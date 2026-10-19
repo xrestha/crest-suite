@@ -20,6 +20,17 @@ import { movementFigures } from './stockMovementRows'
 import { isCostedByBuild } from '../recipes/buildYourOwnRating'
 import { isMissingColumn } from '../../customization/customizationData'
 import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
+import { readPeriodTransfers, lineValue, TRANSFER_LINE_SELECT } from '../transfers/transferFlows'
+
+// A stock-transfer line, in words (S849, PNL-8). Every line here COUNTS for this outlet: 'sent'
+// left it, 'received' arrived, 'returned' came back after the transfer was cancelled or refused.
+function transferMoveText(t) {
+  const who = t.counterpart_name || 'another outlet'
+  if (t.leg === 'sent') return `Out to ${who}`
+  if (t.leg === 'received') return `In from ${who}`
+  if (t.leg === 'returned') return `Back — not received by ${who}`
+  return t.direction === 'in' ? `In (${who})` : `Out (${who})`
+}
 
 // Module scope so the memoized derivation below can reference them without them becoming
 // unstable dependencies (they're pure column definitions).
@@ -58,6 +69,9 @@ export default function StockMovements() {
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [rows, setRows] = useState([])
+  // This month's stock-transfer lines (S849): shown under the ledger, never in Value Depleted or the
+  // reconciliation — moving stock to a sister outlet is not depletion.
+  const [transferLines, setTransferLines] = useState([])
   const [staffNames, setStaffNames] = useState({})
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
@@ -184,13 +198,16 @@ export default function StockMovements() {
         ? fetchAllRows(() => scopedFrom('recipes', 'id').eq('is_build_your_own', true).order('id'))
           .then(r => (isMissingColumn(r.error) ? { data: [], error: null } : r))
         : Promise.resolve({ data: [], error: null }),
+      // Stock moved between sister outlets this month (S849, PNL-8), with each item's name. Listed on
+      // its own under the ledger; a failed read fails the page like the others.
+      readPeriodTransfers(scopedFrom, periodId, { select: `${TRANSFER_LINE_SELECT}, items(name, uom, item_code)` }),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 ledger (S612 silent-zero rule).
     // That includes the book: a failed one would silently hide the no-BOM warning banner.
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setRows([]); setNoBomRecipes([]); return }
-    const [{ data: movements }, { data: profs }, { data: soldEntries }, { data: book }, { data: byoRows }] = results
+    if (failed) { setLoadError(failed); setRows([]); setNoBomRecipes([]); setTransferLines([]); return }
+    const [{ data: movements }, { data: profs }, { data: soldEntries }, { data: book }, { data: byoRows }, { data: transfers }] = results
     // S840: a bill Crest support closed is named only when its id is asked for, so the closers the
     // names read did not name are asked for now (usually none, and then nothing is sent). A failure
     // leaves those rows' Staff blank, never the ledger.
@@ -235,6 +252,7 @@ export default function StockMovements() {
       }
     })
     setRows(built)
+    setTransferLines([...(transfers || [])].sort((a, b) => (a.bs_day - b.bs_day) || String(a.created_at).localeCompare(String(b.created_at))))
 
     if (presetItemId) {
       const match = built.find(r => r.item_id === presetItemId)
@@ -767,6 +785,51 @@ export default function StockMovements() {
           </div>
         )}
       </div>
+      )}
+      {/* S849 (PNL-8): stock moved between this outlet and its sister outlets this month. Listed, not
+          added to Value Depleted or the reconciliation above: sending stock to a branch is not using
+          it. Rendered only once the load has landed, and only when there is something to list. */}
+      {tab !== 'subs' && !loading && transferLines.length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2 style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <Tip text="Stock sent to or received from your other outlets this month. Received stock counts like a purchase and sent stock like a return to the supplier, at the sending outlet's price — so these lines are in Stock Report and Monthly Summary, not in Value Depleted here." width={300}>
+              Stock transfers this month
+            </Tip>
+          </h2>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Day</th><th>Movement</th><th>Item</th>
+                  <th style={{ textAlign: 'right' }}>Qty</th><th>UOM</th>
+                  <th style={{ textAlign: 'right' }}>Value (NPR)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transferLines.map(t => (
+                  <tr key={t.id}>
+                    <td style={{ color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>{formatBsDay(t.bs_day, selectedPeriod?.bs_month) || '—'}</td>
+                    <td>
+                      <span className="badge badge-gray">{transferMoveText(t)}</span>
+                      {t.prep_label && <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 2 }}>{t.prep_label}</div>}
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{t.items?.name || 'An item no longer listed'}</div>
+                      {t.items?.item_code && <div style={{ fontSize: 11, color: 'var(--theme-text3)', fontFamily: 'monospace' }}>{t.items.item_code}</div>}
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>
+                      {t.direction === 'out' ? '−' : '+'}{(parseFloat(t.qty) || 0).toFixed(3)}
+                    </td>
+                    <td style={{ color: 'var(--theme-text2)' }}>{t.items?.uom || '—'}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>
+                      {t.direction === 'out' ? '−' : '+'}{lineValue(t).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
       </>}
     </div>

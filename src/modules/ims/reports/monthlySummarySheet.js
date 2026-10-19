@@ -139,10 +139,14 @@ export function buildMonthlySummaryWorkbook(report, { periodLabel, periodStatus,
     ? ` — PROVISIONAL: month still open; ${openMonthLine(report.gap)}`
     : ' (closed)'} · all categories, sub-recipes (prep items) excluded`
 
+  // Stock transfers between sister outlets (S849): their figures and words appear only in a month
+  // that had any, exactly as on the page, so an outlet outside a group gets the sheet it always got.
+  const transfers = (Number(report.totalTransferIn) || 0) > 0 || (Number(report.totalTransferOut) || 0) > 0
   const notes = [
     ...(named && gapNote(report.gap, periodLabel) ? [gapNote(report.gap, periodLabel)] : []),
     'All figures in NPR. Discount and Returns are amounts taken off Gross Purchases.',
-    `COGS = ${COGS_FORMULA} · Net Purchases = Gross − bill discounts − returns · Food Cost % = COGS ÷ Net Sales Revenue × 100`,
+    ...(transfers ? ["Transfers In is stock received from your other outlets (and stock back after a cancelled or refused transfer); Transfers Out is stock sent to them. Both at the sending outlet's price when it was sent."] : []),
+    `COGS = ${COGS_FORMULA} · Net Purchases = Gross − bill discounts − returns${transfers ? ' + transfers in − transfers out' : ''} · Food Cost % = COGS ÷ Net Sales Revenue × 100`,
     "Excludes sub-recipes (prep items). Stock Count's Summary includes them, so its COGS differs from this sheet by exactly the sub-recipe amount; both are correct for what they count.",
   ]
 
@@ -156,6 +160,10 @@ export function buildMonthlySummaryWorkbook(report, { periodLabel, periodStatus,
     row('Gross Purchases',   money(report.totalPurchase),    ''),
     row('Discount',          money(report.totalDiscount),    ''),
     row('Returns',           money(report.totalReturn),      ''),
+    ...(transfers ? [
+      row('Transfers In',    money(report.totalTransferIn),  '', 'Stock received from your other outlets'),
+      row('Transfers Out',   money(report.totalTransferOut), '', 'Stock sent to your other outlets'),
+    ] : []),
     row('Net Purchases',     money(report.totalNetPurchase), ''),
     row('Wastage',           money(report.totalWastage),     ''),
     row('Staff Meals',       money(report.totalStaffMeals),  ''),
@@ -182,6 +190,7 @@ export function buildMonthlySummaryWorkbook(report, { periodLabel, periodStatus,
     'Gross Purchases': money(r.purchaseVal),
     'Discount':        money(r.discountVal),
     'Returns':         money(r.returnVal),
+    ...(transfers ? { 'Transfers In': money(r.transferInVal), 'Transfers Out': money(r.transferOutVal) } : {}),
     'Net Purchases':   money(r.netPurchaseVal),
     'Wastage':         money(r.wastageVal),
     'Staff Meals':     money(r.staffMealsVal),
@@ -198,6 +207,7 @@ export function buildMonthlySummaryWorkbook(report, { periodLabel, periodStatus,
     'Gross Purchases': money(report.totalPurchase),
     'Discount':        money(report.totalDiscount),
     'Returns':         money(report.totalReturn),
+    ...(transfers ? { 'Transfers In': money(report.totalTransferIn), 'Transfers Out': money(report.totalTransferOut) } : {}),
     'Net Purchases':   money(report.totalNetPurchase),
     'Wastage':         money(report.totalWastage),
     'Staff Meals':     money(report.totalStaffMeals),

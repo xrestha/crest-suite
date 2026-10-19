@@ -42,6 +42,12 @@ export const ITEM_REF_TABLES = [
   { table: 'par_levels',           label: 'PAR', name: 'Par Levels',        cascades: false },
   { table: 'purchase_order_items', label: 'PO',  name: 'Purchase Orders',   cascades: false },
   { table: 'stock_movements',      label: 'MV',  name: 'Stock Movements',   cascades: false },
+  // S849 (PNL-8): stock sent, received or returned between two outlets of a group. Plain FK, so a
+  // delete is refused. `blocksForceDelete`: force_delete_item REFUSES an item on any transfer line
+  // (force_delete_item_transferred), because removing this outlet's half of a movement would leave
+  // the other outlet's half standing. The table stays in the clearing list so the SQL twin matches
+  // (behind the refusal it always clears 0 rows), and Item Master offers Hide instead.
+  { table: 'ims_stock_transfer_lines', label: 'TR', name: 'Stock Transfers', cascades: false, blocksForceDelete: true },
   { table: 'purchase_entries',     label: 'P',   name: 'Purchases',         cascades: false },
 ]
 
@@ -52,8 +58,24 @@ export const USAGE_LABELS = Object.fromEntries(ITEM_REF_TABLES.map(t => [t.label
  * What force-delete actually clears, as prose, derived from the list rather than typed out again.
  * The dialog said "purchases, stock counts, wastage, staff meals, requisitions, vendor returns and
  * recipe lines" while the loop beneath it had drifted to a different set.
+ *
+ * A `blocksForceDelete` table is left out: force-delete refuses an item that has any of its rows,
+ * so it never clears one, and the dialog must not promise to (S849).
  */
-export const REF_TABLE_PROSE = ITEM_REF_TABLES.map(t => t.name.toLowerCase()).join(', ')
+export const REF_TABLE_PROSE = ITEM_REF_TABLES.filter(t => !t.blocksForceDelete).map(t => t.name.toLowerCase()).join(', ')
+
+/** The badge codes whose presence means force-delete will refuse the item (S849: 'TR'). */
+export const FORCE_DELETE_BLOCKING_CODES = ITEM_REF_TABLES.filter(t => t.blocksForceDelete).map(t => t.label)
+
+/**
+ * The reason force-delete cannot run for an item with these badge codes, or null when it can.
+ * One sentence for the page, so Item Master never opens a force-delete dialog the server will refuse.
+ */
+export function forceDeleteBlockedText(codes) {
+  const blocked = (codes || []).some(code => FORCE_DELETE_BLOCKING_CODES.includes(code))
+  if (!blocked) return null
+  return 'This item was sent or received between outlets, so it cannot be force-deleted: both outlets keep the transfer on their books. Hide it instead.'
+}
 
 const LABEL_OF_TABLE = Object.fromEntries(ITEM_REF_TABLES.map(t => [t.table, t.label]))
 

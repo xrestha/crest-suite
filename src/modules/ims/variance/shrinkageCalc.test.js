@@ -102,3 +102,24 @@ describe('ShrinkageReport.js calls the shared code and keeps no copy', () => {
     expect(src).toMatch(/initReq\.begin\(effectiveClientId\)/)
   })
 })
+
+// S849 (PNL-8): stock moved between outlets moves the month's net purchases, so stock sent to a
+// branch is not shrinkage at the sender and stock received is not a surplus at the branch.
+describe('buildShrinkageObservations with stock transfers (S849)', () => {
+  const tr = (period_id, direction, qty) => ({ period_id, item_id: 'F', qty, direction })
+
+  test('omitted, the observations are what they were', () => {
+    expect(observe({ transfers: [] })).toEqual(observe())
+  })
+
+  test('received stock adds like a purchase, sent stock comes off like a return', () => {
+    const base = observe().rows[0].observations.map(o => o.actual)
+    const { rows } = observe({ transfers: [tr('p2', 'in', '3'), tr('p1', 'out', '2')] })
+    expect(rows[0].observations.map(o => o.actual)).toEqual([base[0] + 3, base[1] - 2])
+  })
+
+  test('a cancelled transfer (sent, then returned) changes nothing', () => {
+    expect(observe({ transfers: [tr('p1', 'out', '4'), tr('p1', 'in', '4')] }).rows)
+      .toEqual(observe().rows)
+  })
+})

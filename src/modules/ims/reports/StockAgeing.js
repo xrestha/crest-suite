@@ -21,7 +21,9 @@ import { FilterChips } from '../../../components/Tabs'
 import {
   AGE_BANDS, ageAllocated, ageInDays, asOfForWindow, splitReturns, batchRateOf,
   anchorToCounts, rollingWindow, sumConsumptionByPeriod, countsFromClosedPeriods, periodMonthIndex,
+  transferBatchesOf,
 } from './stockAgeingCalc'
+import { readPeriodTransfers } from '../transfers/transferFlows'
 
 
 // How old stock has to be before the page calls it capital worth acting on. Matches the last
@@ -163,6 +165,9 @@ export default function StockAgeing() {
       // rest (S792, PLANNING-9): past 1,000 recipes the dishes beyond the cut consumed nothing,
       // every batch they would have eaten stayed on the shelf, and aged into the 90+ band.
       fetchAllRows(() => scopedFrom('recipes', 'id').order('id')),
+      // Stock moved between sister outlets (S849, PNL-8), the same twelve months, paged and chunked.
+      // Received stock is a batch dated the day it arrived; sent stock leaves in its month.
+      readPeriodTransfers(scopedFrom, periodIds),
     ])
 
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer selection
@@ -173,7 +178,7 @@ export default function StockAgeing() {
     const [
       { data: items }, { data: purchases }, { data: returns },
       { data: sales }, { data: wastages }, { data: staffMeals },
-      { data: opening }, { data: closing }, { data: clientRecipes },
+      { data: opening }, { data: closing }, { data: clientRecipes }, { data: transfers },
     ] = results
 
     const itemById = Object.fromEntries((items || []).map(i => [i.id, i]))
@@ -210,6 +215,9 @@ export default function StockAgeing() {
       if (!date) continue
       batches.push({ item_id: p.item_id, qty, rate: batchRateOf(p), date, period_id: p.period_id })
     }
+    // Stock received from a sister outlet, or back after a cancelled or refused transfer (S849): a
+    // batch at the line's frozen rate, dated the day it counted here, exactly as a purchase.
+    batches.push(...transferBatchesOf(transfers, adDateOf, id => !!itemById[id]))
 
     // The recipe walk throws on a failed read (S695).
     const recipeIds = (clientRecipes || []).map(r => r.id)
@@ -234,6 +242,7 @@ export default function StockAgeing() {
     const consumedByPeriod = sumConsumptionByPeriod({
       sales: depletingSales,
       breakdown, explosion, wastages, staffMeals, returnsByPeriodItem: returnedByPeriodItem,
+      transfers,
     })
 
     // Anchor to the counts (S756, D19) — see anchorToCounts for the walk.

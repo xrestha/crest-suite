@@ -21,6 +21,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { readPeriodTransfers, transferNetQtyByItem } from '../transfers/transferFlows'
 
 function dispPurch(baseQty, item) {
   const cf = parseFloat(item.conversion_factor) || 1
@@ -154,6 +155,10 @@ export default function Variance() {
       // rule (PLANNING-9: past 1000 recipes the dishes beyond the cut would consume nothing) holds.
       // Settled into the { error } shape so firstError below sees a failed book like any other read.
       recipeBook().then(book => ({ data: book, error: null }), error => ({ data: null, error })),
+      // Stock moved between sister outlets (S849, PNL-8): received or returned stock adds to net
+      // purchases, sent stock comes off — so stock on its way to a branch is not read as a loss here,
+      // and stock received is not read as a surplus. A failed read fails the report, never "none".
+      readPeriodTransfers(scopedFrom, periodId),
     ])
     if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
@@ -168,7 +173,8 @@ export default function Variance() {
       { data: wastages },
       { data: staffMealsData },
       { data: sales },
-      { data: book }
+      { data: book },
+      { data: transfers },
     ] = results
 
     const recipeIds = [...book.recipes.keys()]
@@ -212,10 +218,11 @@ export default function Variance() {
     const hasClosingRows = Object.keys(closeMap).length > 0
     setHasClosing(hasClosingRows)
 
-    // PATCHED: build purchMap net of returns
+    // PATCHED: build purchMap net of returns — and of stock transfers (S849): in adds, out subtracts
     const purchMap = {}
     ;(purchases || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) + parseFloat(r.qty) })
     ;(returns || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) - parseFloat(r.qty) })
+    Object.entries(transferNetQtyByItem(transfers)).forEach(([id, q]) => { purchMap[id] = (purchMap[id] || 0) + q })
 
     const wasteMap = {}
     ;(wastages || []).forEach(r => { wasteMap[r.item_id] = (wasteMap[r.item_id] || 0) + parseFloat(r.qty) })
@@ -240,7 +247,7 @@ export default function Variance() {
 
     const rows = (items || []).map(item => {
       const openQty      = openMap[item.id] || 0
-      const netPurchQty  = purchMap[item.id] || 0  // already net of returns
+      const netPurchQty  = purchMap[item.id] || 0  // already net of returns and stock transfers
       // Measurability is PER ITEM, not per period (S719). `hasClosing` only asks whether the month
       // has any closing rows at all, so on a month where 900 of 1000 items were counted the other
       // 100 got closeQty 0, actual usage came out as "everything on hand plus everything bought",
@@ -538,7 +545,7 @@ export default function Variance() {
                   <th>Category</th>
                   <th>UOM</th>
                   <th style={{ textAlign: 'right' }}>Opening</th>
-                  <th style={{ textAlign: 'right' }}>Net Purchased</th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Purchases minus returns to the supplier, plus stock received from your other outlets minus stock sent to them." width={250}>Net Purchased</Tip></th>
                   <th style={{ textAlign: 'right' }}>Wastage</th>
                   <th style={{ textAlign: 'right' }}>Closing</th>
                   <th style={{ textAlign: 'right' }}><Tip text={`${COGS_FORMULA}. What was actually consumed, based on stock movement.`} width={240}>Actual Used</Tip></th>

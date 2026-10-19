@@ -58,3 +58,37 @@ describe('budgetActuals', () => {
     expect(budgetActuals({ items, categories })).toEqual({ byCategory: { dry: 0, dairy: 0 }, uncategorised: 0, excluded: 0, total: 0 })
   })
 })
+
+// S849 (PNL-8): received stock is the branch's food spend; stock sent away is not the sender's.
+describe('budgetActuals with stock transfers (S849)', () => {
+  const items = [
+    { id: 'O', category_id: 'dry', per_uom_rate: '10', is_active: true },
+    { id: 'S', category_id: null, per_uom_rate: '1', is_active: true },
+  ]
+  const categories = [{ id: 'dry' }]
+  const purchases = [{ item_id: 'O', qty: '10', rate: '10', purchase_group_id: 'g', discount_amount: '0' }]
+  const transfers = [
+    { item_id: 'O', direction: 'in', qty: '4', rate: '12', value: '48', leg: 'received' },
+    { item_id: 'O', direction: 'out', qty: '1', rate: '10', value: '10', leg: 'sent' },
+    { item_id: 'S', direction: 'in', qty: '5', rate: '2', leg: 'returned' },   // value falls back to qty × rate
+    { item_id: 'M', direction: 'in', qty: '1', rate: '7', value: '7' },        // not a valued item
+  ]
+  const out = budgetActuals({ items, categories, purchases, returns: [], transfers })
+
+  it('adds received stock and takes sent stock off, in the item category', () => {
+    expect(out.byCategory.dry).toBeCloseTo(100 + 48 - 10)
+    expect(out.uncategorised).toBeCloseTo(10)
+    expect(out.excluded).toBeCloseTo(7)
+    expect(out.total).toBeCloseTo(148)
+  })
+
+  it('omitted, nothing changes', () => {
+    expect(budgetActuals({ items, categories, purchases, returns: [] }))
+      .toEqual(budgetActuals({ items, categories, purchases, returns: [], transfers: [] }))
+  })
+
+  it("still ties to Monthly Summary's Net Purchases", () => {
+    const monthly = valuePeriodItems(items, periodStockMaps({ purchases, returns: [], transfers }))
+    expect(out.total).toBeCloseTo(monthly.netPurchaseVal)
+  })
+})

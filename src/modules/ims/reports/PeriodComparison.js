@@ -27,6 +27,7 @@ import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { findUncountedItems, gapNote, unjudgedFcFigure } from '../../../shared/uncountedItems'
 import NoPeriodState from '../../../components/NoPeriodState'
+import { readPeriodTransfers, lineValue } from '../transfers/transferFlows'
 
 // Fallback categorical rotation for any recipe category beyond Food/Beverage (which get fixed
 // semantic colors): the shared CHART_COLORS, so a category reads the same colour here as on the
@@ -187,6 +188,9 @@ export default function PeriodComparison() {
       // (S756): `source` is nullable and `NULL <> 'pos_comp'` is NULL, so the server-side form
       // dropped every legacy row — revenue short and FC% high across the whole trend.
       fetchAllRows(() => supabase.from('sales_entries').select('period_id, qty_sold, unit_price, discount, source, recipes(selling_price, category)').in('period_id', ids).order('id')),
+      // Stock moved between sister outlets (S849, PNL-8), over the same window, paged and chunked:
+      // received or returned stock adds to Net Purchases like a purchase, sent stock comes off.
+      readPeriodTransfers(scopedFrom, ids),
     ])
     if (!limitReq.isCurrent(key)) return   // superseded — a stale load's failure must not clobber the current view either
     // A failed read must not render as a quiet run of NPR 0 periods (S612 silent-zero rule).
@@ -201,6 +205,7 @@ export default function PeriodComparison() {
       { data: openings },
       { data: closings },
       { data: sales },
+      { data: transfers },
     ] = results
 
     // One pass per table instead of a `.filter()` per period per table — 24 periods × 7 arrays.
@@ -223,6 +228,8 @@ export default function PeriodComparison() {
     const openBy  = byPeriod(openings)
     const closeBy = byPeriod(closings)
     const salesBy = byPeriod((sales || []).filter(r => r.source !== 'pos_comp'))
+    // Same item set as every other column (Monthly Summary's periodCost rule), at the line's value.
+    const transferBy = byPeriod((transfers || []).filter(r => isTracked(r.item_id)))
     const at = (m, pid) => m.get(pid) || []
 
     // Cost basis (S792, D32): lineGrossCost / lineCost / returnCostValue, so a PAN-bill outlet's
@@ -257,7 +264,10 @@ export default function PeriodComparison() {
         const amt = parseFloat(r.qty_sold||0) * price - (parseFloat(r.discount) || 0)
         catRev[cat] = (catRev[cat] || 0) + amt
       })
-      const netPurch = purchV - discV - retV
+      const tRows    = at(transferBy, pid)
+      const tInV     = tRows.filter(r => r.direction === 'in').reduce((s,r)=>s+lineValue(r),0)
+      const tOutV    = tRows.filter(r => r.direction === 'out').reduce((s,r)=>s+lineValue(r),0)
+      const netPurch = purchV - discV - retV + tInV - tOutV
       const cogs     = computeUsed({ opening: openV, purchases: netPurch, wastage: wasteV, staffMeals: staffV, closing: closeV })
       const fcPct    = revenue > 0 ? (cogs / revenue) * 100 : null
       // Uncounted items for this period (S756 D6), from the rows already grouped above: a closing
@@ -269,9 +279,14 @@ export default function PeriodComparison() {
         purchaseQty[r.item_id] = (purchaseQty[r.item_id] || 0) + parseFloat(r.qty || 0)
         purchaseValue[r.item_id] = (purchaseValue[r.item_id] || 0) + r.lineCost
       })
+      // Stock received by transfer is stock presence like a purchase (S849, periodGap's rule).
+      tRows.filter(r => r.direction === 'in').forEach(r => {
+        purchaseQty[r.item_id] = (purchaseQty[r.item_id] || 0) + parseFloat(r.qty || 0)
+        purchaseValue[r.item_id] = (purchaseValue[r.item_id] || 0) + lineValue(r)
+      })
       const countedIds = new Set(at(closeBy, pid).filter(r => r.physical_qty != null).map(r => r.item_id))
       const gap = findUncountedItems({ items: trackedItems, openingQty, purchaseQty, purchaseValue, countedIds, cogs })
-      result[pid]    = { purchV, discV, retV, netPurch, wasteV, openV, closeV, revenue, cogs, fcPct, catRev, gap }
+      result[pid]    = { purchV, discV, retV, tInV, tOutV, netPurch, wasteV, openV, closeV, revenue, cogs, fcPct, catRev, gap }
     }
     if (!limitReq.isCurrent(key)) return   // superseded by a newer range selection
     setStats(result)
@@ -391,6 +406,9 @@ export default function PeriodComparison() {
   async function exportExcel() {
     const XLSX = await import('xlsx')
     const wb   = XLSX.utils.book_new()
+    // Stock transfers (S849): their two columns ride in the sheet only when a shown month had any,
+    // so Gross − discounts − returns + in − out still rebuilds Net Purchases on every row.
+    const anyTransfers = shown.some(p => (stats[p.id]?.tInV || 0) > 0 || (stats[p.id]?.tOutV || 0) > 0)
     const data = shown.map((p, i) => {
       const s    = stats[p.id] || {}
       const prev = i < shown.length - 1 ? stats[shown[i + 1]?.id] : null
@@ -402,6 +420,10 @@ export default function PeriodComparison() {
         'Gross Purchases (NPR)': s.purchV   != null ? s.purchV.toFixed(0)   : '',
         'Bill Discounts (NPR)':  s.discV    != null ? s.discV.toFixed(0)    : '',
         'Returns (NPR)':         s.retV     != null ? s.retV.toFixed(0)     : '',
+        ...(anyTransfers ? {
+          'Transfers In (NPR)':  s.tInV  != null ? s.tInV.toFixed(0)  : '',
+          'Transfers Out (NPR)': s.tOutV != null ? s.tOutV.toFixed(0) : '',
+        } : {}),
         'Net Purchases (NPR)':   s.netPurch != null ? s.netPurch.toFixed(0) : '',
         'Purchases Δ% vs Prev':  (() => { const d = pctDelta(s.netPurch, prev?.netPurch); return d != null ? d.toFixed(1) + '%' : '' })(),
         'Wastage Value (NPR)':   s.wasteV   ? s.wasteV.toFixed(0)   : '',
@@ -739,7 +761,7 @@ export default function PeriodComparison() {
               <tr>
                 <th>Period</th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="Gross purchases minus bill-level discounts minus vendor returns (NPR value) — the same figure Monthly Summary and Consolidated P&L build COGS from. The line beneath shows the % change vs the previous period, and vs the same month last year when that toggle is on." width={290}>Net Purchases</Tip>
+                  <Tip text="Gross purchases minus bill-level discounts minus vendor returns, plus stock received from your other outlets minus stock sent to them (NPR value) — the same figure Monthly Summary and Consolidated P&L build COGS from. The line beneath shows the % change vs the previous period, and vs the same month last year when that toggle is on." width={290}>Net Purchases</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
                   <Tip text="Total value of wastage logged in Stock Count (qty × per-unit rate)." width={240}>Wastage</Tip>

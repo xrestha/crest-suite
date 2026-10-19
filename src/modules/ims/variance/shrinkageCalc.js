@@ -88,8 +88,12 @@ function byPeriodItem(rows, field) {
  *   expected use or stock on hand but no count is skipped and counted, never read as the whole shelf
  *   consumed (S756). A month where nothing sold and nothing moved has nothing to judge.
  * - Staff meals are logged use, like wastage, so neither is shrinkage (actual usage takes both off).
+ * - Stock transfers between outlets (S849, PNL-8; `transfers`, optional, each line carrying
+ *   `period_id, item_id, qty, direction`) move the month's net purchases: received or returned
+ *   stock ('in') adds like a purchase, sent stock ('out') comes off like a return. Stock sent to a
+ *   branch is therefore never read as shrinkage at the sender, nor stock received as a surplus.
  */
-export function buildShrinkageObservations({ periodIds, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion = null }) {
+export function buildShrinkageObservations({ periodIds, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion = null, transfers = null }) {
   const ids = periodIds || []
   const openMap = byPeriodItem(opening, 'qty')
   const wasteMap = byPeriodItem(wastages, 'qty')
@@ -98,6 +102,13 @@ export function buildShrinkageObservations({ periodIds, items, opening, closing,
   ;(returns || []).forEach(r => {
     if (!purchMap[r.period_id]) purchMap[r.period_id] = {}
     purchMap[r.period_id][r.item_id] = (purchMap[r.period_id][r.item_id] || 0) - num(r.qty)
+  })
+  ;(transfers || []).forEach(t => {
+    if (!t || t.item_id == null) return
+    const sign = t.direction === 'in' ? 1 : t.direction === 'out' ? -1 : 0
+    if (!sign) return
+    if (!purchMap[t.period_id]) purchMap[t.period_id] = {}
+    purchMap[t.period_id][t.item_id] = (purchMap[t.period_id][t.item_id] || 0) + sign * num(t.qty)
   })
   const closeMap = {}
   ;(closing || []).forEach(r => {

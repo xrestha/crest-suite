@@ -26,6 +26,12 @@
 // month that has one — so theft and spillage leave the shelf here as they do on Stock Report,
 // instead of ageing into the 90+ band as "old stock". Ages are still estimated from purchase dates,
 // oldest used first; only the quantities are anchored.
+//
+// S849 (PNL-8): STOCK TRANSFERS. A transfer line with direction 'in' (received from another outlet,
+// or returned here after a cancel or refusal) is a batch like a purchase, dated the day it counted
+// here and valued at the line's own frozen rate (no VAT factor: it is already the cost basis), with
+// no expiry date. A line with direction 'out' (sent away) is consumption in its month, like a return
+// that names no batch. Lines exist only once they count for this outlet, so there is no status.
 
 import { bsToAd, adToBs, adToBsSafe, daysInBsMonth } from '../../../utils/bsCalendar'
 import { nepalCivilDate } from '../../../shared/nepalTime'
@@ -164,6 +170,30 @@ export function splitReturns(returns, entryIds) {
   return { byEntry, byItem, byPeriodItem }
 }
 
+/**
+ * Stock-transfer lines with direction 'in' → batches (S849, PNL-8): `{ item_id, qty, rate, date,
+ * period_id, transfer: true, counterpartName }`, rate = the line's frozen rate (never a VAT factor),
+ * date = `adDateOf(period_id, bs_day)` (the page's own BS → local-date helper, so a transfer batch
+ * is dated exactly as a purchase batch is). `admit(itemId)` is the page's item filter. An 'out' line
+ * is not a batch: it goes to `sumConsumptionByPeriod`'s `transfers`. A line whose date cannot be
+ * placed is skipped, as an undatable purchase is.
+ */
+export function transferBatchesOf(lines, adDateOf, admit = () => true) {
+  const out = []
+  for (const l of lines || []) {
+    if (!l || l.direction !== 'in' || !admit(l.item_id)) continue
+    const qty = parseFloat(l.qty) || 0
+    if (!(qty > 0)) continue
+    const date = typeof adDateOf === 'function' ? adDateOf(l.period_id, l.bs_day) : null
+    if (!date) continue
+    out.push({
+      item_id: l.item_id, qty, rate: parseFloat(l.rate) || 0, date, period_id: l.period_id,
+      transfer: true, counterpartName: l.counterpart_name || null,
+    })
+  }
+  return out
+}
+
 /** A period's position on a single month axis — for ordering and for "is this the next month". */
 export function periodMonthIndex(p) {
   return p.bs_year * 12 + (p.bs_month - 1)
@@ -198,8 +228,10 @@ export function rollingWindow(allPeriods, selected, months = 12) {
  * `period_id`; `breakdown` is `explodeRecipeIngredients`' `{ recipeId: [{ item_id, qty }] }`;
  * `returnsByPeriodItem` is `splitReturns(...).byPeriodItem`; `explosion` is
  * `loadDeltaExplosion`'s result for the sales rows' `ingredient_deltas` (null when none carry any).
+ * `transfers` (S849) are the window's stock-transfer lines: each 'out' line (stock sent away) comes
+ * off in its own month like an off-batch return; 'in' lines are batches (`transferBatchesOf`).
  */
-export function sumConsumptionByPeriod({ sales, breakdown, wastages, staffMeals, returnsByPeriodItem, explosion = null } = {}) {
+export function sumConsumptionByPeriod({ sales, breakdown, wastages, staffMeals, returnsByPeriodItem, explosion = null, transfers = null } = {}) {
   const out = {}
   const add = (pid, itemId, q) => {
     if (!itemId || !(q > 0)) return
@@ -247,6 +279,9 @@ export function sumConsumptionByPeriod({ sales, breakdown, wastages, staffMeals,
   for (const m of staffMeals || []) add(m.period_id, m.item_id, parseFloat(m.qty) || 0)
   for (const [pid, byItem] of Object.entries(returnsByPeriodItem || {})) {
     for (const [itemId, q] of Object.entries(byItem)) add(pid, itemId, q)
+  }
+  for (const t of transfers || []) {
+    if (t && t.direction === 'out') add(t.period_id, t.item_id, parseFloat(t.qty) || 0)
   }
   return out
 }

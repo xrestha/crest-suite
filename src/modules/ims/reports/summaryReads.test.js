@@ -45,9 +45,11 @@ const DELEGATES = { 'BudgetVsActual.js': /budgetActuals\(/ }
 // the window these pages read. `items` is in the list because it is the read that yields the ids
 // everything else is joined against — the S706/S708 lesson that paging the consumer and not the
 // producer has not finished the job.
+// `ims_stock_transfer_lines` (S849, PNL-8) is one row per item per transfer leg; the pages read it
+// through transferFlows.readPeriodTransfers (pinned below), so a direct read here must page too.
 const PER_ITEM_TABLES = [
   'items', 'opening_stock', 'closing_stock', 'staff_meals',
-  'wastages', 'purchase_entries', 'vendor_returns',
+  'wastages', 'purchase_entries', 'vendor_returns', 'ims_stock_transfer_lines',
 ]
 
 /** Source with comments removed and whitespace flattened, so a wrapped builder chain reads as one
@@ -224,5 +226,51 @@ describe.each(FILES)('%s reads what the D32 cost basis needs', (name, file) => {
     if (SHARED_COST.has(name) || DELEGATES[name]) return   // periodCost.js / budgetActuals.js carry it
     expect(flat).toMatch(/\.lineCost\b/)
     expect(flat).not.toMatch(/\.lineNet\b/)
+  })
+})
+
+// 7. STOCK TRANSFERS (S849, PNL-8). Stock moved between sister outlets counts in Net Purchases —
+//    received or returned like a purchase, sent like a return — so all five pages must read the
+//    transfer lines, or one page's month costs differ from the next's for any outlet in a group.
+//    They read them through ONE reader, transferFlows.readPeriodTransfers, which pages by
+//    period_id on the unique id; a failed read is a failed report read (it returns { data, error }
+//    into the page's firstError batch). Silent by construction if skipped: a missing read is a
+//    month with no transfers.
+const TRANSFER_FLOWS = path.join(__dirname, '../transfers/transferFlows.js')
+
+describe.each(FILES)('%s reads the stock transfer lines', (name, file) => {
+  const flat = flatten(file)
+
+  it('calls readPeriodTransfers', () => {
+    expect(`${name}: ${flat.includes('readPeriodTransfers(')}`).toBe(`${name}: true`)
+  })
+})
+
+describe('transferFlows.readPeriodTransfers pages its read', () => {
+  const flat = flatten(TRANSFER_FLOWS)
+
+  it('wraps every ims_stock_transfer_lines read in fetchAllRows, ordered on the unique id', () => {
+    const sites = readSites(flat, 'ims_stock_transfer_lines')
+    expect(sites.length).toBeGreaterThan(0)
+    for (const at of sites) {
+      expect(flat.slice(Math.max(0, at - 90), at)).toMatch(/fetchAllRows(Chunked)?\(/)
+      expect(flat.slice(at, at + 200)).toMatch(/\.order\(\s*'id'/)
+    }
+  })
+})
+
+// 8. THE RECIPE PRICE LIST IS PAGED (S849, PNL-15). Revenue is valued from `recipes.selling_price`,
+//    and a bare read stops at 1,000 recipes with no error: every sale of a dish past the cut was
+//    valued at nothing. Both pages that share periodRevenue() make the same paged read.
+describe.each(FILES.filter(([name]) => SHARED_COST.has(name)))('%s pages its recipe price read', (name, file) => {
+  const flat = flatten(file)
+
+  it("reads recipes through fetchAllRows, ordered on 'id'", () => {
+    const sites = readSites(flat, 'recipes')
+    expect(sites.length).toBeGreaterThan(0)
+    for (const at of sites) {
+      expect(`${name}: ${flat.slice(Math.max(0, at - 90), at).slice(-60)}`).toMatch(/fetchAllRows(Chunked)?\(/)
+      expect(`${name}: ${flat.slice(at, at + 120)}`).toMatch(/\.order\(\s*'id'/)
+    }
   })
 })

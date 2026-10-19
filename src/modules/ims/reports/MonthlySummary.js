@@ -20,6 +20,7 @@ import { unjudgedFcFigure, UncountedItemsBanner } from '../../../shared/uncounte
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { buildMonthlySummaryWorkbook, closingUncounted, cogsShareLine, foodCostSentence, foodCostVerdict, openFcText, openMonthLine, uncountedNamed, verdictWithheld } from './monthlySummarySheet'
+import { readPeriodTransfers } from '../transfers/transferFlows'
 
 export default function MonthlySummary() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -109,7 +110,14 @@ export default function MonthlySummary() {
       // `NULL <> 'pos_comp'` is NULL, so the .neq silently dropped every legacy row — Revenue read
       // short and Food Cost % high, on the denominator of the page's headline ratio.
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', periodId).order('id')),
-      scopedFrom('recipes', 'id, selling_price')
+      // Paged like every other read here (S849, PNL-15 — Consolidated P&L makes the same read): the
+      // recipe book is the price list revenue is valued from, and past 1,000 recipes a bare read
+      // dropped the rest silently, so their sales were valued at nothing.
+      fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
+      // Stock moved between this outlet and its sister outlets (S849, PNL-8): received or returned
+      // stock adds like a purchase, sent stock comes off like a return. A failed read fails the
+      // report like any other read here — never "no transfers".
+      readPeriodTransfers(scopedFrom, periodId),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded — a stale load's failure must not clobber the current view either
     // A failed read must not render as a quiet month of NPR 0 (S612 silent-zero rule).
@@ -125,7 +133,8 @@ export default function MonthlySummary() {
       { data: wastages },
       { data: staffMealsData },
       { data: allSales },
-      { data: recipes }
+      { data: recipes },
+      { data: transfers },
     ] = results
 
     // Revenue and every stock value come from periodCost.js, the arithmetic Consolidated P&L calls
@@ -134,11 +143,11 @@ export default function MonthlySummary() {
     // headed "Gross Purchases" was once fed the post-discount figure, so gross − net read as
     // "returns" and Net Purchases printed a dash on every discounted bill with no return.
     const totalRevenue = periodRevenue(allSales, recipes)
-    const maps = periodStockMaps({ opening, closing, purchases, returns, wastages, staffMeals: staffMealsData })
+    const maps = periodStockMaps({ opening, closing, purchases, returns, wastages, staffMeals: staffMealsData, transfers })
     // Every active item, plus each hidden one that had a row this month (D29). The totals would be
     // the same over the whole read; this is what keeps a category's "N items" and the uncounted
     // list from filling up with items hidden long ago that nothing happened to.
-    const items = periodValuationItems(allItems, periodRowIds({ opening, closing, purchases, returns, wastages, staffMeals: staffMealsData }))
+    const items = periodValuationItems(allItems, periodRowIds({ opening, closing, purchases, returns, wastages, staffMeals: staffMealsData, transfers }))
 
     // Per-category summary — COGS uses net purchases (after bill discounts and returns)
     // items.category_id is nullable — an uncategorized item used to match no category's
@@ -169,13 +178,20 @@ export default function MonthlySummary() {
       // category has a return and nothing else, so it was dropped, its credit never reached
       // totalReturn (the KPI read "None this period" beside a real return) and totalCOGS was
       // overstated by the whole amount.
-      .filter(r => r.openingVal > 0 || r.purchaseVal > 0 || r.closingVal > 0 || r.wastageVal > 0 || r.staffMealsVal > 0 || r.returnVal > 0)
+      //
+      // Stock transfers are the same trap a third time (S849): a category whose only movement this
+      // month was stock received from, or sent to, a sister outlet would vanish with its value.
+      .filter(r => r.openingVal > 0 || r.purchaseVal > 0 || r.closingVal > 0 || r.wastageVal > 0 || r.staffMealsVal > 0 || r.returnVal > 0
+        || r.transferInVal > 0 || r.transferOutVal > 0)
 
     const totalOpening     = catRows.reduce((s, r) => s + r.openingVal, 0)
     const totalPurchase    = catRows.reduce((s, r) => s + r.purchaseVal, 0)
     const totalDiscount    = catRows.reduce((s, r) => s + r.discountVal, 0)
     const totalReturn      = catRows.reduce((s, r) => s + r.returnVal, 0)
-    const totalNetPurchase = totalPurchase - totalDiscount - totalReturn
+    // Stock transfers (S849): in like a purchase, out like a return, at the line's frozen value.
+    const totalTransferIn  = catRows.reduce((s, r) => s + (r.transferInVal || 0), 0)
+    const totalTransferOut = catRows.reduce((s, r) => s + (r.transferOutVal || 0), 0)
+    const totalNetPurchase = totalPurchase - totalDiscount - totalReturn + totalTransferIn - totalTransferOut
     const totalWastage     = catRows.reduce((s, r) => s + r.wastageVal, 0)
     const totalStaffMeals  = catRows.reduce((s, r) => s + (r.staffMealsVal || 0), 0)
     const totalClosing     = catRows.reduce((s, r) => s + r.closingVal, 0)
@@ -199,7 +215,7 @@ export default function MonthlySummary() {
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setReport({
       clientId: builtFor, periodId,
-      catRows, totalOpening, totalPurchase, totalDiscount, totalReturn, totalNetPurchase,
+      catRows, totalOpening, totalPurchase, totalDiscount, totalReturn, totalTransferIn, totalTransferOut, totalNetPurchase,
       totalWastage, totalStaffMeals, totalClosing, totalCOGS, totalRevenue, fcPct, purchaseFcPct, gap
     })
   }
@@ -220,6 +236,9 @@ export default function MonthlySummary() {
   // Both rules live in monthlySummarySheet.js (verdictWithheld, uncountedNamed), so the Excel export
   // withholds and names exactly what this page does.
   const isOpenPeriod = selectedPeriod?.status === 'open'
+  // Stock moved to or from a sister outlet this month (S849): the transfer columns, tile and formula
+  // appear only then, so an outlet outside a group keeps the page it always had.
+  const hasTransfers = !!report && ((report.totalTransferIn || 0) > 0 || (report.totalTransferOut || 0) > 0)
   const withholdVerdict = verdictWithheld(selectedPeriod?.status, report?.gap)
   const gapNamed = !!report && uncountedNamed(report.gap, selectedPeriod?.status)
   // The export may only write the report the header names: built for this client and this month
@@ -310,9 +329,17 @@ export default function MonthlySummary() {
               { label: 'Opening Stock',    value: fmt(report.totalOpening),     color: 'var(--theme-text1)' },
               { label: 'Gross Purchases',  value: fmt(report.totalPurchase),    color: 'var(--theme-text1)' },
               { label: 'Returns',          value: fmt(report.totalReturn),      color: 'var(--theme-text1)',
-                sub: report.totalReturn > 0 || report.totalDiscount > 0
+                sub: report.totalReturn > 0 || report.totalDiscount > 0 || hasTransfers
                   ? `Net purchases: ${fmt(report.totalNetPurchase)}${report.totalDiscount > 0 ? ` (after ${fmt(report.totalDiscount)} discount)` : ''}`
                   : 'None this period' },
+              // Stock moved between this outlet and its sister outlets (S849). Shown only in a month
+              // that had any, so an outlet outside a group sees the page it always saw.
+              hasTransfers && {
+                label: 'Stock Transfers', value: `${report.totalTransferIn - report.totalTransferOut < 0 ? '−' : '+'}${fmt(Math.abs(report.totalTransferIn - report.totalTransferOut))}`,
+                color: 'var(--theme-text1)',
+                sub: `In ${fmt(report.totalTransferIn)} · out ${fmt(report.totalTransferOut)}`,
+                tip: "Stock received from your other outlets (or back after a cancelled or refused transfer) counts like a purchase; stock sent to them comes off like a return to the supplier. Valued at the sending outlet's price when it was sent. Included in Net Purchases.",
+              },
               // Raw items only, on purpose (S792, FIGURES-5): this is the Wastage term inside COGS.
               // Wasted prep is already in COGS through the raw items it was made from, so the
               // dashboards' and the Wastage Report's all-items figure (periodWastageValue) would
@@ -329,7 +356,7 @@ export default function MonthlySummary() {
               { label: 'COGS',             value: fmt(report.totalCOGS),        color: 'var(--theme-text1)',
                 sub: cogsShareLine(report.fcPct, withholdVerdict, isOpenPeriod, report.gap),
                 tip: `Cost of Goods Used: ${COGS_FORMULA}. The actual ingredient cost consumed.` }
-            ].map(s => (
+            ].filter(Boolean).map(s => (
               <div key={s.label} className="stat-card">
                 <div className="stat-label">{s.tip ? <Tip text={s.tip} width={230}>{s.label}</Tip> : s.label}</div>
                 <div className="stat-value" style={{ fontSize: 14, color: s.color }}>{s.value}</div>
@@ -422,7 +449,9 @@ export default function MonthlySummary() {
                     <th style={{ textAlign: 'right' }}><Tip text="Bill value before any bill-level discount and before returns — what was invoiced." width={230}>Gross Purchases</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Bill-level discounts, spread across each bill's lines in proportion to line value. Vendor Report and Consolidated P&amp;L net the same amount off." width={250}>Discount</Tip></th>
                     <th style={{ textAlign: 'right' }}>Returns</th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Gross purchases minus bill discounts minus returns to vendor. The true amount spent on stock this period, and what COGS is built from." width={240}>Net Purchases</Tip></th>
+                    {hasTransfers && <th style={{ textAlign: 'right' }}><Tip text="Stock received from your other outlets this month, plus stock that came back after a cancelled or refused transfer, at the sending outlet's price. Counts like a purchase." width={250}>Transfers In</Tip></th>}
+                    {hasTransfers && <th style={{ textAlign: 'right' }}><Tip text="Stock sent to your other outlets this month, at this outlet's price when it was sent. It leaves this outlet's stock the moment it is sent, like a return to the supplier." width={250}>Transfers Out</Tip></th>}
+                    <th style={{ textAlign: 'right' }}><Tip text={hasTransfers ? 'Gross purchases minus bill discounts minus returns to vendor, plus stock received from your other outlets minus stock sent to them. The stock this outlet took on this period, and what COGS is built from.' : 'Gross purchases minus bill discounts minus returns to vendor. The true amount spent on stock this period, and what COGS is built from.'} width={240}>Net Purchases</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Wastage taken out of COGS, raw items only: wasted prep is already counted through the raw items it was made from. The Wastage Report lists everything thrown away, prep included." width={250}>Wastage</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Staff & complimentary consumption recorded this period. Deducted from COGS separately from wastage." width={240}>Staff Meals</Tip></th>
                     <th style={{ textAlign: 'right' }}>Closing Stock</th>
@@ -459,6 +488,16 @@ export default function MonthlySummary() {
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
                           {row.returnVal > 0 ? `−${fmt(row.returnVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
                         </td>
+                        {hasTransfers && (
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
+                            {row.transferInVal > 0 ? `+${fmt(row.transferInVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                          </td>
+                        )}
+                        {hasTransfers && (
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
+                            {row.transferOutVal > 0 ? `−${fmt(row.transferOutVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}
+                          </td>
+                        )}
                         {/* Always printed, never a dash: this column has a TOTAL under it, and a
                             column whose cells cannot be added up to its own total is unreadable.
                             It previously showed "—" whenever net equalled gross. */}
@@ -502,6 +541,16 @@ export default function MonthlySummary() {
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>
                       {report.totalReturn > 0 ? `−${fmt(report.totalReturn)}` : '—'}
                     </td>
+                    {hasTransfers && (
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>
+                        {report.totalTransferIn > 0 ? `+${fmt(report.totalTransferIn)}` : '—'}
+                      </td>
+                    )}
+                    {hasTransfers && (
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>
+                        {report.totalTransferOut > 0 ? `−${fmt(report.totalTransferOut)}` : '—'}
+                      </td>
+                    )}
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>{fmt(report.totalNetPurchase)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>{fmt(report.totalWastage)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>{report.totalStaffMeals > 0 ? fmt(report.totalStaffMeals) : '—'}</td>
@@ -515,7 +564,7 @@ export default function MonthlySummary() {
 
             <div style={{ marginTop: 20, padding: '12px 16px', background: 'var(--theme-bg)', borderRadius: 'var(--radius-sm)', fontSize: 12, color: 'var(--theme-text3)' }}>
               COGS = {COGS_FORMULA} &nbsp;·&nbsp;
-              Net Purchases = Gross − bill discounts − returns &nbsp;·&nbsp;
+              Net Purchases = Gross − bill discounts − returns{hasTransfers ? ' + transfers in − transfers out' : ''} &nbsp;·&nbsp;
               Food Cost % = COGS ÷ Net Sales Revenue × 100
               {/* Sub-recipe disclosure — Stock Count's Summary counts prep as stock, this page
                   deliberately excludes it (is_sub_recipe = false), so the two COGS figures differ

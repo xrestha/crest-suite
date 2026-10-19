@@ -15,6 +15,7 @@ import SupportContactLine from '../../../components/SupportContactLine'
 import { COGS_FORMULA, computeUsed } from '../../../shared/imsFormulas'
 import { allocateBillDiscounts, returnCostValue } from '../reports/supplierAttribution'
 import { periodRowIds, periodValuationItems } from '../reports/periodCost'
+import { readPeriodTransfers, transferQtyByItem, transferValueByItem } from '../transfers/transferFlows'
 import { nepalBs, nepalDateAd } from '../../../shared/nepalTime'
 import SearchableSelect from '../../../components/SearchableSelect'
 import ConfirmModal from '../../../components/ConfirmModal'
@@ -90,6 +91,17 @@ const defaultTabOf = data =>
   Object.values(data || {}).some(r => r && r.opening !== '' && r.opening != null) ? 'closing' : 'opening'
 
 // The Summary's Hidden badge (S792, D29) — worded like Stock Report's, the other page that keeps them.
+// Stock moved between this outlet and its sister outlets this month (S849, PNL-8), per item: qty and
+// value by direction. 'in' (received here, or back after a cancelled or refused transfer) counts like
+// a purchase, 'out' (sent from here) like a return, so expected quantity, Used and COGS all move with
+// it. An offline copy written before S849 has none, which reads as no transfers.
+const EMPTY_TRANSFERS = Object.freeze({ inQty: {}, outQty: {}, inVal: {}, outVal: {} })
+const transferMapsOf = lines => {
+  const q = transferQtyByItem(lines)
+  const v = transferValueByItem(lines)
+  return { inQty: q.in, outQty: q.out, inVal: v.in, outVal: v.out }
+}
+
 const HIDDEN_ITEM_TIP = 'Hidden in Item Master. Shown because it had stock or movement this month, so the month’s figures still include it — hiding an item never changes a past month. It is not on the entry tabs, because a hidden item is no longer counted; show it again in Item Master to count it.'
 
 export default function Stock() {
@@ -182,6 +194,9 @@ export default function Stock() {
   const [stockData, setStockData] = useState({})
   const [purchases, setPurchases] = useState({})
   const [returns, setReturns] = useState({}) // { item_id: total_returned_qty }
+  // Stock transfers this period (S849): see EMPTY_TRANSFERS. Every save path ignores it — it is
+  // read-only here, written only by Stock Transfers.
+  const [transferMaps, setTransferMaps] = useState(EMPTY_TRANSFERS)
   // What the period's purchases and returns COST, per item (S756): purchases at each bill line's
   // own rate net of its share of the bill discount (allocateBillDiscounts), returns at the rate
   // they went back at — the basis Monthly Summary and the frozen Monthly Report use. The Summary
@@ -396,6 +411,7 @@ export default function Stock() {
             setReturns(cached.returns        || {})
             setPurchaseValues(cached.purchaseValues || null)
             setReturnValues(cached.returnValues || null)
+            setTransferMaps(cached.transfers || EMPTY_TRANSFERS)
             setRequisitioned(cached.requisitioned || {})
             // The badge counts everything still waiting for THIS client, across every month —
             // the same set flushQueue() will attempt. It used to count only the open period's
@@ -505,6 +521,9 @@ export default function Stock() {
         .eq('requisitions.period_id', periodId)
         .eq('requisitions.status', 'issued')
         .order('id')),
+      // Stock moved between sister outlets (S849, PNL-8). In the failure check below like every read
+      // here: a Summary the month is closed on must not silently lose a column of stock.
+      readPeriodTransfers(scopedFrom, periodId),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must not render as an empty month. Every read here destructured `{ data }`
@@ -516,16 +535,17 @@ export default function Stock() {
     if (failed) {
       setLoadError(failed)
       setStockData({}); setPurchases({}); setReturns({}); setRequisitioned({}); setPurchFreq({})
-      setPurchaseValues({}); setReturnValues({}); setCountedBy({})
+      setPurchaseValues({}); setReturnValues({}); setCountedBy({}); setTransferMaps(EMPTY_TRANSFERS)
       setDailyWastage({}); setDailyRows([])
       setSummaryRowIds(new Set())
       resetStored(periodId, {})
       return
     }
-    const [{ data: opening }, { data: closing }, { data: wastages }, { data: staffMealsData }, { data: purch }, { data: rets }, reqRes] = results
+    const [{ data: opening }, { data: closing }, { data: wastages }, { data: staffMealsData }, { data: purch }, { data: rets }, reqRes, { data: transferLines }] = results
 
-    // Which items had any row this month (S792, D29) — what admits a hidden item to the Summary.
-    const rowIds = periodRowIds({ opening, closing, purchases: purch, returns: rets, wastages, staffMeals: staffMealsData })
+    // Which items had any row this month (S792, D29) — what admits a hidden item to the Summary. A
+    // transfer line admits one too (S849): an item that only moved between outlets still shows.
+    const rowIds = periodRowIds({ opening, closing, purchases: purch, returns: rets, wastages, staffMeals: staffMealsData, transfers: transferLines })
     setSummaryRowIds(rowIds)
 
     const data = {}
@@ -596,6 +616,10 @@ export default function Stock() {
     setReturns(retMap)
     setReturnValues(retValMap)
 
+    // Stock transfers (S849): qty and value per item by direction, at each line's frozen value.
+    const tMaps = transferMapsOf(transferLines)
+    setTransferMaps(tMaps)
+
     // Requisitioned map — qty issued via store requisitions
     const reqMap = {}
     ;(reqRes?.data || []).forEach(r => { reqMap[r.item_id] = (reqMap[r.item_id] || 0) + parseFloat(r.qty_issued || 0) })
@@ -604,6 +628,7 @@ export default function Stock() {
     try {
       await cacheStockData(periodId, {
         stockData: data, purchases: purchMap, returns: retMap, purchaseValues: purchValMap, returnValues: retValMap, requisitioned: reqMap,
+        transfers: tMaps,
         rowIds: [...rowIds], hiddenItems: (hiddenList || []).filter(h => rowIds.has(h.id)),
       })
     } catch (_) {}
@@ -638,6 +663,7 @@ export default function Stock() {
         setReturns(cached.returns        || {})
         setPurchaseValues(cached.purchaseValues || null)
         setReturnValues(cached.returnValues || null)
+        setTransferMaps(cached.transfers || EMPTY_TRANSFERS)
         setRequisitioned(cached.requisitioned || {})
       } else {
         // No offline copy of this month: show it EMPTY under its own label. Leaving the previous
@@ -646,7 +672,7 @@ export default function Stock() {
         const blank = {}
         items.forEach(item => { blank[item.id] = { opening: '', closing: '', wastage: '', staff_meal: '' } })
         setStockData(blank); setDefaultTab('opening'); setPurchases({}); setReturns({}); setRequisitioned({})
-        setPurchaseValues({}); setReturnValues({})
+        setPurchaseValues({}); setReturnValues({}); setTransferMaps(EMPTY_TRANSFERS)
         setDailyWastage({}); setDailyRows([])
         restoreSummaryPopulation(null)
         resetStored(periodId, blank)
@@ -1254,7 +1280,7 @@ export default function Stock() {
         // item carrying only waste is exactly the shape that goes negative.
         const wast = (parseFloat(row.wastage) || 0) + (parseFloat(dailyWastage[item.id]) || 0)
         const hasData = row.opening !== '' || row.closing !== '' || purchases[item.id]
-          || wast > 0 || (parseFloat(row.staff_meal) || 0) > 0
+          || wast > 0 || (parseFloat(row.staff_meal) || 0) > 0 || hasTransfer(item.id)
         return hasData && getUsed(item.id) < 0
       })
       if (negativeItems.length > 0) {
@@ -1551,12 +1577,22 @@ export default function Stock() {
 
   // Quantity used, through the shared formula rather than a retyped copy of it (S756 — the S551
   // rule: COGS_FORMULA where it is printed, computeUsed() where it is computed).
+  // Stock transfers (S849), per item: in counts with purchases, out with returns.
+  const transferInQty  = id => transferMaps.inQty[id] || 0
+  const transferOutQty = id => transferMaps.outQty[id] || 0
+  const transferNetQty = id => transferInQty(id) - transferOutQty(id)
+  const transferNetVal = id => (transferMaps.inVal[id] || 0) - (transferMaps.outVal[id] || 0)
+  const hasTransfer    = id => transferInQty(id) > 0 || transferOutQty(id) > 0
+  // Any transfer this month: the Transfers columns appear in the rollup, the item table and the
+  // export together (S567: the two tables must still tie), and only then.
+  const anyTransfers = Object.keys(transferMaps.inQty).length > 0 || Object.keys(transferMaps.outQty).length > 0
+
   function getUsed(itemId) {
     const row = stockData[itemId] || {}
     return computeUsed({
       opening:    parseFloat(row.opening) || 0,
-      purchases:  parseFloat(purchases[itemId]) || 0,
-      returns:    parseFloat(returns[itemId]) || 0,
+      purchases:  (parseFloat(purchases[itemId]) || 0) + transferInQty(itemId),
+      returns:    (parseFloat(returns[itemId]) || 0) + transferOutQty(itemId),
       wastage:    (parseFloat(row.wastage) || 0) + (parseFloat(dailyWastage[itemId]) || 0),
       staffMeals: parseFloat(row.staff_meal) || 0,
       closing:    parseFloat(row.closing) || 0,
@@ -1581,21 +1617,23 @@ export default function Stock() {
     const rate = parseFloat(item.per_uom_rate || 0)
     return computeUsed({
       opening:    (parseFloat(row.opening) || 0) * rate,
-      purchases:  purchaseValueOf(item),
-      returns:    returnValueOf(item),
+      // Transfers at each line's frozen value (S849): in with purchases, out with returns.
+      purchases:  purchaseValueOf(item) + (transferMaps.inVal[item.id] || 0),
+      returns:    returnValueOf(item) + (transferMaps.outVal[item.id] || 0),
       wastage:    ((parseFloat(row.wastage) || 0) + (parseFloat(dailyWastage[item.id]) || 0)) * rate,
       staffMeals: (parseFloat(row.staff_meal) || 0) * rate,
       closing:    (parseFloat(row.closing) || 0) * rate,
     })
   }
 
-  // PATCHED: subtract returns from system ref qty
+  // PATCHED: subtract returns from system ref qty — and add stock received from, minus stock sent
+  // to, sister outlets (S849): the expected quantity the Closing tab and the high-value flags read.
   function getSystemRefQty(itemId) {
     const row = stockData[itemId] || {}
     const opening = parseFloat(row.opening) || 0
     const purchased = parseFloat(purchases[itemId]) || 0
     const returned = parseFloat(returns[itemId]) || 0
-    return opening + purchased - returned
+    return opening + purchased - returned + transferNetQty(itemId)
   }
 
   function getStockValue(itemId, item) {
@@ -1618,7 +1656,7 @@ export default function Stock() {
       if (value >= valueThreshold && value > 0 && freq >= freqThreshold) flagged.add(item.id)
     })
     return flagged
-  }, [items, stockData, purchases, returns, purchFreq]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, stockData, purchases, returns, purchFreq, transferMaps]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Key used for items whose `category_id` is NULL (Items.js writes null when the field is left
   // blank) or points at a category this client no longer has. Both used to fall out of the rollup
@@ -1644,8 +1682,10 @@ export default function Stock() {
       const returnsVal   = catItems.reduce((sum, i) => sum + returnValueOf(i), 0)
       const wastageVal    = catItems.reduce((sum, i) => sum + ((parseFloat(stockData[i.id]?.wastage) || 0) + (parseFloat(dailyWastage[i.id]) || 0)) * parseFloat(i.per_uom_rate || 0), 0)
       const staffMealsVal = catItems.reduce((sum, i) => sum + (parseFloat(stockData[i.id]?.staff_meal) || 0) * parseFloat(i.per_uom_rate || 0), 0)
+      // Stock transfers, net value (S849): in − out. COGS below already carries them.
+      const transfersVal  = catItems.reduce((sum, i) => sum + transferNetVal(i.id), 0)
       const cogsVal       = catItems.reduce((sum, i) => sum + getCogsValue(i), 0)
-      byCategory[name] = { opening: openingVal, closing: closingVal, purchases: purchasesVal, returns: returnsVal, wastage: wastageVal, staffMeals: staffMealsVal, cogs: cogsVal }
+      byCategory[name] = { opening: openingVal, closing: closingVal, purchases: purchasesVal, returns: returnsVal, transfers: transfersVal, wastage: wastageVal, staffMeals: staffMealsVal, cogs: cogsVal }
     })
     return byCategory
   }
@@ -1667,9 +1707,15 @@ export default function Stock() {
       if (toQty(row.closing) != null) countedIds.add(item.id)
       cogs += getCogsValue(item)
     })
+    // Stock received by transfer is stock presence like a purchase (S849, periodGap's rule): an item
+    // that only arrived from a sister outlet and was never counted is uncounted.
     const purchaseValue = {}
-    summaryItems.forEach(item => { purchaseValue[item.id] = purchaseValueOf(item) })
-    return findUncountedItems({ items: summaryItems, openingQty, purchaseQty: purchases, purchaseValue, countedIds, cogs })
+    const presenceQty = {}
+    summaryItems.forEach(item => {
+      purchaseValue[item.id] = purchaseValueOf(item) + (transferMaps.inVal[item.id] || 0)
+      presenceQty[item.id] = (parseFloat(purchases[item.id]) || 0) + transferInQty(item.id)
+    })
+    return findUncountedItems({ items: summaryItems, openingQty, purchaseQty: presenceQty, purchaseValue, countedIds, cogs })
   }
 
   async function exportExcel() {
@@ -1700,6 +1746,11 @@ export default function Stock() {
         'Purchase Value':    purchQty ? Math.round(purchaseValueOf(item)) : '',
         'Returned Qty':      retQty    || '',
         'Returns Value':     retQty ? Math.round(returnValueOf(item)) : '',
+        // Stock moved between sister outlets (S849), net: received minus sent, at each line's value.
+        ...(anyTransfers ? {
+          'Transfers Qty (net)':   hasTransfer(item.id) ? transferNetQty(item.id) : '',
+          'Transfers Value (net)': hasTransfer(item.id) ? Math.round(transferNetVal(item.id)) : '',
+        } : {}),
         'Wastage Qty':       wastQty   || '',
         'Wastage Value':     rate > 0 ? Math.round(wastQty  * rate) : '',
         'Staff Meals Qty':   staffQty  || '',
@@ -1969,7 +2020,7 @@ export default function Stock() {
         <div>
           {(() => {
               const summary = getSummary()
-              const EMPTY_ROW = { opening: 0, purchases: 0, returns: 0, closing: 0, wastage: 0, staffMeals: 0, cogs: 0 }
+              const EMPTY_ROW = { opening: 0, purchases: 0, returns: 0, transfers: 0, closing: 0, wastage: 0, staffMeals: 0, cogs: 0 }
               // The Uncategorised group is rendered only when it actually holds something, so a
               // tidy client never sees an all-dashes row — but when it does hold something, both
               // the row and the Totals below include it.
@@ -1984,6 +2035,7 @@ export default function Stock() {
                 opening:    rows.reduce((s, r) => s + r.opening,            0),
                 purchases:  rows.reduce((s, r) => s + r.purchases,          0),
                 returns:    rows.reduce((s, r) => s + (r.returns || 0),      0),
+                transfers:  rows.reduce((s, r) => s + (r.transfers || 0),    0),
                 closing:    rows.reduce((s, r) => s + r.closing,            0),
                 wastage:    rows.reduce((s, r) => s + r.wastage,            0),
                 staffMeals: rows.reduce((s, r) => s + (r.staffMeals || 0), 0),
@@ -2015,6 +2067,7 @@ export default function Stock() {
                     Summary leaves out, so its COGS differs from this page by the value of that prep.
                     An item hidden in Item Master stays in any month it had stock or movement in, just
                     as on Monthly Summary; the item table below marks it Hidden.
+                    {anyTransfers && ' Stock received from your other outlets counts like a purchase and stock sent to them like a return, at the sending outlet\'s price when it was sent.'}
                   </p>
                   <div className="table-wrap">
                     <table className="data-table">
@@ -2025,6 +2078,7 @@ export default function Stock() {
                           <th style={thStyle}>Opening Stock</th>
                           <th style={thStyle}><Tip text="What this period's purchase bills charged for these goods, after each bill's discount and before VAT. 'Production' = sub-recipes processed in-house from existing stock." width={280}>Purchase</Tip></th>
                           <th style={thStyle}><Tip text="Value of goods sent back to the vendor this period — a short delivery, a damaged crate, wrong item — at the rate each return was recorded at. Already netted off COGS." width={270}>Returns</Tip></th>
+                          {anyTransfers && <th style={thStyle}><Tip text="Stock received from your other outlets minus stock sent to them this month, at the sending outlet's price when it was sent. Received stock counts like a purchase and sent stock like a return; already in COGS." width={280}>Transfers</Tip></th>}
                           <th style={thStyle}>Closing Stock</th>
                           <th style={thStyle}>Wastage</th>
                           <th style={thStyle}>Staff Meals</th>
@@ -2049,6 +2103,7 @@ export default function Stock() {
                               <td style={tdStyle('var(--theme-text3)')}>{s.opening > 0 ? fmt(s.opening) : '—'}</td>
                               <td style={tdStyle('var(--theme-text1)')}>{s.purchases > 0 ? fmt(s.purchases) : '—'}</td>
                               <td style={tdStyle('var(--theme-text1)')}>{(s.returns || 0) > 0 ? fmt(s.returns) : '—'}</td>
+                              {anyTransfers && <td style={tdStyle('var(--theme-text1)')}>{Math.abs(s.transfers || 0) > 0.005 ? `${s.transfers > 0 ? '+' : '−'}${fmt(Math.abs(s.transfers))}` : '—'}</td>}
                               <td style={tdStyle('var(--theme-text1)')}>{s.closing > 0 ? fmt(s.closing) : '—'}</td>
                               <td style={tdStyle('var(--theme-text1)')}>{s.wastage > 0 ? fmt(s.wastage) : '—'}</td>
                               <td style={tdStyle('var(--theme-text1)')}>{(s.staffMeals || 0) > 0 ? fmt(s.staffMeals) : '—'}</td>
@@ -2064,6 +2119,7 @@ export default function Stock() {
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>{fmt(totals.opening)}</td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>{fmt(totals.purchases)}</td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>{fmt(totals.returns)}</td>
+                          {anyTransfers && <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>{`${totals.transfers < 0 ? '−' : '+'}${fmt(Math.abs(totals.transfers))}`}</td>}
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>{fmt(totals.closing)}</td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>{fmt(totals.wastage)}</td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>{fmt(totals.staffMeals)}</td>
@@ -2105,6 +2161,7 @@ export default function Stock() {
                     <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}>Opening</th>
                     <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}>Purchased</th>
                     <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}>Returned</th>
+                    {anyTransfers && <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Received from your other outlets minus sent to them this month, in the item's unit. In counts like a purchase, out like a return." width={250}>Transfers</Tip></th>}
                     <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}>Wastage</th>
                     <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Staff & complimentary consumption recorded this period. Deducted from Used separately from wastage." width={240}>Staff Meals</Tip></th>
                     <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}>Closing</th>
@@ -2112,6 +2169,7 @@ export default function Stock() {
                     <th style={{ textAlign: 'right', color: 'var(--theme-text2)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Total qty issued from the store via requisition slips this period. Should align with Used quantity." width={240}>Requisitioned</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-text3)', borderLeft: '1px solid var(--theme-border)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Opening quantity × per-unit rate. Value of stock carried forward from the previous period." width={240}>Open. Value</Tip></th>
                     <th style={{ textAlign: 'right', color: 'var(--theme-text1)', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="What this period's bills charged for the item, after each bill's discount and before VAT — not quantity × today's Item Master rate." width={240}>Purch. Value</Tip></th>
+                    {anyTransfers && <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Transfers in minus transfers out, at the sending outlet's price when each was sent — the same figure as the Transfers column in the category table above." width={250}>Transfers Value</Tip></th>}
                     <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Wastage quantity × per-unit rate. NPR cost of goods recorded as waste." width={240}>Wastage Value</Tip></th>
                     <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Staff meals quantity × per-unit rate. NPR cost of complimentary/staff consumption." width={260}>Staff Meals Value</Tip></th>
                     <th style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 2, background: 'var(--theme-card)' }}><Tip text="Closing (physical count) quantity × per-unit rate." width={220}>Close Value</Tip></th>
@@ -2138,7 +2196,8 @@ export default function Stock() {
                     // Wastage and staff meals count as "this item has activity" too. Without them an
                     // item carrying only waste (no opening, no purchase, no count) rendered Used and
                     // COGS as "—" while the rollup above still added its negative COGS in.
-                    const hasData  = row.opening !== '' || row.closing !== '' || purchases[item.id] || wastQty > 0 || staffQty > 0
+                    const hasData  = row.opening !== '' || row.closing !== '' || purchases[item.id] || wastQty > 0 || staffQty > 0 || hasTransfer(item.id)
+                    const tNetQty  = transferNetQty(item.id)
                     const fmtVal   = (qty) => rate > 0 && qty !== 0
                       ? `NPR ${Math.round(qty * rate).toLocaleString('en-IN')}`
                       : '—'
@@ -2168,6 +2227,11 @@ export default function Stock() {
                         <td style={{ textAlign: 'right' }}>{row.opening !== '' ? Number(row.opening).toLocaleString('en-IN') : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{purchQty > 0 ? dispPurch(purchQty, item) : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{returned > 0 ? `−${Number(returned).toLocaleString('en-IN')}` : '—'}</td>
+                        {anyTransfers && (
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>
+                            {hasTransfer(item.id) ? `${tNetQty < 0 ? '−' : '+'}${Number(Math.abs(tNetQty)).toLocaleString('en-IN')}` : '—'}
+                          </td>
+                        )}
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{wastQty > 0 ? Number(wastQty).toLocaleString('en-IN') : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{staffQty > 0 ? Number(staffQty).toLocaleString('en-IN') : '—'}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{row.closing !== '' ? Number(row.closing).toLocaleString('en-IN') : '—'}</td>
@@ -2179,6 +2243,11 @@ export default function Stock() {
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)', borderLeft: '1px solid var(--theme-border)' }}>{fmtVal(openQty)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{purchQty > 0 ? npr(purchaseValueOf(item)) : '—'}</td>
+                        {anyTransfers && (
+                          <td style={{ textAlign: 'right', color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>
+                            {hasTransfer(item.id) ? `${transferNetVal(item.id) < 0 ? '−' : '+'}${npr(Math.abs(transferNetVal(item.id)))}` : '—'}
+                          </td>
+                        )}
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtVal(wastQty)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtVal(staffQty)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmtVal(closeQty)}</td>
@@ -2228,7 +2297,7 @@ export default function Stock() {
           <div className="note-banner no-print">
             {blindOn
               ? 'Blind counting is on, so this sheet prints without the expected quantities — write what is on the shelf. ★ marks high-value, fast-moving items; count these first and double-check the figures.'
-              : 'System Ref Qty = Opening Stock + Purchases − Returns recorded this period. ★ marks high-value, fast-moving items — count these first and double-check the figures.'}
+              : 'System Ref Qty = Opening Stock + Purchases − Returns recorded this period, plus stock received from your other outlets minus stock sent to them. ★ marks high-value, fast-moving items — count these first and double-check the figures.'}
           </div>
 
           <div className="card print-sheet">
@@ -2265,7 +2334,7 @@ export default function Stock() {
                             Printing it here handed a blinded counter the figure the Closing tab
                             had just withheld — on paper, which is worse, because it leaves the
                             store room. */}
-                        {!blindOn && <th style={{ textAlign: 'right' }}><Tip text="Opening Stock + Purchases − Returns recorded this period. Use as a reference — your physical count may differ due to usage or shrinkage." width={250}>System Ref Qty</Tip></th>}
+                        {!blindOn && <th style={{ textAlign: 'right' }}><Tip text="Opening Stock + Purchases − Returns recorded this period, plus stock received from your other outlets minus stock sent to them. Use as a reference — your physical count may differ due to usage or shrinkage." width={250}>System Ref Qty</Tip></th>}
                         <th style={{ textAlign: 'right' }}>Physical Count</th>
                       </tr>
                     </thead>
@@ -2567,6 +2636,9 @@ export default function Stock() {
                         {!blindCount && returned > 0 && (
                           <span className="mobile-stock-ref" style={{ color: 'var(--theme-text2)' }}>Returned: −{Number(returned).toLocaleString('en-IN')}</span>
                         )}
+                        {!blindCount && hasTransfer(item.id) && (
+                          <span className="mobile-stock-ref" style={{ color: 'var(--theme-text2)' }}>Transfers: {transferNetQty(item.id) < 0 ? '−' : '+'}{Number(Math.abs(transferNetQty(item.id))).toLocaleString('en-IN')}</span>
+                        )}
                       </div>
                       <div className="mobile-stock-card-input-row">
                         <QtyInput
@@ -2625,6 +2697,7 @@ export default function Stock() {
                           </th>
                           {!blindCount && <th style={{ textAlign: 'right' }}>Purchased</th>}
                           {!blindCount && <th style={{ textAlign: 'right' }}>Returned</th>}
+                          {!blindCount && anyTransfers && <th style={{ textAlign: 'right' }}><Tip text="Received from your other outlets minus sent to them this month (S849). In counts like a purchase, out like a return." width={240}>Transfers</Tip></th>}
                           {!hideValues && !blindCount && (
                             <th style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>
                               <Tip text="Qty entered × unit rate (per_uom_rate). Gives the NPR value of this item's stock entry." width={220}>Value (NPR)</Tip>
@@ -2685,6 +2758,11 @@ export default function Stock() {
                                   {returned > 0 ? `−${Number(returned).toLocaleString('en-IN')} ${item.uom}` : '—'}
                                 </td>
                               )}
+                              {!blindCount && anyTransfers && (
+                                <td style={{ textAlign: 'right', color: hasTransfer(item.id) ? 'var(--theme-text1)' : 'var(--theme-text3)', fontSize: 13, whiteSpace: 'nowrap' }}>
+                                  {hasTransfer(item.id) ? `${transferNetQty(item.id) < 0 ? '−' : '+'}${Number(Math.abs(transferNetQty(item.id))).toLocaleString('en-IN')} ${item.uom}` : '—'}
+                                </td>
+                              )}
                               {!hideValues && !blindCount && (
                                 <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontSize: 13, fontWeight: lineValue ? 600 : 400 }}>
                                   {lineValue != null ? `NPR ${lineValue.toLocaleString('en-IN')}` : '—'}
@@ -2705,7 +2783,7 @@ export default function Stock() {
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>
                             {totalQty > 0 ? Number(totalQty).toLocaleString('en-IN') : '—'}
                           </td>
-                          {!blindCount && <td colSpan={2}></td>}
+                          {!blindCount && <td colSpan={anyTransfers ? 3 : 2}></td>}
                           {!hideValues && !blindCount && (
                             <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', fontSize: 14, paddingTop: 12 }}>
                               {totalValue > 0 ? `NPR ${Math.round(totalValue).toLocaleString('en-IN')}` : '—'}

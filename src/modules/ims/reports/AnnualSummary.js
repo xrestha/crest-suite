@@ -18,6 +18,7 @@ import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { findUncountedItems, mergeGaps, gapNote, unjudgedFcFigure } from '../../../shared/uncountedItems'
 import NoPeriodState from '../../../components/NoPeriodState'
+import { readPeriodTransfers, lineValue } from '../transfers/transferFlows'
 
 // Nepal fiscal year starts Shrawan (month 4)
 // bs_month >= 4 → fiscal year = bs_year; else fiscal year = bs_year - 1
@@ -143,7 +144,12 @@ export default function AnnualSummary() {
       // JS below, not with .neq (S756): `source` is nullable and `NULL <> 'pos_comp'` is NULL, so
       // the server-side form dropped every legacy row — Revenue short, FC% high, for twelve months.
       fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount, source').in('period_id', periodIds).order('id')),
-      scopedFrom('recipes', 'id, selling_price'),
+      // Paged (S849, the PNL-15 rule Monthly Summary follows): revenue for a row recorded before
+      // unit_price existed is valued off this price list, and a bare read stops at 1,000 recipes.
+      fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
+      // Stock moved between sister outlets (S849, PNL-8), the year's twelve months in one paged
+      // read: received or returned stock adds like a purchase, sent stock comes off like a return.
+      readPeriodTransfers(scopedFrom, periodIds),
     ])
     // A failed read must not render as a quiet year of NPR 0 (S612 silent-zero rule).
     if (!yearReq.isCurrent(key)) return   // superseded by a newer year selection
@@ -152,7 +158,7 @@ export default function AnnualSummary() {
     const [
       { data: items }, { data: opening }, { data: closing },
       { data: purchases }, { data: returns }, { data: wastages },
-      { data: staffMeals }, { data: sales }, { data: recipes }
+      { data: staffMeals }, { data: sales }, { data: recipes }, { data: transfers },
     ] = results
 
     // `rateMap` doubles as the non-sub-recipe item set, and both jobs matter. It once valued
@@ -184,6 +190,7 @@ export default function AnnualSummary() {
     const wasteBy  = byPeriod(wastages)
     const staffBy  = byPeriod(staffMeals)
     const salesBy  = byPeriod((sales || []).filter(r => r.source !== 'pos_comp'))
+    const transferBy = byPeriod(transfers)
     const at = (m, pid) => m.get(pid) || []
 
     const rows = yearPeriods.map(period => {
@@ -199,7 +206,12 @@ export default function AnnualSummary() {
       const grossPurch= purchRows.reduce((s, r) => s + r.lineGrossCost, 0)
       const discVal   = grossPurch - purchRows.reduce((s, r) => s + r.lineCost, 0)
       const retVal    = at(retBy,   pid).filter(r => isTracked(r.item_id)).reduce((s, r) => s + returnCostValue(r), 0)
-      const netPurch  = grossPurch - discVal - retVal
+      // Stock transfers (S849): at the line's own value (qty × the sender's rate frozen at sending),
+      // for the same item set every other column values, as Monthly Summary's periodCost does.
+      const transferRows = at(transferBy, pid).filter(r => isTracked(r.item_id))
+      const tInVal    = transferRows.filter(r => r.direction === 'in').reduce((s, r) => s + lineValue(r), 0)
+      const tOutVal   = transferRows.filter(r => r.direction === 'out').reduce((s, r) => s + lineValue(r), 0)
+      const netPurch  = grossPurch - discVal - retVal + tInVal - tOutVal
       const wasteVal  = at(wasteBy, pid).reduce((s, r) => s + parseFloat(r.qty) * (rateMap[r.item_id] || 0), 0)
       const staffVal  = at(staffBy, pid).reduce((s, r) => s + parseFloat(r.qty) * (rateMap[r.item_id] || 0), 0)
       const cogs      = computeUsed({ opening: openVal, purchases: netPurch, wastage: wasteVal, staffMeals: staffVal, closing: closeVal })
@@ -222,11 +234,17 @@ export default function AnnualSummary() {
         purchaseQty[r.item_id] = (purchaseQty[r.item_id] || 0) + parseFloat(r.qty || 0)
         purchaseValue[r.item_id] = (purchaseValue[r.item_id] || 0) + r.lineCost
       })
+      // Stock that arrived by transfer is stock presence like a purchase (S849, periodGap's rule):
+      // an item received and never counted is uncounted. Stock sent away is not taken off presence.
+      transferRows.filter(r => r.direction === 'in').forEach(r => {
+        purchaseQty[r.item_id] = (purchaseQty[r.item_id] || 0) + parseFloat(r.qty || 0)
+        purchaseValue[r.item_id] = (purchaseValue[r.item_id] || 0) + lineValue(r)
+      })
       const countedIds = new Set(at(closeBy, pid).filter(r => r.physical_qty != null).map(r => r.item_id))
       const gap = findUncountedItems({ items, openingQty, purchaseQty, purchaseValue, countedIds, cogs })
 
       return {
-        period, openVal, closeVal, grossPurch, discVal, retVal, netPurch, wasteVal, cogs, revenue, fcPct, gap,
+        period, openVal, closeVal, grossPurch, discVal, retVal, tInVal, tOutVal, netPurch, wasteVal, cogs, revenue, fcPct, gap,
         label: `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`
       }
     })
@@ -236,14 +254,16 @@ export default function AnnualSummary() {
     const totPurch   = rows.reduce((s, r) => s + r.grossPurch, 0)
     const totDisc    = rows.reduce((s, r) => s + r.discVal, 0)
     const totRet     = rows.reduce((s, r) => s + r.retVal, 0)
-    const totNetPurch= totPurch - totDisc - totRet
+    const totTIn     = rows.reduce((s, r) => s + r.tInVal, 0)
+    const totTOut    = rows.reduce((s, r) => s + r.tOutVal, 0)
+    const totNetPurch= totPurch - totDisc - totRet + totTIn - totTOut
     const totWaste   = rows.reduce((s, r) => s + r.wasteVal, 0)
     const totFcPct   = totRevenue > 0 ? (totCogs / totRevenue) * 100 : null
     // The year's FC% carries every month's uncounted stock, so it is judged on the year's gap as a
     // whole — item-months against item-months, value against the year's COGS (mergeGaps).
     const totGap     = mergeGaps(rows.map(r => r.gap))
 
-    setReport({ key, rows, totRevenue, totCogs, totPurch, totDisc, totRet, totNetPurch, totWaste, totFcPct, totGap })
+    setReport({ key, rows, totRevenue, totCogs, totPurch, totDisc, totRet, totTIn, totTOut, totNetPurch, totWaste, totFcPct, totGap })
     setLoading(false)
   }
 
@@ -278,6 +298,7 @@ export default function AnnualSummary() {
       'Gross Purchases': n0(r.grossPurch),
       'Bill Discounts':  n0(r.discVal),
       'Returns':         n0(r.retVal),
+      ...(hasTransfers ? { 'Transfers In': n0(r.tInVal), 'Transfers Out': n0(r.tOutVal) } : {}),
       'Net Purchases':   n0(r.netPurch),
       'Wastage':         n0(r.wasteVal),
       'COGS':            n0(r.cogs),
@@ -293,6 +314,7 @@ export default function AnnualSummary() {
       'Gross Purchases': n0(report.totPurch),
       'Bill Discounts':  n0(report.totDisc),
       'Returns':         n0(report.totRet),
+      ...(hasTransfers ? { 'Transfers In': n0(report.totTIn), 'Transfers Out': n0(report.totTOut) } : {}),
       'Net Purchases':   n0(report.totNetPurch),
       'Wastage':         n0(report.totWaste),
       'COGS':            n0(report.totCogs),
@@ -311,7 +333,8 @@ export default function AnnualSummary() {
     XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
       title: 'Annual Summary', biz, scopeLine, rows: xlRows,
       notes: [
-        `COGS = ${COGS_FORMULA} · Net Purchases = Gross − bill discounts − returns · Annual FC% = Total COGS ÷ Total Revenue`,
+        `COGS = ${COGS_FORMULA} · Net Purchases = Gross − bill discounts − returns${hasTransfers ? ' + transfers in − transfers out' : ''} · Annual FC% = Total COGS ÷ Total Revenue`,
+        ...(hasTransfers ? ["Transfers In is stock received from your other outlets (and stock back after a cancelled or refused transfer); Transfers Out is stock sent to them. Both at the sending outlet's price when it was sent."] : []),
         ...report.rows.filter(r => r.gap.uncountedCount > 0).map(r => gapNote(r.gap, r.label)),
       ],
     }), 'Annual Summary')
@@ -325,6 +348,8 @@ export default function AnnualSummary() {
   const viewKey = selectedYear === null ? null : yearKeyOf(effectiveClientId, fiscalMode, selectedYear)
   const current = !!report && report.key === viewKey
   const busy = loading || (!loadError && !current)
+  // Stock moved to or from a sister outlet in the year (S849): the transfer columns appear only then.
+  const hasTransfers = current && ((report.totTIn || 0) > 0 || (report.totTOut || 0) > 0)
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
   // !loadError: a failed periods read must not wear NoPeriodState (S612 silent-zero rule).
@@ -433,7 +458,9 @@ export default function AnnualSummary() {
                   <th style={{ textAlign: 'right' }}><Tip text="Bill value before any bill-level discount and before returns — what was invoiced." width={230}>Gross Purchases</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Bill-level discounts, spread across each bill's lines in proportion to line value — the same allocation Monthly Summary and Consolidated P&L use, which is what keeps the three pages' COGS tied." width={260}>Discount</Tip></th>
                   <th style={{ textAlign: 'right' }}>Returns</th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Gross purchases minus bill discounts minus returns. What COGS is built from." width={240}>Net Purchases</Tip></th>
+                  {hasTransfers && <th style={{ textAlign: 'right' }}><Tip text="Stock received from your other outlets, plus stock back after a cancelled or refused transfer, at the sending outlet's price. Counts like a purchase." width={250}>Transfers In</Tip></th>}
+                  {hasTransfers && <th style={{ textAlign: 'right' }}><Tip text="Stock sent to your other outlets, at this outlet's price when it was sent. Comes off like a return to the supplier." width={250}>Transfers Out</Tip></th>}
+                  <th style={{ textAlign: 'right' }}><Tip text={hasTransfers ? 'Gross purchases minus bill discounts minus returns, plus stock received from your other outlets minus stock sent to them. What COGS is built from.' : 'Gross purchases minus bill discounts minus returns. What COGS is built from.'} width={240}>Net Purchases</Tip></th>
                   <th style={{ textAlign: 'right' }}>Wastage</th>
                   <th style={{ textAlign: 'right' }}>
                     <Tip text={`${COGS_FORMULA}. Ingredient cost consumed this month.`} width={250}>COGS</Tip>
@@ -468,6 +495,8 @@ export default function AnnualSummary() {
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{row.grossPurch > 0 ? fmt(row.grossPurch) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{row.discVal > 0 ? `−${fmt(row.discVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{row.retVal > 0 ? `−${fmt(row.retVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+                      {hasTransfers && <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{row.tInVal > 0 ? `+${fmt(row.tInVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>}
+                      {hasTransfers && <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{row.tOutVal > 0 ? `−${fmt(row.tOutVal)}` : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>}
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(row.netPurch)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{row.wasteVal > 0 ? fmt(row.wasteVal) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{row.cogs !== 0 ? fmt(row.cogs) : <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
@@ -505,6 +534,16 @@ export default function AnnualSummary() {
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>
                     {report.totRet > 0 ? `−${fmt(report.totRet)}` : '—'}
                   </td>
+                  {hasTransfers && (
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>
+                      {report.totTIn > 0 ? `+${fmt(report.totTIn)}` : '—'}
+                    </td>
+                  )}
+                  {hasTransfers && (
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>
+                      {report.totTOut > 0 ? `−${fmt(report.totTOut)}` : '—'}
+                    </td>
+                  )}
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>{fmt(report.totNetPurch)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 14 }}>{fmt(report.totWaste)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 800, color: 'var(--theme-text1)', paddingTop: 14, fontSize: 14 }}>{fmt(report.totCogs)}</td>
@@ -518,7 +557,7 @@ export default function AnnualSummary() {
           </div>
         )}
         <div style={{ marginTop: 16, fontSize: 12, color: 'var(--theme-text3)' }}>
-          COGS = {COGS_FORMULA} · Net Purchases = Gross − bill discounts − returns · Revenue from sales entries · Annual FC% = Total COGS ÷ Total Revenue
+          COGS = {COGS_FORMULA} · Net Purchases = Gross − bill discounts − returns{hasTransfers ? ' + transfers in − transfers out' : ''} · Revenue from sales entries · Annual FC% = Total COGS ÷ Total Revenue
         </div>
       </div>
       )}

@@ -217,3 +217,48 @@ describe('buildMonthlySummaryWorkbook', () => {
     expect(none.categoryRows.every(r => r['% of Total COGS'] === '')).toBe(true)
   })
 })
+
+// S849 (PNL-8): stock moved between sister outlets. The sheet carries Transfers In / Out only in a
+// month that had any, and Net Purchases still rebuilds from the columns beside it.
+describe('buildMonthlySummaryWorkbook with stock transfers (S849)', () => {
+  const withTransfers = {
+    ...report,
+    totalTransferIn: 700, totalTransferOut: 200, totalNetPurchase: 5300 + 700 - 200,
+    catRows: report.catRows.map((r, i) => ({
+      ...r,
+      transferInVal: i === 0 ? 700 : 0,
+      transferOutVal: i === 0 ? 200 : 0,
+      netPurchaseVal: (Number(r.netPurchaseVal) || 0) + (i === 0 ? 500 : 0),
+    })),
+  }
+  const wb = buildMonthlySummaryWorkbook(withTransfers, { periodLabel: 'Bhadra 2082', periodStatus: 'closed', settings })
+
+  it('adds the two figures between Returns and Net Purchases, and Net Purchases still rebuilds', () => {
+    const figures = wb.summaryRows.map(r => r.Figure)
+    expect(figures.slice(1, 7)).toEqual(['Gross Purchases', 'Discount', 'Returns', 'Transfers In', 'Transfers Out', 'Net Purchases'])
+    const by = Object.fromEntries(wb.summaryRows.map(r => [r.Figure, r['Amount (NPR)']]))
+    expect(by['Gross Purchases'] - by['Discount'] - by['Returns'] + by['Transfers In'] - by['Transfers Out']).toBe(by['Net Purchases'])
+  })
+
+  it('adds the two columns to the category table, and the TOTAL adds up', () => {
+    const rows = wb.categoryRows
+    const keys = Object.keys(rows[0])
+    expect(keys.slice(keys.indexOf('Returns'), keys.indexOf('Returns') + 4)).toEqual(['Returns', 'Transfers In', 'Transfers Out', 'Net Purchases'])
+    const total = rows[rows.length - 1]
+    for (const col of ['Transfers In', 'Transfers Out']) {
+      expect(rows.slice(0, -1).reduce((s, r) => s + r[col], 0)).toBe(total[col])
+    }
+  })
+
+  it('says what a transfer is and puts it in the formula', () => {
+    expect(wb.notes.join(' ')).toMatch(/Transfers In is stock received from your other outlets/)
+    expect(wb.notes.join(' ')).toMatch(/Net Purchases = Gross − bill discounts − returns \+ transfers in − transfers out/)
+  })
+
+  it('a month with none keeps the sheet it always had', () => {
+    const plain = buildMonthlySummaryWorkbook(report, { periodLabel: 'Bhadra 2082', periodStatus: 'closed', settings })
+    expect(plain.summaryRows.map(r => r.Figure)).not.toContain('Transfers In')
+    expect(Object.keys(plain.categoryRows[0])).not.toContain('Transfers In')
+    expect(plain.notes.join(' ')).not.toMatch(/transfer/i)
+  })
+})

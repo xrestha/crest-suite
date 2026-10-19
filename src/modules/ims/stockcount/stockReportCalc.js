@@ -36,11 +36,34 @@
 // An item with no activity at all — no opening, no purchases, no usage, no wastage, no staff
 // meals and no closing row — is `idle`, not `out`: nothing in the data says it was ever stocked,
 // so counting it as "out of stock" inflated that KPI by every dormant item in the master list.
+//
+//   6. Stock transfers between outlets (S849, PNL-8) move the shelf like a purchase and a return:
+//      a line with direction 'in' (received here, or returned here after a cancel or refusal) adds
+//      its qty, a line with direction 'out' (sent from here) takes it off — the moment it is sent,
+//      so the sender stops expecting stock that is on the way to a branch. A line exists only once
+//      it counts for this outlet, so there is no status to filter. `netPurch` carries the term, and
+//      `transferNet` shows it on its own.
 
 import { selectDepletingSales } from '../sales/salesDepletion'
 import { deltaItems } from '../../../utils/orderLineIngredients'
 
 const num = v => parseFloat(v) || 0
+
+/**
+ * Stock transfer lines → item id → net qty (in − out). The same fold as transferFlows'
+ * `transferNetQtyByItem`, kept here because transferFlows.js imports the Supabase client and this
+ * file is pure: the dashboards' and the Owner Report's tests import it with no client configured.
+ * Only 'in' and 'out' count; anything else is not a transfer line and moves nothing.
+ */
+export function transferNetQtyMap(transfers) {
+  const out = {}
+  ;(transfers || []).forEach(t => {
+    if (!t || t.item_id == null) return
+    const sign = t.direction === 'in' ? 1 : t.direction === 'out' ? -1 : 0
+    if (sign) out[t.item_id] = (out[t.item_id] || 0) + sign * num(t.qty)
+  })
+  return out
+}
 
 function sumBy(rows, key, valueKey) {
   const out = {}
@@ -90,8 +113,10 @@ export function buildUsageMap(sales, breakdown, explosion = null) {
  * `sales` rows must carry `bs_day` and `source` (rule 2 cannot run without them — select them).
  * `pars` may be omitted by a caller that only wants on-hand; every reorder field then reads as
  * "no par". Items are taken as given: a caller that must exclude sub-recipes filters first.
+ * `transfers` (S849) are the period's ims_stock_transfer_lines `{ item_id, qty, direction }`;
+ * omitted, every figure is exactly what it was before transfers existed.
  */
-export function buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars, explosion = null }) {
+export function buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars, explosion = null, transfers = null }) {
   const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = num(r.qty) })
   const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = num(r.physical_qty) })
   const wasteMap = sumBy(wastages, 'item_id', 'qty')
@@ -99,16 +124,22 @@ export function buildStockRows({ items, opening, closing, purchases, returns, wa
   const parMap = {}; (pars || []).forEach(r => { parMap[r.item_id] = num(r.par_qty) })
   const purchMap = sumBy(purchases, 'item_id', 'qty')
   ;(returns || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) - num(r.qty) })
+  // Rule 6: received / returned stock adds like a purchase, sent stock comes off like a return.
+  const transferMap = transferNetQtyMap(transfers)
+  Object.entries(transferMap).forEach(([id, q]) => { purchMap[id] = (purchMap[id] || 0) + q })
   const usageMap = buildUsageMap(sales, breakdown, explosion)
 
   return (items || []).map(item => {
     const openQty  = openMap[item.id] || 0
     const netPurch = purchMap[item.id] || 0
+    const transferNet = transferMap[item.id] || 0
     const wasteQty = wasteMap[item.id] || 0
     const usageQty = usageMap[item.id] || 0
     const staffQty = staffMap[item.id] || 0
     const hasClosing = item.id in closeMap
+    // A transfer that moved stock both ways (received 5, sent 5) nets to 0 and is still activity.
     const hasActivity = hasClosing || openQty !== 0 || netPurch !== 0 || usageQty !== 0 || wasteQty !== 0 || staffQty !== 0
+      || item.id in transferMap
     const rawTheoretical = openQty + netPurch - usageQty - wasteQty - staffQty
     const onHand = hasClosing ? closeMap[item.id] : Math.max(0, rawTheoretical)
     const isNegative = !hasClosing && rawTheoretical < 0
@@ -129,7 +160,7 @@ export function buildStockRows({ items, opening, closing, purchases, returns, wa
 
     return {
       item, category: item.categories?.name || 'Uncategorised',
-      openQty, netPurch, usageQty, wasteQty, staffQty,
+      openQty, netPurch, transferNet, usageQty, wasteQty, staffQty,
       onHand, isNegative, par, unitRate, stockValue,
       needsReorder, shortfall, shortfallValue,
       stockSource: hasClosing ? 'closing' : 'theoretical', status,

@@ -18,7 +18,9 @@ import { selectDepletingSalesAcrossPeriods } from '../sales/salesDepletion'
 import {
   daysUntilExpiry, asOfForWindow, splitReturns, batchRateOf,
   anchorToCounts, rollingWindow, sumConsumptionByPeriod, countsFromClosedPeriods, periodMonthIndex,
+  transferBatchesOf,
 } from './stockAgeingCalc'
+import { readPeriodTransfers } from '../transfers/transferFlows'
 import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
@@ -167,6 +169,8 @@ export default function FifoReport() {
       // stand in for the count.
       fetchAllRowsChunked(closedIds, ids => supabase.from('closing_stock')
         .select('period_id, item_id, physical_qty').in('period_id', ids).order('id')),
+      // Stock moved between sister outlets (S849, PNL-8), the same window, paged and chunked.
+      readPeriodTransfers(scopedFrom, periodIds),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must never flow through the `|| []`s below into a confident report (S612).
@@ -174,7 +178,7 @@ export default function FifoReport() {
     if (failed) { setLoadError(failed); setRows([]); return }
     const [
       { data: purchases }, { data: returns }, { data: sales },
-      { data: wastages }, { data: staffMeals }, { data: opening }, { data: closing },
+      { data: wastages }, { data: staffMeals }, { data: opening }, { data: closing }, { data: transfers },
     ] = results
 
     // Returns come off their own purchase line where that line is IN the window; an orphan return,
@@ -214,6 +218,11 @@ export default function FifoReport() {
         entry: p, returnedQty: returnedByEntry[p.id] || 0,
       })
     }
+    // Stock received from a sister outlet, or back after a cancelled or refused transfer (S849): a
+    // batch dated the day it counted here. It carries no expiry date, so like any undated batch it
+    // is never listed — it absorbs its share of consumption, oldest first, which is what keeps a
+    // dated purchase from being eaten by usage that came off the transferred stock.
+    batches.push(...transferBatchesOf(transfers, adDateOf).map(b => ({ ...b, entry: null })))
 
     // Consumption over the window: recipe-exploded sales + wastage + staff meals + orphan returns.
     //
@@ -248,6 +257,7 @@ export default function FifoReport() {
     // Consumption per MONTH, so each month's count settles what came before it (S756, D19).
     const consumedByPeriod = sumConsumptionByPeriod({
       sales: depleting, breakdown, explosion, wastages, staffMeals, returnsByPeriodItem: returnedByPeriodItem,
+      transfers,
     })
 
     // ONE shared walk, not a second copy — Stock Ageing solves the same problem the same way and

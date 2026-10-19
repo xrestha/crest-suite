@@ -24,6 +24,7 @@ import path from 'path'
 import {
   ITEM_REF_TABLES, refCountsFromRows, refCodesFromCounts, readItemRefCounts,
   priceImpactPhrase, priceImpactSentence, PRICE_CHANGE_KEEPS,
+  REF_TABLE_PROSE, FORCE_DELETE_BLOCKING_CODES, forceDeleteBlockedText,
 } from './itemRefTables'
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', '..', '..', '..', 'supabase', 'migrations')
@@ -141,6 +142,29 @@ describe('ITEM_REF_TABLES', () => {
       expect(checked.slice().sort()).toEqual(ITEM_REF_TABLES.map(t => t.table).sort())
     })
 
+    // S849 (PNL-8): the third twin. push_master_data's unit lock asks item_has_references about a
+    // BRANCH item; a table missing there lets HQ change the unit of an item whose only history is a
+    // stock transfer, re-reading those quantities in the new unit.
+    it('checks the same tables, in the same order, in item_has_references()', () => {
+      const hasSql = latestDefining('item_has_references')
+      const body = hasSql.split('CREATE OR REPLACE FUNCTION public.item_has_references')[1]
+        .split('$$;')[0]
+      const checked = [...body.matchAll(/FROM (\w+)\s+WHERE item_id = p_item_id/g)].map(m => m[1])
+      expect(checked).toEqual(ITEM_REF_TABLES.map(t => t.table))
+    })
+
+    // S849 (PNL-8): a stock transfer is one movement on two outlets' books, so force_delete_item
+    // refuses an item that moved, before anything is removed, rather than clearing one outlet's half.
+    it('refuses to force-delete an item on a blocksForceDelete table, before the clearing loop', () => {
+      const force = forceSql.split('CREATE OR REPLACE FUNCTION public.force_delete_item')[1].split('$fn$;')[0]
+      const refuse = force.indexOf('force_delete_item_transferred')
+      expect(refuse).toBeGreaterThan(-1)
+      expect(refuse).toBeLessThan(force.indexOf('FOREACH v_tbl IN ARRAY'))
+      for (const t of ITEM_REF_TABLES.filter(x => x.blocksForceDelete)) {
+        expect(force).toMatch(new RegExp(`EXISTS \\(SELECT 1 FROM ${t.table} WHERE item_id = p_item_id\\)`))
+      }
+    })
+
     it('clears the same tables, in the same dependency order, in force_delete_item()', () => {
       const arr = forceSql
         .split('CREATE OR REPLACE FUNCTION public.force_delete_item')[1]
@@ -205,6 +229,48 @@ function fakeClient(rows, { error = null, pageSize = 1000 } = {}) {
   }
   return { client, calls }
 }
+
+// S849 (PNL-8): an item that moved between outlets is "used" (its unit locks, Used In says TR) and
+// can be hidden but never force-deleted.
+describe('Stock Transfers in the item reference list', () => {
+  it('sits after stock_movements and before purchase_entries, as in the SQL twins', () => {
+    const order = ITEM_REF_TABLES.map(t => t.table)
+    const tr = order.indexOf('ims_stock_transfer_lines')
+    expect(tr).toBe(order.indexOf('stock_movements') + 1)
+    expect(order[tr + 1]).toBe('purchase_entries')
+    expect(ITEM_REF_TABLES[tr]).toEqual({
+      table: 'ims_stock_transfer_lines', label: 'TR', name: 'Stock Transfers', cascades: false, blocksForceDelete: true,
+    })
+  })
+
+  it('is the only table that blocks a force-delete', () => {
+    expect(FORCE_DELETE_BLOCKING_CODES).toEqual(['TR'])
+  })
+
+  it('is left out of what the force-delete dialog says it clears', () => {
+    expect(REF_TABLE_PROSE).not.toMatch(/stock transfers/)
+    expect(REF_TABLE_PROSE).toMatch(/stock movements, purchases$/)
+  })
+
+  it('says why force-delete cannot run only when the item moved', () => {
+    expect(forceDeleteBlockedText(['P', 'TR'])).toMatch(/sent or received between outlets/)
+    expect(forceDeleteBlockedText(['P', 'CS'])).toBeNull()
+    expect(forceDeleteBlockedText(null)).toBeNull()
+  })
+
+  it('reads a transfer row back as the TR code', () => {
+    const counts = refCountsFromRows([
+      { ref_item_id: 'a', ref_table: 'ims_stock_transfer_lines', ref_count: 2 },
+      { ref_item_id: 'a', ref_table: 'purchase_entries', ref_count: 1 },
+    ])
+    expect(counts).toEqual({ a: { TR: 2, P: 1 } })
+    expect(refCodesFromCounts(counts)).toEqual({ a: ['TR', 'P'] })
+  })
+
+  it('is not re-valued by a price change: a transfer line keeps the rate it was sent at', () => {
+    expect(priceImpactPhrase({ TR: 4 })).toBeNull()
+  })
+})
 
 describe('refCountsFromRows / refCodesFromCounts', () => {
   const rows = [

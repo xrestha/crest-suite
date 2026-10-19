@@ -18,7 +18,18 @@
 // Monthly Summary's `periodStockMaps` uses) and returns are at their own recorded rate — Monthly
 // Summary's two conventions exactly — including its COST basis (S792, D32): `lineCost`, and each
 // return at its line's basis (`returnCostValue`), so a PAN-bill outlet's supplier VAT is spend.
+//
+// S849 (PNL-8): stock transfers between outlets are spend the way Monthly Summary counts them in
+// Net Purchases: stock RECEIVED from another outlet (direction 'in', and stock returned here after a
+// cancel or refusal) is this outlet's food spend, added to its item's category at the line's value;
+// stock SENT away (direction 'out') is not this outlet's spend and comes off, like a supplier return.
+// Value is the line's stored `value` (qty × the sender's rate frozen at sending): no bill discount
+// and no VAT factor, the basis periodCost.js uses, so the total still ties.
 import { allocateBillDiscounts, returnCostValue } from './supplierAttribution'
+
+const transferValue = t => (t.value != null && t.value !== ''
+  ? (parseFloat(t.value) || 0)
+  : (parseFloat(t.qty) || 0) * (parseFloat(t.rate) || 0))
 
 /**
  * @param {object}   args
@@ -26,14 +37,20 @@ import { allocateBillDiscounts, returnCostValue } from './supplierAttribution'
  * @param {object[]} args.categories  `{ id }` rows — the budgetable categories
  * @param {object[]} args.purchases   the period's purchase lines, with the bill-key columns
  * @param {object[]} args.returns     the period's vendor returns `{ item_id, qty, rate, purchase_entries }`
+ * @param {object[]} [args.transfers] the period's stock-transfer lines `{ item_id, direction, qty, rate, value }` (S849)
  * @returns {{ byCategory: Object<string, number>, uncategorised: number, excluded: number, total: number }}
  *   `total` = every category + `uncategorised`; `excluded` is never in it.
  */
-export function budgetActuals({ items, categories, purchases, returns }) {
+export function budgetActuals({ items, categories, purchases, returns, transfers }) {
   const net = {}
   allocateBillDiscounts(purchases || []).forEach(p => { net[p.item_id] = (net[p.item_id] || 0) + p.lineCost })
   ;(returns || []).forEach(r => {
     net[r.item_id] = (net[r.item_id] || 0) - returnCostValue(r)
+  })
+  ;(transfers || []).forEach(t => {
+    if (!t || t.item_id == null) return
+    const sign = t.direction === 'in' ? 1 : t.direction === 'out' ? -1 : 0
+    if (sign) net[t.item_id] = (net[t.item_id] || 0) + sign * transferValue(t)
   })
 
   const known = new Set((categories || []).map(c => c.id))

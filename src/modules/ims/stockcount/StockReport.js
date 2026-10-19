@@ -19,6 +19,7 @@ import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { buildStockRows } from './stockReportCalc'
 import { unitRateCell } from '../../../shared/unitRate'
 import { periodRowIds, periodValuationItems } from '../reports/periodCost'
+import { readPeriodTransfers } from '../transfers/transferFlows'
 
 const npr = n => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })
 const STATUS_LABEL = { out: 'OUT', low: 'LOW', ok: 'OK', idle: 'NO ACTIVITY', hidden: 'HIDDEN' }
@@ -114,6 +115,10 @@ export default function StockReport() {
       // One row per item per client — a truncated read here silently turns "below par" into "no
       // par set" for the tail of the book, so Low Stock reads low on both this page and Reorder.
       fetchAllRows(() => scopedFrom('par_levels', 'item_id, par_qty').order('id')),
+      // Stock moved between sister outlets (S849, PNL-8): received or returned stock is on this
+      // shelf like a purchase, sent stock left it like a return — the moment it was sent. A failed
+      // read fails the report like the others, never "no transfers".
+      readPeriodTransfers(scopedFrom, periodId),
       // Requisitions are deliberately NOT read here any more — see stockReportCalc.js. Issued
       // stock is consumed by the recipes the kitchen cooks, which the sales read above already
       // covers; deducting both took every cooked-and-requisitioned item off twice.
@@ -125,11 +130,11 @@ export default function StockReport() {
     const [
       { data: allItems }, { data: opening }, { data: closing }, { data: purchases },
       { data: returns }, { data: wastages }, { data: staffMeals }, { data: clientRecipes },
-      { data: sales }, { data: pars }
+      { data: sales }, { data: pars }, { data: transfers },
     ] = results
     // Every active item, plus each hidden one with a row this period (D29) — a hidden item nothing
     // happened to is not part of the month and would only pad the list with "No activity" rows.
-    const items = periodValuationItems(allItems, periodRowIds({ opening, closing, purchases, returns, wastages, staffMeals }))
+    const items = periodValuationItems(allItems, periodRowIds({ opening, closing, purchases, returns, wastages, staffMeals, transfers }))
 
     const recipeIds = (clientRecipes || []).map(r => r.id)
     // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct —
@@ -153,7 +158,7 @@ export default function StockReport() {
 
     // A hidden item keeps its figures but not its reorder verdict: it is no longer bought, so "Low"
     // or "Out" would be a prompt to buy something the owner has retired.
-    const built = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars, explosion })
+    const built = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars, explosion, transfers })
       .map(r => (r.item.is_active === false ? { ...r, status: 'hidden' } : r))
 
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
@@ -353,10 +358,10 @@ export default function StockReport() {
               <thead>
                 <tr>
                   <th>Item</th><th>Category</th><th>UOM</th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Closing physical count if entered for this period (a count of 0 counts); otherwise estimated as Opening + Net Purchases − Usage (sales × recipe) − Wastage − Staff Meals. Requisitions are not deducted: the recipes the kitchen cooks already consume what was issued." width={300}>On-hand</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Closing physical count if entered for this period (a count of 0 counts); otherwise estimated as Opening + Net Purchases − Usage (sales × recipe) − Wastage − Staff Meals. Net Purchases includes stock received from your other outlets and takes off stock sent to them. Requisitions are not deducted: the recipes the kitchen cooks already consume what was issued." width={300}>On-hand</Tip></th>
                   <th><Tip text="Physical = your closing count, including a count of 0. Theoretical = calculated (less reliable until you do a stock count)." width={240}>Source</Tip></th>
                   <th style={{ textAlign: 'right' }}>Opening</th>
-                  <th style={{ textAlign: 'right' }}>Purchased</th>
+                  <th style={{ textAlign: 'right' }}><Tip text="Purchases minus returns to the supplier, plus stock received from your other outlets minus stock sent to them, in the item's unit." width={260}>Purchased</Tip></th>
                   <th style={{ textAlign: 'right' }}>Used</th>
                   <th style={{ textAlign: 'right' }}>Wastage</th>
                   <th style={{ textAlign: 'right' }}>Rate</th>

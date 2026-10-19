@@ -26,6 +26,13 @@
 //   staff meals, and that is what still/slow read. Wastage stays out on purpose: an item that is
 //   only ever thrown away is still flagged, because "buy less" is the right advice for it. `used`
 //   itself is unchanged — it is still the COGS figure the page prints in its Used column.
+//
+// S849 (PNL-8): STOCK TRANSFERS COUNT LIKE PURCHASES AND RETURNS. Stock received from another
+//   outlet (or returned here after a cancel or refusal) is available like a purchase; stock sent to
+//   another outlet leaves like a supplier return. Neither is movement in the still/slow sense — the
+//   kitchen did not use it — so an item that sat still and was then sent away is still, exactly as
+//   one handed back to its supplier is. `lastBuy` (the page's "return to supplier" advice) stays
+//   supplier-only: a branch is not a supplier you can ask to take it back.
 
 import { computeUsed } from '../../../shared/imsFormulas'
 import { daysUntilExpiry, ageInDays } from '../reports/stockAgeingCalc'
@@ -49,15 +56,18 @@ export const QTY_EPS = 1e-6
  * available — a missing bill, and "never used" would be the wrong thing to say), or `judged` with
  * the measured `used` (the COGS residual, after staff meals and wastage) and `moved` (`used` plus
  * staff meals — what still/slow are judged on, S792). Presence of the count is `hasCount`; a count
- * of 0 is a count (S695).
+ * of 0 is a count (S695). `transferIn` / `transferOut` (S849) are the month's stock-transfer
+ * quantities by direction: in adds like a purchase, out leaves like a return.
  */
-export function judgeItemPeriod({ opening = 0, purchased = 0, returned = 0, wasted = 0, staffUsed = 0, hasCount = false, closing = 0 }) {
-  const available = opening + purchased - returned
+export function judgeItemPeriod({ opening = 0, purchased = 0, returned = 0, transferIn = 0, transferOut = 0, wasted = 0, staffUsed = 0, hasCount = false, closing = 0 }) {
+  const inQty = purchased + transferIn
+  const outQty = returned + transferOut
+  const available = opening + inQty - outQty
   if (available <= QTY_EPS && !hasCount) return { state: 'absent', available }
   if (!hasCount) return { state: 'uncounted', available }
   // Counted zero on an item nothing was available of: no stock presence, not a Dead item worth NPR 0.
   if (available <= QTY_EPS && closing <= QTY_EPS) return { state: 'absent', available }
-  const rawUsed = computeUsed({ opening, purchases: purchased, returns: returned, wastage: wasted, staffMeals: staffUsed, closing })
+  const rawUsed = computeUsed({ opening, purchases: inQty, returns: outQty, wastage: wasted, staffMeals: staffUsed, closing })
   if (rawUsed < -QTY_EPS) return { state: 'inconsistent', available }
   // Inside the tolerance a residue either side of zero IS zero — so a row prints 0, not −0.0.
   const used = Math.abs(rawUsed) <= QTY_EPS ? 0 : rawUsed

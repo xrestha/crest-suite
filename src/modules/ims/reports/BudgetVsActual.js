@@ -13,6 +13,7 @@ import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { budgetActuals } from './budgetActuals'
+import { readPeriodTransfers } from '../transfers/transferFlows'
 import { printWithTitle } from '../../../utils/printTitle'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 
@@ -86,13 +87,16 @@ export default function BudgetVsActual() {
         .eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('vendor_returns').select('item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').eq('period_id', periodId).order('id')),
       supabase.from('budgets').select('*').eq('period_id', periodId).eq('client_id', effectiveClientId),
+      // Stock moved between sister outlets (S849, PNL-8): received stock is this outlet's food spend,
+      // stock sent away is not, exactly as Monthly Summary's Net Purchases counts them.
+      readPeriodTransfers(scopedFrom, periodId),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must not render NPR-0 actuals beside real budgets — or blank budget boxes a
     // save would then write zeros over (S612).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setActuals({}); setBudgets({}); setUnbudgeted(0); setExcluded(0); setDirty({}); return }
-    const [{ data: items }, { data: purchases }, { data: returns }, { data: budgetRows }] = results
+    const [{ data: items }, { data: purchases }, { data: returns }, { data: budgetRows }, { data: transfers }] = results
 
     // Net purchase value per category, NET of each bill's allocated discount (base units both
     // sides — see item-master-rates.md), through budgetActuals.js so the arithmetic is tested
@@ -103,7 +107,7 @@ export default function BudgetVsActual() {
     // the Totals row, silently. Those items are an unbudgetable row of their own, as Monthly
     // Summary groups them into "Uncategorized": there is no category to set a budget against, so
     // the row reports what was spent and says so.
-    const { byCategory, uncategorised, excluded: notValued } = budgetActuals({ items, categories: catList, purchases, returns })
+    const { byCategory, uncategorised, excluded: notValued } = budgetActuals({ items, categories: catList, purchases, returns, transfers })
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setActuals(byCategory)
     setUnbudgeted(uncategorised)
@@ -233,7 +237,7 @@ export default function BudgetVsActual() {
       </div>
 
       <div className="note-banner">
-        Enter a budget for each category — the app compares it against net purchases (purchases − bill discounts − returns) for the selected period, the same figure Monthly Summary shows. Budgets are saved automatically when you click out of the box.
+        Enter a budget for each category — the app compares it against net purchases (purchases − bill discounts − returns, plus stock received from your other outlets minus stock sent to them) for the selected period, the same figure Monthly Summary shows. Budgets are saved automatically when you click out of the box.
       </div>
 
       {!loading && !loadError && provisional && (

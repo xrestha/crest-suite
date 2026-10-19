@@ -20,7 +20,10 @@
 //   actualUsed       computeUsed(): opening + net purchases − wastage − staff meals − closing
 //   variancePct      (actual − theoretical) ÷ theoretical × 100, or null when theoretical ≤ 0
 //   value            (actual − theoretical) × per-unit rate
-//   hasCount, openQty, purchQty (net of returns)
+//   hasCount, openQty, purchQty (net of returns AND of stock transfers, S849: received or returned
+//                    transfer lines add like a purchase, sent lines come off like a return, so
+//                    `hasVarianceActivity` and `isUncountedGap` see stock that only arrived by
+//                    transfer, and a sender stops expecting stock that is on the way elsewhere)
 import { varianceBand } from '../../../shared/imsFormulas'
 import { deltaItems } from '../../../utils/orderLineIngredients'
 

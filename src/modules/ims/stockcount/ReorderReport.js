@@ -21,6 +21,8 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { buildStockRows } from './stockReportCalc'
 import { packsFor, packText, reorderQtyText } from './reorderPacks'
+import { useSuiteAccess, SUITE_PAGES } from '../../../components/SuiteGate'
+import { readPeriodTransfers } from '../transfers/transferFlows'
 
 // The day a slip is printed, in BS as the day is read in Nepal (S792, PLANNING-9) — the Stock
 // Count Print Sheet's rule. `new Date().toLocaleDateString('en-GB')` was the AD date on the
@@ -32,7 +34,12 @@ function printedOn() {
 }
 
 export default function ReorderReport() {
-  const { clientId, profile, isAdmin, loading: authLoading, hasImsAccess, suitePlan } = useAuth()
+  const { clientId, profile, isAdmin, loading: authLoading, hasImsAccess } = useAuth()
+  // S849 (ACCESS item 8, FORECAST): the Demand Forecast link shows exactly when that page would open
+  // for this viewer: SuiteGate's own answer (operator, live Suite, or the per-client override), with
+  // its module floor. `isAdmin || suitePlan === 'pro'` hid the link from an outlet given Demand
+  // Forecast by its flag, and showed it on a Suite whose dates had lapsed only while suitePlan lagged.
+  const demandForecastOpen = useSuiteAccess(SUITE_PAGES.demandForecast).allowed
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
@@ -147,7 +154,11 @@ export default function ReorderReport() {
       // worth having — and a missing par reads as "no par set", which means the item can never
       // flag for reorder on the page whose whole job is flagging it (S717).
       fetchAllRows(() => scopedFrom('par_levels').order('id')),
-      fetchAllRows(() => scopedFrom('stock_movements', 'item_id, qty').eq('period_id', periodId).order('id'))
+      fetchAllRows(() => scopedFrom('stock_movements', 'item_id, qty').eq('period_id', periodId).order('id')),
+      // Stock moved between sister outlets (S849, PNL-8): stock sent to a branch has left this shelf
+      // the moment it was sent, and stock received counts once the branch pressed Received, so the
+      // purchase list neither re-buys what is on the way out nor ignores what arrived.
+      readPeriodTransfers(scopedFrom, periodId),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must never flow through the `|| []`s below — Book Stock is a figure people
@@ -164,7 +175,8 @@ export default function ReorderReport() {
       { data: staffMeals },
       { data: sales },
       { data: pars },
-      { data: movements }
+      { data: movements },
+      { data: transfers },
     ] = results
 
     // The row id is what savePar's update path filters on, so it must be kept here and after an
@@ -197,10 +209,11 @@ export default function ReorderReport() {
     // Report, both dashboards, the Monthly Owner Report and Requisitions use (S696) — this page
     // used to keep its own copy, which deducted no staff meals, summed sales raw and flagged an
     // item sitting exactly at par. See stockReportCalc.js for the five rules.
-    const built = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars, explosion }).map(r => {
+    const built = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, pars, explosion, transfers }).map(r => {
       const hasMovements = r.item.id in movementMap
       // Book Stock is the same theoretical figure with the ledger's own depletions in place of
       // sales × recipe: opening + net purchases − wastage − staff meals + Σ movements (negative).
+      // Net purchases carries the stock transfers (S849), as on-hand does.
       const bookStock = hasMovements ? Math.max(0, r.openQty + r.netPurch - r.wasteQty - r.staffQty + movementMap[r.item.id]) : null
       return {
         item: r.item, openQty: r.openQty, purchQty: r.netPurch, wasteQty: r.wasteQty, staffQty: r.staffQty, usageQty: r.usageQty,
@@ -476,7 +489,7 @@ export default function ReorderReport() {
           {/* S800 (owner decision): the forecast's buying list stays a Crest Suite page, and this is
               how a Suite client finds it — this list looks back at par, that one forward at the
               sales forecast. Offered only where Suite is on, so nobody is sent to an upsell. */}
-          {(isAdmin || suitePlan === 'pro') && (
+          {demandForecastOpen && (
             <p className="page-subtitle" style={{ marginTop: 2 }}>
               Buying for the days ahead? <Link to="/demand-forecast" className="dash-tile-link" style={{ marginTop: 0 }}>Demand Forecast's buying list →</Link>
               {' '}covers forecast sales and keeps your par.

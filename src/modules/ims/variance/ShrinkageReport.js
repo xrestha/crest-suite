@@ -8,6 +8,7 @@ import { supabase } from '../../../supabaseClient'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 import { buildShrinkageObservations, bandShrinkageItem } from './shrinkageCalc'
+import { readPeriodTransfers } from '../transfers/transferFlows'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
@@ -117,6 +118,9 @@ export default function ShrinkageReport() {
       // the 1000-row cap (sub-recipes count) would consume nothing — theoretical usage LOW, which
       // reads as shrinkage.
       fetchAllRows(() => scopedFrom('recipes', 'id').order('id')),
+      // Stock moved between sister outlets (S849, PNL-8), over the same window, paged and chunked:
+      // only the columns the observation loop needs. Stock sent to a branch is not shrinkage.
+      readPeriodTransfers(scopedFrom, periodIds, { select: 'id, period_id, item_id, qty, direction' }),
     ])
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
     if (!windowReq.isCurrent(key)) return   // superseded by a newer window selection
@@ -132,6 +136,7 @@ export default function ShrinkageReport() {
       { data: staffMeals },
       { data: sales },
       { data: clientRecipes },
+      { data: transfers },
     ] = results
 
     // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct —
@@ -168,7 +173,7 @@ export default function ShrinkageReport() {
     // so neither is shrinkage.
     const { rows: observed, uncountedItems, uncountedItemPeriods } = buildShrinkageObservations({
       periodIds, items, opening, closing, purchases, returns, wastages, staffMeals, sales,
-      breakdown: ingredientBreakdown, explosion,
+      breakdown: ingredientBreakdown, explosion, transfers,
     })
     const rows = observed.map(r => ({ ...r, category: r.item.categories?.name || 'Uncategorised' }))
 

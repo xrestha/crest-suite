@@ -1,4 +1,4 @@
-import { buildStockRows, buildUsageMap, summarizeReorder } from './stockReportCalc'
+import { buildStockRows, buildUsageMap, summarizeReorder, transferNetQtyMap } from './stockReportCalc'
 
 const item = (id, rate = 10) => ({ id, name: id, per_uom_rate: rate, categories: { name: 'Dry' } })
 const dish = { dish: [{ item_id: 'rice', qty: 0.2 }] }
@@ -190,5 +190,74 @@ describe('choice extras follow their dish', () => {
       { recipe_id: 'dish', qty_sold: 2, bs_day: 3, source: 'pos', ingredient_deltas: [{ item_id: 'onion', qty: -0.05 }] },
     ], dish)
     expect(usage.onion).toBeCloseTo(-0.1)
+  })
+})
+
+// S849 (PNL-8): stock moved between outlets. A line exists only once it counts for this outlet:
+// sent lines (out) at the sender from the moment of sending, received lines (in) at the branch once
+// it presses Received, returned lines (in) back at the sender after a cancel or refusal.
+describe('stock transfers move the shelf like purchases and returns (S849)', () => {
+  const tr = (direction, qty, item_id = 'rice') => ({ item_id, qty, direction, leg: direction === 'out' ? 'sent' : 'received' })
+
+  test('omitted, every figure is what it was before transfers existed', () => {
+    const over = { opening: [{ item_id: 'rice', qty: 10 }], purchases: [{ item_id: 'rice', qty: 5 }] }
+    const [before] = rowsFor(over)
+    const [withNone] = rowsFor({ ...over, transfers: [] })
+    expect(withNone).toEqual(before)
+    expect(before.transferNet).toBe(0)
+  })
+
+  test('received stock adds like a purchase', () => {
+    const [r] = rowsFor({ opening: [{ item_id: 'rice', qty: 10 }], transfers: [tr('in', 4)] })
+    expect(r.netPurch).toBeCloseTo(4)
+    expect(r.transferNet).toBeCloseTo(4)
+    expect(r.onHand).toBeCloseTo(14)
+  })
+
+  test('sent stock leaves the sender at once, like a supplier return', () => {
+    const [r] = rowsFor({
+      opening: [{ item_id: 'rice', qty: 10 }],
+      purchases: [{ item_id: 'rice', qty: 5 }],
+      transfers: [tr('out', 6)],
+    })
+    expect(r.netPurch).toBeCloseTo(-1)
+    expect(r.onHand).toBeCloseTo(9)
+  })
+
+  test('a cancelled transfer nets to zero at the sender (sent out, returned in)', () => {
+    const base = { opening: [{ item_id: 'rice', qty: 10 }] }
+    const [r] = rowsFor({ ...base, transfers: [tr('out', 6), { ...tr('in', 6), leg: 'returned' }] })
+    expect(r.onHand).toBeCloseTo(rowsFor(base)[0].onHand)
+    expect(r.transferNet).toBe(0)
+  })
+
+  test('an item whose only movement is a transfer both ways is activity, not idle', () => {
+    const [r] = rowsFor({ transfers: [tr('in', 3), tr('out', 3)] })
+    expect(r.status).not.toBe('idle')
+  })
+
+  test('a transfer-only item is on the shelf and can satisfy par', () => {
+    const [r] = rowsFor({ transfers: [tr('in', 5)], pars: [{ item_id: 'rice', par_qty: 5 }] })
+    expect(r.status).toBe('ok')
+    expect(r.needsReorder).toBe(false)
+  })
+
+  test('sending stock away can push the sender below par', () => {
+    const [r] = rowsFor({ opening: [{ item_id: 'rice', qty: 6 }], pars: [{ item_id: 'rice', par_qty: 5 }], transfers: [tr('out', 2)] })
+    expect(r.needsReorder).toBe(true)
+    expect(r.shortfall).toBeCloseTo(1)
+  })
+
+  test('a closing count still wins over the theoretical figure', () => {
+    const [r] = rowsFor({ opening: [{ item_id: 'rice', qty: 10 }], closing: [{ item_id: 'rice', physical_qty: 2 }], transfers: [tr('in', 50)] })
+    expect(r.onHand).toBe(2)
+    expect(r.stockSource).toBe('closing')
+  })
+
+  test('transferNetQtyMap: in adds, out subtracts, anything else moves nothing', () => {
+    expect(transferNetQtyMap([
+      tr('in', 4), tr('out', 1.5), tr('in', 2, 'dal'), { item_id: 'dal', qty: 9, direction: 'sideways' }, null,
+    ])).toEqual({ rice: 2.5, dal: 2 })
+    expect(transferNetQtyMap(null)).toEqual({})
   })
 })

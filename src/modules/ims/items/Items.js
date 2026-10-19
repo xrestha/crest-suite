@@ -17,7 +17,7 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import {
-  ITEM_REF_TABLES, USAGE_LABELS, REF_TABLE_PROSE,
+  ITEM_REF_TABLES, USAGE_LABELS, REF_TABLE_PROSE, forceDeleteBlockedText,
   readItemRefCounts, refCodesFromCounts, priceImpactSentence, PRICE_CHANGE_KEEPS,
 } from './itemRefTables'
 import VatCostPriceBanner from './VatCostPriceBanner'
@@ -281,6 +281,14 @@ export default function Items() {
         )
         return
       }
+      // S849 (PNL-8): an item that moved between outlets is never force-deleted. force_delete_item
+      // refuses it (one outlet's half of a transfer must not vanish while the other half stands), so
+      // the dialog is not offered at all: the page says why and points at Hide.
+      const blocked = forceDeleteBlockedText(refs)
+      if (blocked) {
+        setPageError(`"${item.name}" can't be deleted — it has records in ${fullNames}. ${blocked}`)
+        return
+      }
       // Admin: offer to force-delete (removes the referencing records too). The most destructive
       // action in IMS, so the ask is the product's own dialog with the consequence spelled out
       // (S682; was a window.confirm with the same text squeezed into an OS box).
@@ -310,7 +318,7 @@ export default function Items() {
             return
           }
           if (isFk) {
-            setPageError(`"${item.name}" can't be deleted — an older record still refers to it (a purchase, stock count, wastage, requisition, vendor return, par level, purchase order, stock movement or recipe line) even though nothing shows against it here. ${HIDE_INSTEAD}`)
+            setPageError(`"${item.name}" can't be deleted — an older record still refers to it (a purchase, stock count, wastage, requisition, vendor return, par level, purchase order, stock movement, stock transfer or recipe line) even though nothing shows against it here. ${HIDE_INSTEAD}`)
           } else {
             const { text, detail } = asActionError(error)
             setPageError({ text: `"${item.name}" was not deleted. ${text}`, detail })
@@ -1261,7 +1269,7 @@ export default function Items() {
                   </th>
                   <th><Tip text="Purchase unit → base unit mapping (e.g. 1 carton = 12 bottles). Set this when your vendor sells in bulk but you track stock in individual units." width={280}>Conversion</Tip></th>
                   <th><Tip text="Blank means active: the item shows in pickers and on the stock sheet. Hidden takes it out of them from now on; its past purchases and counts keep their figures." width={260}>Status</Tip></th>
-                  <th><Tip text="Where this item already has records. An item with any of these can't be deleted — hide it instead: past months keep its purchases and counts, and it only leaves the pickers and the stock sheet from now on. The chip names the first two places; hover it for the full list." width={320}>Used In</Tip></th>
+                  <th><Tip text="Where this item already has records. An item with any of these can't be deleted — hide it instead: past months keep its purchases and counts, and it only leaves the pickers and the stock sheet from now on. The chip names the first two places; hover it for the full list. An item sent or received between your outlets (Stock Transfers) can be hidden but never force-deleted, because both outlets keep the transfer on their books." width={320}>Used In</Tip></th>
                   <th></th>
                 </tr>
               </thead>

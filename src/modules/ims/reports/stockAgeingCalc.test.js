@@ -2,7 +2,7 @@ import {
   AGE_BANDS, bandOf, ageInDays, allocateFifo, buildAgeing,
   daysUntilExpiry, parseDateLocal, asOfForWindow, nepalTodayRef, splitReturns,
   anchorToCounts, ageAllocated, rollingWindow, sumConsumptionByPeriod, countsFromClosedPeriods,
-  batchRateOf,
+  batchRateOf, transferBatchesOf,
 } from './stockAgeingCalc'
 import { daysInBsMonth } from '../../../utils/bsCalendar'
 
@@ -532,5 +532,61 @@ describe('batchRateOf', () => {
     expect(batchRateOf({ rate: '100', vat_inclusive: false, vat_is_cost: true })).toBe(100)
     expect(batchRateOf({ rate: '100' })).toBe(100)
     expect(batchRateOf({ rate: null })).toBe(0)
+  })
+})
+
+// S849 (PNL-8): stock moved between outlets. An 'in' line (received, or returned after a cancel or
+// refusal) is a batch at its own frozen rate, dated the day it counted; an 'out' line (sent away) is
+// consumption in its month, like a return that names no batch.
+describe('stock transfers in the FIFO walk (S849)', () => {
+  const d = (month, day) => new Date(2026, month, day)
+  const dateOf = (pid, day) => (pid === 'p1' ? d(4, day) : pid === 'p2' ? d(5, day) : null)
+  const line = (direction, qty, extra = {}) => ({
+    period_id: 'p1', item_id: 'A', qty, rate: 40, value: qty * 40, bs_day: 12, direction,
+    leg: direction === 'out' ? 'sent' : 'received', counterpart_name: 'BLOOM CAFE', ...extra,
+  })
+
+  test('an in line becomes a batch at the line rate, dated by the page helper, with no VAT factor', () => {
+    expect(transferBatchesOf([line('in', 5, { rate: '40' })], dateOf)).toEqual([
+      { item_id: 'A', qty: 5, rate: 40, date: d(4, 12), period_id: 'p1', transfer: true, counterpartName: 'BLOOM CAFE' },
+    ])
+  })
+
+  test('out lines, unknown items and undatable lines are not batches', () => {
+    expect(transferBatchesOf([
+      line('out', 5),
+      line('in', 3, { item_id: 'Z' }),
+      line('in', 2, { period_id: 'gone' }),
+      line('in', 0),
+    ], dateOf, id => id === 'A')).toEqual([])
+    expect(transferBatchesOf(null, dateOf)).toEqual([])
+  })
+
+  test('an out line is consumption in its own month; an in line is not consumption', () => {
+    const out = sumConsumptionByPeriod({
+      transfers: [line('out', 3), line('out', 2, { period_id: 'p2' }), line('in', 9)],
+    })
+    expect(out).toEqual({ p1: { A: 3 }, p2: { A: 2 } })
+  })
+
+  test('omitted, consumption is what it was', () => {
+    const args = { wastages: [{ period_id: 'p1', item_id: 'A', qty: 1 }] }
+    expect(sumConsumptionByPeriod({ ...args, transfers: [] })).toEqual(sumConsumptionByPeriod(args))
+  })
+
+  test('sent stock comes off the oldest batch first; received stock ages from the day it arrived', () => {
+    const periods = [{ id: 'p1', endDate: d(4, 31) }, { id: 'p2', endDate: d(5, 30) }]
+    const lines = [line('out', 4), line('in', 6, { period_id: 'p2', bs_day: 5, rate: 50 })]
+    const { batches } = anchorToCounts({
+      periods,
+      batches: [
+        { item_id: 'A', qty: 10, rate: 30, date: d(4, 1), period_id: 'p1', carriedForward: true },
+        ...transferBatchesOf(lines, dateOf),
+      ],
+      consumedByPeriod: sumConsumptionByPeriod({ transfers: lines }),
+    })
+    expect(batches.map(b => [b.rate, b.remaining])).toEqual([[30, 6], [50, 6]])
+    const { totals } = ageAllocated(batches, d(5, 30))
+    expect(totals.value).toBeCloseTo(6 * 30 + 6 * 50)
   })
 })

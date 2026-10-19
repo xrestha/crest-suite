@@ -18,6 +18,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 import { buildStockRows } from '../stockcount/stockReportCalc'
+import { readPeriodTransfers } from '../transfers/transferFlows'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import RequisitionRejectModal from './RequisitionRejectModal'
 import { statusMeta, trailParts } from './requisitionTrail'
@@ -235,7 +236,12 @@ export default function Requisitions() {
       // Stock Report applies, so this guard and that page agree on "available".
       // ingredient_deltas: a customized plate also consumes its options' stock lines (S758).
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', periodId).order('id')),
-      scopedFrom('recipes', 'id'),
+      // Paged, as Stock Report pages the same seed (S792, PLANNING-9): past 1,000 recipes the dishes
+      // beyond the cut consumed nothing, and this guard read their ingredients as still on the shelf.
+      fetchAllRows(() => scopedFrom('recipes', 'id').order('id')),
+      // Stock moved between sister outlets (S849, PNL-8): stock sent away has left this store, stock
+      // received is in it. A failed read is a failed check, like every read here.
+      readPeriodTransfers(scopedFrom, periodId),
       // Issued requisitions are deliberately NOT read here any more (S695, decided with Aashish):
       // what the store issued is consumed by the recipes the kitchen then cooks, and sales × recipe
       // below already subtracts that. Deducting both took every cooked-and-requisitioned item off
@@ -246,7 +252,7 @@ export default function Requisitions() {
     // the problem. Signal the caller instead of computing from partial data.
     if (firstError(results)) return null
     const [{ data: opening }, { data: closing }, { data: purchases }, { data: returns },
-      { data: wastages }, { data: staffMealsData }, { data: sales }, { data: clientRecipes }] = results
+      { data: wastages }, { data: staffMealsData }, { data: sales }, { data: clientRecipes }, { data: transfers }] = results
 
     const recipeIds = (clientRecipes || []).map(r => r.id)
     // The recipe walk throws on a failed read (S695); same answer as any other failed read here.
@@ -265,7 +271,7 @@ export default function Requisitions() {
     // The ONE on-hand calculation Stock Report and Reorder use (S696) — this guard kept a local
     // copy of the same arithmetic, which is how the two drift apart the next time either moves.
     const onHand = {}
-    buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals: staffMealsData, sales, breakdown, explosion })
+    buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals: staffMealsData, sales, breakdown, explosion, transfers })
       .forEach(r => { onHand[r.item.id] = r.onHand })
     return onHand
   }

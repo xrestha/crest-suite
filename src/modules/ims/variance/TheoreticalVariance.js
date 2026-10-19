@@ -20,6 +20,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { readPeriodTransfers, transferNetQtyByItem } from '../transfers/transferFlows'
 
 export default function TheoreticalVariance() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -204,12 +205,15 @@ export default function TheoreticalVariance() {
       fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
+      // Stock moved between sister outlets (S849, PNL-8): in adds to net purchases, out comes off,
+      // as on Variance.js — stock sent to a branch is not a loss here. A failed read fails the page.
+      readPeriodTransfers(scopedFrom, periodId),
     ])
     if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); return }
-    const [{ data: sales }, { data: opening }, { data: closing }, { data: purch }, { data: rets }, { data: wast }, { data: staffMeals }] = results
+    const [{ data: sales }, { data: opening }, { data: closing }, { data: purch }, { data: rets }, { data: wast }, { data: staffMeals }, { data: transfers }] = results
 
     // Sales map: recipe_id → total qty sold. Deduplicated via the shared POS-supersedes-manual
     // rule so a client running POS *and* manual bulk entry doesn't double-count the same dish and
@@ -274,6 +278,7 @@ export default function TheoreticalVariance() {
     ;(rets    || []).forEach(r => { retMap[r.item_id]   = (retMap[r.item_id]   || 0) + parseFloat(r.qty || 0) })
     ;(wast    || []).forEach(r => { wastMap[r.item_id]  = (wastMap[r.item_id]  || 0) + parseFloat(r.qty || 0) })
     ;(staffMeals || []).forEach(r => { staffMap[r.item_id] = (staffMap[r.item_id] || 0) + parseFloat(r.qty || 0) })
+    const transferNet = transferNetQtyByItem(transfers)
 
     // THE SAME POPULATION AS Variance.js (S792, FIGURES-4 / owner decision D36). This used to be
     // `itemList.filter(item => theoretical > 0.001)`, so an ingredient whose dishes sold nothing —
@@ -285,7 +290,7 @@ export default function TheoreticalVariance() {
     const linkedItemIds = linkedItemIdsOf(breakdown, depleting, explosion)
     const computed = itemList.map(item => {
       const openQty         = openMap[item.id] || 0
-      const purchQty        = (purchMap[item.id] || 0) - (retMap[item.id] || 0)   // net of returns
+      const purchQty        = (purchMap[item.id] || 0) - (retMap[item.id] || 0) + (transferNet[item.id] || 0)   // net of returns and stock transfers (S849)
       // Measurability is PER ITEM (S719), exactly as on Variance.js, which this page must agree
       // with. `hasClosing` only asks whether the month has ANY closing rows; an item missing from
       // the count got closeQty 0, so actual usage read as everything on hand plus everything

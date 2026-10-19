@@ -18,6 +18,7 @@ import { Navigate, Link } from 'react-router-dom'
 import { BS_MONTHS, bsToAd, formatBsDay } from '../../../utils/bsCalendar'
 import { asOfForWindow, periodMonthIndex } from '../reports/stockAgeingCalc'
 import { FilterChips } from '../../../components/Tabs'
+import { readPeriodTransfers } from '../transfers/transferFlows'
 import {
   judgeItemPeriod, classifyItem, suggestNextStep,
   DEAD_AFTER_MONTHS, SLOW_THRESHOLD,
@@ -121,6 +122,10 @@ export default function DeadStock() {
       // Every vendor, not only active ones: this resolves a NAME on history (S708) — an archived
       // supplier still sold you the stock.
       fetchAllRows(() => scopedFrom('vendors', 'id, name').order('id')),
+      // Stock moved between sister outlets (S849, PNL-8), the same twelve months, paged and chunked:
+      // received stock is available like a purchase, sent stock leaves like a return (neither is
+      // use). The "return to supplier" advice below stays on supplier purchases only.
+      readPeriodTransfers(scopedFrom, ids, { select: 'id, period_id, item_id, qty, direction' }),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must never flow through the `|| []`s below (S612 silent-zero rule).
@@ -129,6 +134,7 @@ export default function DeadStock() {
     const [
       { data: itemsData }, { data: openings }, { data: purchases }, { data: rets },
       { data: wastes }, { data: staffMealRows }, { data: closings }, { data: vendors },
+      { data: transfers },
     ] = results
 
     const openMap  = sumByPeriodItem(openings, 'qty')
@@ -136,6 +142,8 @@ export default function DeadStock() {
     const retMap   = sumByPeriodItem(rets, 'qty')
     const wasteMap = sumByPeriodItem(wastes, 'qty')
     const staffMap = sumByPeriodItem(staffMealRows, 'qty')
+    const tInMap   = sumByPeriodItem((transfers || []).filter(t => t.direction === 'in'), 'qty')
+    const tOutMap  = sumByPeriodItem((transfers || []).filter(t => t.direction === 'out'), 'qty')
     // Built directly: presence is the fact this page turns on, and a 0 count must be present.
     const closeMap = {}
     for (const r of closings || []) {
@@ -167,6 +175,8 @@ export default function DeadStock() {
         opening:   openMap[pid]?.[item.id] || 0,
         purchased: purchMap[pid]?.[item.id] || 0,
         returned:  retMap[pid]?.[item.id] || 0,
+        transferIn:  tInMap[pid]?.[item.id] || 0,
+        transferOut: tOutMap[pid]?.[item.id] || 0,
         wasted:    wasteMap[pid]?.[item.id] || 0,
         staffUsed: staffMap[pid]?.[item.id] || 0,
         hasCount:  !!closeMap[pid] && item.id in closeMap[pid],
@@ -200,6 +210,8 @@ export default function DeadStock() {
         opening:     f.opening,
         purchased:   f.purchased,
         returned:    f.returned,
+        transferIn:  f.transferIn,
+        transferOut: f.transferOut,
         wasted:      f.wasted,
         // Shown beside Used (S792): a row whose Used is — but which is only "Moving slowly" is
         // explained by what the staff ate, which is movement.
@@ -276,6 +288,8 @@ export default function DeadStock() {
       'Opening Qty':          r.opening   || '',
       'Purchased Qty':        r.purchased || '',
       'Returned Qty':         r.returned  || '',
+      'Transferred In Qty':   r.transferIn  || '',
+      'Transferred Out Qty':  r.transferOut || '',
       'Net Available':        r.available || '',
       'Wasted Qty':           r.wasted    || '',
       'Staff Meals Qty':      r.staffMeals || '',
@@ -462,7 +476,7 @@ export default function DeadStock() {
                   <Tip text="Physical stock counted at the start of this period." width={200}>Opening</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
-                  <Tip text="Net purchases this period (purchases minus vendor returns)." width={220}>Net Purchased</Tip>
+                  <Tip text="Net purchases this period: purchases minus vendor returns, plus stock received from your other outlets minus stock sent to them." width={240}>Net Purchased</Tip>
                 </th>
                 <th style={{ textAlign: 'right' }}>
                   <Tip text="Quantity recorded as wastage this period." width={200}>Wasted</Tip>
@@ -499,7 +513,7 @@ export default function DeadStock() {
                   <td><span className="badge badge-gray">{r.category}</span></td>
                   <td>{r.uom}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.opening)}</td>
-                  <td style={{ textAlign: 'right' }}>{fmtQty(r.purchased - r.returned)}</td>
+                  <td style={{ textAlign: 'right' }}>{fmtQty(r.purchased - r.returned + r.transferIn - r.transferOut)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.wasted)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.staffMeals)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtQty(r.used)}</td>

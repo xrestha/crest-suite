@@ -152,3 +152,32 @@ describe('suggestNextStep', () => {
     expect(suggestNextStep({ status: 'Slow', stillMonths: 0, lastPurchase: null, asOf }).key).toBe('special')
   })
 })
+
+// S849 (PNL-8): stock moved between outlets counts like a purchase (in) or a supplier return (out).
+describe('stock transfers in the dead-stock judgement (S849)', () => {
+  test('omitted, the judgement is what it was', () => {
+    const args = { opening: 5, purchased: 3, returned: 1, hasCount: true, closing: 2 }
+    expect(judgeItemPeriod({ ...args, transferIn: 0, transferOut: 0 })).toEqual(judgeItemPeriod(args))
+  })
+
+  test('received stock is available like a purchase, and its use is measured', () => {
+    expect(judgeItemPeriod({ transferIn: 10, hasCount: true, closing: 4 })).toMatchObject({ state: 'judged', available: 10, used: 6, moved: 6 })
+  })
+
+  test('a transfer-only item with no count is uncounted, not absent', () => {
+    expect(judgeItemPeriod({ transferIn: 4 }).state).toBe('uncounted')
+  })
+
+  test('sending stock away is not movement: an item that sat still and was sent is still', () => {
+    expect(judgeItemPeriod({ opening: 10, transferOut: 6, hasCount: true, closing: 4 })).toMatchObject({ state: 'judged', available: 4, used: 0, moved: 0 })
+  })
+
+  test('sent more than was there, then counted: inconsistent, never "no movement"', () => {
+    expect(judgeItemPeriod({ opening: 2, transferOut: 1, hasCount: true, closing: 3 }).state).toBe('inconsistent')
+  })
+
+  test('a cancelled transfer (out, then returned in) changes nothing', () => {
+    const base = { opening: 10, hasCount: true, closing: 7 }
+    expect(judgeItemPeriod({ ...base, transferIn: 4, transferOut: 4 })).toEqual(judgeItemPeriod(base))
+  })
+})
