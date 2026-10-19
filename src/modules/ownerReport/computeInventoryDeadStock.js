@@ -30,6 +30,7 @@ import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { throwFirstError } from '../../shared/queryError'
 import { bsToAd, formatBsDay } from '../../utils/bsCalendar'
 import { asOfForWindow, periodMonthIndex } from '../ims/reports/stockAgeingCalc'
+import { readPeriodTransfers } from '../ims/transfers/transferFlows'
 import {
   judgeItemPeriod, classifyItem, suggestNextStep, DEAD_AFTER_MONTHS,
 } from '../ims/stockcount/deadStockCalc'
@@ -65,10 +66,14 @@ export function historyFor(periods, period, months = HISTORY_MONTHS) {
  * Pure: the section from already-read rows. `history` is newest first and must start with the
  * report's period. Exported so the verdict can be tested without a database.
  */
-export function buildDeadStockSection({ history, items, openings, purchases, returns, wastages, staffMeals, closings, vendors, asOf }) {
+export function buildDeadStockSection({ history, items, openings, purchases, returns, wastages, staffMeals, closings, vendors, asOf, transfers = null }) {
   const openMap  = sumByPeriodItem(openings, 'qty')
   const purchMap = sumByPeriodItem(purchases, 'qty')
   const retMap   = sumByPeriodItem(returns, 'qty')
+  // Stock transfers between outlets (S849, PNL-8, schema 18), as on the Dead Stock page: received
+  // stock is available like a purchase, sent stock leaves like a return (deadStockCalc.judgeItemPeriod).
+  const tInMap   = sumByPeriodItem((transfers || []).filter(t => t?.direction === 'in'), 'qty')
+  const tOutMap  = sumByPeriodItem((transfers || []).filter(t => t?.direction === 'out'), 'qty')
   const wasteMap = sumByPeriodItem(wastages, 'qty')
   const staffMap = sumByPeriodItem(staffMeals, 'qty')
   // Built directly: presence is the fact the verdict turns on, and a 0 count must be present (S695).
@@ -99,6 +104,8 @@ export function buildDeadStockSection({ history, items, openings, purchases, ret
       opening:   openMap[pid]?.[item.id] || 0,
       purchased: purchMap[pid]?.[item.id] || 0,
       returned:  retMap[pid]?.[item.id] || 0,
+      transferIn:  tInMap[pid]?.[item.id] || 0,
+      transferOut: tOutMap[pid]?.[item.id] || 0,
       wasted:    wasteMap[pid]?.[item.id] || 0,
       staffUsed: staffMap[pid]?.[item.id] || 0,
       hasCount:  !!closeMap[pid] && item.id in closeMap[pid],
@@ -178,16 +185,18 @@ export async function computeInventoryDeadStock(clientId, period) {
     byMonth('closing_stock', 'period_id, item_id, physical_qty'),
     // Every vendor, archived included: this resolves a NAME on history (S708).
     fetchAllRows(() => scopedFrom('vendors', clientId, 'id, name').order('id')),
+    // The window's stock-transfer lines (S849, PNL-8): paged and chunked; a failed read fails the section.
+    readPeriodTransfers((t, c) => scopedFrom(t, clientId, c), ids, { select: 'id, period_id, item_id, qty, direction' }),
   ])
   throwFirstError(results)
   const [
     { data: items }, { data: openings }, { data: purchases }, { data: returns },
-    { data: wastages }, { data: staffMeals }, { data: closings }, { data: vendors },
+    { data: wastages }, { data: staffMeals }, { data: closings }, { data: vendors }, { data: transfers },
   ] = results
 
   // The page's as-of rule for a month that is not the newest: the last day of the period, so a
   // frozen "bought N days ago" does not depend on when the snapshot happened to be generated.
   const asOf = asOfForWindow(period, { isNewest: false }).date
 
-  return buildDeadStockSection({ history, items, openings, purchases, returns, wastages, staffMeals, closings, vendors, asOf })
+  return buildDeadStockSection({ history, items, openings, purchases, returns, wastages, staffMeals, closings, vendors, asOf, transfers })
 }

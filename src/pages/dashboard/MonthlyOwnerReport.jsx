@@ -1,24 +1,29 @@
 import { nprOrDash } from '../../shared/nepalMoney'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { TriangleAlert, Check } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { useSettings } from '../../context/SettingsContext'
+import { useBizInfo } from '../../shared/hooks/useBizInfo'
 import { fcThresholds, varianceBand, COGS_FORMULA } from '../../shared/imsFormulas'
+import { FEATURE_TIER } from '../../shared/featureCatalog'
 import { gapHeadline } from '../../shared/uncountedItems'
 import { descendingBand, lcBand, pcBand, nmBand } from '../../shared/operatingBands'
 import { BS_MONTHS } from '../../utils/bsCalendar'
-import SuiteGate from '../../components/SuiteGate'
+import { withTimeout, settleWithin, isTimeout } from '../../utils/withTimeout'
+import SuiteGate, { SUITE_PAGES } from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
 import ConfirmModal from '../../components/ConfirmModal'
+import ActionError, { asActionError } from '../../components/ActionError'
+import ReportLoadError from '../../components/ReportLoadError'
 import { printWithTitle } from '../../utils/printTitle'
-import { errorText } from '../../shared/errorText'
 import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
 import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '../../modules/ownerReport/generateMonthlyReport'
 import { buildExecutiveSummary } from '../../modules/ownerReport/reportNarrative'
 import { reportMadeText } from '../../modules/ownerReport/reportMadeLine'
+import { failedSectionKeys, sectionLabel, sectionList, newlyMissingSections, trendUnavailableText } from '../../modules/ownerReport/sectionNames'
 import { loadProfileNames } from '../../shared/profileNames'
 import './MonthlyOwnerReport.css'
 
@@ -26,10 +31,19 @@ const fmt = nprOrDash
 const pct = n => (n == null ? '—' : `${n.toFixed(1)}%`)
 const num = n => (n == null ? '—' : Math.round(n).toLocaleString('en-IN'))
 
+// How long the page waits (S849, OWNER-REPORT-6). A read that blocks the page gets 20 s; making the
+// report reads a whole month across three modules, so it gets 90 s, the close's own limit.
+const READ_MS = 20000
+const MAKE_MS = 90000
+
 const sectionTitleStyle = {
   fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
   color: 'var(--theme-accent-ink)', margin: '0 0 8px', paddingBottom: 4, borderBottom: '1px solid var(--theme-border-lt)',
 }
+// A printed qualifier under a figure or a table (a Tip does not print).
+const noteStyle = { fontSize: 12, color: 'var(--theme-text2)', margin: '8px 0 0', lineHeight: 1.5 }
+const warnNoteStyle = { ...noteStyle, color: 'var(--theme-amber-text)' }
+const subStyle = { display: 'block', fontSize: 11, fontWeight: 500, color: 'var(--theme-text3)', whiteSpace: 'normal' }
 
 // The printed page: A4, and the running footer drawn in its bottom margin boxes (see the <style>
 // where this is rendered). The label is a business name, so it is escaped into a CSS string. The
@@ -102,9 +116,11 @@ function TrendRow({ label, cur, prior, delta, fmtFn }) {
 // Trend row for a percentage-point metric (Food Cost %, Labor Cost %, etc.) — `delta` here is a
 // plain number (percentage-POINT change), not the {absoluteChange,pctChange} money shape.
 // `higherIsBetter` flips the color logic for Net Margin % (up = good), vs the default (down =
-// good) for cost metrics like Food/Labor/Prime Cost %.
-function TrendPctRow({ label, cur, prior, delta, higherIsBetter = false }) {
-  const good = delta == null || delta === 0 ? null : higherIsBetter ? delta > 0 : delta < 0
+// good) for cost metrics like Food/Labor/Prime Cost %. `unjudged` (S849, OWNER-REPORT-12): page 1
+// withholds the verdict on this figure for one of the two months, so the change is shown with no
+// better/worse word and no colour.
+function TrendPctRow({ label, cur, prior, delta, higherIsBetter = false, unjudged = false }) {
+  const good = unjudged || delta == null || delta === 0 ? null : higherIsBetter ? delta > 0 : delta < 0
   const color = good == null ? undefined : good ? 'var(--theme-green-text)' : 'var(--theme-red-text)'
   return (
     <tr>
@@ -123,143 +139,15 @@ function TrendPctRow({ label, cur, prior, delta, higherIsBetter = false }) {
 // pre-existing closed period. Sections render per the SNAPSHOT's own recorded modules_included,
 // not live clientModules — a historical report never grows a section retroactively just because
 // a module got enabled later. See CLAUDE.md's Monthly Owner/Manager Report section.
+//
+// S849 (OWNER-REPORT-17, GAPS-2, ACCESS's Suite-page pattern): two components in one file. This
+// outer one holds only the role guard, the header and SuiteGate; every read and write lives in
+// `MonthlyOwnerReportBody`, which SuiteGate mounts (render prop) only once the gate passes, so an
+// Owner without Crest Suite Pro no longer mints a report behind the upsell card. The body is keyed
+// on the outlet, so an outlet switch (in this tab or another) remounts it with empty state and no
+// load of the old outlet can land on the new one.
 export default function MonthlyOwnerReport() {
-  const { clientId, profile, isAdmin, isOwner, hasFeature } = useAuth()
-  const canOverheads = hasFeature('overheads')
-  const { scopedFrom } = useScopedDb()
-  const periodReq = useLatestRequest()
-  const { settings } = useSettings()
-
-  const [periods, setPeriods] = useState([])
-  const [selectedPeriodId, setSelectedPeriodId] = useState(null)
-  const [report, setReport] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [generating, setGenerating] = useState(false)
-  const [regenerating, setRegenerating] = useState(false)
-  const [confirmRegenerate, setConfirmRegenerate] = useState(false)
-  const [generatorName, setGeneratorName] = useState('')
-  const [genError, setGenError] = useState('')
-  // Regeneration reports through the page's own error card, not window.alert — this is the only
-  // native dialog left on a screen that already confirms this action through ConfirmModal, and
-  // the one place the outcome of overwriting frozen figures gets announced.
-  const [regenNotice, setRegenNotice] = useState(null)
-  const [bizInfo, setBizInfo] = useState({ name: '', vat: '', address: '', vatReg: true })
-
-  useEffect(() => {
-    if (!clientId) return
-    loadPeriods()
-    Promise.all([
-      supabase.from('clients').select('name').eq('id', clientId).single(),
-      supabase.from('settings').select('vat_number, property_address, is_vat_registered').eq('client_id', clientId).maybeSingle(),
-    ]).then(([{ data: client }, { data: settings }]) => {
-      setBizInfo({
-        name: client?.name || '', vat: settings?.vat_number || '',
-        address: settings?.property_address || '', vatReg: settings?.is_vat_registered ?? true,
-      })
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId])
-
-  async function loadPeriods() {
-    const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
-      .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-    // A failed read must not impersonate "no periods yet" (S612, the silent-zero class).
-    if (error) { setGenError(`Could not load periods: ${error.message}`); setLoading(false); return }
-    const rows = data || []
-    setPeriods(rows)
-    setSelectedPeriodId(prev => prev || rows.find(p => p.status === 'closed')?.id || rows[0]?.id || null)
-  }
-
-  const loadReport = useCallback(async () => {
-    const period = periods.find(p => p.id === selectedPeriodId)
-    if (!period) { setReport(null); setLoading(false); return }
-    // Arrowing the period <select> starts one load per keypress and the last to land used to win
-    // the figures while the label said another month (S601) — on the one report that is printed
-    // and handed to an accountant, where the label is also the print title and the filename.
-    const key = periodReq.begin(selectedPeriodId)
-    setLoading(true)
-    setGenError('')
-
-    const { data: existing, error: existingErr } = await scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle()
-    if (!periodReq.isCurrent(key)) return   // superseded by a newer period selection
-    // A failed read here used to fall straight through to the lazy-generate path — treating
-    // "could not read the snapshot" as "no snapshot exists" (S612). Refuse instead.
-    if (existingErr) { setGenError(`Could not load the report: ${existingErr.message}`); setReport(null); setLoading(false); return }
-    if (existing) {
-      setReport(existing)
-      setGeneratorName('')   // never the previous month's maker under this month's report
-      // Who made it, for the header's "when it was made" line (D42). A failed or empty names read
-      // leaves the name out of that line rather than printing a dash as if nobody made it; the
-      // report itself is already on screen, so this read never blocks it.
-      // Asked for by id, so a report Crest support made reads "Crest support" (S840). Bounded: the
-      // report is already on screen, and a hung names read must not hold "Loading" over it.
-      let name = ''
-      if (existing.generated_by) {
-        const { map: names, error: namesErr } = await loadProfileNames(supabase, clientId, [existing.generated_by])
-        if (!periodReq.isCurrent(key)) return   // superseded during the names read
-        if (namesErr) console.error('Owner Report: could not read who made it', namesErr)
-        else name = names[existing.generated_by] || ''
-      }
-      setGeneratorName(name)
-      setLoading(false)
-      return
-    }
-
-    if (period.status !== 'closed') { setReport(null); setLoading(false); return }
-
-    // Lazy-generate — a closed period from before this feature shipped, or a report-gen call
-    // that failed at close time (see Periods.js's non-blocking try/catch).
-    setGenerating(true)
-    try {
-      const { snapshot, modulesIncluded } = await generateMonthlyReport({ clientId, period })
-      await saveGeneratedReport({ clientId, period, snapshot, modulesIncluded, actorId: profile?.id, source: 'backfill' })
-      const { data: fresh, error: freshErr } = await scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle()
-      if (freshErr) throw new Error(freshErr.message)
-      if (!periodReq.isCurrent(key)) return
-      setReport(fresh)
-      setGeneratorName(profile?.full_name || '')
-    } catch (e) {
-      console.error('Report generation failed:', e)
-      setGenError('Could not generate the report for this period. Try again, or contact support if this keeps happening.')
-      setReport(null)
-    } finally {
-      setGenerating(false)
-      setLoading(false)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPeriodId, periods, clientId])
-
-  useEffect(() => { if (selectedPeriodId) loadReport() }, [selectedPeriodId, loadReport])
-
-  async function handleRegenerate() {
-    // Confirmed through ConfirmModal (S575 rule — this overwrites frozen figures, the one
-    // deliberate exception to the snapshot freeze). Rendered at the end of the main return.
-    const period = periods.find(p => p.id === selectedPeriodId)
-    if (!period) return
-    setConfirmRegenerate(false)
-    setRegenerating(true)
-    setRegenNotice(null)
-    try {
-      const { snapshot, modulesIncluded } = await generateMonthlyReport({ clientId, period })
-      await regenerateReport({ clientId, periodId: period.id, snapshot, modulesIncluded, actorId: profile?.id })
-      // Past this line the overwrite HAS landed. A failure reading the row back therefore must
-      // not say "Regeneration failed" — the frozen figures really were replaced, and telling the
-      // owner otherwise invites a second regeneration against figures that already moved. What is
-      // wrong at that point is only what is on screen.
-      const { data: fresh, error: freshErr } = await scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle()
-      if (freshErr) {
-        setRegenNotice({ tone: 'warn', text: `The report was regenerated, but it could not be re-read to show you. Reload the page to see the new figures. (${errorText(freshErr, 'operator')})` })
-        return
-      }
-      setReport(fresh)
-      setGeneratorName(profile?.full_name || '')
-      setRegenNotice({ tone: 'ok', text: `Regenerated from today's data — ${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}.` })
-    } catch (e) {
-      setRegenNotice({ tone: 'error', text: errorText(e, 'operator') })
-    } finally {
-      setRegenerating(false)
-    }
-  }
+  const { clientId, isAdmin, isOwner } = useAuth()
 
   // RLS already blocks every staff-account type from monthly_owner_reports (see migration
   // 20260721010000) — this guard just keeps a staff account from landing on a page that would
@@ -267,15 +155,299 @@ export default function MonthlyOwnerReport() {
   // visibility condition for the Owner Dashboard nav link.
   if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />
 
+  return (
+    <div>
+      <div className="page-header owner-report-page-header">
+        <h1 className="page-title">Monthly Owner/Manager Report</h1>
+        <p className="page-subtitle">Frozen figures made when each month closes, or the first time the Owner opens it — Crest IMS, HR &amp; POS combined.</p>
+      </div>
+      <SuiteGate page={SUITE_PAGES.ownerReport}>
+        {() => <MonthlyOwnerReportBody key={clientId || 'none'} />}
+      </SuiteGate>
+    </div>
+  )
+}
+
+function MonthlyOwnerReportBody() {
+  const { clientId, isAdmin, isOwner, hasFeature } = useAuth()
+  const canOverheads = hasFeature('overheads')
+  // Overheads is an IMS feature of one plan; the label names it (OWNER-REPORT-11).
+  const overheadsTier = (t => (t ? t[0].toUpperCase() + t.slice(1) : ''))(FEATURE_TIER.overheads)
+  const { scopedFrom } = useScopedDb()
+  const periodReq = useLatestRequest()
+  const { settings } = useSettings()
+  // The letterhead (name, VAT/PAN, address) through the shared hook, with its read error and its
+  // `ready` gate (S849, OWNER-REPORT-18): the hand-rolled read dropped both errors and printed a
+  // blank business name into the workbook.
+  const biz = useBizInfo()
+
+  const [periods, setPeriods] = useState([])
+  const [periodsError, setPeriodsError] = useState(null)
+  const [selectedPeriodId, setSelectedPeriodId] = useState(null)
+  const [report, setReport] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [generating, setGenerating] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false)
+  const [generatorName, setGeneratorName] = useState('')
+  // A failed READ (`{ kind: 'read', error }`, ReportLoadError) or a failed MAKE (`{ kind: 'make',
+  // error: ActionError value }`). Never `error.message` raw.
+  const [pageError, setPageError] = useState(null)
+  // The operator never makes a report by browsing (GAPS-11): a closed month with none waits for "Make it now".
+  const [needsMaking, setNeedsMaking] = useState(false)
+  // Regeneration reports through the page's own notice, not window.alert — this is the only
+  // native dialog left on a screen that already confirms this action through ConfirmModal, and
+  // the one place the outcome of overwriting frozen figures gets announced. `{ tone: 'ok'|'warn',
+  // text }` or `{ tone: 'error', error }` (an ActionError value).
+  const [regenNotice, setRegenNotice] = useState(null)
+  const [exportError, setExportError] = useState(null)
+
+  // GAPS-2: a write that finishes after the page went away (outlet switch, navigation) must not
+  // land, and Regenerate's result must land only on the month still on screen.
+  const mountedRef = useRef(true)
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
+  const selectedRef = useRef(null)
+  useEffect(() => { selectedRef.current = selectedPeriodId }, [selectedPeriodId])
+
+  useEffect(() => {
+    if (!clientId) { setLoading(false); return }
+    let cancelled = false
+    ;(async () => {
+      // `client_id` is read so the lazy generate can refuse a month that is not this outlet's (GAPS-2).
+      const res = await settleWithin(scopedFrom('monthly_periods', 'id, client_id, bs_year, bs_month, status')
+        .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }), READ_MS, 'Loading the months')
+      if (cancelled || !mountedRef.current) return
+      // A failed read must not impersonate "no periods yet" (S612, the silent-zero class).
+      if (res.error) { setPeriodsError(res.error); setLoading(false); return }
+      const rows = res.data || []
+      setPeriods(rows)
+      const first = rows.find(p => p.status === 'closed')?.id || rows[0]?.id || null
+      setSelectedPeriodId(prev => prev || first)
+      if (!first) setLoading(false)
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId])
+
+  // Who made a report, for the header's "when it was made" line (D42), read the way a reload reads
+  // it: from the row's `generated_by`, which the database stamps (S849, GAPS-11), so the operator
+  // reads "Crest support" everywhere and a failed write never names its presser. A failed or empty
+  // names read leaves the name out rather than printing a dash as if nobody made it; it is bounded
+  // (loadProfileNames), and it never blocks the report already on screen.
+  async function makerName(id) {
+    if (!id) return ''
+    const { map: names, error: namesErr } = await loadProfileNames(supabase, clientId, [id])
+    if (namesErr) { console.error('Owner Report: could not read who made it', namesErr); return '' }
+    return names[id] || ''
+  }
+
+  // Make and save the report for a closed month, then read it back (the lazy generate, and the
+  // operator's "Make it now"). `key` is the request this belongs to.
+  async function makeReport(period, key) {
+    const label = `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`
+    // GAPS-2: the month must be this outlet's. The scoped read already filters by outlet, so this
+    // fires only if the outlet changed under a stale list; the database refuses it too
+    // (owner_report_1_same_client).
+    if (period.client_id && period.client_id !== clientId) {
+      setPageError({ kind: 'make', error: `No report was made: ${label} belongs to another outlet. Reload the page and pick the month again.` })
+      setLoading(false)
+      return
+    }
+    setGenerating(true)
+    let stage = 'compute'
+    try {
+      const { snapshot, modulesIncluded } = await withTimeout(generateMonthlyReport({ clientId, period }), MAKE_MS, 'Making the monthly report')
+      // GAPS-2: the figures took a while; write them only if this page is still this outlet's and this month's.
+      if (!mountedRef.current || !periodReq.isCurrent(key)) return
+      stage = 'save'
+      await withTimeout(saveGeneratedReport({ clientId, period, snapshot, modulesIncluded, source: 'backfill' }), READ_MS, 'Saving the monthly report')
+      stage = 'read'
+      // Read back what is STORED: when another tab or the close saved first (23505), that row stands.
+      const freshRes = await settleWithin(scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle(), READ_MS, 'Reading the report back')
+      if (!mountedRef.current || !periodReq.isCurrent(key)) return
+      if (freshRes.error || !freshRes.data) {
+        setPageError({ kind: 'read', error: freshRes.error || { message: `The report for ${label} was saved, but it could not be read back to show you. Reload the page.` } })
+        setReport(null)
+        return
+      }
+      setReport(freshRes.data)
+      setGeneratorName('')
+      const name = await makerName(freshRes.data.generated_by)
+      if (!mountedRef.current || !periodReq.isCurrent(key)) return
+      setGeneratorName(name)
+    } catch (e) {
+      if (!mountedRef.current || !periodReq.isCurrent(key)) return
+      console.error('Report generation failed:', e)
+      const info = asActionError(e, 'operator')
+      // A save we stopped waiting for may still land: never say it was not made.
+      const text = isTimeout(e) && stage !== 'compute'
+        ? `We stopped waiting for ${label}'s report to save, so it may have been made. Reload the page in a minute to see.`
+        : isTimeout(e)
+          ? `No report was made for ${label}: its figures took too long to read. Try again on a steadier connection.`
+          : /^No report was made|^Only the Owner/.test(info.text) ? info.text
+          : `No report was made for ${label}. ${info.text}`
+      setPageError({ kind: 'make', error: { text, detail: info.detail } })
+      setReport(null)
+    } finally {
+      // Only the request that is still current clears the flags (OWNER-REPORT-6).
+      if (mountedRef.current && periodReq.isCurrent(key)) { setGenerating(false); setLoading(false) }
+    }
+  }
+
+  const loadReport = useCallback(async () => {
+    // Arrowing the period <select> starts one load per keypress and the last to land used to win
+    // the figures while the label said another month (S601) — on the one report that is printed
+    // and handed to an accountant, where the label is also the print title and the filename.
+    // Claimed before anything can return (GAPS-2), so a superseded load never writes.
+    const key = periodReq.begin(selectedPeriodId)
+    const period = periods.find(p => p.id === selectedPeriodId)
+    setGenerating(false)
+    setNeedsMaking(false)
+    setPageError(null)
+    setExportError(null)
+    if (!period) { setReport(null); setLoading(false); return }
+    setLoading(true)
+
+    const existingRes = await settleWithin(scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle(), READ_MS, 'Loading the report')
+    if (!mountedRef.current || !periodReq.isCurrent(key)) return   // superseded by a newer period selection
+    // A failed read here used to fall straight through to the lazy-generate path — treating
+    // "could not read the snapshot" as "no snapshot exists" (S612). Refuse instead.
+    if (existingRes.error) { setPageError({ kind: 'read', error: existingRes.error }); setReport(null); setLoading(false); return }
+    const existing = existingRes.data
+    if (existing) {
+      setReport(existing)
+      setGeneratorName('')   // never the previous month's maker under this month's report
+      const name = await makerName(existing.generated_by)
+      if (!mountedRef.current || !periodReq.isCurrent(key)) return   // superseded during the names read
+      setGeneratorName(name)
+      setLoading(false)
+      return
+    }
+
+    setReport(null)
+    if (period.status !== 'closed') { setLoading(false); return }
+
+    // The operator browsing a client never freezes a report (GAPS-11): it is made by one deliberate press.
+    if (isAdmin) { setNeedsMaking(true); setLoading(false); return }
+
+    // Lazy-generate — a closed period from before this feature shipped, a close by someone who
+    // cannot write the report (D42), or a report-gen call that failed at close time.
+    await makeReport(period, key)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPeriodId, periods, clientId, isAdmin])
+
+  useEffect(() => { if (selectedPeriodId) loadReport() }, [selectedPeriodId, loadReport])
+
+  function makeNow() {
+    const period = periods.find(p => p.id === selectedPeriodId)
+    if (!period) return
+    const key = periodReq.begin(selectedPeriodId)
+    setNeedsMaking(false)
+    setPageError(null)
+    setLoading(true)
+    makeReport(period, key)
+  }
+
+  async function handleRegenerate() {
+    // Confirmed through ConfirmModal (S575 rule — this overwrites frozen figures, the one
+    // deliberate exception to the snapshot freeze). Rendered at the end of the body.
+    const period = periods.find(p => p.id === selectedPeriodId)
+    if (!period || !report) return
+    const label = `${BS_MONTHS[period.bs_month - 1]} ${period.bs_year}`
+    const stored = report.snapshot
+    setConfirmRegenerate(false)
+    setRegenerating(true)
+    setRegenNotice(null)
+    let stage = 'compute'
+    try {
+      const { snapshot, modulesIncluded } = await withTimeout(generateMonthlyReport({ clientId, period }), MAKE_MS, 'Regenerating the monthly report')
+      if (!mountedRef.current) return
+      // OWNER-REPORT-3: never swap a complete report for a partial one.
+      const lost = newlyMissingSections(stored, snapshot)
+      if (lost.length > 0) {
+        setRegenNotice({ tone: 'error', error: `Not regenerated: ${sectionList(lost)} could not be read just now, and the stored report has ${lost.length === 1 ? 'it' : 'them'}. The stored figures still stand; try again on a steadier connection.` })
+        return
+      }
+      stage = 'save'
+      const { error, updated } = await withTimeout(regenerateReport({ clientId, periodId: period.id, snapshot, modulesIncluded }), READ_MS, 'Saving the regenerated report')
+      if (!mountedRef.current) return
+      // A refusal (the database guard: the month reopened, a login that may not regenerate) or zero
+      // rows changed (PostgREST answers no error) is "not regenerated" — it used to say "Regenerated".
+      if (error || !updated) {
+        const info = error ? asActionError(error, 'operator') : null
+        setRegenNotice({ tone: 'error', error: {
+          text: `Not regenerated: the stored figures still stand. ${info ? info.text : 'No report row was changed — reload the page to check this month still has its report.'}`,
+          detail: info?.detail || '',
+        } })
+        return
+      }
+      // Past this line the overwrite HAS landed. A failure reading the row back therefore must
+      // not say "Regeneration failed" — the frozen figures really were replaced, and telling the
+      // owner otherwise invites a second regeneration against figures that already moved. What is
+      // wrong at that point is only what is on screen.
+      stage = 'read'
+      const freshRes = await settleWithin(scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle(), READ_MS, 'Reading the report back')
+      if (!mountedRef.current) return
+      if (freshRes.error || !freshRes.data) {
+        const info = freshRes.error ? asActionError(freshRes.error, 'operator') : null
+        setRegenNotice({ tone: 'warn', text: `The report was regenerated, but it could not be re-read to show you. Reload the page to see the new figures.${info ? ` (${info.text})` : ''}` })
+        return
+      }
+      // Only onto the month still on screen (OWNER-REPORT-3): the <select> is held while this runs,
+      // and this is the backstop.
+      if (selectedRef.current === period.id) {
+        setReport(freshRes.data)
+        setGeneratorName('')
+        const name = await makerName(freshRes.data.generated_by)
+        if (mountedRef.current && selectedRef.current === period.id) setGeneratorName(name)
+      }
+      if (mountedRef.current) setRegenNotice({ tone: 'ok', text: `Regenerated from today's data — ${label}.` })
+    } catch (e) {
+      if (!mountedRef.current) return
+      const info = asActionError(e, 'operator')
+      setRegenNotice({ tone: 'error', error: {
+        text: isTimeout(e) && stage !== 'compute'
+          ? 'We stopped waiting for the save, so we cannot say whether the report was regenerated. Reload the page to see which figures are stored.'
+          : isTimeout(e)
+            ? `Not regenerated: ${label}'s figures took too long to read. The stored figures still stand; try again on a steadier connection.`
+            : `Not regenerated: the stored figures still stand. ${info.text}`,
+        detail: info.detail,
+      } })
+    } finally {
+      if (mountedRef.current) setRegenerating(false)
+    }
+  }
+
   const selectedPeriod = periods.find(p => p.id === selectedPeriodId)
   const snapshot = report?.snapshot
   const periodLabel = report ? `${BS_MONTHS[report.bs_month - 1]} ${report.bs_year}` : ''
-  const execSummary = snapshot ? buildExecutiveSummary(snapshot, periodLabel) : ''
+  // Export and Print emit a FILE, so they wait for every read they print from (OWNER-REPORT-18):
+  // the letterhead's name, and no load in flight (S728's stale-workbook rule).
+  const exportsReady = !!report && biz.ready && !loading && !generating && !regenerating
+
+  // Food Cost thresholds: the ones frozen with the report (schema 18, OWNER-REPORT-5), else today's
+  // Settings for an older report.
+  const liveFcT = fcThresholds(settings)
+  const fcFrozen = !!snapshot?.combined?.fcThresholds
+  const fcT = snapshot?.combined?.fcThresholds || liveFcT
+  const execSummary = snapshot ? buildExecutiveSummary(snapshot, periodLabel, { fcT: liveFcT }) : ''
   // When and how this snapshot was made, in BS and Nepal time (S792, D42) — and, when it was made
   // at the first view rather than at the close, a plain sentence saying what that means.
   const made = report ? reportMadeText({
     generatedAt: report.generated_at, source: report.generation_source, byName: generatorName, monthLabel: periodLabel,
   }) : null
+
+  async function handleExport() {
+    setExportError(null)
+    try {
+      const { exportMonthlyReportExcel } = await import('../../modules/ownerReport/monthlyReportExcel')
+      exportMonthlyReportExcel(report, { name: biz.name, vat: biz.vat, address: biz.address, vatReg: biz.vatReg, madeLine: made?.line })
+    } catch (e) {
+      // A chunk that no longer exists after a deploy is the likeliest cause: the reload fixes it.
+      console.error('Owner Report: export failed', e)
+      setExportError({ text: 'The workbook was not made. Reload the page and try again.', detail: asActionError(e, 'operator').detail })
+    }
+  }
   // The figures some rows describe changed meaning at a version (the S696 par rule at v4, the
   // Wastage item set at v10); a frozen row keeps its own, so its tip must describe its own.
   const schemaVersion = report?.schema_version ?? snapshot?.schemaVersion ?? 0
@@ -285,6 +457,27 @@ export default function MonthlyOwnerReport() {
   // v16 (S814 4d, owner decision D1): Comped Bills' potential value is before VAT, marked on the
   // figure itself (`compedBillsTotal.basis`); an older report's carries VAT.
   const compExVat = snapshot?.pos?.compedBillsTotal?.basis === 'ex_vat'
+  // The sections that failed when it was made, Inventory Depth's sub-sections included (OWNER-REPORT-2/-1).
+  const failedKeys = snapshot ? failedSectionKeys(snapshot) : []
+  const subFailed = key => !!snapshot?.inventoryDepth?.sectionErrors && key in snapshot.inventoryDepth.sectionErrors
+
+  // ── Labour (schema 18, GAPS-4 / OWNER-REPORT-9 / -10) ──
+  // A v18 report froze the one labour rule's answer as `combined.labour`; an older one has only the
+  // HR section, and no labour at all without Crest HR.
+  const lab = snapshot?.combined?.labour || null
+  const labourShown = !!lab || !!snapshot?.hr
+  const labourEstimated = lab ? lab.source === 'estimate' : snapshot?.hr?.payrollSource === 'estimated'
+  // No verdict on a labour figure that is incomplete or absent: pay not set for someone on payroll,
+  // nobody on payroll, labour not read, or no labour entered without Crest HR.
+  const labourUnjudged = !!lab && (lab.reason === 'nopay' || lab.reason === 'nostaff' || lab.source === 'failed' || lab.source === 'none')
+  // The short words under Labor, Prime and Net Margin, so the basis prints (a Tip does not).
+  const labourSub = lab?.source === 'overheads' ? 'from Overheads'
+    : labourEstimated ? 'estimate — payroll not finalized'
+    : lab?.source === 'failed' ? 'labour could not be read'
+    : ''
+  const labourNotJudgedSub = lab?.reason === 'nopay' ? `pay not set for ${num(lab.noPayCount)} staff — not judged`
+    : lab?.reason === 'nostaff' ? 'nobody on payroll — not judged'
+    : ''
 
   // Color bands match Owner Dashboard's live KPI cards exactly, so the same rough magnitude
   // never reads as a different "health" color depending on which page you're looking at.
@@ -292,39 +485,24 @@ export default function MonthlyOwnerReport() {
   // -text variants because every one of these lands on a <td> as type. And labour's green band is
   // 30, not 37: the Target cell printed in the same table row reads "25-30%", so a client at 34%
   // used to get a reassuring green number sitting immediately beside a target it fails by four
-  // points. Cross-page consistency had been achieved; consistency within one row had not.
-  // Owner Dashboard's laborPct band moved with it.
+  // points.
   //
-  // Two corrections, S608. **The band is no longer carried by colour alone** — each returns a
-  // ✓/△/▲ shape mark and a title, the same vocabulary `fcBand()` uses, because green and amber
-  // measured ΔE 3.1 apart under deuteranopia on the Light preset: Healthy and Needs-attention
-  // were one colour for roughly 1 in 12 men, on the four figures this report exists to deliver.
-  // The shapes differ by FILL, not hue, so they survive a monochrome print of this page too.
-  //
-  // And **food cost now reads the client's OWN thresholds** rather than a hardcoded 35/45. The
-  // note above says these match Owner Dashboard's live KPI cards exactly; that had quietly
-  // stopped being true. OwnerDashboard.jsx calls `fcBand(fcPct, settings)`, which resolves
-  // `fc_warning_pct`/`fc_critical_pct` from Settings — and 35/45 are merely `fcThresholds()`'s
-  // DEFAULTS, so the two pages agreed only for clients who never touched them. A client on 30/40
-  // saw the same month banded two different ways on two pages. Labour, prime cost and net margin
-  // keep their literal bands: those have no Settings equivalent, and the accent-ink middle step
-  // is this table's own four-metric language, deliberately not fcBand's amber (see above).
-  // S660: labour, prime and net margin now come from `operatingBands.js`, which the Owner
-  // Dashboard and the Roster board read too. The thresholds and the ✓/△/▲ vocabulary were correct
-  // here and this page was the model — but they were LITERALS here, restated inline on the Owner
-  // Dashboard without the marks, and contradicted outright by the Roster board's own `>35 ? amber`.
-  // Food cost keeps this page's accent-ink middle step (see the note above) while still reading
-  // the client's own `fcThresholds()`, via the same shared primitive.
+  // The band is never carried by colour alone (S608): each returns a ✓/△/▲ shape mark and a title,
+  // the same vocabulary `fcBand()` uses; the shapes differ by FILL, not hue, so they survive a
+  // monochrome print of this page too. Labour, prime and net margin come from `operatingBands.js`
+  // (S660), which the Owner Dashboard and the Roster board read too. Food cost keeps this page's
+  // accent-ink middle step while reading the client's own thresholds — since S849 the pair frozen
+  // with the report (OWNER-REPORT-5), so a later change in Settings never re-judges an old month.
   const NONE = { color: undefined, mark: '', title: undefined }
   const asTitled = b => ({ color: b.color, mark: b.mark, title: b.key === 'none' ? undefined : b.label })
-  const fcT = fcThresholds(settings)
   const fcBandOf = v => v == null ? NONE
-    : asTitled(descendingBand(v, fcT.warn, fcT.critical, ' — your Settings thresholds'))
-  const lcBandOf = v => v == null ? NONE : asTitled(lcBand(v))
-  const pcBandOf = v => v == null ? NONE : asTitled(pcBand(v))
-  // Net margin is the one inverted band on this page: higher is better. Still gated on
-  // `canOverheads` — without it there is no margin to band.
-  const nmBandOf = v => (!canOverheads || v == null) ? NONE : asTitled(nmBand(v))
+    : asTitled(descendingBand(v, fcT.warn, fcT.critical, fcFrozen ? ' — your thresholds when this report was made' : ' — your Settings thresholds'))
+  const lcBandOf = v => (v == null || labourUnjudged) ? NONE : asTitled(lcBand(v))
+  const pcBandOf = v => (v == null || labourUnjudged) ? NONE : asTitled(pcBand(v))
+  // Net margin is the one inverted band on this page: higher is better. Its verdict needs
+  // `canOverheads` (without Overheads this month's fixed costs may simply not be entered), and a
+  // labour figure that can be judged.
+  const nmBandOf = v => (!canOverheads || v == null || labourUnjudged) ? NONE : asTitled(nmBand(v))
 
   // S792 (D30, schema v9): Food Cost % is food USED (COGS) ÷ revenue. A snapshot generated before
   // that has no `foodCostBasis` and froze net purchases ÷ revenue — it keeps its figure, and the
@@ -335,154 +513,221 @@ export default function MonthlyOwnerReport() {
   const taxFeesInNet = s => s?.combined?.netMarginTaxFees === true
   // Since v13 (S798 3c) labour is pay earned plus festival, incentive and final-settlement pay.
   const earnedLabour = s => s?.combined?.labourBasis === 'earned'
+  // Since v18 (S849, GAPS-1) Net Margin also subtracts raw stock wasted, staff meals and delivery commission.
+  const pnlCostsInNet = s => s?.combined?.netMarginPnlCosts === true
   const netMarginTip = (() => {
     const food = cogsBasis ? 'food used (COGS)' : 'net purchases'
-    if (taxFeesInNet(snapshot)) {
-      return `Revenue minus ${food}, labor cost, overheads and tax & fees (card and bank fees, the accountant, licences), as a % of revenue — the same costs Consolidated P&L subtracts.`
+    if (pnlCostsInNet(snapshot)) {
+      return 'Revenue minus food used (COGS), raw stock wasted, staff meals, delivery commission, labour, overheads and tax & fees (card and bank fees, the accountant, licences), as a % of revenue — the same costs Consolidated P&L subtracts.'
     }
-    return `Revenue minus ${food}, labor cost and overheads, as a % of revenue — the rule this report was generated under. Tax & Fees were not subtracted then, so this margin reads higher than Consolidated P&L's by them; Regenerate Snapshot to include them.`
+    if (taxFeesInNet(snapshot)) {
+      return `Revenue minus ${food}, labor cost, overheads and tax & fees, as a % of revenue — the rule this report was made under. Raw stock wasted, staff meals and delivery commission were not subtracted then, so this margin reads higher than Consolidated P&L's by them; Regenerate Snapshot to include them.`
+    }
+    return `Revenue minus ${food}, labor cost and overheads, as a % of revenue — the rule this report was generated under. Tax & Fees, raw stock wasted, staff meals and delivery commission were not subtracted then, so this margin reads higher than Consolidated P&L's by them; Regenerate Snapshot to include them.`
   })()
+  // Labor Cost %'s tip says what labour is in this report (OWNER-REPORT-10).
+  const laborTip = lab?.source === 'overheads'
+    ? 'What was typed on the Overheads Labor tab for the month, as a % of revenue: this outlet had no Crest HR when the report was made, so the Labor tab is its labour.'
+    : lab?.source === 'none'
+      ? 'No labour was entered on the Overheads Labor tab for this month, and this outlet had no Crest HR when the report was made, so there is no Labor Cost %.'
+      : lab && labourEstimated
+        ? 'The Crest HR wage estimate, as a % of revenue: payroll was not finalized when this report was made. Pay for the days each person was employed (unpaid days on the attendance sheet taken off), overtime and employer SSF, plus festival, incentive and final-settlement pay finalized this month. Regenerate Snapshot after Finalize for the exact figure.'
+        : labourEstimated
+          ? 'An estimate, as a % of revenue: payroll was not finalized when this report was made. Regenerate Snapshot after Finalize for the exact figure.'
+          : earnedLabour(snapshot)
+            ? 'Finalized payroll — pay earned (gross less unpaid days) + overtime + employer SSF — plus festival allowance, incentives and leavers\' final pay finalized this month, as a % of revenue.'
+            : 'Gross + overtime + employer SSF, as a % of revenue — the rule this report was generated under.'
   // COGS rests on the closing count: an item with stock and no count is counted as all used. While
   // that gap is material the three ratios that contain food cost are shown without a verdict, as on
-  // Monthly Summary (S756, D6). Only a v9 snapshot carries the gap.
+  // Monthly Summary (S756, D6). Only a v9 snapshot carries the gap. A food cost at or below zero is
+  // not judged either (OWNER-REPORT-5): it means a count or a bill is missing, not a fine month.
   const countGap = snapshot?.ims?.countGap
   const verdictWithheld = cogsBasis && !!countGap?.material
+  const fcNotPositive = snapshot?.combined?.foodCostPct != null && snapshot.combined.foodCostPct <= 0
   const UNJUDGED = { color: undefined, mark: '', title: 'Not judged: the closing count is incomplete, so food cost reads high until every item with stock is counted.' }
-  const withheld = bandOf => v => (verdictWithheld && v != null ? UNJUDGED : bandOf(v))
+  const UNJUDGED_ZERO = { color: undefined, mark: '', title: 'Not judged: a food cost at or below zero means a closing count or a purchase bill is missing.' }
+  const withheld = bandOf => v => (v == null ? bandOf(v) : verdictWithheld ? UNJUDGED : fcNotPositive ? UNJUDGED_ZERO : bandOf(v))
   const fcCellOf = withheld(fcBandOf)
   const pcCellOf = withheld(pcBandOf)
-  const nmCellOf = v => (!canOverheads ? NONE : withheld(nmBandOf)(v))
+  const nmCellOf = withheld(nmBandOf)
+  const dc = snapshot?.deliveryCommission
+  const hrInReport = !!snapshot?.hr || report?.modules_included?.hr === true
+
   return (
-    <div>
-      <div className="page-header owner-report-page-header">
-        <h1 className="page-title">Monthly Owner/Manager Report</h1>
-        <p className="page-subtitle">Frozen figures generated when each period closes — Crest IMS, HR &amp; POS combined.</p>
+    <>
+      <div className="no-print card" style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Held while Regenerate runs (OWNER-REPORT-3), so its result cannot land under another month's label. */}
+        <select aria-label="Period"
+          className="form-select" style={{ maxWidth: 220 }}
+          value={selectedPeriodId || ''} onChange={e => setSelectedPeriodId(e.target.value)}
+          disabled={regenerating}
+        >
+          {periods.length === 0 && <option value="">No periods yet</option>}
+          {periods.map(p => (
+            <option key={p.id} value={p.id}>
+              {BS_MONTHS[p.bs_month - 1]} {p.bs_year}{p.status === 'open' ? ' (Open)' : ''}
+            </option>
+          ))}
+        </select>
+        {report && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn btn-ghost" onClick={handleExport} disabled={!exportsReady}>Export Excel</button>
+            <button
+              className="btn btn-ghost" disabled={!exportsReady}
+              onClick={() => printWithTitle(`Owner Report — ${periodLabel} — ${biz.name}`)}
+            >
+              Print / Save as PDF
+            </button>
+            {/* The Owner regenerates too (S756): they now edit closed months in place, and a
+                frozen report that only an operator could refresh would lag every such fix. */}
+            {(isAdmin || isOwner) && (
+              <button className="btn btn-ghost" onClick={() => setConfirmRegenerate(true)} disabled={regenerating || loading || generating}>
+                {regenerating ? 'Regenerating…' : 'Regenerate Snapshot'}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      <SuiteGate featureKey="monthly_owner_report" featureLabel="Monthly Owner/Manager Report" requireModules={['ims']}>
-        <div className="no-print card" style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select aria-label="Period"
-            className="form-select" style={{ maxWidth: 220 }}
-            value={selectedPeriodId || ''} onChange={e => setSelectedPeriodId(e.target.value)}
-          >
-            {periods.length === 0 && <option value="">No periods yet</option>}
-            {periods.map(p => (
-              <option key={p.id} value={p.id}>
-                {BS_MONTHS[p.bs_month - 1]} {p.bs_year}{p.status === 'open' ? ' (Open)' : ''}
-              </option>
-            ))}
-          </select>
-          {report && (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="btn btn-ghost" onClick={async () => {
-                const { exportMonthlyReportExcel } = await import('../../modules/ownerReport/monthlyReportExcel')
-                exportMonthlyReportExcel(report, { ...bizInfo, madeLine: made?.line })
-              }}>Export Excel</button>
-              <button
-                className="btn btn-ghost"
-                onClick={() => printWithTitle(`Owner Report — ${periodLabel} — ${bizInfo.name}`)}
-              >
-                Print / Save as PDF
-              </button>
-              {/* The Owner regenerates too (S756): they now edit closed months in place, and a
-                  frozen report that only an operator could refresh would lag every such fix. */}
+      {/* The letterhead could not be read: Export and Print stay off rather than ship a blank
+          business name (OWNER-REPORT-18, S754). Its own slot, so a later load cannot wipe it. */}
+      {biz.error && report && (
+        <div className="no-print" style={{ marginBottom: 16 }}>
+          <ActionError error={{ text: 'Your business name could not be loaded, so Export and Print are off: the letterhead would print blank. Reload the page.', detail: asActionError(biz.error, 'operator').detail }} />
+        </div>
+      )}
+      {exportError && <div className="no-print" style={{ marginBottom: 16 }}><ActionError error={exportError} /></div>}
+
+      {regenNotice && regenNotice.tone === 'error' && (
+        <div className="no-print" style={{ marginBottom: 16 }}><ActionError error={regenNotice.error} /></div>
+      )}
+      {regenNotice && regenNotice.tone !== 'error' && (
+        <div
+          className="card no-print" role={regenNotice.tone === 'ok' ? 'status' : 'alert'}
+          style={{
+            marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12,
+            borderColor: `color-mix(in srgb, var(--theme-${regenNotice.tone === 'ok' ? 'green' : 'amber'}) 25%, transparent)`,
+            background: `color-mix(in srgb, var(--theme-${regenNotice.tone === 'ok' ? 'green' : 'amber'}) 8%, transparent)`,
+          }}
+        >
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, display: 'flex', alignItems: 'flex-start', gap: 6, color: `var(--theme-${regenNotice.tone === 'ok' ? 'green' : 'amber'}-text)` }}>
+            {regenNotice.tone === 'ok'
+              ? <Check size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+              : <TriangleAlert size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />}
+            {regenNotice.text}
+          </p>
+          <button
+            className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px', flexShrink: 0 }}
+            onClick={() => setRegenNotice(null)} aria-label="Dismiss"
+          >&times;</button>
+        </div>
+      )}
+
+      {/* The months could not be read: never "no periods yet" (S612), and never the raw message. */}
+      {periodsError && <ReportLoadError error={periodsError} />}
+
+      {!periodsError && (loading || generating) && (
+        <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>
+          {generating ? 'Making the report for this month…' : 'Loading…'}
+        </p></div>
+      )}
+
+      {!loading && !generating && pageError?.kind === 'read' && <ReportLoadError error={pageError.error} />}
+      {!loading && !generating && pageError?.kind === 'make' && <ActionError error={pageError.error} />}
+
+      {/* The operator browsing a client: nothing is frozen until one deliberate press (GAPS-11). */}
+      {!loading && !generating && !pageError && needsMaking && selectedPeriod && (
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>
+            No report has been made for {BS_MONTHS[selectedPeriod.bs_month - 1]} {selectedPeriod.bs_year} yet.
+          </p>
+          <Tip text="Makes and freezes this month's report from the data as it stands now, as the Owner's first visit would. It is stamped as made by Crest support.">
+            <button className="btn btn-primary" onClick={makeNow}>Make it now</button>
+          </Tip>
+        </div>
+      )}
+
+      {!loading && !generating && !pageError && !needsMaking && selectedPeriod && selectedPeriod.status !== 'closed' && !report && (
+        <div className="card">
+          <p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>
+            This month is still open — its report is made when the month is closed.
+          </p>
+        </div>
+      )}
+
+      {!loading && !generating && report && snapshot && (
+        <div className="card owner-report-doc" style={{ maxWidth: 760, margin: '0 auto', padding: '22px 30px' }}>
+          {/* Running footer, so a sheet separated from page 1 still says which business and
+              period it belongs to — and, since S778, which page of how many. It lives in the page's
+              bottom MARGIN. It used to be a position: fixed div, and Chrome paints a table that runs
+              to the foot of a page straight over a fixed element, so the footer vanished on exactly
+              the pages a long list filled. A margin box sits outside the content area where nothing
+              reaches it, and it can count pages. It is a <style> rendered here, not a rule in the
+              .css file, because the text is this report's own and because an @page rule in a lazy
+              chunk's stylesheet stays in the document after you leave, re-margining every later
+              print in the session. Chromium (Chrome, Edge) draws margin boxes; a browser that does
+              not prints the report without a footer. */}
+          <style>{pageFooterCss(`${biz.name || '—'} · Monthly Owner/Manager Report · ${periodLabel}`)}</style>
+          {/* Letterhead */}
+          <div className="owner-report-letterhead" style={{ textAlign: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid var(--theme-border)' }}>
+            <h2 style={{ margin: '0 0 3px', fontSize: 17, fontWeight: 800, letterSpacing: '0.02em' }}>{biz.name || '—'}</h2>
+            <p style={{ margin: '0 0 8px', fontSize: 11, color: 'var(--theme-text2)' }}>
+              {biz.vatReg ? 'VAT No' : 'PAN No'}: {biz.vat || '—'}{biz.address ? ` · ${biz.address}` : ''}
+            </p>
+            <div style={{ fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 4px' }}>
+              Monthly Owner/Manager Report
+            </div>
+            {/* When it was made, as a BS date and Nepal time (S792, D42). It printed the viewer's
+                clock and calendar and "Source: Backfill", which told nobody that a report made at
+                the Owner's first view holds the month as it stood that day, not at the close. */}
+            <p style={{ margin: 0, fontSize: 11, color: 'var(--theme-text3)' }}>
+              Period: {periodLabel} &nbsp;|&nbsp; {made?.line}
+            </p>
+            {made?.note && (
+              <p style={{ margin: '4px auto 0', maxWidth: 560, fontSize: 11, lineHeight: 1.5, color: 'var(--theme-text2)' }}>
+                {made.note}
+              </p>
+            )}
+            {/* The sections below render per the snapshot's own modules_included, so a module
+                that was off when this was generated is simply absent — which a reader takes
+                for "there was nothing to report". Name what is not here (S683). */}
+            {report.modules_included && ['ims', 'hr', 'pos'].some(m => report.modules_included[m] === false) && (
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--theme-amber-text)' }}>
+                Not in this report: {['ims', 'hr', 'pos'].filter(m => report.modules_included[m] === false)
+                  .map(m => ({
+                    ims: 'Crest IMS',
+                    // v18 (OWNER-REPORT-9, SU18): without Crest HR the Labor tab is the labour.
+                    hr: lab?.source === 'overheads' ? 'Crest HR (labour is from the Overheads Labor tab)' : 'Crest HR (no payroll or labour figures)',
+                    pos: 'Crest POS',
+                  })[m]).join(', ')}
+                {' '}— not enabled when it was generated.
+              </p>
+            )}
+          </div>
+
+          {/* A section that failed when the report was made, named in words, printed under the
+              header, with the repair beside it (S849, OWNER-REPORT-2 / -1). It used to be a
+              no-print note at the foot of the page naming code keys ("hr, laborAnalytics"), so a
+              printed report with no payroll in it looked complete. Print hides the button. */}
+          {failedKeys.length > 0 && (
+            <div className="owner-report-section" role="note" style={{
+              marginBottom: 16, padding: '10px 12px', borderRadius: 6,
+              border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+              background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
+              display: 'flex', gap: 12, alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap',
+            }}>
+              <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: 'var(--theme-amber-text)', flex: '1 1 320px' }}>
+                △ Not in this report: {sectionList(failedKeys)} could not be worked out when it was made, so
+                {failedKeys.length === 1 ? ' its figures are' : ' their figures are'} missing here — not zero.
+                {' '}Regenerate Snapshot makes the report again from today's data.
+              </p>
               {(isAdmin || isOwner) && (
-                <button className="btn btn-ghost" onClick={() => setConfirmRegenerate(true)} disabled={regenerating}>
-                  {regenerating ? 'Regenerating…' : 'Regenerate Snapshot'}
+                <button className="btn btn-ghost btn-sm" onClick={() => setConfirmRegenerate(true)} disabled={regenerating}>
+                  Regenerate Snapshot
                 </button>
               )}
             </div>
           )}
-        </div>
-
-        {regenNotice && (
-          <div
-            className="card" role={regenNotice.tone === 'ok' ? 'status' : 'alert'}
-            style={{
-              marginBottom: 16, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12,
-              borderColor: `color-mix(in srgb, var(--theme-${regenNotice.tone === 'ok' ? 'green' : regenNotice.tone === 'warn' ? 'amber' : 'red'}) 25%, transparent)`,
-              background: `color-mix(in srgb, var(--theme-${regenNotice.tone === 'ok' ? 'green' : regenNotice.tone === 'warn' ? 'amber' : 'red'}) 8%, transparent)`,
-            }}
-          >
-            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, display: 'flex', alignItems: 'flex-start', gap: 6, color: `var(--theme-${regenNotice.tone === 'ok' ? 'green' : regenNotice.tone === 'warn' ? 'amber' : 'red'}-text)` }}>
-              {regenNotice.tone === 'ok'
-                ? <Check size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
-                : <TriangleAlert size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />}
-              {regenNotice.text}
-            </p>
-            <button
-              className="btn btn-ghost" style={{ fontSize: 12, padding: '8px 12px', flexShrink: 0 }}
-              onClick={() => setRegenNotice(null)} aria-label="Dismiss"
-            >&times;</button>
-          </div>
-        )}
-
-        {(loading || generating) && (
-          <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>
-            {generating ? 'Generating report for this period…' : 'Loading…'}
-          </p></div>
-        )}
-
-        {!loading && !generating && genError && (
-          <div className="card" style={{ borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)', background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)' }}>
-            <p style={{ color: 'var(--theme-red-text)', margin: 0, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <TriangleAlert size={14} aria-hidden="true" /> {genError}
-            </p>
-          </div>
-        )}
-
-        {!loading && !generating && !genError && selectedPeriod?.status !== 'closed' && !report && (
-          <div className="card">
-            <p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>
-              This period is still open — a report generates automatically once it's closed.
-            </p>
-          </div>
-        )}
-
-        {!loading && !generating && report && snapshot && (
-          <div className="card owner-report-doc" style={{ maxWidth: 760, margin: '0 auto', padding: '22px 30px' }}>
-            {/* Running footer, so a sheet separated from page 1 still says which business and
-                period it belongs to — and, since S778, which page of how many. It lives in the page's
-                bottom MARGIN. It used to be a position: fixed div, and Chrome paints a table that runs
-                to the foot of a page straight over a fixed element, so the footer vanished on exactly
-                the pages a long list filled. A margin box sits outside the content area where nothing
-                reaches it, and it can count pages. It is a <style> rendered here, not a rule in the
-                .css file, because the text is this report's own and because an @page rule in a lazy
-                chunk's stylesheet stays in the document after you leave, re-margining every later
-                print in the session. Chromium (Chrome, Edge) draws margin boxes; a browser that does
-                not prints the report without a footer. */}
-            <style>{pageFooterCss(`${bizInfo.name || '—'} · Monthly Owner/Manager Report · ${periodLabel}`)}</style>
-            {/* Letterhead */}
-            <div className="owner-report-letterhead" style={{ textAlign: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid var(--theme-border)' }}>
-              <h2 style={{ margin: '0 0 3px', fontSize: 17, fontWeight: 800, letterSpacing: '0.02em' }}>{bizInfo.name || '—'}</h2>
-              <p style={{ margin: '0 0 8px', fontSize: 11, color: 'var(--theme-text2)' }}>
-                {bizInfo.vatReg ? 'VAT No' : 'PAN No'}: {bizInfo.vat || '—'}{bizInfo.address ? ` · ${bizInfo.address}` : ''}
-              </p>
-              <div style={{ fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 4px' }}>
-                Monthly Owner/Manager Report
-              </div>
-              {/* When it was made, as a BS date and Nepal time (S792, D42). It printed the viewer's
-                  clock and calendar and "Source: Backfill", which told nobody that a report made at
-                  the Owner's first view holds the month as it stood that day, not at the close. */}
-              <p style={{ margin: 0, fontSize: 11, color: 'var(--theme-text3)' }}>
-                Period: {periodLabel} &nbsp;|&nbsp; {made?.line}
-              </p>
-              {made?.note && (
-                <p style={{ margin: '4px auto 0', maxWidth: 560, fontSize: 11, lineHeight: 1.5, color: 'var(--theme-text2)' }}>
-                  {made.note}
-                </p>
-              )}
-              {/* The sections below render per the snapshot's own modules_included, so a module
-                  that was off when this was generated is simply absent — which a reader takes
-                  for "there was nothing to report". Name what is not here (S683). */}
-              {report.modules_included && ['ims', 'hr', 'pos'].some(m => report.modules_included[m] === false) && (
-                <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--theme-amber-text)' }}>
-                  Not in this report: {['ims', 'hr', 'pos'].filter(m => report.modules_included[m] === false)
-                    .map(m => ({ ims: 'Crest IMS', hr: 'Crest HR (no payroll or labour figures)', pos: 'Crest POS' })[m]).join(', ')}
-                  {' '}— not enabled when it was generated.
-                </p>
-              )}
-            </div>
 
             {/* Executive Summary — the one narrative paragraph in the report; everything below
                 this point is pure data tables, per the hybrid format chosen for this report. */}
@@ -518,34 +763,88 @@ export default function MonthlyOwnerReport() {
                             {cogsBasis ? 'Food Cost %' : 'Food Cost % (on purchases)'}
                           </Tip>
                         </td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: fcCellOf(snapshot.combined?.foodCostPct).color }} title={fcCellOf(snapshot.combined?.foodCostPct).title}>{pct(snapshot.combined?.foodCostPct)} {fcCellOf(snapshot.combined?.foodCostPct).mark}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>28–35%</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: fcCellOf(snapshot.combined?.foodCostPct).color }} title={fcCellOf(snapshot.combined?.foodCostPct).title}>
+                          {pct(snapshot.combined?.foodCostPct)} {fcCellOf(snapshot.combined?.foodCostPct).mark}
+                          {fcNotPositive && <span style={subStyle}>not judged: a count or a bill is missing</span>}
+                        </td>
+                        {/* The client's own target (OWNER-REPORT-5): frozen with a v18 report, today's
+                            Settings for an older one. It printed a fixed "28–35%". */}
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>
+                          <Tip text={fcFrozen
+                            ? `Your Food Cost target when this report was made: up to ${fcT.warn}% is on target, above ${fcT.critical}% is critical. Saved with the report, so changing Settings later does not re-judge it.`
+                            : `Your Food Cost target in Settings today (up to ${fcT.warn}%, critical above ${fcT.critical}%). This report was made before the thresholds were saved with it.`} width={260}>
+                            ≤ {fcT.warn}%
+                          </Tip>
+                        </td>
                       </tr>
                     )}
-                    {snapshot.hr && (
+                    {/* Labour, Prime and Net Margin come from the one labour rule since v18
+                        (combined.labour; GAPS-4, OWNER-REPORT-9): payroll or the HR estimate with Crest
+                        HR, the Overheads Labor tab without it. An older report renders from its HR
+                        section, and has none of the three without Crest HR. */}
+                    {labourShown && (
                       <tr>
-                        <td><Tip text="Gross + overtime + employer SSF, as a % of revenue — the actual final figure for a closed period, not a proration." width={280}>Labor Cost %</Tip></td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: lcBandOf(snapshot.combined?.laborCostPct).color }} title={lcBandOf(snapshot.combined?.laborCostPct).title}>{pct(snapshot.combined?.laborCostPct)} {lcBandOf(snapshot.combined?.laborCostPct).mark}</td>
+                        <td><Tip text={laborTip} width={280}>Labor Cost %</Tip></td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: lcBandOf(snapshot.combined?.laborCostPct).color }} title={lcBandOf(snapshot.combined?.laborCostPct).title}>
+                          {pct(snapshot.combined?.laborCostPct)} {lcBandOf(snapshot.combined?.laborCostPct).mark}
+                          {lab?.source === 'none' && <span style={subStyle}>no labour entered on Overheads</span>}
+                          {labourSub && <span style={subStyle}>{labourSub}</span>}
+                          {labourNotJudgedSub && <span style={subStyle}>{labourNotJudgedSub}</span>}
+                        </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>25–30%</td>
                       </tr>
                     )}
-                    {snapshot.ims && snapshot.hr && (
+                    {snapshot.ims && labourShown && (
                       <tr>
                         <td><Tip text="Food Cost % + Labor Cost % — the number operators benchmark against." width={240}>Prime Cost %</Tip></td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: pcCellOf(snapshot.combined?.primeCostPct).color }} title={pcCellOf(snapshot.combined?.primeCostPct).title}>{pct(snapshot.combined?.primeCostPct)} {pcCellOf(snapshot.combined?.primeCostPct).mark}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: pcCellOf(snapshot.combined?.primeCostPct).color }} title={pcCellOf(snapshot.combined?.primeCostPct).title}>
+                          {pct(snapshot.combined?.primeCostPct)} {pcCellOf(snapshot.combined?.primeCostPct).mark}
+                          {snapshot.combined?.primeCostPct != null && labourSub && <span style={subStyle}>{labourSub}</span>}
+                        </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>≤60–65%</td>
                       </tr>
                     )}
-                    {snapshot.ims && snapshot.hr && (
+                    {snapshot.ims && labourShown && (
                       <tr>
                         <td><Tip text={netMarginTip} width={280}>Net Margin %</Tip></td>
-                        <td style={{ textAlign: 'right', fontWeight: 700, color: nmCellOf(snapshot.combined?.netMarginPct).color }} title={nmCellOf(snapshot.combined?.netMarginPct).title}>{!canOverheads ? 'Requires Overheads (Pro)' : `${pct(snapshot.combined?.netMarginPct)} ${nmCellOf(snapshot.combined?.netMarginPct).mark}`}</td>
+                        {/* A frozen Net Margin is shown whenever the report holds one; without the
+                            Overheads feature only its verdict is withheld (OWNER-REPORT-11, DOCS-M6).
+                            It said "Requires Overheads (Pro)", and Overheads is not a Pro feature. */}
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: nmCellOf(snapshot.combined?.netMarginPct).color }} title={nmCellOf(snapshot.combined?.netMarginPct).title}>
+                          {snapshot.combined?.netMarginPct == null && !canOverheads
+                            ? `Requires Overheads (${overheadsTier})`
+                            : <>{pct(snapshot.combined?.netMarginPct)} {nmCellOf(snapshot.combined?.netMarginPct).mark}</>}
+                          {snapshot.combined?.netMarginPct != null && <>
+                            {lab?.source === 'none' && <span style={subStyle}>no labour entered on Overheads</span>}
+                            {labourSub && <span style={subStyle}>{labourSub}</span>}
+                            {!canOverheads && <span style={subStyle}>no verdict: Overheads ({overheadsTier}) is not on this plan</span>}
+                          </>}
+                          {snapshot.combined?.netMarginPct == null && snapshot.sectionErrors?.deliveryCommission && (
+                            <span style={subStyle}>delivery commission could not be read</span>
+                          )}
+                        </td>
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>≥20%</td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
+              {/* v18 (SU11): the Labor tab is never a second labour figure beside Crest HR. Named, printed. */}
+              {lab?.laborTabNotCounted > 0 && (
+                <p style={noteStyle}>
+                  Overheads Labor tab {fmt(lab.laborTabNotCounted)} not counted: {lab.source === 'payroll' ? 'payroll' : 'Crest HR'} is this month's labour.
+                </p>
+              )}
+              {lab?.reason === 'nopay' && (
+                <p style={warnNoteStyle}>
+                  △ Pay is not set for {num(lab.noPayCount)} staff on payroll, so their wages are not in labour, and Labor Cost, Prime Cost and Net Margin are shown without a verdict. Set their pay in Pay Setup, then Regenerate Snapshot.
+                </p>
+              )}
+              {lab?.reason === 'nostaff' && (
+                <p style={warnNoteStyle}>
+                  △ Nobody was on payroll in Crest HR this month, so labour is not judged.
+                </p>
+              )}
               {/* The count COGS rests on, frozen with it (v9). Printed, not a hover: it qualifies
                   the three figures above on paper too. */}
               {snapshot.ims && cogsBasis && countGap?.uncountedCount > 0 && (
@@ -564,7 +863,15 @@ export default function MonthlyOwnerReport() {
                   <table className="data-table owner-report-table"><tbody>
                     <Row label="Opening Stock" value={fmt(snapshot.ims.openingStockValueTotal)}
                       tip="Value of stock on hand at the start of the period (qty × per-unit rate), carried forward from last period's closing count." />
-                    <Row label="Purchases" value={fmt(snapshot.ims.purchaseTotal)} />
+                    <Row label="Purchases" value={fmt(snapshot.ims.purchaseTotal)}
+                      tip={snapshot.ims.transferIn != null
+                        ? 'Net purchases: bills less their discounts and supplier returns, plus stock received from your other outlets and less stock sent to them — as Monthly Summary counts them.'
+                        : undefined} />
+                    {/* v18 (PNL-8): stock moved between outlets, inside Purchases above. Shown only when there was any. */}
+                    {(snapshot.ims.transferIn > 0 || snapshot.ims.transferOut > 0) && (
+                      <Row label="Stock transfers in / out" value={`${fmt(snapshot.ims.transferIn)} / ${fmt(snapshot.ims.transferOut)}`}
+                        tip="Stock received from your other outlets (counted once the branch confirmed it arrived) and stock sent to them, at the sender's rate. Both are inside Purchases above; neither is in the Cash or Credit split below, since no supplier was paid." />
+                    )}
                     {/* What the figure counts depends on when it was frozen (S792, FIGURES-5): from v10
                         it is the Wastage Report's own total; before, active items only. */}
                     <Row label="Wastage Value" value={fmt(snapshot.ims.wastageValueTotal)} color={snapshot.ims.wastageValueTotal > 0 ? 'var(--theme-red-text)' : undefined}
@@ -575,7 +882,9 @@ export default function MonthlyOwnerReport() {
                         snapshot, which froze no COGS — never rendered as NPR 0 there. */}
                     {snapshot.ims.staffMealsValueTotal != null && (
                       <Row label="Staff Meals" value={fmt(snapshot.ims.staffMealsValueTotal)}
-                        tip="Value of food logged as staff meals this period. Like wastage, it is taken out of Food Used (COGS) below and shown on its own line." />
+                        tip={pnlCostsInNet(snapshot)
+                          ? 'Value of food logged as staff meals this period. Like wastage, it is taken out of Food Used (COGS) below and shown on its own line, and Net Margin takes it off as a cost, as Consolidated P&L does.'
+                          : 'Value of food logged as staff meals this period. Like wastage, it is taken out of Food Used (COGS) below and shown on its own line. This report was made before Net Margin took it off; Regenerate Snapshot to include it.'} />
                     )}
                     <Row label="Closing Stock" value={fmt(snapshot.ims.closingStockValueTotal)}
                       tip="Value of stock physically counted at period close (qty × per-unit rate) — becomes next period's Opening Stock." />
@@ -590,18 +899,38 @@ export default function MonthlyOwnerReport() {
                       tip={schemaVersion >= 4
                         ? 'Items whose stock at period close was below their par level — an item exactly at par is fine.'
                         : 'Items whose stock at period close was at or below par level (this report predates the rule that an item exactly at par is fine).'} />
+                    {/* v18 (OWNER-REPORT-8): what is still owed per bill, as Outstanding Payables values it. */}
                     <Row label="Unpaid Credit (this period)" value={fmt(snapshot.ims.payables?.unpaidTotal)}
-                      tip="This period's Credit purchases still unpaid as of generation — a period-bound figure, not a live 'days overdue' count." />
+                      tip={snapshot.ims.payables?.basis === 'owed'
+                        ? `What is still owed on this month's credit bills, VAT, discount and returns included, when this report was made (${num(snapshot.ims.payables?.unpaidCount)} bill${snapshot.ims.payables?.unpaidCount === 1 ? '' : 's'}) — a period-bound figure, not a live 'days overdue' count.`
+                        : "This period's Credit purchases still unpaid as of generation, line by line at quantity × rate (before VAT, discounts and returns) — the rule this report was made under. Regenerate Snapshot to value each bill at what is owed."} />
                     {/* v12 (S798 2e): the two non-labour cost lines Net Margin subtracts, so the margin
                         can be traced. Absent on an older snapshot, which froze no Tax & Fees. */}
                     {canOverheads && snapshot.ims.taxFeesTotal != null && <>
                       <Row label="Overheads" value={fmt(snapshot.ims.overheadTotal)}
-                        tip="The Overheads page's fixed costs for the month (rent, utilities and the like). The Labor tab is not here: labour is counted from payroll in the Crest HR section." />
+                        tip={hrInReport
+                          ? "The Overheads page's fixed costs for the month (rent, utilities and the like). The Labor tab is not here: labour is payroll, in the Crest HR section."
+                          : "The Overheads page's fixed costs for the month (rent, utilities and the like). The Labor tab is not here: without Crest HR, labour comes from the Labor tab, shown under Labor Cost %."} />
                       <Row label="Tax & Fees" value={fmt(snapshot.ims.taxFeesTotal)}
                         tip="The Overheads page's Tax & Fees tab for the month: card and bank fees, the accountant, licences and permits. Net Margin subtracts it, as Consolidated P&L does." />
                     </>}
+                    {/* v18 (S849, GAPS-1 / PNL-1): the other costs Net Margin takes off, so it can be
+                        traced. Absent on an older report, which did not subtract them. */}
+                    {snapshot.ims.cogsWastageTotal != null && (
+                      <Row label="Stock wasted (raw items)" value={fmt(snapshot.ims.cogsWastageTotal)}
+                        tip="The raw-ingredient part of Wastage Value, at each item's rate. Net Margin takes it off as a cost, as Consolidated P&L does. Wasted prep is not here: the raw items it was made from are already inside Food Used." />
+                    )}
+                    {dc && (
+                      <Row label="Delivery commission" value={fmt(dc.amount)}
+                        tip="What Foodmandu, Pathao or another delivery partner kept from bills sold this month, as recorded when you took their payment in Customers → Credit. Net Margin takes it off, as Consolidated P&L does. A bill not settled when this report was made has no commission in it." />
+                    )}
                   </tbody></table>
                 </div>
+                {dc?.unsettledBills > 0 && (
+                  <p style={warnNoteStyle}>
+                    △ {num(dc.unsettledBills)} delivery bill{dc.unsettledBills === 1 ? '' : 's'} from {periodLabel} {dc.unsettledBills === 1 ? 'was' : 'were'} not settled with the partner when this report was made, so {dc.unsettledBills === 1 ? 'its' : 'their'} commission is not in Net Margin. Regenerate Snapshot after {dc.unsettledBills === 1 ? 'it is' : 'they are'} settled.
+                  </p>
+                )}
               </div>
             )}
 
@@ -615,7 +944,7 @@ export default function MonthlyOwnerReport() {
                     </span>
                   )}
                 </h3>
-                <div className="table-wrap" style={{ marginBottom: snapshot.hr.leave?.length > 0 ? 8 : 0 }}>
+                <div className="table-wrap" style={{ marginBottom: snapshot.hr.leave?.length > 0 || snapshot.hr.headcount?.noEndDate > 0 ? 8 : 0 }}>
                   <table className="data-table owner-report-table"><tbody>
                     <Row label="Gross Payroll" value={fmt(snapshot.hr.payroll?.gross)} />
                     {/* v13 (S798 3c, H19): what was earned — the payroll sheet's Cost to business.
@@ -643,16 +972,35 @@ export default function MonthlyOwnerReport() {
                       tip={earnedLabour(snapshot)
                         ? 'Pay earned (gross less unpaid days) + overtime + employer SSF, plus festival allowance, incentives and leavers\' final pay finalized this month — the figure Labor Cost % divides by revenue.'
                         : 'Gross pay + overtime + employer SSF — the rule this report was generated under. Unpaid days were not taken off and festival, incentive and final-settlement pay was not counted; Regenerate Snapshot to apply the current rule.'} />
-                    <Row label="Active Headcount" value={num(snapshot.hr.headcount?.active)} />
+                    {/* v18 (OWNER-REPORT-7): employed at any time in the month, by join and End
+                        Dates — not by today's status, which counted nobody who had left since. */}
+                    {snapshot.hr.headcount?.basis === 'dates'
+                      ? <Row label="Staff Employed" value={num(snapshot.hr.headcount.employed)}
+                          tip="Everyone employed at any time in the month, joiners and leavers included, by their join and End Dates." />
+                      : <Row label="Active Headcount" value={num(snapshot.hr.headcount?.active)}
+                          tip="Staff whose status was active or on probation when this report was made — the rule it was made under, so someone who left after the month and before the report is not counted. Regenerate Snapshot to count by dates." />}
                     <Row label="New Hires / Terminations" value={`${num(snapshot.hr.headcount?.newHires)} / ${num(snapshot.hr.headcount?.terminations)}`} />
-                    <Row label="Attendance Rate" value={snapshot.hr.attendance ? pct(snapshot.hr.attendance.rate) : 'N/A'}
-                      tip="Best-effort — only meaningful for clients using the daily Attendance Sheet." />
+                    {/* v18 (OWNER-REPORT-13): over the days staff were due to work. */}
+                    <Row label="Attendance Rate" value={snapshot.hr.attendance?.rate != null ? pct(snapshot.hr.attendance.rate) : 'N/A'}
+                      tip={snapshot.hr.attendance?.basis === 'working_days'
+                        ? 'Days present ÷ days staff were due to work (weekly offs and public holidays left out). Paid leave counts as present, unpaid leave as absent. Only meaningful when the daily Attendance Sheet is used.'
+                        : 'Best-effort — only meaningful for clients using the daily Attendance Sheet. This report was made under the earlier rule, which includes weekly offs and holidays in the days counted, so it reads low.'} />
                   </tbody></table>
                 </div>
+                {snapshot.hr.headcount?.noEndDate > 0 && (
+                  <p style={{ ...warnNoteStyle, margin: '0 0 8px' }}>
+                    △ {num(snapshot.hr.headcount.noEndDate)} former staff {snapshot.hr.headcount.noEndDate === 1 ? 'has' : 'have'} no End Date, so {snapshot.hr.headcount.noEndDate === 1 ? 'is' : 'are'} not counted. Enter their last working day in Employees, then Regenerate Snapshot.
+                  </p>
+                )}
                 {snapshot.hr.leave?.length > 0 && (
                   <div className="table-wrap">
                     <table className="data-table owner-report-table">
-                      <thead><tr><th>Leave Type</th><th style={{ textAlign: 'right' }}>Requests</th><th style={{ textAlign: 'right' }}>Days Taken</th></tr></thead>
+                      {/* v18 (OWNER-REPORT-14): a leave crossing a month edge counts only its days here. */}
+                      <thead><tr><th>Leave Type</th><th style={{ textAlign: 'right' }}>Requests</th><th style={{ textAlign: 'right' }}>
+                        {snapshot.hr.leaveBasis === 'in_month'
+                          ? <Tip text="Approved leave days falling in this month. A leave that crosses into the month before or after is shared out by calendar days, so each month counts only its own part." width={260}>Days in this month</Tip>
+                          : <Tip text="Each approved leave touching this month, counted in full — the rule this report was made under, so a leave crossing a month edge is in both months." width={260}>Days (whole requests)</Tip>}
+                      </th></tr></thead>
                       <tbody>
                         {snapshot.hr.leave.map((l, i) => (
                           <tr key={i}><td>{l.leaveTypeName}</td><td style={{ textAlign: 'right' }}>{l.requestCount}</td><td style={{ textAlign: 'right' }}>{l.days}</td></tr>
@@ -835,8 +1183,11 @@ export default function MonthlyOwnerReport() {
                   {inv.turnover && (
                     <div className="table-wrap" style={{ marginBottom: 8 }}>
                       <table className="data-table owner-report-table"><tbody>
+                        {/* v18 (OWNER-REPORT-15): COGS over the stock of the same items. */}
                         <Row label="Inventory Turnover Ratio (this period)" value={inv.turnover.turnoverRatio != null ? inv.turnover.turnoverRatio.toFixed(2) : '—'}
-                          tip="Value used ÷ average inventory value this period. Higher means stock is moving faster." />
+                          tip={inv.turnover.basis === 'cogs'
+                            ? 'Food used (COGS) ÷ average stock of the same items (prep left out, as in COGS). Higher means stock is moving faster.'
+                            : 'Stock consumed (waste included) ÷ average inventory value this period — the rule this report was made under. Higher means stock is moving faster.'} />
                         <Row label="Days on Hand" value={inv.turnover.daysOnHand != null ? `${inv.turnover.daysOnHand.toFixed(1)} days` : '—'}
                           tip="How many days your average inventory would last at this period's usage rate. Lower means you're restocking more often." />
                         <Row label="Average Inventory Value" value={fmt(inv.turnover.avgInventoryValue)} />
@@ -844,6 +1195,10 @@ export default function MonthlyOwnerReport() {
                     </div>
                   )}
 
+                  {/* OWNER-REPORT-1: a sub-section that failed says so where it would be, never vanishes. */}
+                  {subFailed('deadSlowStock') && (
+                    <p style={{ ...warnNoteStyle, margin: '0 0 8px' }}>△ {sectionLabel('deadSlowStock')}: could not be worked out when this report was made.</p>
+                  )}
                   {inv.deadSlowStock && (() => {
                     const ds = inv.deadSlowStock
                     // S756 (D20): a v7+ section carries `rule: 'streak'` (Dead = 3 counted months with
@@ -909,6 +1264,9 @@ export default function MonthlyOwnerReport() {
                     )
                   })()}
 
+                  {subFailed('variance') && (
+                    <p style={{ ...warnNoteStyle, margin: '0 0 8px' }}>△ {sectionLabel('variance')}: could not be worked out when this report was made.</p>
+                  )}
                   {inv.variance && (() => {
                     const v = inv.variance
                     // v9 (S792, FIGURES-2): the live Variance page's arithmetic, with the tolerance and
@@ -992,7 +1350,9 @@ export default function MonthlyOwnerReport() {
                       </div>
                     </>
                     )
-                  })() : (
+                  })() : subFailed('shrinkageTrend') ? (
+                    <p style={{ ...warnNoteStyle, margin: 0 }}>△ {sectionLabel('shrinkageTrend')}: could not be worked out when this report was made.</p>
+                  ) : (
                     <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: 0 }}>Not enough closed period history yet for a shrinkage trend.</p>
                   )}
                 </div>
@@ -1017,7 +1377,11 @@ export default function MonthlyOwnerReport() {
                   </div>
                   <div className="table-wrap">
                     <table className="data-table owner-report-table"><tbody>
-                      <Row label="Unpaid Credit — Current (≤30d)" value={fmt(vp.billAging.current)} />
+                      {/* v18 (OWNER-REPORT-8): each bill at what is still owed on it. */}
+                      <Row label="Unpaid Credit — Current (≤30d)" value={fmt(vp.billAging.current)}
+                        tip={vp.billAging.basis === 'owed'
+                          ? 'What is still owed on this month\'s credit bills (VAT, discount and returns included, less payments), by how old each bill was when this report was made.'
+                          : 'This month\'s credit lines at quantity × rate less payments (before VAT, discounts and returns) — the rule this report was made under — by how old each bill was when it was made.'} />
                       <Row label="Unpaid Credit — 31–60 days" value={fmt(vp.billAging.d31_60)} color={vp.billAging.d31_60 > 0 ? 'var(--theme-amber-text)' : undefined} />
                       <Row label="Unpaid Credit — 61–90 days" value={fmt(vp.billAging.d61_90)} color={vp.billAging.d61_90 > 0 ? 'var(--theme-amber-text)' : undefined} />
                       <Row label="Unpaid Credit — 90+ days" value={fmt(vp.billAging.d90plus)} color={vp.billAging.d90plus > 0 ? 'var(--theme-red-text)' : undefined}
@@ -1035,14 +1399,25 @@ export default function MonthlyOwnerReport() {
                   const t = snapshot.trend[key]
                   const label = key === 'vsLastPeriod' ? 'vs Last Period' : 'vs Same Month Last Year'
                   const priorLabel = t?.period ? `${BS_MONTHS[t.period.bs_month - 1]} ${t.period.bs_year}` : '—'
-                  const noDataReason = t?.reason === 'no_period' ? 'No period exists for this comparison.'
-                    : t?.reason === 'not_closed' ? 'That period is still open.'
-                    : 'No report was generated for that period.'
+                  const d = t?.deltas || {}
+                  // v18: labour, Prime and Net Margin can exist without Crest HR (the Labor tab), so a
+                  // row shows when either month has its figure.
+                  const has = k => snapshot.combined?.[k] != null || t?.snapshot?.combined?.[k] != null
+                  const showLabour = !!snapshot.hr || has('laborCostPct')
+                  const showPrime = !!snapshot.ims && (!!snapshot.hr || has('primeCostPct'))
+                  const showMargin = !!snapshot.ims && (!!snapshot.hr || has('netMarginPct'))
+                  // OWNER-REPORT-12: a month whose closing count was materially incomplete has no
+                  // food-cost verdict on page 1, so none here either.
+                  const curGap = !!snapshot.ims?.countGap?.material && cogsBasis
+                  const priorGap = t?.snapshot?.countGapMaterial === true
+                  const unjudged = !!d.verdictWithheld || curGap || priorGap
+                  // OWNER-REPORT-2: the prior froze without its Crest IMS section.
+                  const priorMissingIms = (t?.snapshot?.sectionErrors || []).includes('ims')
                   return (
                     <div key={key} style={{ marginBottom: 14 }}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text2)', marginBottom: 6 }}>{label}</div>
                       {!t?.available ? (
-                        <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: 0 }}>{noDataReason}</p>
+                        <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: 0 }}>{trendUnavailableText(t)}</p>
                       ) : (
                         <div className="table-wrap">
                           <table className="data-table owner-report-table">
@@ -1050,20 +1425,32 @@ export default function MonthlyOwnerReport() {
                               <tr><th>Metric</th><th style={{ textAlign: 'right' }}>This Period</th><th style={{ textAlign: 'right' }}>{priorLabel}</th><th style={{ textAlign: 'right' }}>Change</th></tr>
                             </thead>
                             <tbody>
-                              <TrendRow label="Revenue" cur={snapshot.combined?.revenueTotal} prior={t.snapshot?.combined?.revenueTotal} delta={t.deltas?.revenueTotal} fmtFn={fmt} />
-                              {snapshot.ims && <TrendPctRow label="Food Cost %" cur={snapshot.combined?.foodCostPct} prior={t.snapshot?.combined?.foodCostPct} delta={t.deltas?.foodCostPct} />}
-                              {snapshot.hr && <TrendPctRow label="Labor Cost %" cur={snapshot.combined?.laborCostPct} prior={t.snapshot?.combined?.laborCostPct} delta={t.deltas?.laborCostPct} />}
-                              {snapshot.ims && snapshot.hr && <TrendPctRow label="Prime Cost %" cur={snapshot.combined?.primeCostPct} prior={t.snapshot?.combined?.primeCostPct} delta={t.deltas?.primeCostPct} />}
-                              {snapshot.ims && snapshot.hr && <TrendPctRow label="Net Margin %" cur={snapshot.combined?.netMarginPct} prior={t.snapshot?.combined?.netMarginPct} delta={t.deltas?.netMarginPct} higherIsBetter />}
-                              {snapshot.pos && t.snapshot?.pos && <TrendRow label="POS Net Sales" cur={snapshot.pos?.totalNetSales} prior={t.snapshot?.pos?.totalNetSales} delta={t.deltas?.posNetSales} fmtFn={fmt} />}
+                              <TrendRow label="Revenue" cur={snapshot.combined?.revenueTotal} prior={t.snapshot?.combined?.revenueTotal} delta={d.revenueTotal} fmtFn={fmt} />
+                              {snapshot.ims && <TrendPctRow label="Food Cost %" cur={snapshot.combined?.foodCostPct} prior={t.snapshot?.combined?.foodCostPct} delta={d.foodCostPct} unjudged={unjudged} />}
+                              {showLabour && <TrendPctRow label="Labor Cost %" cur={snapshot.combined?.laborCostPct} prior={t.snapshot?.combined?.laborCostPct} delta={d.laborCostPct} />}
+                              {showPrime && <TrendPctRow label="Prime Cost %" cur={snapshot.combined?.primeCostPct} prior={t.snapshot?.combined?.primeCostPct} delta={d.primeCostPct} unjudged={unjudged} />}
+                              {showMargin && <TrendPctRow label="Net Margin %" cur={snapshot.combined?.netMarginPct} prior={t.snapshot?.combined?.netMarginPct} delta={d.netMarginPct} higherIsBetter unjudged={unjudged || !canOverheads} />}
+                              {snapshot.pos && t.snapshot?.pos && <TrendRow label="POS Net Sales" cur={snapshot.pos?.totalNetSales} prior={t.snapshot?.pos?.totalNetSales} delta={d.posNetSales} fmtFn={fmt} />}
                             </tbody>
                           </table>
                         </div>
                       )}
+                      {t?.available && unjudged && snapshot.ims && (
+                        <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
+                          Not judged: {curGap && priorGap ? `${periodLabel}'s and ${priorLabel}'s closing counts were` : `${curGap ? periodLabel : priorLabel}'s closing count was`} incomplete,
+                          so Food Cost, Prime Cost and Net Margin show their change without better or worse.
+                        </p>
+                      )}
+                      {t?.available && snapshot.ims && priorMissingIms && (
+                        <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
+                          {priorLabel}'s report is missing its Crest IMS section, so Food Cost, Prime Cost and Net Margin are not compared.
+                          Regenerate {priorLabel}'s snapshot and then this one to compare them.
+                        </p>
+                      )}
                       {/* S792 (D30): across the v8 → v9 line the two Food Cost % figures are two
                           formulas, so the three ratios containing it carry no change (buildDeltas
                           left them null). Say why, or the dashes read as missing data. */}
-                      {t?.available && snapshot.ims && basisOf(snapshot) !== basisOf(t.snapshot) && (
+                      {t?.available && snapshot.ims && !priorMissingIms && basisOf(snapshot) !== basisOf(t.snapshot) && (
                         <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
                           Food Cost, Prime Cost and Net Margin are not compared: {priorLabel} was generated
                           on {basisOf(t.snapshot) === 'cogs' ? 'food used (COGS)' : 'net purchases'} ÷ revenue and this
@@ -1073,16 +1460,25 @@ export default function MonthlyOwnerReport() {
                       )}
                       {/* S798 2e: across the v11 → v12 line Net Margin gained Tax & Fees, so its
                           change is left blank (buildDeltas). Same reason to say so. */}
-                      {t?.available && snapshot.ims && snapshot.hr && basisOf(snapshot) === basisOf(t.snapshot) && taxFeesInNet(snapshot) !== taxFeesInNet(t.snapshot) && (
+                      {t?.available && showMargin && basisOf(snapshot) === basisOf(t.snapshot) && taxFeesInNet(snapshot) !== taxFeesInNet(t.snapshot) && (
                         <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
                           Net Margin is not compared: {taxFeesInNet(snapshot) ? 'this report' : priorLabel} subtracts Tax &amp; Fees
                           and {taxFeesInNet(snapshot) ? priorLabel : 'this report'} was made before it did.
                           To compare them, regenerate {priorLabel}'s snapshot and then this one.
                         </p>
                       )}
+                      {/* S849 (GAPS-1): across the v17 → v18 line Net Margin gained wasted stock,
+                          staff meals and delivery commission (buildDeltas: netMarginCostsChanged). */}
+                      {t?.available && showMargin && basisOf(snapshot) === basisOf(t.snapshot) && taxFeesInNet(snapshot) === taxFeesInNet(t.snapshot) && pnlCostsInNet(snapshot) !== pnlCostsInNet(t.snapshot) && (
+                        <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
+                          Net Margin is not compared: {pnlCostsInNet(snapshot) ? 'this report' : priorLabel} also subtracts wasted stock,
+                          staff meals and delivery commission, and {pnlCostsInNet(snapshot) ? priorLabel : 'this report'} was made before it did.
+                          To compare them, regenerate {priorLabel}'s snapshot and then this one.
+                        </p>
+                      )}
                       {/* S798 3c: across the v12 → v13 line labour changed meaning (buildDeltas
                           leaves Labor, Prime and Net Margin blank). */}
-                      {t?.available && snapshot.hr && earnedLabour(snapshot) !== earnedLabour(t.snapshot) && (
+                      {t?.available && showLabour && earnedLabour(snapshot) !== earnedLabour(t.snapshot) && (
                         <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
                           Labor Cost, Prime Cost and Net Margin are not compared: {earnedLabour(snapshot) ? 'this report' : priorLabel} counts
                           labour as pay earned (unpaid days taken off) plus festival, incentive and final-settlement pay,
@@ -1096,13 +1492,6 @@ export default function MonthlyOwnerReport() {
               </div>
             )}
 
-            {snapshot.sectionErrors && (
-              <div className="no-print card" style={{ marginTop: 16, borderColor: 'color-mix(in srgb, var(--theme-amber) 25%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)' }}>
-                <p style={{ color: 'var(--theme-amber-text)', margin: 0, fontSize: 12 }}>
-                  Some sections could not be generated: {Object.keys(snapshot.sectionErrors).join(', ')}. Try Regenerate Snapshot, or contact support if this keeps happening.
-                </p>
-              </div>
-            )}
           </div>
         )}
         {confirmRegenerate && selectedPeriod && (
@@ -1119,7 +1508,6 @@ export default function MonthlyOwnerReport() {
             figures change with them.
           </ConfirmModal>
         )}
-      </SuiteGate>
-    </div>
+    </>
   )
 }

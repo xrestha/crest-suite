@@ -33,8 +33,9 @@ import { throwFirstError } from '../../shared/queryError'
 import { computeUsed, varianceThresholds } from '../../shared/imsFormulas'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
+import { readPeriodTransfers } from '../ims/transfers/transferFlows'
 import { selectDepletingSales } from '../ims/sales/salesDepletion'
-import { buildUsageMap } from '../ims/stockcount/stockReportCalc'
+import { buildUsageMap, transferNetQtyMap } from '../ims/stockcount/stockReportCalc'
 import {
   closingCountMap, linkedItemIdsOf, varianceRowBand, judgedRows, isUncountedGap, hasVarianceActivity,
 } from '../ims/variance/variancePopulation'
@@ -53,13 +54,17 @@ function sumByItem(rows, field) {
  * depletion rule cannot run without `bs_day` and `source`. `settings` supplies
  * `variance_flag_pct`; anything missing falls back to varianceBand's defaults.
  */
-export function buildVarianceSection({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion = null, settings = null }) {
+export function buildVarianceSection({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion = null, settings = null, transfers = null }) {
   const openMap = sumByItem(opening, 'qty')
   const closeMap = closingCountMap(closing)
   // Local, never state: the month has any count at all. Without one nothing is measured.
   const hasClosingRows = Object.keys(closeMap).length > 0
   const purchMap = sumByItem(purchases, 'qty')
   ;(returns || []).forEach(r => { purchMap[r.item_id] = (purchMap[r.item_id] || 0) - num(r.qty) })
+  // Stock transfers between outlets (S849, PNL-8, schema 18), as on the Variance page: received or
+  // returned stock ('in') adds like a purchase, sent stock ('out') comes off like a return, so stock
+  // sent to a branch is never read as over-use here and stock received is never a false surplus.
+  Object.entries(transferNetQtyMap(transfers)).forEach(([id, q]) => { purchMap[id] = (purchMap[id] || 0) + q })
   const wasteMap = sumByItem(wastages, 'qty')
   const staffMap = sumByItem(staffMeals, 'qty')
 
@@ -74,7 +79,7 @@ export function buildVarianceSection({ items, opening, closing, purchases, retur
 
   const rows = (items || []).map(item => {
     const openQty = openMap[item.id] || 0
-    const purchQty = purchMap[item.id] || 0 // already net of returns
+    const purchQty = purchMap[item.id] || 0 // already net of returns and transfers
     const hasCount = item.id in closeMap
     const closeQty = hasCount ? closeMap[item.id] : 0
     const actualUsed = computeUsed({
@@ -149,13 +154,15 @@ export async function computeInventoryVariance(clientId, period) {
     // The client's own tolerance, read at generation and frozen with the section. `settings` has a
     // nullable client_id, so it stays on raw supabase.from (CLAUDE.md).
     supabase.from('settings').select('variance_flag_pct').eq('client_id', clientId).maybeSingle(),
+    // This outlet's stock-transfer lines for the month (S849, PNL-8): paged; a failed read fails the section.
+    readPeriodTransfers((t, c) => scopedFrom(t, clientId, c), period.id),
   ])
   // Throw on a failed read so the section is named as failed instead of freezing a variance table
   // built on zeros into the immutable snapshot (S612).
   throwFirstError(results)
   const [
     { data: items }, { data: opening }, { data: closing }, { data: purchases }, { data: returns },
-    { data: wastages }, { data: staffMeals }, { data: sales }, { data: recipes }, { data: settings },
+    { data: wastages }, { data: staffMeals }, { data: sales }, { data: recipes }, { data: settings }, { data: transfers },
   ] = results
 
   const recipeIds = (recipes || []).map(r => r.id)
@@ -166,5 +173,5 @@ export async function computeInventoryVariance(clientId, period) {
     loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
   ])
 
-  return buildVarianceSection({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion, settings })
+  return buildVarianceSection({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion, settings, transfers })
 }

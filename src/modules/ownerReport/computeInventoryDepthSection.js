@@ -32,9 +32,9 @@ export async function computeInventoryDepthSection(clientId, period, { ims } = {
   // Pure, sync — no query, so no try/catch needed, but still guarded against missing `ims`
   // (e.g. IMS somehow failed upstream — Inventory Depth is only computed when ims is present,
   // but stay defensive since this is cheap to do).
+  // On the report's COGS and the stock of the same items since schema 18 (OWNER-REPORT-15).
   const turnover = ims ? computeInventoryTurnover({
-    openingStockValueTotal: ims.openingStockValueTotal, closingStockValueTotal: ims.closingStockValueTotal,
-    purchaseTotal: ims.purchaseTotal, monthDays,
+    usedValue: ims.cogsTotal, openingValue: ims.cogsOpeningValue, closingValue: ims.cogsClosingValue, monthDays,
   }) : null
 
   return { deadSlowStock, turnover, variance, shrinkageTrend, sectionErrors: Object.keys(errors).length > 0 ? errors : null }

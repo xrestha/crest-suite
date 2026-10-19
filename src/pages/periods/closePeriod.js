@@ -1,8 +1,9 @@
 import { supabase } from '../../supabaseClient'
 import { scopedFrom, scopedInsert, scopedUpdate } from '../../shared/scopedDb'
-import { withTimeout } from '../../utils/withTimeout'
+import { withTimeout, isTimeout } from '../../utils/withTimeout'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { generateMonthlyReport, saveGeneratedReport } from '../../modules/ownerReport/generateMonthlyReport'
+import { failedSectionKeys, sectionList } from '../../modules/ownerReport/sectionNames'
 import { backfillApprovedLeave } from '../../modules/hr/leave/backfillApprovedLeave'
 import { loadImsWaiting, waitingForPeriod, countPhrase } from '../../modules/pos/orders/posImsWaiting'
 import { BS_MONTHS } from '../../utils/bsCalendar'
@@ -27,8 +28,13 @@ import { BS_MONTHS } from '../../utils/bsCalendar'
  * its month's work AFTER the stock month closes — the count is on the 1st, payroll is finalized by
  * the 5th — so an IMS-style `isLocked` on HR pages would block every HR client's payroll run. HR's
  * lock is Payroll Run's own finalize. The close dialog says so, and says what the frozen report
- * carries in the meantime (an estimate, until an admin regenerates it).
+ * carries in the meantime (an estimate, until the Owner or Crest support regenerates it).
  */
+
+// How long the close waits for the frozen report before it lets the dialog go (S849, OWNER-REPORT-6).
+// The report reads a whole month across three modules, so it gets far longer than a preflight's 10s;
+// but a hung read must not hold "Closing…" for ever over a month that is already closed.
+export const REPORT_TIMEOUT_MS = 90000
 
 export function nextBsMonth(period) {
   return period.bs_month === 12
@@ -135,9 +141,11 @@ export async function payrollPreflight(periodId, clientId) {
  * @returns {{danger: boolean, warn: boolean, text: string}}
  */
 export function payrollNote(pre, monthLabel) {
-  if (!pre) return { danger: false, warn: false, text: `Couldn't check whether ${monthLabel}'s payroll is finalized. If it is not, the frozen Monthly Report carries an estimated labour cost until an admin regenerates it after Finalize.` }
+  // S849 (OWNER-REPORT-20): the Owner regenerates too (S756), so "an admin" was wrong for every close
+  // an Owner or an IMS supervisor makes.
+  if (!pre) return { danger: false, warn: false, text: `Couldn't check whether ${monthLabel}'s payroll is finalized. If it is not, the frozen Monthly Report carries an estimated labour cost until the Owner presses Regenerate Snapshot on it after Finalize.` }
   if (pre.status === 'finalized') return { danger: false, warn: false, text: `${monthLabel}'s payroll is finalized — the frozen Monthly Report carries the exact payroll figure.` }
-  return { danger: false, warn: true, text: `${monthLabel}'s payroll is not finalized yet. HR pages stay open after the close and Payroll Run has its own lock — but the frozen Monthly Report will carry an ESTIMATED labour cost until an admin regenerates it after Finalize.` }
+  return { danger: false, warn: true, text: `${monthLabel}'s payroll is not finalized yet. HR pages stay open after the close and Payroll Run has its own lock — but the frozen Monthly Report will carry an ESTIMATED labour cost until the Owner presses Regenerate Snapshot on it after Finalize.` }
 }
 
 /**
@@ -289,11 +297,20 @@ export async function createPeriodWithCarryForward({ clientId, periods, bs_year,
  * `makeReport: false` skips the frozen report for a closer who cannot write it (D42, see
  * `closerMakesReport`); `reportSaved` is then false and nothing is recorded as a failure.
  *
+ * The report is "saved" only when it is whole (S849, OWNER-REPORT-2): a snapshot that froze with a
+ * section missing (`sectionErrors`, or an Inventory Depth sub-section) is a `report_partial` failure
+ * naming those sections, so the close says so instead of "ready". And it is bounded
+ * (OWNER-REPORT-6): a generate-and-save that has not answered in `reportTimeoutMs` is a
+ * `report_slow` failure, so the close dialog lets go. A save that lands after that is not lost.
+ *
+ * `actorId` is accepted for the callers' sake and no longer sent: since S849 the database stamps who
+ * made the report and when (`owner_report_2_guard`, OWNER-REPORT-4).
+ *
  * @returns {Promise<{closed: boolean, nextPeriodId: string|null, reportSaved: boolean,
- *   failures: Array<{stage: 'close'|'already_closed'|'open_next'|'carry_forward'|'leave_backfill'|'report', error: any}>,
+ *   failures: Array<{stage: 'close'|'already_closed'|'open_next'|'carry_forward'|'leave_backfill'|'report'|'report_partial'|'report_slow', error: any, sections?: string[]}>,
  *   leaveFill: {filled: number, skipped: number, employees: number, error: any}|null}>}
  */
-export async function performPeriodClose({ clientId, period, openNext = true, actorId = null, makeReport = true }) {
+export async function performPeriodClose({ clientId, period, openNext = true, actorId = null, makeReport = true, reportTimeoutMs = REPORT_TIMEOUT_MS }) {
   const failures = []
   // Guarded on the status it changes (S792, STOCK-8). Unguarded, a stale "End month" pressed on a
   // dashboard that had not reloaded since someone else closed the month matched anyway (closed →
@@ -376,12 +393,17 @@ export async function performPeriodClose({ clientId, period, openNext = true, ac
   if (makeReport) {
     try {
       const closed = { ...period, status: 'closed' }
-      const { snapshot, modulesIncluded } = await generateMonthlyReport({ clientId, period: closed })
-      await saveGeneratedReport({ clientId, period: closed, snapshot, modulesIncluded, actorId, source: 'period_close' })
-      reportSaved = true
+      const snapshot = await withTimeout((async () => {
+        const made = await generateMonthlyReport({ clientId, period: closed })
+        await saveGeneratedReport({ clientId, period: closed, snapshot: made.snapshot, modulesIncluded: made.modulesIncluded, source: 'period_close' })
+        return made.snapshot
+      })(), reportTimeoutMs, 'Making the monthly report')
+      const missing = failedSectionKeys(snapshot)
+      if (missing.length > 0) failures.push({ stage: 'report_partial', error: null, sections: missing })
+      else reportSaved = true
     } catch (e) {
       console.error('Monthly owner report generation failed (non-blocking):', e)
-      failures.push({ stage: 'report', error: e })
+      failures.push({ stage: isTimeout(e) ? 'report_slow' : 'report', error: e })
     }
   }
 
@@ -393,7 +415,7 @@ export async function performPeriodClose({ clientId, period, openNext = true, ac
  * never the constraint (see errorText.js). The technical detail rides along separately as
  * ActionError's fine print; this is the headline.
  */
-export function closeFailureText({ stage, period, isAdmin = false }) {
+export function closeFailureText({ stage, period, isAdmin = false, sections = [] }) {
   const m = periodLabel(period)
   const n = nextBsMonth(period)
   const nextLabel = `${BS_MONTHS[n.bs_month - 1]} ${n.bs_year}`
@@ -423,6 +445,13 @@ export function closeFailureText({ stage, period, isAdmin = false }) {
         `payroll will not deduct those days as they stand. Open HR → Leave and use "Mark approved leave", or re-open ${nextLabel}'s Attendance after checking the connection.`
     case 'report':
       return `${m} closed, but its frozen Monthly Report could not be generated now. It will be generated the first time the report is opened.`
+    case 'report_partial':
+      // S849 (OWNER-REPORT-2): the report was made, with a section frozen out of it. It used to say
+      // nothing, and "Report is ready" showed over a report with no payroll in it.
+      return `${m} closed, but its Monthly Report is missing ${sectionList(sections) || 'some sections'}: those figures could not be read just then. Open the report and press Regenerate Snapshot.`
+    case 'report_slow':
+      // S849 (OWNER-REPORT-6): we stopped waiting, which does not prove the report was not saved.
+      return `${m} closed, but its Monthly Report was still being made when we stopped waiting. Open the report: if it is not there yet, it is made then.`
     default:
       return `${m} may not have closed completely. Check Periods before continuing.`
   }
@@ -440,8 +469,10 @@ export function closeFailureText({ stage, period, isAdmin = false }) {
 export function closeFailuresText({ failures, period, isAdmin = false }) {
   const stages = [...new Set((failures || []).map(f => f.stage))]
   if (!stages.length) return null
+  // A stage's sentence may need its failure's own detail (report_partial names its sections).
+  const firstOf = stage => (failures || []).find(f => f.stage === stage) || {}
   return {
-    text: stages.map(stage => closeFailureText({ stage, period, isAdmin })).join(' '),
+    text: stages.map(stage => closeFailureText({ stage, period, isAdmin, sections: firstOf(stage).sections })).join(' '),
     error: failures[0].error,
     neutral: stages.length === 1 && stages[0] === 'already_closed',
   }

@@ -37,6 +37,7 @@ import { varianceThresholds } from '../../shared/imsFormulas'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildShrinkageObservations, bandShrinkageItem } from '../ims/variance/shrinkageCalc'
+import { readPeriodTransfers } from '../ims/transfers/transferFlows'
 
 const WINDOW_SIZE = 6
 
@@ -45,10 +46,12 @@ const WINDOW_SIZE = 6
  * database. `window` is the closed periods analysed, newest first; `sales` rows must carry
  * `period_id, recipe_id, qty_sold, bs_day, source, ingredient_deltas`.
  */
-export function buildShrinkageTrendSection({ window, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion = null, settings = null }) {
+export function buildShrinkageTrendSection({ window, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion = null, settings = null, transfers = null }) {
   const periodIds = (window || []).map(p => p.id)
+  // Stock transfers between outlets move each month's net purchases (S849, PNL-8, schema 18), as on
+  // the Shrinkage Report: stock sent to a branch is never read as shrinkage here.
   const { rows: observed, uncountedItems, uncountedItemPeriods } = buildShrinkageObservations({
-    periodIds, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion,
+    periodIds, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion, transfers,
   })
   // The frozen row names its item by id and name (resolved at generation, S435), not the item row.
   const rows = observed.map(({ item, rate, observations, uncountedPeriods }) =>
@@ -106,11 +109,13 @@ export async function computeInventoryShrinkageTrend(clientId, period) {
     fetchAllRows(() => scopedFrom('recipes', clientId, 'id').order('id')),
     // The client's own tolerance, frozen with the section. Raw supabase.from: nullable client_id.
     supabase.from('settings').select('variance_flag_pct').eq('client_id', clientId).maybeSingle(),
+    // The window's stock-transfer lines (S849, PNL-8): paged and chunked; a failed read fails the section.
+    readPeriodTransfers((t, c) => scopedFrom(t, clientId, c), windowIds, { select: 'id, period_id, item_id, qty, direction' }),
   ])
   throwFirstError(results)
   const [
     { data: items }, { data: opening }, { data: closing }, { data: purchases }, { data: returns },
-    { data: wastages }, { data: staffMeals }, { data: sales }, { data: recipes }, { data: settings },
+    { data: wastages }, { data: staffMeals }, { data: sales }, { data: recipes }, { data: settings }, { data: transfers },
   ] = results
 
   const recipeIds = (recipes || []).map(r => r.id)
@@ -121,5 +126,5 @@ export async function computeInventoryShrinkageTrend(clientId, period) {
     loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
   ])
 
-  return buildShrinkageTrendSection({ window, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion, settings })
+  return buildShrinkageTrendSection({ window, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion, settings, transfers })
 }

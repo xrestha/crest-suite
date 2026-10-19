@@ -24,7 +24,7 @@ import {
   closingCountPreflight,
   performPeriodClose, closeFailureText, closeFailuresText, payrollNote, nextBsMonth,
   nextExistingPeriod, previousExistingPeriod, carryForwardOpeningStock, createPeriodWithCarryForward,
-  closerMakesReport, deferredReportNote, tillWaitingNote, tillWaitingPreflight,
+  closerMakesReport, deferredReportNote, tillWaitingNote, tillWaitingPreflight, REPORT_TIMEOUT_MS,
 } from './closePeriod'
 /* eslint-enable import/first */
 
@@ -209,7 +209,9 @@ describe('performPeriodClose', () => {
     expect(scopedInsert).toHaveBeenCalledWith('monthly_periods', 'c1', { bs_year: 2083, bs_month: 6, status: 'open' }, { single: true })
     // The report is generated for the CLOSED period — status must not still read 'open'.
     expect(generateMonthlyReport).toHaveBeenCalledWith({ clientId: 'c1', period: { ...PERIOD, status: 'closed' } })
-    expect(saveGeneratedReport).toHaveBeenCalledWith(expect.objectContaining({ actorId: 'u1', source: 'period_close' }))
+    expect(saveGeneratedReport).toHaveBeenCalledWith(expect.objectContaining({ source: 'period_close' }))
+    // S849 (OWNER-REPORT-4): the database stamps who made it; the browser no longer sends a maker.
+    expect(saveGeneratedReport.mock.calls[0][0]).not.toHaveProperty('actorId')
   })
 
   test('a failed close stops everything — nothing else is about a month that is not closed', async () => {
@@ -401,6 +403,41 @@ describe('performPeriodClose', () => {
     expect(r.failures.map(f => f.stage)).toEqual(['report'])
   })
 
+  // S849 (OWNER-REPORT-2): a section frozen out of the snapshot is not a finished report.
+  test('a report saved with a section missing is a report_partial failure naming it, never "saved"', async () => {
+    generateMonthlyReport.mockResolvedValue({
+      snapshot: { sectionErrors: { hr: 'Failed to fetch' }, inventoryDepth: { sectionErrors: { shrinkageTrend: 'x' } } },
+      modulesIncluded: { ims: true, hr: true },
+    })
+    const r = await performPeriodClose({ clientId: 'c1', period: PERIOD })
+    expect(r.closed).toBe(true)
+    expect(r.reportSaved).toBe(false)
+    expect(saveGeneratedReport).toHaveBeenCalled()
+    expect(r.failures).toEqual([{ stage: 'report_partial', error: null, sections: ['hr', 'shrinkageTrend'] }])
+    const said = closeFailuresText({ failures: r.failures, period: PERIOD })
+    expect(said.text).toMatch(/Bhadra 2083 closed, but its Monthly Report is missing Crest HR and Shrinkage Trend/)
+    expect(said.text).toMatch(/press Regenerate Snapshot/)
+    expect(said.neutral).toBe(false)
+  })
+
+  // S849 (OWNER-REPORT-6): a hung generate must not hold the close dialog on "Closing…" for ever.
+  test('a generate that never answers is a report_slow failure, and the month is still closed', async () => {
+    generateMonthlyReport.mockReturnValue(new Promise(() => {}))
+    const r = await performPeriodClose({ clientId: 'c1', period: PERIOD, reportTimeoutMs: 20 })
+    expect(r.closed).toBe(true)
+    expect(r.nextPeriodId).toBe('p-ashwin')
+    expect(r.reportSaved).toBe(false)
+    expect(r.failures.map(f => f.stage)).toEqual(['report_slow'])
+    const t = closeFailureText({ stage: 'report_slow', period: PERIOD })
+    expect(t).toMatch(/still being made when we stopped waiting/)
+    // Stopping the wait proves nothing about the save, so it never says the report was not made.
+    expect(t).not.toMatch(/could not be generated/)
+  })
+
+  test('the close waits 90 seconds for the report by default', async () => {
+    expect(REPORT_TIMEOUT_MS).toBe(90000)
+  })
+
   test('openNext:false (admin End Period) opens nothing and carries nothing', async () => {
     const r = await performPeriodClose({ clientId: 'c1', period: PERIOD, openNext: false })
     expect(r).toEqual({ closed: true, nextPeriodId: null, reportSaved: true, failures: [], leaveFill: null })
@@ -432,6 +469,11 @@ describe('closeFailureText', () => {
 
   test('report says the lazy fallback will cover it', () => {
     expect(closeFailureText({ stage: 'report', period: PERIOD })).toMatch(/first time the report is opened/)
+  })
+
+  test('report_partial names the missing sections in words (S849, OWNER-REPORT-2)', () => {
+    const t = closeFailureText({ stage: 'report_partial', period: PERIOD, sections: ['hr', 'laborAnalytics'] })
+    expect(t).toBe('Bhadra 2083 closed, but its Monthly Report is missing Crest HR and Labor Analytics: those figures could not be read just then. Open the report and press Regenerate Snapshot.')
   })
 
   test('already_closed says nothing changed and sends them to reload, not to try again (S792, STOCK-8)', () => {
@@ -506,6 +548,15 @@ describe('payrollNote', () => {
     expect(n.warn).toBe(false)
     expect(n.text).toMatch(/couldn't check/i)
     expect(n.text).toMatch(/estimated labour cost/)
+  })
+
+  // S849 (OWNER-REPORT-20, DOCS-M3): the Owner regenerates (S756); "an admin" was wrong for them.
+  test('the repair is the Owner pressing Regenerate Snapshot, never "an admin"', () => {
+    for (const pre of [null, { status: 'draft' }, { status: 'none' }]) {
+      const { text } = payrollNote(pre, 'Bhadra 2083')
+      expect(text).toMatch(/until the Owner presses Regenerate Snapshot on it after Finalize/)
+      expect(text).not.toMatch(/an admin/)
+    }
   })
 
   test('finalized is the quiet all-clear', () => {

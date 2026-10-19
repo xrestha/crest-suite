@@ -13,6 +13,7 @@ import { bsToAd } from '../../utils/bsCalendar'
 import { allocateBillDiscounts, netFactors, returnBase, mergeFactors, vatCostFactor, returnCostFactor } from '../ims/reports/supplierAttribution'
 import { returnLinesOutsidePeriod, priorBillFactors } from '../ims/reports/purchaseTaxSplit'
 import { readPriorBillLines } from '../ims/reports/readPriorBillLines'
+import { unpaidCreditBills, returnedByEntryOf } from './unpaidCreditBills'
 
 const EPS = 0.001
 
@@ -58,11 +59,17 @@ export async function computeVendorPurchasingSection(clientId, period, generated
 
   const creditIds = (purchases || []).filter(p => p.payment_method === 'Credit').map(p => p.id)
   // Chunked and paged (S723/S629): one row per LINE per settlement, and the id list rides in the URL.
-  const paymentsRes = creditIds.length > 0
-    ? await fetchAllRowsChunked(creditIds, ids =>
-      scopedFrom('payable_payments', clientId, 'id, purchase_entry_id, amount').in('purchase_entry_id', ids).order('id'))
-    : { data: [], error: null }
-  throwFirstError([paymentsRes])
+  // The returns against those lines come from ANY month (S849, OWNER-REPORT-8): a return made after
+  // the month still lowers what is owed on the month's bill, as Outstanding Payables counts it.
+  const [paymentsRes, creditReturnsRes] = creditIds.length > 0
+    ? await Promise.all([
+      fetchAllRowsChunked(creditIds, ids =>
+        scopedFrom('payable_payments', clientId, 'id, purchase_entry_id, amount').in('purchase_entry_id', ids).order('id')),
+      fetchAllRowsChunked(creditIds, ids =>
+        scopedFrom('vendor_returns', clientId, 'id, purchase_entry_id, qty, rate').in('purchase_entry_id', ids).order('id')),
+    ])
+    : [{ data: [], error: null }, { data: [], error: null }]
+  throwFirstError([paymentsRes, creditReturnsRes])
   const { data: payments } = paymentsRes
 
   // Returns are credited at the price actually paid — net of their own bill's discount — as
@@ -134,18 +141,17 @@ export async function computeVendorPurchasingSection(clientId, period, generated
   const grandReturn = (returns || []).reduce((s, r) => s + returnValue(r), 0)
 
   // Bill-level aging for unpaid Credit bills — pinned to `generatedAt`, not live `new Date()`.
-  const billAging = { current: 0, d31_60: 0, d61_90: 0, d90plus: 0 }
+  // What is still OWED on each bill since schema 18 (S849, OWNER-REPORT-8): VAT added, the discount
+  // taken off and returns credited at their discounted price (`unpaidCreditBills`, the Outstanding
+  // Payables arithmetic), less its payments. Until v17 it was raw qty × rate less payments, so a
+  // discounted bill paid in full aged its discount as unpaid and a VAT bill paid half aged too little.
+  // `basis: 'owed'` marks it; an older section has none.
+  const billAging = { current: 0, d31_60: 0, d61_90: 0, d90plus: 0, basis: 'owed' }
   const agingBills = []
-  const seenBillsForAging = new Set()
-  ;(purchases || []).forEach(e => {
-    if (e.payment_method !== 'Credit') return
-    const gid = billKey(e)
-    if (seenBillsForAging.has(gid)) return
-    seenBillsForAging.add(gid)
-    const billEntries = (purchases || []).filter(p => p.payment_method === 'Credit' && billKey(p) === gid)
-    const total = billEntries.reduce((s, p) => s + parseFloat(p.qty || 0) * parseFloat(p.rate || 0), 0)
-    const paid = billEntries.reduce((s, p) => s + (paidByEntry[p.id] || 0), 0)
-    const remaining = Math.max(0, total - paid)
+  const creditBills = unpaidCreditBills({
+    lines: purchases, returnedByEntry: returnedByEntryOf(creditReturnsRes.data), paidByEntry,
+  })
+  creditBills.forEach(({ firstLine: e, remaining }) => {
     if (remaining <= EPS) return
     const adDate = bsToAd(period.bs_year, period.bs_month, e.bs_day || 1)
     const daysOld = Math.max(0, Math.floor((generatedAt - adDate) / 86400000))

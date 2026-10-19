@@ -11,13 +11,14 @@ jest.mock('../../shared/scopedDb', () => ({ scopedFrom: jest.fn() }))
 
 // eslint-disable-next-line import/first
 import {
-  netPurchaseFigures, estimatePayrollAccrual, CURRENT_SCHEMA_VERSION,
+  netPurchaseFigures, CURRENT_SCHEMA_VERSION,
   computeCombinedMetrics, buildDeltas, foodCostBasisOf, trendSnapshotOf, netMarginTaxFeesOf, labourBasisOf,
+  netMarginPnlCostsOf, resolveReportLabour, employmentInMonth, attendanceRate, leaveDaysInMonth,
 } from './computeMonthlyReport'
 // eslint-disable-next-line import/first
 import { hoursCoverage } from './computeLaborAnalyticsSection'
 // eslint-disable-next-line import/first
-import { SSF_CAP, SSF_EMPLOYER_PCT } from '../hr/payrollConstants'
+import { computeInventoryTurnover } from './computeInventoryTurnover'
 // eslint-disable-next-line import/first
 import { bsToAd, daysInBsMonth, formatAd } from '../../utils/bsCalendar'
 
@@ -73,53 +74,26 @@ describe('netPurchaseFigures', () => {
   })
 
   test('empty and missing inputs are zero, not NaN', () => {
-    expect(netPurchaseFigures(null, undefined)).toEqual({ purchaseTotal: 0, cashNet: 0, creditNet: 0 })
+    expect(netPurchaseFigures(null, undefined)).toEqual({ purchaseTotal: 0, cashNet: 0, creditNet: 0, transferIn: 0, transferOut: 0 })
+  })
+
+  // S849 (PNL-8, schema 18): a stock transfer moves Net Purchases like a purchase / a return, and the
+  // Cash / Credit split stays supplier-only.
+  test('transfers in add and transfers out come off Net Purchases, not the Cash / Credit split', () => {
+    const purchases = [line({ qty: 10, rate: 100 })]
+    const transfers = [
+      { item_id: 'i1', direction: 'in', qty: 2, rate: 100, value: 200 },
+      { item_id: 'i2', direction: 'out', qty: 1, rate: 50, value: 50 },
+    ]
+    const f = netPurchaseFigures(purchases, [], transfers)
+    expect(f.purchaseTotal).toBeCloseTo(1000 + 200 - 50, 6)
+    expect(f).toMatchObject({ cashNet: 1000, creditNet: 0, transferIn: 200, transferOut: 50 })
   })
 })
 
-describe('estimatePayrollAccrual — employer SSF follows payroll’s own gate', () => {
-  // A 30-or-so-day BS month; the exact length does not matter because every employee below
-  // works the whole of it, so gross is the monthly figure and SSF is on the full capped base.
-  const period = { bs_year: 2083, bs_month: 5 }
-  const base = { status: 'active', basic_salary: 40000, pay_basis: 'monthly', join_date: null, end_date: null }
-
-  test('enrolled AND numbered: employer SSF is added', () => {
-    const { gross, ssfEmployer } = estimatePayrollAccrual({
-      employees: [{ ...base, id: 'e1', ssf_enrolled: true, ssf_no: '1234567890' }], components: [], period,
-    })
-    expect(gross).toBeCloseTo(40000, 6)
-    expect(ssfEmployer).toBeCloseTo(Math.min(40000, SSF_CAP) * SSF_EMPLOYER_PCT, 6)
-  })
-
-  test('enrolled WITHOUT a number: no employer SSF (payroll contributes nothing for them)', () => {
-    for (const ssf_no of [null, undefined, '', '   ']) {
-      const { gross, ssfEmployer } = estimatePayrollAccrual({
-        employees: [{ ...base, id: 'e2', ssf_enrolled: true, ssf_no }], components: [], period,
-      })
-      expect(gross).toBeCloseTo(40000, 6)
-      expect(ssfEmployer).toBe(0)
-    }
-  })
-
-  test('a number without the enrolment flag adds nothing either', () => {
-    const { ssfEmployer } = estimatePayrollAccrual({
-      employees: [{ ...base, id: 'e3', ssf_enrolled: false, ssf_no: '1234567890' }], components: [], period,
-    })
-    expect(ssfEmployer).toBe(0)
-  })
-
-  // S798 4b, LABOUR-FIGURES-8 (schema 14): SSF is on basic, so an allowance raises gross and leaves
-  // employer SSF where payroll leaves it.
-  test('allowances are in gross but not in the employer SSF base', () => {
-    const { gross, ssfEmployer } = estimatePayrollAccrual({
-      employees: [{ ...base, id: 'e4', ssf_enrolled: true, ssf_no: '1234567890' }],
-      components: [{ employee_id: 'e4', type: 'earning', calc_type: 'fixed', value: 3000 }], period,
-    })
-    expect(gross).toBeCloseTo(43000, 6)
-    expect(ssfEmployer).toBeCloseTo(40000 * SSF_EMPLOYER_PCT, 6)
-    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(14)
-  })
-})
+// The estimate's own cases (employer SSF only for a contributor, on basic; a leaver on the month's
+// last day; joiners) moved with the estimate to labourEstimate.test.js (S849, GAPS-4): the report now
+// runs the ONE HR estimate every Suite page uses.
 
 describe('computeMonthlyReport reads what the two helpers need', () => {
   const flat = fs.readFileSync(path.join(__dirname, 'computeMonthlyReport.js'), 'utf8')
@@ -151,12 +125,19 @@ describe('computeMonthlyReport reads what the two helpers need', () => {
     }
   })
 
-  test('the hr_employees read selects ssf_no, and nothing gates employer SSF on the flag alone', () => {
-    const at = flat.indexOf("scopedFrom('hr_employees'")
-    expect(at).toBeGreaterThan(-1)
-    expect(flat.slice(at, at + 160)).toContain('ssf_no')
+  // S849 (GAPS-4, OWNER-REPORT-16): the HR inputs come through the shared, paged reads and the ONE
+  // estimate; the report keeps no estimate of its own (employer SSF is gated inside estimateLabour).
+  test('the HR section runs the shared estimate over the shared paged reads', () => {
+    expect(flat).toContain('loadLabourEstimateInputs(from, period)')
+    expect(flat).toContain('estimateLabour({ ...inputs, period, throughDay: monthDays })')
+    expect(flat).not.toMatch(/estimatePayrollAccrual\(/)
+    expect(flat).not.toMatch(/scopedFrom\('hr_employees'/)
     expect(flat).not.toMatch(/if \(\s*emp\.ssf_enrolled\s*\)/)
-    expect(flat).toMatch(/isSsfContributor\(emp\)/)
+  })
+
+  test('the Food Cost thresholds and the stock transfers are read for the frozen report (S849)', () => {
+    expect(flat).toContain("supabase.from('settings').select('fc_warning_pct, fc_critical_pct').eq('client_id', clientId).maybeSingle()")
+    expect(flat).toContain('readPeriodTransfers((t, c) => scopedFrom(t, clientId, c), period.id)')
   })
 
   test('the schema version moved for the change of meaning', () => {
@@ -262,6 +243,8 @@ describe('trendSnapshotOf: a Trend entry no longer embeds the whole prior snapsh
     const t = trendSnapshotOf(prior)
     expect(t).toEqual({
       schemaVersion: 9,
+      countGapMaterial: false,
+      sectionErrors: null,
       combined: { revenueTotal: 110, foodCostPct: 35, laborCostPct: 25, primeCostPct: 60, netMarginPct: 30, foodCostBasis: 'cogs' },
       pos: { totalNetSales: 125 },
     })
@@ -291,41 +274,18 @@ describe('trendSnapshotOf: a Trend entry no longer embeds the whole prior snapsh
   })
 })
 
-// S798 stage 2e, LABOUR-FIGURES-5. `new Date('YYYY-MM-DD')` is UTC midnight: 05:45 that day in
-// Nepal, later than bsToAd's LOCAL midnight for the same day. So `endAd <= periodEndAd` failed for
-// a leaver whose last day was the month's last day, and they dropped out of the frozen estimate.
-// The bug shows only east of UTC; run this file with TZ=Asia/Kathmandu to see it (Jest cannot
-// change the zone mid-run, and on a UTC machine the old parse happened to be right).
-describe('estimatePayrollAccrual reads stored dates as local dates (S798 2e)', () => {
-  const period = { bs_year: 2083, bs_month: 5 }
-  const monthDays = daysInBsMonth(2083, 5)
-  const firstDay = formatAd(bsToAd(2083, 5, 1))
-  const lastDay = formatAd(bsToAd(2083, 5, monthDays))
-  const base = { basic_salary: 30000, pay_basis: 'monthly', ssf_enrolled: false, ssf_no: null }
-
-  test('a leaver whose last day is the month’s last day is paid the whole month', () => {
-    const { gross } = estimatePayrollAccrual({
-      employees: [{ ...base, id: 'ram', status: 'resigned', join_date: '2020-01-01', end_date: lastDay }], components: [], period,
-    })
-    expect(gross).toBeCloseTo(30000, 6)
-  })
-
-  test('a joiner on the first day accrues every day of it, and one on the last day accrues one day', () => {
-    const whole = estimatePayrollAccrual({ employees: [{ ...base, id: 'a', status: 'active', join_date: firstDay }], components: [], period })
-    expect(whole.gross).toBeCloseTo(30000, 6)
-    const oneDay = estimatePayrollAccrual({ employees: [{ ...base, id: 'b', status: 'active', join_date: lastDay }], components: [], period })
-    expect(oneDay.gross).toBeCloseTo(30000 / monthDays, 6)
-  })
-})
-
 describe('the HR and overhead reads (S798 2e)', () => {
   const flat = fs.readFileSync(path.join(__dirname, 'computeMonthlyReport.js'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
     .replace(/\s+/g, ' ')
 
-  test('overheads: every bucket but labor, with the bucket selected (LABOUR-FIGURES-4)', () => {
-    expect(flat).toContain("from('overheads').select('amount, bucket').eq('period_id', period.id).or(NON_LABOUR_OVERHEADS)")
+  // S849 (GAPS-4 / OWNER-REPORT-9): every bucket, so the Labor tab can be labour without HR and be
+  // named "not counted" beside payroll with HR. Split by splitOverheadBuckets.
+  test('overheads: every bucket, with the bucket selected (LABOUR-FIGURES-4, GAPS-4)', () => {
+    expect(flat).toContain("from('overheads').select('amount, bucket').eq('period_id', period.id),")
+    expect(flat).not.toContain('.or(NON_LABOUR_OVERHEADS)')
+    expect(flat).toContain('splitOverheadBuckets(overheadsData)')
     expect(flat).not.toContain("'bucket', 'overhead'")
   })
 
@@ -426,8 +386,217 @@ describe('labour is pay earned plus other labour paid from schema v13 (S798 3c)'
 
   const flat = fs.readFileSync(path.join(__dirname, 'computeMonthlyReport.js'), 'utf8').replace(/\s+/g, ' ')
   test('the finalized run takes off the absence deduction and both paths add other labour', () => {
-    expect(flat).toMatch(/total: gross - absenceDeduction \+ otAmount \+ ssfEmployer \+ other\.total/)
-    expect(flat).toMatch(/total: accruedGross \+ otTotal \+ accruedSsfEmployer \+ other\.total/)
+    // payrollLabourTotal is gross − absence deduction + overtime + employer SSF (labourSource.js).
+    expect(flat).toMatch(/const payrollBase = payrollLabourTotal\(payslips \|\| \[\]\)/)
+    expect(flat).toMatch(/total: payrollBase \+ other\.total/)
+    expect(flat).toMatch(/total: est\.amount \+ other\.total/)
     expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(13)
   })
+})
+
+// ── Schema 18 (S849) ─────────────────────────────────────────────────────────────────────────────
+
+describe('Net Margin takes off what Consolidated P&L takes off (S849, GAPS-1 / PNL-1)', () => {
+  // GAPS-1's worked month.
+  const ims = {
+    revenueTotal: 900000, cogsTotal: 314000, cogsWastageTotal: 14000, staffMealsValueTotal: 22000,
+    overheadTotal: 120000, taxFeesTotal: 18000, foodCostPct: 314000 / 9000, foodCostBasis: 'cogs',
+  }
+  const labour = { source: 'payroll', amount: 234000, laborTabNotCounted: 0, reason: '', noPayCount: 0 }
+
+  test('raw stock wasted and staff meals come off: 19.8%', () => {
+    const c = computeCombinedMetrics({ ims, labour })
+    expect(c.netMarginPct).toBeCloseTo(19.78, 2)
+    expect(c.netMarginPnlCosts).toBe(true)
+    expect(netMarginPnlCostsOf({ combined: c })).toBe(true)
+    // Prime Cost stays Food Cost % + Labour % (D30): wastage and staff meals are not in it.
+    expect(c.primeCostPct).toBeCloseTo(314000 / 9000 + 26, 6)
+  })
+
+  test('delivery commission comes off too', () => {
+    const c = computeCombinedMetrics({ ims, labour, deliveryCommission: { amount: 9000, unsettledBills: 2 } })
+    expect(c.netMarginPct).toBeCloseTo(((178000 - 9000) / 900000) * 100, 6)
+  })
+
+  test('a failed commission read is no Net Margin, never one without it', () => {
+    const c = computeCombinedMetrics({ ims, labour, deliveryCommission: null, commissionFailed: true })
+    expect(c.netMarginPct).toBeNull()
+    expect(c.foodCostPct).toBeCloseTo(34.89, 2)
+  })
+
+  test('Trend gives no Net Margin change across the v17 → v18 line; the rest still compare', () => {
+    const base = { revenueTotal: 110, foodCostPct: 35, laborCostPct: 25, primeCostPct: 60, foodCostBasis: 'cogs', netMarginTaxFees: true, labourBasis: 'earned' }
+    const v18 = { combined: { ...base, netMarginPct: 18, netMarginPnlCosts: true } }
+    const v17 = { combined: { ...base, laborCostPct: 26, netMarginPct: 22 } }
+    const d = buildDeltas(v18, v17)
+    expect(d).toMatchObject({ netMarginCostsChanged: true, netMarginBasisChanged: false, netMarginPct: null })
+    expect(d.laborCostPct).toBeCloseTo(-1, 9)
+    // Two v18 snapshots compare, through the trimmed copy Trend stores.
+    const prior = trendSnapshotOf({ combined: { ...v18.combined, netMarginPct: 15 } })
+    expect(prior.combined.netMarginPnlCosts).toBe(true)
+    const same = buildDeltas(v18, prior)
+    expect(same.netMarginCostsChanged).toBe(false)
+    expect(same.netMarginPct).toBeCloseTo(3, 9)
+  })
+})
+
+describe('a failed IMS section keeps the rule markers (S849, OWNER-REPORT-2)', () => {
+  test('no figures, but the basis a reader needs is still there', () => {
+    const c = computeCombinedMetrics({ ims: null, labour: null })
+    expect(c).toMatchObject({
+      revenueTotal: null, foodCostPct: null, netMarginPct: null,
+      foodCostBasis: 'cogs', netMarginTaxFees: true, labourBasis: 'earned', netMarginPnlCosts: true,
+    })
+  })
+
+  test('a Trend copy names the prior’s failed sections', () => {
+    const t = trendSnapshotOf({ combined: {}, sectionErrors: { ims: 'Failed to fetch', trend: 'x' } })
+    expect(t.sectionErrors).toEqual(['ims', 'trend'])
+  })
+})
+
+describe('labour by the one rule (S849, GAPS-4 / OWNER-REPORT-9, SU11 a, SU18)', () => {
+  const ims = { revenueTotal: 1000000, cogsTotal: 300000, overheadTotal: 100000, taxFeesTotal: 0, foodCostPct: 30, foodCostBasis: 'cogs' }
+  const other = { festival: 0, incentive: 0, settlement: 0, total: 0 }
+
+  test('with Crest HR, payroll is labour and a Labor tab beside it is named, never added', () => {
+    const labour = resolveReportLabour({ hrIncluded: true, hrLabour: { payroll: 288000, estimate: null, otherPay: other }, ims: { ...ims, laborTabTotal: 250000 } })
+    expect(labour).toEqual({ source: 'payroll', amount: 288000, laborTabNotCounted: 250000, reason: '', noPayCount: 0 })
+    const c = computeCombinedMetrics({ ims, labour })
+    expect(c.laborCostPct).toBeCloseTo(28.8, 9)
+    expect(c.netMarginPct).toBeCloseTo((1000000 - 300000 - 288000 - 100000) / 10000, 9)
+  })
+
+  test('with Crest HR and no run, the estimate; no pay set withholds the verdict and says how many', () => {
+    const estimate = { amount: 200000, noPay: [{ id: 'a' }, { id: 'b' }], onPayroll: 6 }
+    const labour = resolveReportLabour({ hrIncluded: true, hrLabour: { payroll: null, estimate, otherPay: other }, ims })
+    expect(labour).toMatchObject({ source: 'estimate', amount: 200000, reason: 'nopay', noPayCount: 2 })
+  })
+
+  test('without Crest HR, a Labor tab of 1,60,000 is labour, from Overheads', () => {
+    const labour = resolveReportLabour({ hrIncluded: false, hrLabour: null, ims: { ...ims, laborTabTotal: 160000 } })
+    expect(labour).toMatchObject({ source: 'overheads', amount: 160000, laborTabNotCounted: 0 })
+    const c = computeCombinedMetrics({ ims, labour })
+    expect(c.laborCostPct).toBeCloseTo(16, 9)
+    expect(c.netMarginPct).toBeCloseTo(44, 9)
+  })
+
+  test('without Crest HR and an empty Labor tab: no Labor Cost %, Net Margin still shown', () => {
+    const labour = resolveReportLabour({ hrIncluded: false, hrLabour: null, ims: { ...ims, laborTabTotal: 0 } })
+    expect(labour).toMatchObject({ source: 'none', amount: 0 })
+    const c = computeCombinedMetrics({ ims, labour })
+    expect(c.laborCostPct).toBeNull()
+    expect(c.primeCostPct).toBeNull()
+    expect(c.netMarginPct).toBeCloseTo(60, 9)
+  })
+
+  test('the HR section failed: no labour and no Net Margin — never the Labor tab instead', () => {
+    const labour = resolveReportLabour({ hrIncluded: true, hrLabour: null, ims: { ...ims, laborTabTotal: 160000 } })
+    expect(labour).toMatchObject({ source: 'failed', amount: null })
+    const c = computeCombinedMetrics({ ims, labour })
+    expect(c.laborCostPct).toBeNull()
+    expect(c.netMarginPct).toBeNull()
+  })
+
+  test('no IMS section: no labour figure at all', () => {
+    expect(resolveReportLabour({ hrIncluded: true, hrLabour: { payroll: 1 }, ims: null })).toBeNull()
+  })
+})
+
+describe('Staff Employed is decided by dates, not today’s status (S849, OWNER-REPORT-7)', () => {
+  // CASA's live shape: two staff still working, two leavers whose End Dates are 30 Shrawan and the
+  // last day of Bhadra 2082, both now marked resigned.
+  const day = (m, d) => formatAd(bsToAd(2082, m, d))
+  const staff = [
+    { id: 'a', status: 'active', join_date: '2020-01-01', end_date: null },
+    { id: 'b', status: 'probation', join_date: '2020-01-01', end_date: null },
+    { id: 'c', status: 'resigned', join_date: '2020-01-01', end_date: day(4, 30) },
+    { id: 'd', status: 'resigned', join_date: '2020-01-01', end_date: day(5, daysInBsMonth(2082, 5)) },
+  ]
+  const tally = m => {
+    const start = bsToAd(2082, m, 1), end = bsToAd(2082, m, daysInBsMonth(2082, m))
+    const rows = staff.map(e => employmentInMonth(e, start, end))
+    return { employed: rows.filter(r => r.employed).length, left: rows.filter(r => r.left).length }
+  }
+
+  test('Ashadh counts all four; Shrawan counts four, one of whom left', () => {
+    expect(tally(3)).toEqual({ employed: 4, left: 0 })
+    expect(tally(4)).toEqual({ employed: 4, left: 1 })
+    expect(tally(6)).toEqual({ employed: 2, left: 0 })
+  })
+
+  test('a resigned employee with no End Date is unknown, not counted', () => {
+    const start = bsToAd(2082, 4, 1), end = bsToAd(2082, 4, daysInBsMonth(2082, 4))
+    expect(employmentInMonth({ status: 'resigned', join_date: '2020-01-01', end_date: null }, start, end))
+      .toEqual({ employed: false, joined: false, left: false, unknown: true })
+  })
+
+  test('a joiner in the month is employed and joined; one joining after it is not employed', () => {
+    const start = bsToAd(2082, 4, 1), end = bsToAd(2082, 4, daysInBsMonth(2082, 4))
+    expect(employmentInMonth({ status: 'active', join_date: day(4, 10) }, start, end)).toMatchObject({ employed: true, joined: true })
+    expect(employmentInMonth({ status: 'active', join_date: day(5, 1) }, start, end)).toMatchObject({ employed: false })
+  })
+})
+
+describe('Attendance Rate is over the days staff were due to work (S849, OWNER-REPORT-13)', () => {
+  test('12 staff × 31 days, 4 weekly offs and a holiday each, full attendance: 100%', () => {
+    const rows = []
+    for (let e = 0; e < 12; e++) {
+      for (let d = 1; d <= 31; d++) rows.push({ status: d <= 4 ? 'weekly_off' : d === 5 ? 'holiday' : 'present' })
+    }
+    const a = attendanceRate(rows)
+    expect(a.workingDays).toBe(12 * 26)
+    expect(a.rate).toBeCloseTo(100, 9)
+    expect(a.basis).toBe('working_days')
+  })
+
+  test('paid leave counts as present, unpaid leave as absent; no rows is no figure', () => {
+    const a = attendanceRate([{ status: 'present' }, { status: 'paid_leave' }, { status: 'unpaid_leave' }, { status: 'half_day' }])
+    expect(a.rate).toBeCloseTo((2.5 / 4) * 100, 9)
+    expect(attendanceRate([])).toBeNull()
+    expect(attendanceRate([{ status: 'weekly_off' }]).rate).toBeNull()
+  })
+})
+
+describe('a leave crossing a month edge counts only its days inside the month (S849, OWNER-REPORT-14)', () => {
+  test('10 days from 28 Shrawan to 5 Bhadra 2082: the two months add up to 10', () => {
+    const lr = { start_date: formatAd(bsToAd(2082, 4, 28)), end_date: formatAd(bsToAd(2082, 5, 5)), days: 10 }
+    const month = m => leaveDaysInMonth(lr, bsToAd(2082, m, 1), bsToAd(2082, m, daysInBsMonth(2082, m)))
+    expect(month(4) + month(5)).toBe(10)
+    expect(month(4)).toBeGreaterThan(0)
+    expect(month(6)).toBe(0)
+  })
+
+  test('a request wholly inside the month keeps its stored days', () => {
+    const lr = { start_date: formatAd(bsToAd(2082, 4, 3)), end_date: formatAd(bsToAd(2082, 4, 9)), days: 5 }
+    expect(leaveDaysInMonth(lr, bsToAd(2082, 4, 1), bsToAd(2082, 4, daysInBsMonth(2082, 4)))).toBe(5)
+  })
+})
+
+describe('Trend withholds the verdict when either month’s count was incomplete (S849, OWNER-REPORT-12)', () => {
+  const cur = { combined: { revenueTotal: 110, foodCostPct: 33, foodCostBasis: 'cogs' }, ims: { countGap: { material: false } } }
+  test('a material gap on either side', () => {
+    const priorGap = { combined: { revenueTotal: 100, foodCostPct: 30, foodCostBasis: 'cogs' }, ims: { countGap: { material: true } } }
+    expect(buildDeltas(cur, priorGap).verdictWithheld).toBe(true)
+    expect(buildDeltas({ ...cur, ims: { countGap: { material: true } } }, { combined: { foodCostBasis: 'cogs' } }).verdictWithheld).toBe(true)
+    // The trimmed copy carries it.
+    expect(buildDeltas(cur, trendSnapshotOf(priorGap)).verdictWithheld).toBe(true)
+    // The delta itself is still there.
+    expect(buildDeltas(cur, priorGap).foodCostPct).toBeCloseTo(3, 9)
+  })
+  test('no gap: judged as before', () => {
+    expect(buildDeltas(cur, { combined: { foodCostBasis: 'cogs' }, ims: { countGap: { material: false } } }).verdictWithheld).toBe(false)
+  })
+})
+
+describe('Inventory Turnover is COGS over the stock of the same items (S849, OWNER-REPORT-15)', () => {
+  test('used ÷ average of the passed opening and closing', () => {
+    const t = computeInventoryTurnover({ usedValue: 300000, openingValue: 80000, closingValue: 120000, monthDays: 30 })
+    expect(t).toEqual({ cogsUsedValue: 300000, avgInventoryValue: 100000, turnoverRatio: 3, daysOnHand: 10, basis: 'cogs' })
+    expect(computeInventoryTurnover({ usedValue: 5, openingValue: 0, closingValue: 0, monthDays: 30 }).turnoverRatio).toBeNull()
+  })
+})
+
+test('the schema version moved for S849', () => {
+  expect(CURRENT_SCHEMA_VERSION).toBe(18)
 })

@@ -3,6 +3,7 @@
 // actually present in the snapshot (report.snapshot.modulesIncluded).
 import * as XLSX from 'xlsx'
 import { BS_MONTHS } from '../../utils/bsCalendar'
+import { failedSectionKeys, sectionList, trendUnavailableText } from './sectionNames'
 
 const round2 = n => (n == null ? '' : Math.round(n * 100) / 100)
 const pct    = n => (n == null ? '' : Math.round(n * 10) / 10)
@@ -37,17 +38,42 @@ export function exportMonthlyReportExcel(report, bizInfo) {
   // purchases ÷ revenue. The sheet names which, since a figure without its basis cannot be checked.
   const cogsBasis = snapshot.combined?.foodCostBasis === 'cogs'
   const gap = cogsBasis ? snapshot.ims?.countGap : null
+  // Schema 18 (S849): what labour is, and what Net Margin takes off, said in the sheet as on the page.
+  const lab = snapshot.combined?.labour
+  const pnlCosts = snapshot.combined?.netMarginPnlCosts === true
+  const dc = snapshot.deliveryCommission
+  const missing = failedSectionKeys(snapshot)
+  const labourFrom = lab ? ({
+    payroll: 'Finalized payroll',
+    estimate: 'HR estimate (payroll not finalized)',
+    overheads: 'Overheads Labor tab',
+    none: 'None entered on Overheads',
+    failed: 'Could not be read when the report was made',
+  })[lab.source] || lab.source : null
   const summaryRows = [{
     'Revenue (NPR)': round2(snapshot.combined?.revenueTotal),
     'Food Cost %': pct(snapshot.combined?.foodCostPct),
     'Food Cost Basis': cogsBasis ? 'Food used (COGS) ÷ revenue' : 'Net purchases ÷ revenue (the earlier rule)',
+    // v18 (OWNER-REPORT-5): the thresholds the report is judged against, frozen with it.
+    ...(snapshot.combined?.fcThresholds ? { 'Food Cost Target %': `≤ ${snapshot.combined.fcThresholds.warn} (critical above ${snapshot.combined.fcThresholds.critical})` } : {}),
     'Labor Cost %': pct(snapshot.combined?.laborCostPct),
+    ...(labourFrom ? { 'Labour From': labourFrom } : {}),
+    ...(lab?.laborTabNotCounted > 0 ? { 'Labor Tab Not Counted (NPR)': round2(lab.laborTabNotCounted) } : {}),
+    ...(lab?.reason === 'nopay' ? { 'Labour Judged': `No: pay not set for ${lab.noPayCount} staff` } : lab?.reason === 'nostaff' ? { 'Labour Judged': 'No: nobody on payroll in Crest HR' } : {}),
     'Prime Cost %': pct(snapshot.combined?.primeCostPct),
     'Net Margin %': pct(snapshot.combined?.netMarginPct),
+    // v18 (GAPS-1 / PNL-1): which costs Net Margin takes off.
+    'Net Margin Basis': pnlCosts ? 'As Consolidated P&L' : 'Before wastage, staff meals and commission (the earlier rule)',
+    ...(dc ? {
+      'Delivery Commission (NPR)': round2(dc.amount),
+      'Delivery Bills Not Settled': dc.unsettledBills ?? 0,
+    } : {}),
     ...(gap ? {
       'Items Without Closing Count': gap.uncountedCount ?? 0,
       'Food Cost Judged': gap.material ? 'No: closing count incomplete' : 'Yes',
     } : {}),
+    // OWNER-REPORT-2: a section that failed when the report was made, named in the workbook too.
+    ...(missing.length > 0 ? { 'Sections Not In This Report': sectionList(missing) } : {}),
   }]
   XLSX.utils.book_append_sheet(wb, withLetterhead('Monthly Owner Report - Summary', bizInfo, periodLabel, summaryRows), 'Summary')
 
@@ -60,13 +86,23 @@ export function exportMonthlyReportExcel(report, bizInfo) {
       // v12 only (S798 2e): an older snapshot froze no Tax & Fees, and a blank there would read as zero.
       ...(ims.taxFeesTotal != null ? { 'Tax & Fees (NPR)': round2(ims.taxFeesTotal) } : {}),
       'Wastage Value (NPR)': round2(ims.wastageValueTotal),
+      // v18 (GAPS-1): the raw-item part of wastage, which Net Margin takes off.
+      ...(ims.cogsWastageTotal != null ? { 'Stock Wasted, Raw Items (NPR)': round2(ims.cogsWastageTotal) } : {}),
       // v9 only: an older snapshot froze no COGS, and a blank there would read as zero.
       ...(ims.staffMealsValueTotal != null ? { 'Staff Meals (NPR)': round2(ims.staffMealsValueTotal) } : {}),
       'Closing Stock (NPR)': round2(ims.closingStockValueTotal),
       ...(ims.cogsTotal != null ? { 'Food Used / COGS (NPR)': round2(ims.cogsTotal) } : {}),
       'Cash Purchases (NPR)': round2(ims.cashNet), 'Credit Purchases (NPR)': round2(ims.creditNet),
+      // v18 (PNL-8): stock received from / sent to another outlet, in Purchases but in neither half.
+      ...(ims.transferIn != null ? { 'Transfers In (NPR)': round2(ims.transferIn), 'Transfers Out (NPR)': round2(ims.transferOut) } : {}),
+      // v18 (OWNER-REPORT-9): the Labor tab as typed.
+      ...(ims.laborTabTotal != null ? { 'Overheads Labor Tab (NPR)': round2(ims.laborTabTotal) } : {}),
       'Items Below Par': ims.reorder?.count ?? 0, 'Reorder Est. Value (NPR)': round2(ims.reorder?.estValueTotal),
-      'Unpaid Credit — This Period (NPR)': round2(ims.payables?.unpaidTotal), 'Unpaid Credit Bills': ims.payables?.unpaidCount ?? 0,
+      // v18 (OWNER-REPORT-8): what is still owed per bill (VAT, discount and returns in); before, a
+      // line's raw qty × rate less its payments, counted per line.
+      ...(ims.payables?.basis === 'owed'
+        ? { 'Unpaid Credit — Still Owed (NPR)': round2(ims.payables?.unpaidTotal), 'Unpaid Credit Bills': ims.payables?.unpaidCount ?? 0 }
+        : { 'Unpaid Credit — This Period (NPR)': round2(ims.payables?.unpaidTotal), 'Unpaid Credit Lines': ims.payables?.unpaidCount ?? 0 }),
     }]
     XLSX.utils.book_append_sheet(wb, withLetterhead('Monthly Owner Report - IMS', bizInfo, periodLabel, imsRows), 'IMS')
   }
@@ -87,12 +123,20 @@ export function exportMonthlyReportExcel(report, bizInfo) {
         "Leavers' Final Pay (NPR)": round2(hr.payroll.other.settlement),
         'Total Labour Cost (NPR)': round2(hr.payroll?.total),
       } : { 'Total Payroll Cost (NPR)': round2(hr.payroll?.total) }),
-      'Active Employees': hr.headcount?.active ?? 0, 'New Hires': hr.headcount?.newHires ?? 0,
+      // v18 (OWNER-REPORT-7): everyone employed at any time in the month, by join and End Dates.
+      ...(hr.headcount?.basis === 'dates'
+        ? { 'Staff Employed': hr.headcount.employed ?? 0, 'Former Staff With No End Date (not counted)': hr.headcount.noEndDate ?? 0 }
+        : { 'Active Employees': hr.headcount?.active ?? 0 }),
+      'New Hires': hr.headcount?.newHires ?? 0,
       'Terminations': hr.headcount?.terminations ?? 0,
       'Attendance Rate %': hr.attendance ? pct(hr.attendance.rate) : 'N/A',
+      // v18 (OWNER-REPORT-13): the days the rate is over.
+      'Attendance Basis': hr.attendance?.basis === 'working_days' ? 'Days due to work (weekly offs and holidays left out)' : 'Every day on the sheet',
     }]
     XLSX.utils.book_append_sheet(wb, withLetterhead('Monthly Owner Report - HR', bizInfo, periodLabel, hrRows), 'HR')
-    const leaveRows = (hr.leave || []).map(l => ({ 'Leave Type': l.leaveTypeName, 'Days Taken': round2(l.days), Requests: l.requestCount }))
+    // v18 (OWNER-REPORT-14): a leave crossing a month edge counts only its days inside this month.
+    const daysCol = hr.leaveBasis === 'in_month' ? 'Days in This Month' : 'Days (whole requests)'
+    const leaveRows = (hr.leave || []).map(l => ({ 'Leave Type': l.leaveTypeName, [daysCol]: round2(l.days), Requests: l.requestCount }))
     if (leaveRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(leaveRows), 'HR - Leave')
   }
 
@@ -163,29 +207,42 @@ export function exportMonthlyReportExcel(report, bizInfo) {
       'Net Spend (NPR)': round2(v.net), 'Cash (NPR)': round2(v.cash), 'Credit (NPR)': round2(v.credit), 'FonePay (NPR)': round2(v.fonepay), Bills: v.billCount,
     }))
     if (vendorRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(vendorRows), 'Vendor Summary')
+    // v18 (OWNER-REPORT-8): what is still owed on each bill (VAT, discount and returns in).
+    const remainingCol = vp.billAging?.basis === 'owed' ? 'Still Owed (NPR)' : 'Remaining (NPR)'
     const agingRows = (vp.agingBills || []).map(b => ({
-      Vendor: b.vendorName, Invoice: b.invoiceRef || '', 'BS Day': b.bsDay, 'Remaining (NPR)': round2(b.remaining), 'Days Old (at generation)': b.daysOld, Bucket: b.bucket,
+      Vendor: b.vendorName, Invoice: b.invoiceRef || '', 'BS Day': b.bsDay, [remainingCol]: round2(b.remaining), 'Days Old (at generation)': b.daysOld, Bucket: b.bucket,
     }))
     if (agingRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(agingRows), 'Vendor Aging')
   }
 
   if (snapshot.inventoryDepth) {
     const inv = snapshot.inventoryDepth
+    // OWNER-REPORT-1: a sub-section that failed when the report was made writes "not generated", never
+    // a 0 that reads as a finding; a variance with nothing judged writes "—".
+    const subFailed = key => !!inv.sectionErrors && key in inv.sectionErrors
+    const NOT_GENERATED = 'not generated'
+    const v = inv.variance
+    const varianceNothingJudged = v?.tolerancePct != null && !(v.judgedCount > 0)
+    const varianceCell = val => (subFailed('variance') ? NOT_GENERATED : !v ? 'N/A' : varianceNothingJudged ? '—' : val)
+    const deadCell = val => (subFailed('deadSlowStock') ? NOT_GENERATED : !inv.deadSlowStock ? 'N/A' : val)
     const invSummaryRows = [{
       'Turnover Ratio': inv.turnover?.turnoverRatio != null ? round2(inv.turnover.turnoverRatio) : 'N/A',
       'Days on Hand': inv.turnover?.daysOnHand != null ? round2(inv.turnover.daysOnHand) : 'N/A',
       'Avg Inventory Value (NPR)': round2(inv.turnover?.avgInventoryValue),
-      'Dead Stock Items': inv.deadSlowStock?.deadCount ?? 0, 'Slow Stock Items': inv.deadSlowStock?.slowCount ?? 0,
-      'Value at Risk (NPR)': round2(inv.deadSlowStock?.totalValueAtRisk),
-      'Variance Flagged Items': inv.variance?.flaggedCount ?? 0, 'Total Variance Value (NPR)': round2(inv.variance?.totalVarianceValue),
+      // v18 (OWNER-REPORT-15): turnover is COGS ÷ the average stock of the items COGS counts.
+      'Turnover Basis': inv.turnover?.basis === 'cogs' ? 'Food used (COGS) ÷ average stock of the same items' : 'Stock consumed, waste included (the earlier rule)',
+      'Dead Stock Items': deadCell(inv.deadSlowStock?.deadCount ?? 0), 'Slow Stock Items': deadCell(inv.deadSlowStock?.slowCount ?? 0),
+      'Value at Risk (NPR)': deadCell(round2(inv.deadSlowStock?.totalValueAtRisk)),
+      'Variance Flagged Items': varianceCell(v?.flaggedCount ?? 0), 'Total Variance Value (NPR)': varianceCell(round2(v?.totalVarianceValue)),
       // v9 (S792): the tolerance the flags were judged at, and what could not be judged. An older
       // section was a fixed ±10% and counted uncounted items as 0.
-      'Variance Tolerance': inv.variance?.tolerancePct != null ? `±${inv.variance.tolerancePct}%, NPR ${inv.variance.floorValue} floor` : '±10% (fixed, the earlier rule)',
-      ...(inv.variance?.tolerancePct != null ? {
-        'Variance Items Not Counted': inv.variance.uncountedCount ?? 0,
-        'Variance Items In No Recipe': inv.variance.noRecipeCount ?? 0,
+      'Variance Tolerance': subFailed('variance') ? NOT_GENERATED : v?.tolerancePct != null ? `±${v.tolerancePct}%, NPR ${v.floorValue} floor` : '±10% (fixed, the earlier rule)',
+      ...(v?.tolerancePct != null ? {
+        'Variance Items Not Counted': v.uncountedCount ?? 0,
+        'Variance Items In No Recipe': v.noRecipeCount ?? 0,
       } : {}),
-      'Shrinkage Window (periods)': inv.shrinkageTrend?.periodsAnalyzed ?? 'N/A', 'Shrinkage Loss Value (NPR)': inv.shrinkageTrend ? round2(inv.shrinkageTrend.totalLossValue) : 'N/A',
+      'Shrinkage Window (periods)': subFailed('shrinkageTrend') ? NOT_GENERATED : inv.shrinkageTrend?.periodsAnalyzed ?? 'N/A',
+      'Shrinkage Loss Value (NPR)': subFailed('shrinkageTrend') ? NOT_GENERATED : inv.shrinkageTrend ? round2(inv.shrinkageTrend.totalLossValue) : 'N/A',
     }]
     XLSX.utils.book_append_sheet(wb, withLetterhead('Monthly Owner Report - Inventory Depth', bizInfo, periodLabel, invSummaryRows), 'Inventory Summary')
 
@@ -224,23 +281,41 @@ export function exportMonthlyReportExcel(report, bizInfo) {
     ;['vsLastPeriod', 'vsSameMonthLastYear'].forEach(key => {
       const t = snapshot.trend[key]
       const label = key === 'vsLastPeriod' ? 'vs Last Period' : 'vs Same Month Last Year'
-      if (!t?.available) { trendRows.push({ Comparison: label, Metric: '—', 'This Period': '', Prior: '', Change: t?.reason || 'unavailable' }); return }
+      // S849 (OWNER-REPORT-18 / -19): the reason in words, never the raw code.
+      if (!t?.available) { trendRows.push({ Comparison: label, Metric: '—', 'This Period': '', Prior: '', Change: trendUnavailableText(t) }); return }
       const priorLabel = `${BS_MONTHS[t.period.bs_month - 1]} ${t.period.bs_year}`
       // S792 (D30): across the purchases → COGS change of Food Cost % the three ratios that contain
       // it are two formulas, so they carry no change — and the cell says why rather than going blank.
+      // The same for Net Margin across v12 (Tax & Fees) and v18 (wastage, staff meals and delivery
+      // commission), and for the three labour ratios across v13 (labour as pay earned) — S849.
       const basisOf = s => (s?.combined?.foodCostBasis === 'cogs' ? 'cogs' : 'purchases')
       const basisDiffers = basisOf(snapshot) !== basisOf(t.snapshot)
-      const row = (metric, cur, prior, delta, isPct, foodBased = false) => trendRows.push({
+      const d = t.deltas || {}
+      const priorMissing = t.snapshot?.sectionErrors || []
+      const whyNot = kind => {
+        if (kind !== 'revenue' && kind !== 'labour' && priorMissing.includes('ims')) return `not compared: ${priorLabel}'s report is missing its Crest IMS section`
+        if ((kind === 'food' || kind === 'prime' || kind === 'margin') && basisDiffers) return 'not compared: different food-cost basis'
+        if ((kind === 'labour' || kind === 'prime' || kind === 'margin') && d.labourBasisChanged) return 'not compared: labour counted differently'
+        if (kind === 'margin' && d.netMarginBasisChanged) return 'not compared: Tax & Fees were not subtracted then'
+        if (kind === 'margin' && d.netMarginCostsChanged) return 'not compared: wastage, staff meals and delivery commission were not subtracted then'
+        return null
+      }
+      // OWNER-REPORT-12: with either month's closing count incomplete, the change is shown without a verdict.
+      const unjudged = kind => d.verdictWithheld && (kind === 'food' || kind === 'prime' || kind === 'margin')
+      const row = (metric, cur, prior, delta, isPct, kind) => trendRows.push({
         Comparison: label, Metric: metric, 'This Period': isPct ? pct(cur) : round2(cur), Prior: `${priorLabel}: ${isPct ? pct(prior) : round2(prior)}`,
-        Change: foodBased && basisDiffers ? 'not compared: different food-cost basis'
-          : delta == null ? '' : isPct ? `${delta.toFixed(1)}pp` : `${round2(delta.absoluteChange)} (${delta.pctChange != null ? delta.pctChange.toFixed(1) + '%' : ''})`,
+        Change: whyNot(kind)
+          || (delta == null ? '' : isPct ? `${delta.toFixed(1)}pp${unjudged(kind) ? ' (not judged: closing count incomplete)' : ''}` : `${round2(delta.absoluteChange)} (${delta.pctChange != null ? delta.pctChange.toFixed(1) + '%' : ''})`),
       })
-      row('Revenue (NPR)', snapshot.combined?.revenueTotal, t.snapshot?.combined?.revenueTotal, t.deltas?.revenueTotal, false)
-      if (snapshot.ims) row('Food Cost %', snapshot.combined?.foodCostPct, t.snapshot?.combined?.foodCostPct, t.deltas?.foodCostPct, true, true)
-      if (snapshot.hr) row('Labor Cost %', snapshot.combined?.laborCostPct, t.snapshot?.combined?.laborCostPct, t.deltas?.laborCostPct, true)
-      if (snapshot.ims && snapshot.hr) row('Prime Cost %', snapshot.combined?.primeCostPct, t.snapshot?.combined?.primeCostPct, t.deltas?.primeCostPct, true, true)
-      if (snapshot.ims && snapshot.hr) row('Net Margin %', snapshot.combined?.netMarginPct, t.snapshot?.combined?.netMarginPct, t.deltas?.netMarginPct, true, true)
-      if (snapshot.pos && t.snapshot?.pos) row('POS Net Sales (NPR)', snapshot.pos?.totalNetSales, t.snapshot?.pos?.totalNetSales, t.deltas?.posNetSales, false)
+      // v18: labour, Prime and Net Margin can come without Crest HR (the Labor tab), so each row
+      // shows when either side has its figure.
+      const has = key => snapshot.combined?.[key] != null || t.snapshot?.combined?.[key] != null
+      row('Revenue (NPR)', snapshot.combined?.revenueTotal, t.snapshot?.combined?.revenueTotal, d.revenueTotal, false, 'revenue')
+      if (snapshot.ims) row('Food Cost %', snapshot.combined?.foodCostPct, t.snapshot?.combined?.foodCostPct, d.foodCostPct, true, 'food')
+      if (snapshot.hr || has('laborCostPct')) row('Labor Cost %', snapshot.combined?.laborCostPct, t.snapshot?.combined?.laborCostPct, d.laborCostPct, true, 'labour')
+      if (snapshot.ims && (snapshot.hr || has('primeCostPct'))) row('Prime Cost %', snapshot.combined?.primeCostPct, t.snapshot?.combined?.primeCostPct, d.primeCostPct, true, 'prime')
+      if (snapshot.ims && (snapshot.hr || has('netMarginPct'))) row('Net Margin %', snapshot.combined?.netMarginPct, t.snapshot?.combined?.netMarginPct, d.netMarginPct, true, 'margin')
+      if (snapshot.pos && t.snapshot?.pos) row('POS Net Sales (NPR)', snapshot.pos?.totalNetSales, t.snapshot?.pos?.totalNetSales, d.posNetSales, false, 'revenue')
     })
     if (trendRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(trendRows), 'Trend')
   }

@@ -7,22 +7,27 @@ import { scopedFrom } from '../../shared/scopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { throwFirstError } from '../../shared/queryError'
 import { bsToAd, daysInBsMonth, formatAd, bsDayBoundaryIso } from '../../utils/bsCalendar'
-import { calcAmount, hourlyRateOf, tallyAttendance, isSsfContributor } from '../hr/payroll/payrollCompute'
-import { OT_MULTIPLIER, OT_HOLIDAY_MULTIPLIER, STANDARD_HOURS_PER_DAY } from '../hr/payrollConstants'
+import { tallyAttendance } from '../hr/payroll/payrollCompute'
 import { explodeRecipeIngredients, computeRecipeCosts } from '../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildStockRows, summarizeReorder } from '../ims/stockcount/stockReportCalc'
 import { allocateBillDiscounts, returnCostValue } from '../ims/reports/supplierAttribution'
-import { periodRevenue, periodStockMaps, valuePeriodItems, periodWastageValue, WASTAGE_VALUE_SELECT } from '../ims/reports/periodCost'
-import { findUncountedItems, UNCOUNTED_NAME_LIMIT } from '../../shared/uncountedItems'
+import { periodRevenue, periodStockMaps, valuePeriodItems, periodWastageValue, periodGap, WASTAGE_VALUE_SELECT } from '../ims/reports/periodCost'
+import { readPeriodTransfers, transferTotals } from '../ims/transfers/transferFlows'
+import { UNCOUNTED_NAME_LIMIT } from '../../shared/uncountedItems'
+import { fcThresholds } from '../../shared/imsFormulas'
 import { zeroAmounts, addAmounts, billAmounts, buildSalesEntries, buildGroupedRows, buildPaymentRows, forgoneMenuValue } from '../pos/reports/salesReportMath'
 import { coversTotals } from '../pos/reports/coversMath'
 import { computeMenuEngineeringSection } from './computeMenuEngineeringSection'
 import { computeLaborAnalyticsSection } from './computeLaborAnalyticsSection'
 import { computeVendorPurchasingSection } from './computeVendorPurchasingSection'
 import { computeInventoryDepthSection } from './computeInventoryDepthSection'
-import { NON_LABOUR_OVERHEADS, splitNonLabourOverheads, estimatedEmployerSsf } from '../dashboard/labourSource'
+import { unpaidCreditBills, unpaidCreditTotals, returnedByEntryOf } from './unpaidCreditBills'
+import { splitOverheadBuckets, resolveOutletLabour, payrollLabourTotal } from '../dashboard/labourSource'
+import { estimateLabour } from '../dashboard/labourEstimate'
+import { loadLabourEstimateInputs } from '../dashboard/loadOutletLabour'
 import { loadMonthOtherLabour } from '../dashboard/loadOtherLabourPay'
+import { loadDeliveryCommission, bsMonthWindow } from '../../shared/deliveryCommission'
 import { parseAdDateLocal } from '../../shared/nepalTime'
 
 // ── Net purchases (pure) ─────────────────────────────────────────────────────
@@ -40,7 +45,14 @@ import { parseAdDateLocal } from '../../shared/nepalTime'
 // the rows must carry `vat_inclusive, vat_is_cost` and returns the `purchase_entries` embed.
 // Single-period input by use. Since S792 the fallback bill key also carries `period_id`
 // (supplierAttribution.js allocationBillKey), so a multi-period batch that selects it is safe too.
-export function netPurchaseFigures(purchases, returns) {
+//
+// Stock transfers between outlets (S849, PNL-8, schema 18): Net Purchases = gross − bill discounts −
+// returns + transfers in − transfers out, as Monthly Summary and Consolidated P&L count them, so the
+// month's own figures move with the stock. `transfers` are this outlet's ims_stock_transfer_lines for
+// the month (a line exists only when it counts here). The Cash / Credit split stays supplier-only —
+// a transfer is paid in neither — so the two halves add up to the total less the transfers' net,
+// which `transferIn` / `transferOut` carry so the page can show it.
+export function netPurchaseFigures(purchases, returns, transfers = null) {
   const allocated = allocateBillDiscounts(purchases || [])
   const returnTotal = (returns || []).reduce((s, r) => s + returnCostValue(r), 0)
   let cashNet = 0, creditNet = 0
@@ -48,8 +60,9 @@ export function netPurchaseFigures(purchases, returns) {
     if (p.payment_method === 'Credit') creditNet += p.lineCost; else cashNet += p.lineCost
   })
   cashNet -= returnTotal
-  const purchaseTotal = allocated.reduce((s, p) => s + p.lineCost, 0) - returnTotal
-  return { purchaseTotal, cashNet, creditNet }
+  const { inVal: transferIn, outVal: transferOut } = transferTotals(transfers)
+  const purchaseTotal = allocated.reduce((s, p) => s + p.lineCost, 0) - returnTotal + transferIn - transferOut
+  return { purchaseTotal, cashNet, creditNet, transferIn, transferOut }
 }
 
 // ── IMS section ──────────────────────────────────────────────────────────────
@@ -86,9 +99,12 @@ async function computeImsSection(clientId, period) {
     // seed the reorder walk. A recipe past the 1000-row cap prices its sales at 0 and consumes
     // nothing — frozen.
     fetchAllRows(() => scopedFrom('recipes', clientId, 'id, selling_price').order('id')),
-    // Every bucket but `labor` (S798 2e, LABOUR-FIGURES-4): Net Margin subtracts payroll separately,
-    // so the Labor tab stays out, and Tax & Fees comes in as its own line. Tens of rows, not paged.
-    supabase.from('overheads').select('amount, bucket').eq('period_id', period.id).or(NON_LABOUR_OVERHEADS),
+    // EVERY bucket since schema 18 (S849, GAPS-4 / OWNER-REPORT-9): Overheads and Tax & Fees are cost
+    // lines (Tax & Fees since v12), and the Labor tab is read so the one labour rule can decide what it
+    // is — labour itself for an outlet without Crest HR, named "not counted" beside payroll on an outlet
+    // with it. Until v17 the read left `labor` out (`.or(NON_LABOUR_OVERHEADS)`), so a Suite outlet
+    // without HR froze no labour and no Net Margin at all. Tens of rows per period, not paged.
+    supabase.from('overheads').select('amount, bucket').eq('period_id', period.id),
     // Each row carries its item's rate (WASTAGE_VALUE_SELECT): Wastage Value is the Wastage Report's
     // total over every item, prep and hidden ones included, since schema v10 (S792, FIGURES-5).
     fetchAllRows(() => supabase.from('wastages').select(WASTAGE_VALUE_SELECT).eq('period_id', period.id).order('id')),
@@ -110,6 +126,14 @@ async function computeImsSection(clientId, period) {
     // Staff meals come off the shelf in the shared on-hand calculation the reorder figure is
     // built from (S696).
     fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', period.id).order('id')),
+    // The client's Food Cost thresholds, frozen with the report since schema 18 (S849, OWNER-REPORT-5)
+    // so a later change in Settings never re-judges an old month. `settings` has a nullable
+    // client_id, so it stays on raw supabase.from (CLAUDE.md).
+    supabase.from('settings').select('fc_warning_pct, fc_critical_pct').eq('client_id', clientId).maybeSingle(),
+    // Stock sent to or received from another outlet this month (S849, PNL-8): received stock adds like
+    // a purchase, sent stock comes off like a return, in Net Purchases, COGS and on-hand. Paged, and a
+    // failed read fails the section like every read here.
+    readPeriodTransfers((t, c) => scopedFrom(t, clientId, c), period.id),
   ])
   // A failed read must THROW so runSection() records it as a section error the page names —
   // otherwise it flows through `|| []` and freezes zeros into the immutable snapshot (S612).
@@ -118,21 +142,24 @@ async function computeImsSection(clientId, period) {
     { data: purchases }, { data: returns }, { data: salesData }, { data: recipes },
     { data: overheadsData }, { data: wastagesData }, { data: allItems }, { data: parLevels },
     { data: opening }, { data: closing }, { data: payablePayments }, { data: staffMealsData },
+    { data: settingsRow }, { data: transfers },
   ] = results
   // `is_active === true`, not truthy-ness: the old read was `.eq('is_active', true)`, which a NULL
   // never passed either.
   const items = (allItems || []).filter(i => i.is_active === true)
 
-  // Net of bill discounts since schema v6 — v1–v5 snapshots summed a raw qty × rate here.
-  const { purchaseTotal, cashNet, creditNet } = netPurchaseFigures(purchases, returns)
+  // Net of bill discounts since schema v6 — v1–v5 snapshots summed a raw qty × rate here. Plus stock
+  // transfers in, less transfers out, since schema 18 (PNL-8).
+  const { purchaseTotal, cashNet, creditNet, transferIn, transferOut } = netPurchaseFigures(purchases, returns, transfers)
 
   // Monthly Summary's own revenue arithmetic (periodCost.js): the price charged at the time of sale,
   // net of the row's discount, comps excluded in JS.
   const revenueTotal = periodRevenue(salesData, recipes)
 
   // Overheads (the `overhead` bucket and rows with none) and Tax & Fees, as Consolidated P&L splits
-  // them. Until schema v12 only the first was read and Tax & Fees was in no figure here.
-  const { overhead: overheadTotal, taxFees: taxFeesTotal } = splitNonLabourOverheads(overheadsData)
+  // them. Until schema v12 only the first was read and Tax & Fees was in no figure here. The Labor tab
+  // (v18) is frozen on its own; the labour rule decides what it means (resolveReportLabour below).
+  const { overhead: overheadTotal, taxFees: taxFeesTotal, labor: laborTabTotal } = splitOverheadBuckets(overheadsData)
 
   const itemRateMap = {}; items.forEach(i => { itemRateMap[i.id] = parseFloat(i.per_uom_rate || 0) })
   // The one Wastage Value every tile shows (periodCost.js, S792 FIGURES-5): every item, prep and
@@ -150,21 +177,30 @@ async function computeImsSection(clientId, period) {
 
   const paidMap = {}
   ;(payablePayments || []).forEach(p => { paidMap[p.purchase_entry_id] = (paidMap[p.purchase_entry_id] || 0) + parseFloat(p.amount || 0) })
-  let payablesUnpaidTotal = 0, payablesUnpaidCount = 0
-  ;(purchases || []).forEach(p => {
-    if (p.payment_method !== 'Credit') return
-    const value = parseFloat(p.qty || 0) * parseFloat(p.rate || 0)
-    const remaining = Math.max(0, value - (paidMap[p.id] || 0))
-    if (remaining > 0) { payablesUnpaidTotal += remaining; payablesUnpaidCount += 1 }
-  })
 
   const recipeIds = (recipes || []).map(r => r.id)
+  const creditIds = (purchases || []).filter(p => p.payment_method === 'Credit').map(p => p.id)
   // Both walks throw on a failed read, so runSection records the IMS section as failed rather
   // than freezing zero usage; the delta walk adds customized plates' option stock lines (S758).
-  const [ingredientBreakdown, deltaExplosion] = await Promise.all([
+  // The returns against this month's credit lines come from ANY month (S849, OWNER-REPORT-8): what
+  // is owed on a bill falls when goods go back, whenever that was, as on Outstanding Payables.
+  // Chunked: the line ids travel in the URL.
+  const [ingredientBreakdown, deltaExplosion, creditReturnsRes] = await Promise.all([
     recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds) : {},
     loadDeltaExplosion(supabase, (salesData || []).map(s => s.ingredient_deltas)),
+    creditIds.length > 0
+      ? fetchAllRowsChunked(creditIds, ids => scopedFrom('vendor_returns', clientId, 'id, purchase_entry_id, qty, rate').in('purchase_entry_id', ids).order('id'))
+      : { data: [], error: null },
   ])
+  throwFirstError([creditReturnsRes])
+
+  // "Unpaid Credit (this period)": what is still OWED on this month's credit bills — VAT added, the
+  // bill discount taken off, returns credited at their discounted price — less what was paid, per
+  // BILL (S849, OWNER-REPORT-8, schema 18). Until v17 each LINE's raw qty × rate was compared with its
+  // payments, so a discounted bill paid in full read its discount as unpaid, a VAT bill paid half
+  // read too little, and `unpaidCount` counted lines. `basis: 'owed'` marks it.
+  const { unpaidTotal: payablesUnpaidTotal, unpaidCount: payablesUnpaidCount } = unpaidCreditTotals(
+    unpaidCreditBills({ lines: purchases, returnedByEntry: returnedByEntryOf(creditReturnsRes.data), paidByEntry: paidMap }))
   // Every sales row, comps included — comps consumed ingredients even though they earned nothing.
   // The on-hand / below-par figures come from the ONE calculation the live Reorder Report and
   // both dashboards use (S696, schema v4); v3 snapshots carried this section's own copy, which
@@ -173,7 +209,7 @@ async function computeImsSection(clientId, period) {
   const stockRows = buildStockRows({
     items: items.filter(i => !i.is_sub_recipe),
     opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData,
-    sales: salesData, breakdown: ingredientBreakdown, pars: parLevels, explosion: deltaExplosion,
+    sales: salesData, breakdown: ingredientBreakdown, pars: parLevels, explosion: deltaExplosion, transfers,
   })
   const { count: reorderCount, estValueTotal: reorderEstValueTotal } = summarizeReorder(stockRows)
 
@@ -188,7 +224,7 @@ async function computeImsSection(clientId, period) {
   // Monthly Summary, so the Opening/Closing Stock rows above (which include prep, as Stock Count
   // does) do not add up to it exactly when prep was counted.
   const cogsItems = (allItems || []).filter(i => !i.is_sub_recipe)
-  const stockMaps = periodStockMaps({ opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData })
+  const stockMaps = periodStockMaps({ opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData, transfers })
   const cogs = valuePeriodItems(cogsItems, stockMaps)
   const cogsTotal = cogs.cogsVal
   const foodCostPct = revenueTotal > 0 ? (cogsTotal / revenueTotal) * 100 : null
@@ -196,16 +232,27 @@ async function computeImsSection(clientId, period) {
   // The count COGS rests on (S756, D6): an item with stock and NO closing count is counted as all
   // used. The totals stand — they must tie to Monthly Summary — but the gap is frozen with them,
   // and while it is material the report withholds the food-cost verdict, as Monthly Summary does.
-  // Counted = a row whose physical_qty is not null; a count of 0 is a count (S695).
-  const countedIds = new Set((closing || []).filter(r => r.physical_qty != null).map(r => r.item_id))
-  const purchaseQty = {}; const purchaseValue = {}
-  Object.entries(stockMaps.purchases).forEach(([id, v]) => { purchaseQty[id] = v.qty; purchaseValue[id] = v.value })
-  const gap = findUncountedItems({ items: cogsItems, openingQty: stockMaps.opening, purchaseQty, purchaseValue, countedIds, cogs: cogsTotal })
+  // Counted = a row whose physical_qty is not null; a count of 0 is a count (S695). Monthly
+  // Summary's own gap (periodGap), so stock that only arrived by transfer and was never counted is
+  // uncounted too (S849).
+  const gap = periodGap({ items: cogsItems, maps: stockMaps, closing, cogs: cogsTotal })
+  const fcT = fcThresholds(settingsRow)
 
   return {
     revenueTotal, purchaseTotal, overheadTotal, taxFeesTotal, wastageValueTotal, openingStockValueTotal, closingStockValueTotal, cashNet, creditNet, foodCostPct,
     // New in schema v9 (D30). Absent on an older snapshot, whose foodCostPct is purchases ÷ revenue.
     foodCostBasis: 'cogs', cogsTotal, staffMealsValueTotal: cogs.staffMealsVal,
+    // Schema 18 (S849). Absent on an older snapshot, and never rendered as NPR 0 there:
+    //   - cogsWastageTotal: raw stock wasted, COGS's own wastage term (the raw-item part of Wastage
+    //     Value; wasted prep is already inside COGS). Net Margin subtracts it (GAPS-1).
+    //   - cogsOpeningValue / cogsClosingValue: the stock of the items COGS counts, for Inventory
+    //     Turnover on the same footing (OWNER-REPORT-15).
+    //   - laborTabTotal: the Overheads Labor tab as typed (OWNER-REPORT-9 / GAPS-4).
+    //   - transferIn / transferOut: stock received from / sent to another outlet, in purchaseTotal (PNL-8).
+    //   - fcThresholds: the Food Cost bands the report is judged against (OWNER-REPORT-5).
+    cogsWastageTotal: cogs.wastageVal, cogsOpeningValue: cogs.openingVal, cogsClosingValue: cogs.closingVal,
+    laborTabTotal, transferIn, transferOut,
+    fcThresholds: { warn: fcT.warn, critical: fcT.critical },
     countGap: {
       presentCount: gap.presentCount, uncountedCount: gap.uncountedCount, uncountedValue: gap.uncountedValue,
       material: gap.material,
@@ -213,79 +260,113 @@ async function computeImsSection(clientId, period) {
       names: gap.uncounted.slice(0, UNCOUNTED_NAME_LIMIT).map(u => u.name),
     },
     reorder: { count: reorderCount, estValueTotal: reorderEstValueTotal },
-    payables: { unpaidTotal: payablesUnpaidTotal, unpaidCount: payablesUnpaidCount },
+    payables: { unpaidTotal: payablesUnpaidTotal, unpaidCount: payablesUnpaidCount, basis: 'owed' },
   }
 }
 
-// ── Payroll estimate (pure) ──────────────────────────────────────────────────
-// The fallback used when a closed period has no finalized payroll run: each active/probation
-// employee (or one whose end_date falls inside the period) accrues monthly-equivalent gross for
-// the days between join and end date, plus employer SSF on capped basic. `employees` must
-// carry `ssf_no` as well as `ssf_enrolled` (isSsfContributor needs both). Stored dates are read as
-// LOCAL dates (parseAdDateLocal): `new Date('YYYY-MM-DD')` is 05:45 in Nepal, later than bsToAd's
-// local midnight, so a leaver whose last day was the month's last day fell out of the estimate and
-// was never a termination, and every joiner got one day too few (S798 2e, LABOUR-FIGURES-5).
-export function estimatePayrollAccrual({ employees, components, period }) {
-  const monthDays = daysInBsMonth(period.bs_year, period.bs_month)
-  const periodStartAd = bsToAd(period.bs_year, period.bs_month, 1)
-  const periodEndAd   = bsToAd(period.bs_year, period.bs_month, monthDays)
-  let accruedGross = 0, accruedSsfEmployer = 0
-  ;(employees || []).forEach(emp => {
-    const isActiveish = emp.status === 'active' || emp.status === 'probation'
-    const endAd = emp.end_date ? parseAdDateLocal(emp.end_date) : null
-    const terminatedThisPeriod = !isActiveish && endAd && endAd >= periodStartAd && endAd <= periodEndAd
-    if (!isActiveish && !terminatedThisPeriod) return
-    const joinAd = emp.join_date ? parseAdDateLocal(emp.join_date) : null
-    if (joinAd && joinAd > periodEndAd) return
+// ── Employment, attendance and leave in the month (pure, schema 18) ─────────────────────────────
 
-    const empStart = joinAd && joinAd > periodStartAd ? joinAd : periodStartAd
-    const empEnd    = endAd && endAd < periodEndAd ? endAd : periodEndAd
-    // Local midnights both (parseAdDateLocal, bsToAd), so the difference is whole days; round, not
-    // floor, so an hour of daylight saving on a viewer's laptop abroad cannot drop one.
-    const daysWorked = Math.max(0, Math.round((empEnd - empStart) / 86400000) + 1)
-    if (daysWorked <= 0) return
+/**
+ * Whether one employee was employed at any time in the month, by their dates (S849, OWNER-REPORT-7).
+ * `startAd` / `endAd` are the month's first and last day as local midnights (bsToAd).
+ *
+ * Employed when they had joined by the month's end AND either their End Date is on or after the
+ * month's start, or they have no End Date and are on payroll (active / probation). An off-payroll
+ * status (resigned, terminated, inactive) with NO End Date is `unknown`: nothing says how far into the
+ * month they worked, so they are not counted, and the report says how many there are. Until v17 the
+ * headcount used today's status, so a report made (or regenerated) after two staff resigned counted
+ * neither of them in a month they worked in full (CASA read 2 where payroll paid 4).
+ *
+ * @returns {{ employed: boolean, joined: boolean, left: boolean, unknown: boolean }}
+ */
+export function employmentInMonth(emp, startAd, endAd) {
+  const none = { employed: false, joined: false, left: false, unknown: false }
+  if (!emp) return none
+  const joinAd = emp.join_date ? parseAdDateLocal(emp.join_date) : null
+  if (joinAd && joinAd > endAd) return none
+  const endDate = emp.end_date ? parseAdDateLocal(emp.end_date) : null
+  const onPayroll = emp.status === 'active' || emp.status === 'probation'
+  let employed = false, left = false
+  if (endDate) {
+    employed = endDate >= startAd
+    left = employed && endDate <= endAd
+  } else if (onPayroll) {
+    employed = true
+  } else {
+    return { ...none, unknown: true }
+  }
+  const joined = employed && !!joinAd && joinAd >= startAd && joinAd <= endAd
+  return { employed, joined, left, unknown: false }
+}
 
-    const basic = parseFloat(emp.basic_salary) || 0
-    const basis = emp.pay_basis || 'monthly'
-    const allowances = basis === 'monthly'
-      ? (components || []).filter(c => c.employee_id === emp.id && c.type === 'earning')
-          .reduce((s, c) => s + calcAmount(c, basic), 0)
-      : 0
-    const monthlyEquivGross =
-      basis === 'daily'  ? basic * monthDays :
-      basis === 'hourly' ? basic * STANDARD_HOURS_PER_DAY * monthDays :
-      basic + allowances
-    const perDay = monthDays > 0 ? monthlyEquivGross / monthDays : 0
-    accruedGross += perDay * daysWorked
+/**
+ * Attendance Rate over the days staff were DUE to work (S849, OWNER-REPORT-13): present-equivalent
+ * days ÷ (sheet rows − weekly offs − public holidays). Paid leave counts as present, unpaid leave as
+ * absent, a half day as half. Until v17 the denominator was every sheet row, so a month of perfect
+ * attendance read about 84% (four weekly offs and a holiday in 31 days). Null with no sheet rows, or
+ * no working day on them. `basis: 'working_days'` marks it.
+ */
+export function attendanceRate(rows) {
+  const list = rows || []
+  if (list.length === 0) return null
+  const t = tallyAttendance(list)
+  const totalTrackedDays = list.length
+  const presentDays = t.present + t.half_day * 0.5 + t.paid_leave + t.half_paid_leave * 0.5
+  const absentDays = t.absent + t.unpaid_leave + t.half_unpaid_leave * 0.5
+  const workingDays = totalTrackedDays - t.weekly_off - t.holiday
+  return {
+    presentDays, absentDays, totalTrackedDays, workingDays,
+    rate: workingDays > 0 ? (presentDays / workingDays) * 100 : null,
+    basis: 'working_days',
+  }
+}
 
-    // Employer SSF only for a real contributor — enrolled AND carrying an SSF number — the gate
-    // computePayslip applies (isSsfContributor). The flag alone added 20% for staff payroll
-    // never contributes for, so an estimated snapshot ran above the finalized run it stands in for.
-    // On basic only, through the helper the Owner Dashboard shares (schema 14, LABOUR-FIGURES-8).
-    if (isSsfContributor(emp)) {
-      accruedSsfEmployer += estimatedEmployerSsf({ basis, basic, monthlyEquivGross, daysWorked, monthDays })
-    }
-  })
-  return { gross: accruedGross, ssfEmployer: accruedSsfEmployer }
+/**
+ * The days of one approved leave request that fall inside the month (S849, OWNER-REPORT-14). A request
+ * wholly inside keeps its stored `days` (which already leaves out the days it does not count); one that
+ * crosses a month edge is shared out by calendar days — days × (its calendar days inside the month ÷
+ * its calendar days) — rounded to the half day. Until v17 a crossing leave counted in full in BOTH
+ * months.
+ */
+export function leaveDaysInMonth(lr, startAd, endAd) {
+  const days = parseFloat(lr?.days) || 0
+  if (!lr?.start_date || !lr?.end_date) return days
+  const start = parseAdDateLocal(lr.start_date)
+  const end = parseAdDateLocal(lr.end_date)
+  if (start >= startAd && end <= endAd) return days
+  const DAY = 86400000
+  // Local midnights both, so differences are whole days; round so a daylight-saving hour cannot drop one.
+  const total = Math.round((end - start) / DAY) + 1
+  const from = start > startAd ? start : startAd
+  const to = end < endAd ? end : endAd
+  const inside = Math.max(0, Math.round((to - from) / DAY) + 1)
+  if (!(total > 0)) return 0
+  return Math.round(days * (inside / total) * 2) / 2
 }
 
 // ── HR section ──────────────────────────────────────────────────────────────
-// Starts from OwnerDashboard.jsx's loadLaborCost (already period-parameterized), but returns the
-// gross/OT/SSF breakdown instead of only a pre-summed total, and adds headcount/leave/attendance.
-// A CLOSED period is by construction fully elapsed, so (unlike Owner Dashboard's live MTD view of
-// the still-open period) there is no "days elapsed so far" proration — every employee accrues for
-// the whole month, subject to the same join/end-date bounding Owner Dashboard already applies.
+// Labour for a closed month (S849, GAPS-4 / SU11 (a), schema 18): the finalized payroll run, else the
+// ONE HR wage estimate every Suite page uses (`estimateLabour`, labourEstimate.js) — payroll's own
+// roster, unpaid days on the attendance sheet, attendance-based pay for daily and hourly staff, sheet
+// overtime and approved overtime priced as payroll prices them. Its inputs come through
+// `loadLabourEstimateInputs` (loadOutletLabour.js), paged. Until v17 the report had its own estimate
+// (`estimatePayrollAccrual` + an approved-overtime loop) that read no attendance at all, so a month
+// whose overtime was on the sheet froze none of it, and the Owner Dashboard and this report could
+// disagree for the same month. A CLOSED period is fully elapsed, so the estimate runs to its last day.
+//
+// Returns the frozen section and, apart, what `resolveReportLabour` needs (the estimate object holds
+// names, which are not frozen; only counts are).
 async function computeHrSection(clientId, period) {
   const monthDays = daysInBsMonth(period.bs_year, period.bs_month)
   const periodStartAd = bsToAd(period.bs_year, period.bs_month, 1)
   const periodEndAd   = bsToAd(period.bs_year, period.bs_month, monthDays)
+  const from = (t, c) => scopedFrom(t, clientId, c)
 
   const results = await Promise.all([
-    // `ssf_no` is load-bearing: the estimate's employer SSF gates on isSsfContributor().
-    scopedFrom('hr_employees', clientId, 'id, status, basic_salary, pay_basis, ssf_enrolled, ssf_no, join_date, end_date'),
-    scopedFrom('hr_salary_components', clientId, 'employee_id, type, calc_type, value'),
-    scopedFrom('hr_overtime_entries', clientId, 'employee_id, ot_hours, ot_type, status, bs_year, bs_month')
-      .eq('status', 'approved').eq('bs_year', period.bs_year).eq('bs_month', period.bs_month),
+    // Employees (with names, status and dates), earning components, approved overtime, the month's
+    // attendance and finalized settlements: every read paged with a unique tiebreaker (S849,
+    // OWNER-REPORT-16: three of them were bare and stopped at 1,000 rows with no error).
+    loadLabourEstimateInputs(from, period),
     // Approved requests that touch the month, filtered by the server and paged (S798 2e,
     // LABOUR-FIGURES-6). It read the client's whole leave history in one request, so past ~1,000
     // requests the newest were cut and the frozen Leave section came out short or empty. formatAd
@@ -293,20 +374,19 @@ async function computeHrSection(clientId, period) {
     fetchAllRows(() => scopedFrom('hr_leave_requests', clientId, 'id, leave_type_id, status, start_date, end_date, days')
       .eq('status', 'approved').lte('start_date', formatAd(periodEndAd)).gte('end_date', formatAd(periodStartAd))
       .order('id')),
-    // Paged — one row per employee per day, past the 1000-row cap at ~34 staff. This feeds the
-    // frozen snapshot's labor figures, so a truncated read would be preserved permanently (S529).
-    fetchAllRows(() => scopedFrom('hr_attendance', clientId, 'status, hours_worked, ot_hours').eq('period_id', period.id).order('id')),
+    // A name map of the client's leave types: tens of rows, not paged.
     scopedFrom('hr_leave_types', clientId, 'id, name'),
     scopedFrom('hr_payroll_runs', clientId, 'id').eq('period_id', period.id).eq('status', 'finalized').maybeSingle(),
     // Festival allowance, incentives and final settlements finalized for this month (S798 3c, H18):
     // labour in the month paid, on top of the run or the estimate. A failed read fails the section.
-    loadMonthOtherLabour((t, c) => scopedFrom(t, clientId, c), period.bs_year, period.bs_month),
+    loadMonthOtherLabour(from, period.bs_year, period.bs_month),
   ])
   throwFirstError(results)
   const [
-    { data: employees }, { data: components }, { data: otEntries }, { data: leaveRequests },
-    { data: attendanceRows }, { data: leaveTypes }, { data: finalizedRun }, { other: otherLabour },
+    { inputs }, { data: leaveRequests }, { data: leaveTypes }, { data: finalizedRun }, { other: otherLabour },
   ] = results
+  const employees = inputs.employees || []
+  const attendanceRows = inputs.attendance || []
   // Frozen as plain figures, the festival name resolved now (the S435 rule for a frozen artifact).
   const other = {
     festival: otherLabour.festival, festivalName: otherLabour.festivalName,
@@ -314,35 +394,31 @@ async function computeHrSection(clientId, period) {
     settlementCount: otherLabour.settlementCount, total: otherLabour.total,
   }
   const leaveTypeNameMap = Object.fromEntries((leaveTypes || []).map(lt => [lt.id, lt.name]))
-  const empMap = Object.fromEntries((employees || []).map(e => [e.id, e]))
 
-  // Headcount is a lifecycle fact (who joined/left this period), independent of which payroll
-  // figures get used below — always computed from join_date/end_date regardless of source.
-  let activeCount = 0, newHiresCount = 0, terminationsCount = 0
-  ;(employees || []).forEach(emp => {
-    const isActiveish = emp.status === 'active' || emp.status === 'probation'
-    const endAd = emp.end_date ? parseAdDateLocal(emp.end_date) : null
-    const terminatedThisPeriod = !isActiveish && endAd && endAd >= periodStartAd && endAd <= periodEndAd
-    if (!isActiveish && !terminatedThisPeriod) return
-    const joinAd = emp.join_date ? parseAdDateLocal(emp.join_date) : null
-    if (joinAd && joinAd > periodEndAd) return
-    if (isActiveish) activeCount += 1
-    if (terminatedThisPeriod) terminationsCount += 1
-    if (joinAd && joinAd >= periodStartAd && joinAd <= periodEndAd) newHiresCount += 1
+  // Headcount is a lifecycle fact (who was employed, joined or left in the month), decided by join and
+  // End Dates, not by today's status (schema 18, OWNER-REPORT-7: employmentInMonth). "Employed" is
+  // everyone employed at any time in the month, joiners and leavers included.
+  let employedCount = 0, newHiresCount = 0, terminationsCount = 0, noEndDateCount = 0
+  employees.forEach(emp => {
+    const e = employmentInMonth(emp, periodStartAd, periodEndAd)
+    if (e.unknown) {
+      // Only someone who could have worked the month: joined by its end.
+      const joinAd = emp.join_date ? parseAdDateLocal(emp.join_date) : null
+      if (!joinAd || joinAd <= periodEndAd) noEndDateCount += 1
+      return
+    }
+    if (!e.employed) return
+    employedCount += 1
+    if (e.joined) newHiresCount += 1
+    if (e.left) terminationsCount += 1
   })
 
-  // ── Payroll figures: prefer the actual finalized payroll run over a re-derived estimate ──
+  // ── Payroll figures: prefer the actual finalized payroll run over the estimate ──
   // A finalized hr_payroll_runs/hr_payslips is the exact, authoritative Nepal-payroll-engine
   // computation (payrollCompute.js — real OT from BOTH attendance and approved claims, real
-  // TDS/absence-based deductions) — reusing it is both more accurate and simpler than
-  // re-deriving an approximation. Found live: the estimate path below only reads
-  // hr_overtime_entries (approved OT *claims*), completely missing attendance-based OT
-  // (hr_attendance.ot_hours, tallied inside computePayslip), so a client whose OT comes from
-  // daily attendance rather than separate claims saw NPR 0 overtime in the report despite a
-  // finalized payroll clearly showing otherwise. Only fall back to the estimate below when this
-  // period's payroll was genuinely never finalized (client doesn't use Payroll Run, or hasn't
-  // finalized yet) — matches Owner Dashboard's live MTD estimate for the still-open case.
-  let payroll, payrollSource
+  // TDS/absence-based deductions). Only when the month's payroll was never finalized does the
+  // report fall back to the estimate (the client does not use Payroll Run, or has not finalized yet).
+  let payroll, payrollSource, labourInput, estimateNotes = null
   if (finalizedRun?.id) {
     // Paged: one row per employee per run.
     const payslipRes = await fetchAllRows(() => scopedFrom('hr_payslips', clientId, 'id, gross, absence_deduction, ot_hours, ot_amount, ssf_employer')
@@ -358,30 +434,29 @@ async function computeHrSection(clientId, period) {
     const otHours = (payslips || []).reduce((s, p) => s + (parseFloat(p.ot_hours) || 0), 0)
     const otAmount = (payslips || []).reduce((s, p) => s + (parseFloat(p.ot_amount) || 0), 0)
     const ssfEmployer = (payslips || []).reduce((s, p) => s + (parseFloat(p.ssf_employer) || 0), 0)
-    payroll = { gross, absenceDeduction, ot: { hours: otHours, amount: otAmount }, ssfEmployer, other, total: gross - absenceDeduction + otAmount + ssfEmployer + other.total }
+    const payrollBase = payrollLabourTotal(payslips || [])
+    payroll = { gross, absenceDeduction, ot: { hours: otHours, amount: otAmount }, ssfEmployer, other, total: payrollBase + other.total }
     payrollSource = 'finalized'
+    labourInput = { payroll: payrollBase, estimate: null, otherPay: other }
   } else {
-    const { gross: accruedGross, ssfEmployer: accruedSsfEmployer } = estimatePayrollAccrual({ employees, components, period })
-
-    let otTotal = 0, otHoursTotal = 0
-    ;(otEntries || []).forEach(e => {
-      const emp = empMap[e.employee_id]
-      if (!emp) return
-      const hr = hourlyRateOf(emp.pay_basis || 'monthly', parseFloat(emp.basic_salary) || 0, monthDays)
-      const mult = e.ot_type === 'holiday' ? OT_HOLIDAY_MULTIPLIER : OT_MULTIPLIER
-      const hours = parseFloat(e.ot_hours) || 0
-      otTotal += hours * hr * mult
-      otHoursTotal += hours
-    })
-
-    // The estimate prorates joiners and leavers already; it has no unpaid-day figure to subtract.
-    payroll = { gross: accruedGross, absenceDeduction: null, ot: { hours: otHoursTotal, amount: otTotal }, ssfEmployer: accruedSsfEmployer, other, total: accruedGross + otTotal + accruedSsfEmployer + other.total }
+    const est = estimateLabour({ ...inputs, period, throughDay: monthDays })
+    const otHours = est.sheetOt.hours + est.approvedOt.hours
+    const otAmount = est.sheetOt.amount + est.approvedOt.amount
+    // The estimate prorates joiners and leavers and docks unpaid days itself; it has no separate
+    // unpaid-day figure to show.
+    payroll = { gross: est.gross, absenceDeduction: null, ot: { hours: otHours, amount: otAmount }, ssfEmployer: est.ssfEmployer, other, total: est.amount + other.total }
     payrollSource = 'estimated'
+    labourInput = { payroll: null, estimate: est, otherPay: other }
+    // What the page owes the reader about the estimate, as counts (names are not frozen).
+    estimateNotes = {
+      staffCounted: est.staffCounted, onPayroll: est.onPayroll, noPay: est.noPay.length,
+      unended: est.unended.length, settledOut: est.settledOut, calendarStaff: est.calendarStaff,
+      sheetOt: { hours: est.sheetOt.hours, amount: est.sheetOt.amount },
+    }
   }
 
-  // Leave taken — hr_leave_requests has no period_id, only AD start_date/end_date, so an approved
-  // request counts toward this period if its date range overlaps the period at all (a leave
-  // spanning a period boundary is credited to every period it touches, not split).
+  // Leave taken — hr_leave_requests has no period_id, only AD start_date/end_date. Since schema 18
+  // (OWNER-REPORT-14) a request crossing a month edge counts only its days inside this month.
   const leaveByType = {}
   ;(leaveRequests || []).forEach(lr => {
     // The query already holds only approved requests overlapping the month; kept as a guard.
@@ -396,28 +471,21 @@ async function computeHrSection(clientId, period) {
       const name = lr.leave_type_id ? (leaveTypeNameMap[lr.leave_type_id] || 'Unknown Leave Type') : 'Unspecified'
       leaveByType[key] = { leaveTypeName: name, days: 0, requestCount: 0 }
     }
-    leaveByType[key].days += parseFloat(lr.days) || 0
+    leaveByType[key].days += leaveDaysInMonth(lr, periodStartAd, periodEndAd)
     leaveByType[key].requestCount += 1
   })
 
-  // Attendance rate — best-effort/nullable; not every client uses the daily Attendance Sheet.
-  let attendance = null
-  if ((attendanceRows || []).length > 0) {
-    const t = tallyAttendance(attendanceRows)
-    const totalTrackedDays = attendanceRows.length
-    const presentDays = t.present + t.half_day * 0.5 + t.paid_leave + t.half_paid_leave * 0.5
-    const absentDays = t.absent + t.unpaid_leave + t.half_unpaid_leave * 0.5
-    attendance = {
-      presentDays, absentDays, totalTrackedDays,
-      rate: totalTrackedDays > 0 ? (presentDays / totalTrackedDays) * 100 : null,
-    }
-  }
-
   return {
-    payroll, payrollSource,
-    headcount: { active: activeCount, newHires: newHiresCount, terminations: terminationsCount },
-    leave: Object.values(leaveByType),
-    attendance,
+    section: {
+      payroll, payrollSource,
+      ...(estimateNotes ? { estimate: estimateNotes } : {}),
+      headcount: { employed: employedCount, newHires: newHiresCount, terminations: terminationsCount, noEndDate: noEndDateCount, basis: 'dates' },
+      leave: Object.values(leaveByType),
+      leaveBasis: 'in_month',
+      // Best-effort/nullable; not every client uses the daily Attendance Sheet (OWNER-REPORT-13).
+      attendance: attendanceRate(attendanceRows),
+    },
+    labourInput,
   }
 }
 
@@ -583,15 +651,45 @@ async function computePosSection(clientId, period) {
   }
 }
 
-// Prime Cost % / True Net Margin %. Always computed when inputs exist; True Net Margin's *display*
-// is gated behind hasFeature('overheads') by the report page, not here (mirrors Owner Dashboard's
-// own canOverheads pattern).
+// The labour figure for the report, by the ONE rule every Suite page uses (S849, GAPS-4 / SU11 (a),
+// OWNER-REPORT-9; `resolveOutletLabour`, labourSource.js), for a closed month (scale 1):
+//   - Crest HR in the report: the finalized run, else the HR estimate, plus other labour. A non-empty
+//     Overheads Labor tab is NOT added; it is frozen as `laborTabNotCounted` and named on the page.
+//     The HR section failed → `failed`: no labour figure and no Net Margin, never the Labor tab.
+//   - Crest HR not in the report (SU18): the Labor tab is the labour, "from Overheads"; an empty tab is
+//     `none` (no Labor Cost %, and Net Margin is shown unbanded with "no labour entered on Overheads").
+// `hrLabour` is computeHrSection's `labourInput` (null when HR is off or failed).
+export function resolveReportLabour({ hrIncluded, hrLabour, ims }) {
+  if (!ims) return null
+  const labour = resolveOutletLabour({
+    hrOn: !!hrIncluded,
+    payroll: hrLabour?.payroll ?? null,
+    payrollReadFailed: !!hrIncluded && !hrLabour,
+    estimate: hrLabour?.estimate ?? null,
+    labourBucket: ims.laborTabTotal || 0,
+    otherPay: hrLabour?.otherPay ?? null,
+  })
+  return {
+    source: labour.source,
+    amount: labour.amount,
+    laborTabNotCounted: labour.ignoredBucket || 0,
+    reason: labour.reason || '',
+    noPayCount: labour.reason === 'nopay' ? (labour.estimate?.noPay?.length || 0) : 0,
+  }
+}
+
+// What an older caller (or an older test) passes instead of `labour`: the HR payroll total.
+const labourFromHr = hr => (hr?.payroll ? {
+  source: hr.payrollSource === 'finalized' ? 'payroll' : 'estimate', amount: hr.payroll.total, laborTabNotCounted: 0, reason: '', noPayCount: 0,
+} : null)
+
+// Prime Cost % / True Net Margin %. Always computed when inputs exist; True Net Margin's verdict is
+// gated behind hasFeature('overheads') by the report page, not here (mirrors Owner Dashboard's own
+// canOverheads pattern).
 //
 // Since schema v9 (S792, D30) the food cost in all three is COGS — what was used — because the
-// report is always of a closed month. Net margin takes COGS too: revenue − food cost − labour −
-// overheads only adds up to 100% with Food Cost % beside it if both mean the same food cost, and
-// Consolidated P&L's Net Profit subtracts COGS for the same month. `foodCostBasis` names the basis
-// so a reader, and the Trend section comparing against older snapshots, can tell.
+// report is always of a closed month. `foodCostBasis` names the basis so a reader, and the Trend
+// section comparing against older snapshots, can tell.
 //
 // Since schema v13 (S798 3c, LABOUR-FIGURES-1/-3) labour is pay EARNED (gross less the absence
 // deduction) + overtime + employer SSF, plus festival allowance, incentives and final settlements
@@ -599,18 +697,44 @@ async function computePosSection(clientId, period) {
 // Trend delta across the line.
 //
 // Since schema v12 (S798 2e, LABOUR-FIGURES-4) Net Margin also subtracts Tax & Fees, as Overheads,
-// the Dashboard and Consolidated P&L do. `netMarginTaxFees: true` marks it; a v11 margin without it
-// read higher by that month's card and bank fees, accountant and licences.
-export function computeCombinedMetrics({ ims, hr }) {
-  if (!ims) return { revenueTotal: null, foodCostPct: null, laborCostPct: null, primeCostPct: null, netMarginPct: null }
+// the Dashboard and Consolidated P&L do. `netMarginTaxFees: true` marks it.
+//
+// Since schema 18 (S849, GAPS-1 / SU23, PNL-1) Net Margin takes off the same costs Consolidated P&L
+// does: revenue − COGS − raw stock wasted − staff meals − delivery commission − labour − overheads −
+// Tax & Fees. COGS takes wastage and staff meals OUT of food used (they are shown on their own lines),
+// so a margin that subtracted only COGS left them out of every cost and read higher than the P&L by
+// them. Delivery commission is what Foodmandu, Pathao and the like kept from the month's bills
+// (`loadDeliveryCommission`); when its read failed, Net Margin is null — never a margin without it.
+// `netMarginPnlCosts: true` marks it; Trend gives no Net Margin delta across the line. Prime Cost
+// stays Food Cost % + Labor Cost % (D30).
+//
+// Labour comes from `labour` (resolveReportLabour, v18). Its markers are kept when IMS failed, so a
+// reader can still tell which rule the empty ratios were computed under (OWNER-REPORT-2).
+export function computeCombinedMetrics({ ims, hr, labour, deliveryCommission = null, commissionFailed = false }) {
+  const markers = { netMarginTaxFees: true, labourBasis: LABOUR_BASIS, netMarginPnlCosts: true }
+  const lab = labour !== undefined ? labour : labourFromHr(hr)
+  if (!ims) {
+    return {
+      revenueTotal: null, foodCostPct: null, laborCostPct: null, primeCostPct: null, netMarginPct: null,
+      foodCostBasis: 'cogs', ...markers, labour: lab || null, fcThresholds: null,
+    }
+  }
   const revenueTotal = ims.revenueTotal || 0
   const foodCostPct = ims.foodCostPct
-  const laborCostPct = hr && revenueTotal > 0 ? (hr.payroll.total / revenueTotal) * 100 : null
+  const hasLabourFigure = !!lab && lab.amount != null
+  // `none` (no HR and an empty Labor tab) has no Labor Cost %: 0.0% would read as a verdict.
+  const laborCostPct = hasLabourFigure && lab.source !== 'none' && revenueTotal > 0 ? (lab.amount / revenueTotal) * 100 : null
   const primeCostPct = foodCostPct != null && laborCostPct != null ? foodCostPct + laborCostPct : null
-  const netMarginPct = hr && revenueTotal > 0
-    ? ((revenueTotal - ims.cogsTotal - hr.payroll.total - ims.overheadTotal - (ims.taxFeesTotal || 0)) / revenueTotal) * 100
+  const commission = Number(deliveryCommission?.amount) || 0
+  const netMarginPct = hasLabourFigure && !commissionFailed && revenueTotal > 0
+    ? ((revenueTotal - ims.cogsTotal - (ims.cogsWastageTotal || 0) - (ims.staffMealsValueTotal || 0) - commission
+      - lab.amount - ims.overheadTotal - (ims.taxFeesTotal || 0)) / revenueTotal) * 100
     : null
-  return { revenueTotal, foodCostPct, laborCostPct, primeCostPct, netMarginPct, foodCostBasis: ims.foodCostBasis, netMarginTaxFees: true, labourBasis: LABOUR_BASIS }
+  return {
+    revenueTotal, foodCostPct, laborCostPct, primeCostPct, netMarginPct, foodCostBasis: ims.foodCostBasis, ...markers,
+    labour: lab || null,
+    fcThresholds: ims.fcThresholds || null,
+  }
 }
 
 // ── Trend section ────────────────────────────────────────────────────────────
@@ -651,6 +775,18 @@ export const netMarginTaxFeesOf = snapshot => snapshot?.combined?.netMarginTaxFe
 export const LABOUR_BASIS = 'earned'
 export const labourBasisOf = snapshot => snapshot?.combined?.labourBasis || 'gross'
 
+// Whether a snapshot's Net Margin takes off wastage, staff meals and delivery commission as
+// Consolidated P&L does. Absent before schema 18, when it did not (S849, GAPS-1).
+export const netMarginPnlCostsOf = snapshot => snapshot?.combined?.netMarginPnlCosts === true
+
+// Whether a snapshot's closing count left a MATERIAL gap, so its food-cost verdicts are withheld (D6).
+// A trimmed Trend copy (v18) carries it as `countGapMaterial`; a full snapshot carries `ims.countGap`.
+export const countGapMaterialOf = snapshot => {
+  if (!snapshot) return false
+  if (typeof snapshot.countGapMaterial === 'boolean') return snapshot.countGapMaterial
+  return foodCostBasisOf(snapshot) === 'cogs' && !!snapshot.ims?.countGap?.material
+}
+
 export function buildDeltas(current, prior) {
   if (!prior) return null
   const pctDelta = (curVal, priorVal) => (curVal == null || priorVal == null) ? null : curVal - priorVal // percentage-point delta
@@ -664,15 +800,23 @@ export function buildDeltas(current, prior) {
   // difference is mostly the change of formula, not a change in the kitchen, so the three ratios
   // that contain it get no delta, and the section says why rather than print a move that is not one.
   const sameBasis = foodCostBasisOf(current) === foodCostBasisOf(prior)
-  // The same for Net Margin across the v11→v12 line, where it started subtracting Tax & Fees.
-  const sameNetBasis = sameBasis && netMarginTaxFeesOf(current) === netMarginTaxFeesOf(prior)
+  // The same for Net Margin across the v11→v12 line, where it started subtracting Tax & Fees, and
+  // across v17→v18, where it started subtracting wastage, staff meals and delivery commission (S849).
+  const sameTaxFees = netMarginTaxFeesOf(current) === netMarginTaxFeesOf(prior)
+  const samePnlCosts = netMarginPnlCostsOf(current) === netMarginPnlCostsOf(prior)
+  const sameNetBasis = sameBasis && sameTaxFees && samePnlCosts
   // And for the three labour-bearing ratios across v12→v13, where labour started taking off unpaid
   // days and counting festival, incentive and settlement pay (S798 3c).
   const sameLabour = labourBasisOf(current) === labourBasisOf(prior)
   return {
     foodCostBasisChanged: !sameBasis,
-    netMarginBasisChanged: sameBasis && !sameNetBasis,
+    netMarginBasisChanged: sameBasis && !sameTaxFees,
+    netMarginCostsChanged: sameBasis && sameTaxFees && !samePnlCosts,
     labourBasisChanged: !sameLabour,
+    // A material count gap on EITHER side (S849, OWNER-REPORT-12): page 1 withholds the food-cost
+    // verdicts for such a month, so Trend shows the change with no better/worse word on Food Cost,
+    // Prime Cost and Net Margin.
+    verdictWithheld: countGapMaterialOf(current) || countGapMaterialOf(prior),
     revenueTotal: moneyDelta(current.combined?.revenueTotal, prior.combined?.revenueTotal),
     foodCostPct: sameBasis ? pctDelta(current.combined?.foodCostPct, prior.combined?.foodCostPct) : null,
     laborCostPct: sameLabour ? pctDelta(current.combined?.laborCostPct, prior.combined?.laborCostPct) : null,
@@ -693,8 +837,14 @@ export function buildDeltas(current, prior) {
 export function trendSnapshotOf(snapshot) {
   if (!snapshot) return null
   const c = snapshot.combined || {}
+  const failed = Object.keys(snapshot.sectionErrors || {})
   return {
     schemaVersion: snapshot.schemaVersion ?? null,
+    // Since v18 (S849, OWNER-REPORT-12 / -2): whether the prior's closing count was materially
+    // incomplete (its food-cost verdicts were withheld), and which of its sections failed, so Trend
+    // can say why a ratio is not judged or not compared.
+    countGapMaterial: countGapMaterialOf(snapshot),
+    sectionErrors: failed.length > 0 ? failed : null,
     combined: {
       revenueTotal: c.revenueTotal ?? null,
       foodCostPct: c.foodCostPct ?? null,
@@ -707,6 +857,9 @@ export function trendSnapshotOf(snapshot) {
       ...(c.netMarginTaxFees ? { netMarginTaxFees: true } : {}),
       // Absent before v13 on purpose: its absence says labour was gross + OT + SSF (labourBasisOf).
       ...(c.labourBasis ? { labourBasis: c.labourBasis } : {}),
+      // Absent before v18 on purpose: its absence says Net Margin left wastage, staff meals and
+      // delivery commission out (netMarginPnlCostsOf).
+      ...(c.netMarginPnlCosts ? { netMarginPnlCosts: true } : {}),
     },
     pos: snapshot.pos ? { totalNetSales: snapshot.pos.totalNetSales ?? null } : null,
   }
@@ -880,7 +1033,42 @@ async function computeTrendSection(clientId, period, currentPartial) {
 //   part bill there was a takeaway and its guests went uncounted. A month before S836 has no part
 //   bills and the same figures either way. No Trend marker: Trend compares POS Net Sales only, which
 //   a part bill does not move.
-export const CURRENT_SCHEMA_VERSION = 17
+// 18 (S849): several figures changed meaning at once; one bump for all of them.
+//   - GAPS-1 (SU23) / PNL-1 (SU3 a): Net Margin also subtracts raw stock wasted (`ims.cogsWastageTotal`,
+//     COGS's wastage term), staff meals and delivery-partner commission (top-level `deliveryCommission`
+//     = { amount, unsettledBills, basis: 'sold_month' }, bills SOLD in the month, read only with Crest
+//     POS in the report): the costs Consolidated P&L takes off. A v18 Net Margin is lower than a v17
+//     one by them. `combined.netMarginPnlCosts: true` marks it; Trend gives no Net Margin delta across
+//     the line (`deltas.netMarginCostsChanged`). A failed commission read is a named section error
+//     and Net Margin is null.
+//   - GAPS-4 (SU11 a) / OWNER-REPORT-9 (SU18): labour by the ONE rule every Suite page uses
+//     (resolveOutletLabour), frozen as `combined.labour` = { source, amount, laborTabNotCounted,
+//     reason, noPayCount }. With Crest HR: the finalized run, else the shared HR estimate
+//     (estimateLabour: payroll's roster, unpaid days on the attendance sheet, daily/hourly pay by
+//     attendance, sheet overtime) — v17's own estimate read no attendance; the Overheads Labor tab is
+//     named, never added. Without Crest HR: the Labor tab is the labour, "from Overheads"
+//     (`ims.laborTabTotal`), where v17 froze no labour and no Net Margin at all. No Trend marker: a
+//     v17 no-HR report had no labour, so its delta is null already; the HR estimate was corrected,
+//     as at v12/v14.
+//   - OWNER-REPORT-5: the Food Cost thresholds are frozen (`ims.fcThresholds`, `combined.fcThresholds`).
+//   - OWNER-REPORT-7: Staff Employed is decided by join and End Dates (employmentInMonth), not by
+//     today's status: `hr.headcount` = { employed, newHires, terminations, noEndDate, basis: 'dates' }
+//     where v17 had `active`. A report made after staff left counts them in the months they worked.
+//   - OWNER-REPORT-8: Unpaid Credit is what is still owed per BILL (VAT, discount and returns in, the
+//     Outstanding Payables arithmetic), `ims.payables.basis: 'owed'`, `unpaidCount` counts bills; the
+//     vendor section's bill aging the same (`billAging.basis: 'owed'`).
+//   - OWNER-REPORT-13: Attendance Rate is over working days (weekly offs and holidays left out),
+//     `hr.attendance.basis: 'working_days'`, `workingDays`.
+//   - OWNER-REPORT-14: a leave crossing a month edge counts only its days inside the month,
+//     `hr.leaveBasis: 'in_month'`.
+//   - OWNER-REPORT-15: Inventory Turnover is COGS ÷ the average stock of the items COGS counts
+//     (`ims.cogsOpeningValue` / `cogsClosingValue`, `inventoryDepth.turnover.basis: 'cogs'`).
+//   - OWNER-REPORT-12 / -2: a Trend entry keeps the prior's `countGapMaterial` and failed `sectionErrors`
+//     keys; `deltas.verdictWithheld` when either side's count gap is material.
+//   - PNL-8: stock transfers between outlets fold into Net Purchases, COGS, on-hand and the count gap
+//     (`ims.transferIn` / `transferOut`); in the Inventory Depth sub-sections as well. A month with no
+//     transfers computes as before.
+export const CURRENT_SCHEMA_VERSION = 18
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean
@@ -898,17 +1086,41 @@ async function runSection(key, fn, errors) {
   }
 }
 
+// Delivery-partner commission on the bills SOLD in the month (S849, PNL-1), the P&L's own helper and
+// month window, so the two agree to the paisa. A failed read THROWS, so it is a named section error
+// and Net Margin is null — a margin without it would be the P&L's figure plus the commission.
+async function computeDeliveryCommissionSection(clientId, period) {
+  const { startIso, endIso } = bsMonthWindow(period.bs_year, period.bs_month)
+  const db = { scopedFrom: (t, c) => scopedFrom(t, clientId, c) }
+  const { amount, unsettledBills, error } = await loadDeliveryCommission(db, { startIso, endIso })
+  if (error) throw new Error(error.message || 'Delivery commission could not be read')
+  return { amount, unsettledBills, basis: 'sold_month' }
+}
+
 export async function computeMonthlyReport({ clientId, period, modulesIncluded }) {
   if (!period || period.status !== 'closed') {
     throw new Error('Monthly owner reports are only generated for closed periods')
   }
   const sectionErrors = {}
-  const [ims, hr, pos] = await Promise.all([
+  let hrLabour = null
+  // Commission is read only with Crest POS in the report, as the P&L reads it only for a POS client:
+  // an outlet without the till has no delivery bills (its commission is 0, with no read).
+  const commissionIncluded = !!(modulesIncluded.ims && modulesIncluded.pos)
+  const [ims, hr, pos, deliveryCommission] = await Promise.all([
     modulesIncluded.ims ? runSection('ims', () => computeImsSection(clientId, period), sectionErrors) : null,
-    modulesIncluded.hr  ? runSection('hr',  () => computeHrSection(clientId, period),  sectionErrors) : null,
+    modulesIncluded.hr  ? runSection('hr', async () => {
+      const r = await computeHrSection(clientId, period)
+      hrLabour = r.labourInput
+      return r.section
+    }, sectionErrors) : null,
     modulesIncluded.pos ? runSection('pos', () => computePosSection(clientId, period), sectionErrors) : null,
+    commissionIncluded ? runSection('deliveryCommission', () => computeDeliveryCommissionSection(clientId, period), sectionErrors) : null,
   ])
-  const combined = computeCombinedMetrics({ ims, hr })
+  const labour = resolveReportLabour({ hrIncluded: !!modulesIncluded.hr, hrLabour: hr ? hrLabour : null, ims })
+  const combined = computeCombinedMetrics({
+    ims, hr, labour, deliveryCommission,
+    commissionFailed: commissionIncluded && !deliveryCommission,
+  })
 
   const generatedAt = new Date()
   const [trend, menuEngineering, laborAnalytics, vendorPurchasing, inventoryDepth] = await Promise.all([
@@ -924,6 +1136,7 @@ export async function computeMonthlyReport({ clientId, period, modulesIncluded }
     period: { id: period.id, bs_year: period.bs_year, bs_month: period.bs_month },
     modulesIncluded,
     ims, hr, pos, trend, menuEngineering, laborAnalytics, vendorPurchasing, inventoryDepth,
+    deliveryCommission,
     combined,
     sectionErrors: Object.keys(sectionErrors).length > 0 ? sectionErrors : null,
   }
