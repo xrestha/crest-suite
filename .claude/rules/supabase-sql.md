@@ -346,7 +346,7 @@ A full review on 2026-08-10 found that most of the app's access control was enfo
 
 **Wrap every authorisation condition in `COALESCE(..., false)`.** `pos_role` is NULL for any account with no POS access, `NULL IN ('supervisor','manager')` evaluates to NULL rather than false, `NULL OR false` is NULL, and `IF NOT NULL THEN` never fires — so the natural form of a rank check falls open for exactly the accounts that have no rank. This is the `is_admin()`-returns-NULL trap in a second guise; assume any three-valued expression in a guard is a fail-open until it is wrapped. **A CHECK passes on NULL too**: write a pair rule as `CHECK (COALESCE(…, false))`, or `billed` with a NULL close type sails through (S809 1c, `pos_orders_status_close_type_check`).
 
-`is_client_owner()` is the **third** copy of the negative Owner test, alongside `isOwner` in `AuthContext.js` and `isCallerOwner` in `admin-user-ops/index.ts`. A new staff-account marker column must be added to **all three** — miss one and Owner detection breaks silently and in the permissive direction.
+`profile_is_owner(p)` is the **third** copy of the negative Owner test (since S849 GROUP-15 `is_client_owner()` is `SELECT profile_is_owner(p)` for the caller's row, and `get_group_outlet_access` labels each listed login with it), alongside `isOwner` in `AuthContext.js` and `isCallerOwner` in `admin-user-ops/index.ts`. A new staff-account marker column must be added to **all three** — miss one and Owner detection breaks silently and in the permissive direction.
 
 Security headers (`vercel.json` is strict JSON, and `connect-src` is the exfiltration boundary): `.claude/rules/security-headers.md`.
 

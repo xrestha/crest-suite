@@ -602,9 +602,9 @@ History: #s740-leave-reopen-and-overtime-undo, #s741-leave-back-fill,
 - **Removing a holiday is a stamp (`removed_at`), never a DELETE**, or the next Seed brings it back.
   `planSeed()` counts a removed row as present and never corrects its date. **Every reader outside the
   page filters `removed_at IS NULL`** (grep `hr_holiday_calendar`: today `Overtime.jsx`,
-  `LeaveManagement.jsx`, `demandForecastData.js`, `setupSignals.js`, and in SQL
-  `hr_public_holiday_count`, `hr_backfill_approved_leave` and `get_forecast_holidays`, the
-  dashboard chart's read, S850). Delete for good exists and forgets the
+  `LeaveManagement.jsx`, `setupSignals.js`, and in SQL
+  `hr_public_holiday_count`, `hr_backfill_approved_leave`, `get_forecast_holidays` (the
+  dashboard chart's read, S850) and `demand_forecast_history` (Demand Forecast's, S849). Delete for good exists and forgets the
   removal.
 
 Why: a missing or wrong holiday is a wrong rate on a real payslip, on the biggest working days of
@@ -715,6 +715,12 @@ History: #s633-shift-swaps-tab, #s692-labor-forecast, #s749-roster-attendance-le
   all-days figure and says so (`describeBasis`); under 20 qualifying days there is no standard; a
   failed window read is an `ActionError` saying it failed, not a lack of history. It learns what this
   outlet normally uses, not what it should.
+- **A coming day reads Demand Forecast only where the outlet has it** (S849, ACCESS-10):
+  `useSuiteAccess(SUITE_PAGES.demandForecast)`, the gate Demand Forecast's own page asks (Crest Suite
+  Pro with Inventory). Without it the coming days stay "—" and the footnote says the outlet has no
+  Demand Forecast; a failed overlay read says "not loaded" (FORECAST-10e), never "no forecast". Access
+  'unknown' (the client row did not load) reads as open for the copy. Roster is shared with hss-suite
+  (CLAUDE.md, Sister repo), so this change is open there until it is filed in its `docs/CROSS-REPO.md`.
 - **`covers_per_staff_target` stays a POLICY the owner sets.** The learned covers-per-shift figure is
   shown beside it and never written into it.
 

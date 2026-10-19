@@ -44,7 +44,7 @@ following the PRO badge's own long-standing `isAdmin ||`, so an operator viewing
 Suite still sees the tab; that is deliberate and unchanged in substance, but it does mean an admin
 session cannot see the upsell branch at all.
 
-**A billed axis must be visible on the screens that bill it (S552).** `suite_plan` was selected by `AdminDashboardOverview.jsx` and priced into `clientMRR()` at NPR 2,000/outlet, and rendered **nowhere** — the client list showed IMS/HR/POS pills off the three `*_enabled` flags and nothing for Suite, so a Suite Pro client looked identical to one without it while its revenue sat in the MRR figure on the same page. The Sub Status column tracks IMS only (plus a bolted-on HR hint), so a lapsing Suite was silent too. Both admin surfaces now carry a `★ SUITE` pill and the dashboard warns on `Suite exp. Nd` / `Suite lapsed`, resolving through the same `suite_ends_at → IMS window` fallback `clientMRR()` uses so the pill and the money can never disagree. **Anything added to `clients` that changes what a client pays needs a place in the admin list in the same change** — a module flag gets one for free by joining the pill map; an axis like this one does not. **And the date the money reads must be the date the gate reads (S736).** From S552 to S736 `Suite lapsed` was a badge and nothing else: `SuiteGate` checked `suite_plan` alone, so a lapsed Suite showed "Not billing" beside a client whose Owner Dashboard was still open. `suiteLive()` in `utils/subscription.js` is now what `AuthContext.suitePlan` resolves through — see `subscription-access.md`.
+**A billed axis must be visible on the screens that bill it (S552).** `suite_plan` was selected by `AdminDashboardOverview.jsx` and priced into `clientMRR()` at NPR 2,000/outlet, and rendered **nowhere** — the client list showed IMS/HR/POS pills off the three `*_enabled` flags and nothing for Suite, so a Suite Pro client looked identical to one without it while its revenue sat in the MRR figure on the same page. The Sub Status column tracks IMS only (plus a bolted-on HR hint), so a lapsing Suite was silent too. Both admin surfaces now carry a `★ SUITE` pill and the dashboard warns on `Suite exp. Nd` / `Suite lapsed`. Until S849 only the dashboard's pill resolved a date: Admin → Clients pilled on `suite_plan` alone, which was never true from 818bdde2 to S848 (ACCESS-4). Since S849 every display copy, `clientMRR()` and billing-export read `suiteState(client)` in `utils/subscription.js` (live / no end date / grace / lapsed / needs IMS), so the pill and the money cannot disagree. **Anything added to `clients` that changes what a client pays needs a place in the admin list in the same change** — a module flag gets one for free by joining the pill map; an axis like this one does not. **And the date the money reads must be the date the gate reads (S736).** From S552 to S736 `Suite lapsed` was a badge and nothing else: `SuiteGate` checked `suite_plan` alone, so a lapsed Suite showed "Not billing" beside a client whose Owner Dashboard was still open. `suiteLive()` in `utils/subscription.js` is now what `AuthContext.suitePlan` resolves through — see `subscription-access.md`.
 
 **And the screen that CHANGES what a client pays must show the money, not just the axis (S643).**
 S552 put the `★ SUITE` pill on Admin → Clients; the *figure* stayed on the dashboard. But Clients is
@@ -73,7 +73,9 @@ priced in Settings → Plan Pricing. **Its build-your-own cost range needs IMS a
 Recipe Costing is a Growth feature; a client below that keeps the till and guest behaviour without
 the range.
 
-**Suite has ONE tier** (S548): `suite_plan` is `NULL | 'pro'`. It was `starter|growth|pro`, but both call sites were `minTier="growth"` — so Suite Starter unlocked nothing at all and Suite Pro added nothing over Suite Growth on its own axis. It is also an **add-on priced per outlet on top of a client's modules**, not a bundle containing them: turning it on implies only that IMS is enabled (`requireModules`' floor) and says nothing about HR, POS, or which IMS tier the client is on. `requireModules` (array, default `['ims','hr']` — Owner Dashboard's original behavior) varies per feature; Monthly Owner Report, Demand Forecast and Fixed Assets pass `['ims']`. Don't assume every caller needs Owner Dashboard's set.
+**Suite has ONE tier** (S548): `suite_plan` is `NULL | 'pro'`. It was `starter|growth|pro`, but both call sites were `minTier="growth"` — so Suite Starter unlocked nothing at all and Suite Pro added nothing over Suite Growth on its own axis. It is also an **add-on priced per outlet on top of a client's modules**, not a bundle containing them: turning it on implies only that IMS is enabled (`requireModules`' floor) and says nothing about HR, POS, or which IMS tier the client is on. `requireModules` (array, default `['ims','hr']` — Owner Dashboard's original behavior) varies per feature, and since S849 lives in `SUITE_PAGES` (`SuiteGate.js`): every other Suite page (Monthly Owner Report, Consolidated P&L, Group Console, Demand Forecast, Fixed Assets) passes `['ims']`. Don't assume every caller needs Owner Dashboard's set. A page asks `useSuiteAccess(SUITE_PAGES.x)` before any read, the same `suiteAccess()` the gate renders from (S849 ACCESS-9), because a JSX child runs before its gate.
+
+**Suite is a screen-level paywall, by decision (S848 SU14, ACCESS-6).** `SuiteGate` and the `suiteLive()` it reads are UI gates: no RLS policy and no write function reads `suite_plan`. So an Owner whose outlet never bought Suite, or whose Suite lapsed, can still reach their own Suite tables over the API with their own token (a Demand Forecast insert, the asset register, a master-data push inside their group). Accepted, because every Suite page computes from rows that client may already read and write: what is exposed is the add-on's revenue, not anyone's data, and the staff fences still hold. The one server-side Suite test is the group roll-ups' outlet filter (`get_group_summary`, `get_group_pnl`, `get_group_item_prices`, `get_group_labour_inputs`, through `client_suite_live()` since S849 ACCESS-1), because there one outlet's figures reach another outlet's screen. Outlet access sits outside Suite on purpose: `revoke_outlet_access` and `set_active_outlet` never check it (S798 H22, GAP-OUTLETS-3), so a lapse never strands a person in a branch. Do not add a Suite check to a policy or write function without reopening this decision.
 
 ## A price is printed from the resolver, and read from the PLATFORM row (S701)
 
@@ -255,47 +257,22 @@ changes what a page DOES, support follows the viewed client's `clientModules`: `
 
 ## Four gates, one grammar for "you cannot have this" (S683)
 
-The critique found four gates with four grammars. `ModuleGate` was three silent
-`<Navigate to="/dashboard">` — a client whose HR lapsed clicked HR, landed on the dashboard and was
-told nothing. `SuiteGate`'s module-missing card said "Contact your consultant" with no phone, no
-email and no link, the only gate not on `useSupportContact()`. `PremiumGate` headlined the PLAN
-("Growth Plan Required") and buried the feature the reader had just clicked in a ten-item
-paragraph, then offered no way to plans at all. And every upsell CTA went to `/pricing`, which is
-declared OUTSIDE `ProtectedRoute` and read no session — a signed-in Growth supervisor landed on a
-signed-out marketing page showing "Login →" and "Start Free Trial →".
-
-What holds now, and why each piece is where it is:
-
 - **`ModuleMissingCard`** (`src/components/ModuleMissingCard.jsx`) is what both `ModuleGate` (module
-  off) and `SuiteGate` (required module missing) render, in place, inside the shell. It names the
-  module, says the data is untouched, and gives the OWNER the `SupportContactLine` buttons — while
-  a staff login, who cannot buy anything, is told who can. The one branch that still redirects is
-  the station-team one (`STATION_TEAM_HOME`): a kitchen tablet landing on a card is worse than a
-  kitchen tablet landing on the KDS.
-- **`PremiumGate` names the feature** through `FEATURE_LABELS` in `src/shared/featureCatalog.js` —
-  the tier grid moved OUT of `FeatureAccessModal.js` into a data-only file because importing the
-  admin modal for its constant would drag it into the main bundle. The "also adds" sentence is
-  derived from the same catalog rather than the hand-typed list that had drifted from the grid
-  twice. `featureCatalog.test.js` reads `App.js` and `Layout.js` and fails on any routed or
-  navigated `featureKey` with no label, so the plan-only headline can never come back for a real
-  route.
-- **The buyer is the audience for a pitch.** The upgrade teaser and footer chip render for `isOwner`
-  only — and since the top-bar move they render in two different places: the full teaser stays in the
-  phone drawer, while on desktop the same facts are one row in the account menu (tier name + locked
-  count), both computed from the one `upgrade` object in `Layout.js` so they cannot disagree.
-  `SuiteGate` and `PremiumGate` show "View plans →" and the contact block to an
-  owner and one sentence — *it is switched on for the whole outlet, not per login — ask the account
-  owner* — to anyone else. A CTA whose reader cannot act on it is noise where a manager needs the
-  nav.
-- **`/pricing` reads the session.** Signed in, "Login →" becomes "Back to Crest →", every "Get X" /
-  "Add X" / "Start Free Trial" becomes "Ask about X" (a `mailto:` with the plan in the subject), and
-  the closing banner asks what to switch on instead of selling a trial to a paying customer. It
-  stays outside `ProtectedRoute` on purpose — a visitor must still be able to read it.
+  off) and `SuiteGate` (required module missing) render, in place, inside the shell: it names the
+  module, says the data is untouched, gives the OWNER the `SupportContactLine` buttons and tells a
+  staff login who can act. Only the station-team branch still redirects (`STATION_TEAM_HOME`), to the KDS.
+- **`PremiumGate` names the feature** through `FEATURE_LABELS` in `src/shared/featureCatalog.js`, a
+  data-only file so the admin modal stays out of the main bundle. `featureCatalog.test.js` fails on
+  any routed or navigated `featureKey` with no label. Help's Module Guide files IMS pages by the same
+  catalog's `FEATURE_TIER` (S849 DOCS-1, `helpFeatureTiers.test.js`).
+- **The buyer is the audience for a pitch.** The upgrade teaser, its account-menu row and the
+  "View plans →" plus contact block on `SuiteGate` and `PremiumGate` render for `isOwner` only, from
+  one `upgrade` object in `Layout.js`; anyone else gets one sentence: *it is switched on for the whole
+  outlet, not per login — ask the account owner*.
+- **`/pricing` reads the session.** Signed in, "Login →" becomes "Back to Crest →" and every buy
+  button becomes "Ask about X" (a `mailto:`). It stays outside `ProtectedRoute` so a visitor can read it.
 
-The last piece of the same finding — `SUPPORT_PHONE_RAW`, the one unfilled `[[NEEDS VALUE]]` in
-the product, which left every one of these surfaces showing email only — closed later in S683 by
-making the contact DATA: `settings.support_contact` on the platform row, edited in Settings →
-Support, with the founder's mobile as the constant floor. See `support-contact.md`.
+History: docs/rules-archive/access-control.md#s683-four-gates
 
 ## `is_premium`, `ims_plan` and how `plan` finally came to resolve
 

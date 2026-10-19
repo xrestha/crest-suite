@@ -59,13 +59,18 @@ from 120 days does not move in ten minutes.
 
 Three stores here survive a sign-out, and each had assumed it did not. A fourth — the purchase-bill draft (S779, below) — survives one **on purpose**, and pays this rule's price in its key.
 
-**`sessionDataCache` keys on `page_section_clientId` — no user id — and `sessionStorage` lives as
-long as the TAB, not the session.** So signing out and back in as a *different account of the same
+**`sessionDataCache` keyed on `page_section_clientId` — no user id — and `sessionStorage` lives as
+long as the TAB, not the session.** (Since S849 GAPS-7 the key carries the user too: below.) So signing out and back in as a *different account of the same
 client* in the same tab read the previous account's cached page data straight back. That is not
 cosmetic staleness: the staff-isolation policies are RESTRICTIVE SELECT filters, so the rows an IMS
 `staff` rank must not see are exactly the ones an Owner's cache would hand them. `switchOutlet()`
 already cleared `sessionStorage` for the outlet version of this; **`signOut()` now does too, and
-that call is load-bearing** — the file's own header used to claim the problem was impossible.
+that call is load-bearing** — the file's own header used to claim the problem was impossible. A
+sign-out in ANOTHER tab, or a session that ended by itself, still reached that tab's cache, so since
+S849 (GAPS-7) the key is user + client: AuthContext calls `setPageCacheUser` on load and on every
+auth event, nothing is read or written with no user known, and on no session it calls
+`clearPageCache()`, which removes only `crest_cache_*` keys (never `sessionStorage.clear()`: the guest
+menu and booking pages keep their own state there).
 
 **A queued offline write must carry the client it was made for.** `sync_queue` in
 `src/utils/offlineQueue.js` is one IndexedDB store shared by every account that has ever used the

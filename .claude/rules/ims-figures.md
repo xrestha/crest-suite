@@ -20,6 +20,8 @@ paths:
   - "src/modules/ims/reports/stockAgeingCalc.js"
   - "src/modules/ims/reports/stockAgeingCalc.test.js"
   - "src/modules/ims/reports/summaryReads.test.js"
+  # S849: the stock-transfer reader contract is below ("Stock transfers count as a purchase in…").
+  - "src/modules/ims/transfers/transferFlows.js"
   - "src/modules/ims/sales/**"
   # Added S713. Five files here PRINT a banded food-cost figure — MenuPricing, MenuRepricing,
   # MenuEngineering, RecipeMargin, Recipes — and this rule, which is the one that says how, did
@@ -221,36 +223,60 @@ that reaches the subtitle, the print header, both workbook sheets and the filena
 ### Demand Forecast: revenue is ex-VAT, arithmetic is pure, and an average is not a portion (S694)
 
 **"Revenue" means Σ qty × ex-VAT price everywhere, and a forecast of it must mean the same.**
-`buildDailyHistory` in `src/utils/demandForecastMath.js` takes `grossAmt − discount` from
-`computeOrderAmounts`, never `.net` (the rounded amount payable *including* VAT). It was the only
-caller in the app that hard-coded `vatReg = true`, and the Roster's Labor Forecast divided that
-VAT-inclusive figure by a sales-per-labour-hour learned from ex-VAT `sales_entries`, inflating
-required hours ~13% on a VAT-registered outlet. Any new consumer of `forecast_revenue` can assume
-ex-VAT; any new *producer* of a revenue-like figure must state its VAT basis in a comment.
+Since S849 the till's history is ONE caller-checked server read,
+`demand_forecast_history(p_client_id, p_lookback_days)` (SECURITY DEFINER; operator, Owner or IMS
+supervisor+ of the caller's outlet), returning per Nepal day only totals: bills, covers, revenue =
+Σ qty × unit_price over lines not comped less `pos_orders.discount_amount` (before VAT, the S830
+post's net), and plates per dish (comped lines and Complimentary bills add plates, never revenue or
+covers). `historyFromDailyTotals` only reshapes it. The browser's direct `pos_orders` /
+`pos_order_items` / `hr_holiday_calendar` reads are gone because `no_ims_staff` returns `[]` to an
+IMS login, and that Recompute replaced the Owner's forecast with an empty one. A run whose every day
+has no sample (`hasForecastEvidence`) writes and clears nothing. Any new consumer of
+`forecast_revenue` can assume ex-VAT net of bill discount; any new *producer* of a revenue-like
+figure states its basis in a comment.
 
 **The arithmetic lives in `demandForecastMath.js`, which imports no Supabase client;
 `demandForecastData.js` is the orchestration around it.** Put new forecast maths in the pure file
 — it has a test file, the orchestration file cannot. Three properties the tests pin: the day of
 the run is never a sample (a morning recompute would count a partial day as a whole one), a dish
 absent from a sample is a zero that day (not a missing sample), and covers/revenue average over
-POS-basis samples only (a manual day is "no signal", not zero).
+POS-basis samples only (a manual day is "no signal", not zero). The run's `now` is the server's
+Nepal date (`dateOfIso`, local midnight), so the horizon starts at Nepal's tomorrow.
 
 **A per-day average is shown as whole plates on the page, never as a decimal.** `splitDishList`
 → `platesOf` (ceil) for anything ≥ `OCCASIONAL_THRESHOLD`, an "occasional" tail below it; the raw
 average and the sample count go on hover. A reader took "0.8" as a portion size. The same applies
 to any future per-dish figure: the kitchen makes plates.
 
-**The manual-sales read uses `source.is.null,source.eq.manual`**, the predicate
-`persistSalesDay.js` uses, because rows predating the column default read NULL. `.eq('source',
-'manual')` silently drops them. And a day present in both POS and manual history is ONE sample —
-pass the POS day-key set to `buildManualDailyHistory`.
+**Hand-entered daily Sales Entries are always merged** (`mergeManualHistory`, S849 FORECAST-6), per
+(day, dish) by the stock rule: a hand-entered dish counts unless the till sold that dish that day; on
+a till day it joins that day (one sample, covers and revenue the till's); on a day with no till bill
+it makes a manual-basis day. The read uses `source.is.null,source.eq.manual`, the predicate
+`persistSalesDay.js` uses, because rows predating the column default read NULL. Bulk (`bs_day` 0)
+rows are never samples; they are counted so the page can say why a weekday has none.
 
 **A recompute clears the old run by `run_id` (S792, PLANNING-1, migration `20260928160100`)**:
-`horizon_days = h` and `run_id IS NULL OR run_id <> <this run>`, never `id NOT IN (<every new id>)`
-— ~45 KB of uuids in the URL, refused, so each Recompute stacked another run. It also deletes only
-runs OLDER than its own (`generated_at` read back from the server), so two Recomputes at once leave
-the newer run. The `pos_orders`
-read is paged too: unpaged and unordered, it kept roughly the OLDEST 1,000 bills of the window.
+`horizon_days = h` and `run_id IS NULL OR run_id <> <this run>`, never `id NOT IN (<every new id>)`,
+and only runs OLDER than its own (`generated_at` read back from the server), so two Recomputes at
+once leave the newer run. A refused clear after the insert landed is a success with `leftover`
+(S849). The run log is per horizon (`horizon_days`, `run_id`) and stamped by
+`demand_forecast_run_log_stamp` (who and when, by the server); the browser never sends `run_at`.
+`rows_written` 0 with no error = refused for no history.
+
+**The buying list does not count rain twice (S849, FORECAST-4).** At Recompute the page's
+`sampleFactorOf` gives each sample day the Owner's rain % / 100 on a recorded rainy day, else 1;
+`forecastByWeekday` stores the recency-weighted mean (the qty average's own weights) as
+`sample_rain_factor`, with `rainy_sample_count`, on the covers-level row. The list's day factor is
+the rain-ahead factor ÷ `sample_rain_factor`, only while the rain setting applies. The dish table and
+the Roster keep the observed average. NULL = no setting or no weather at run time. `runForecast`
+itself has no weather code.
+
+**The buying list adds the guests' usual choices (S849, FORECAST-3, owner decision SU13 a).**
+`averageChoicesPerPlate` over the shown run's own 84-day window, till rows only (`isPosSource`,
+`qty_sold > 0`, `bs_day > 0`), every till plate of the dish in the denominator, then
+`loadDeltaExplosion` + `deltaItems` (the one conversion stock uses). Signed; `ingredientBuyList`
+clamps a net-negative use at 0, and an item reached only by a choice that leaves it out is not
+listed. Read only on a Customization outlet.
 
 ### On-hand and "below par" have ONE calculation, on six surfaces (S696)
 
@@ -297,6 +323,30 @@ Three things the same audit found on the Reorder Report itself, each with one ri
 **Do not write a sixth copy.** The tell is a page that needs "what is on the shelf" and reaches
 for `opening_stock` directly — it should reach for `buildStockRows` and read `onHand`.
 
+
+### Stock transfers count as a purchase in and a return out, on every reader (S849, PNL-8)
+
+- `ims_stock_transfer_lines` holds only the lines that COUNT for that outlet (sent = out at the
+  sender; received = in at the receiver; returned = in at the sender after a cancel or refuse), each in
+  an open month, at the sender's rate frozen at sending (`value` is generated). Read them through
+  `transferFlows.readPeriodTransfers(scopedFrom, periodIdOrIds)` inside the page's existing batch, so a
+  failed read fails the report on the same `firstError` path, never "no transfers". No status or
+  `is_active` filter.
+- `in` adds like a purchase and `out` comes off like a supplier return: Net Purchases = gross −
+  discount − returns + in − out. Gross Purchases and Returns stay supplier-only.
+- Every stock figure takes the term: `periodCost.js` (transferInVal / transferOutVal), `buildStockRows({
+  transfers })`, Stock Count, the variance pages (`transferNetQtyByItem`), `shrinkageCalc`,
+  `deadStockCalc` (available, never movement), `stockAgeingCalc` (`transferBatchesOf`,
+  `sumConsumptionByPeriod({ transfers })`), `budgetActuals`, the summaries, the dashboards, Demand
+  Forecast's list, the Owner Report and the group RPCs. Stock Movements lists them; they are not
+  depletion.
+- The pure calculators fold the lines inline (`transferNetQtyMap` in `stockReportCalc.js`) rather than
+  import `transferFlows.js`, which imports the Supabase client: a CRA test importing a calculator
+  would die at import. Pages import `transferFlows` directly.
+- Transfer columns, tiles and formula words appear only in a month that has transfers, so an outlet
+  outside a group sees the page it always had; each Excel sheet follows the same rule, so its columns
+  always rebuild Net Purchases. `summaryReads.test.js` pins the read on every summary page and on
+  Consolidated P&L.
 
 ## A document freezes the rate it was made at; a report recomputes (S710)
 

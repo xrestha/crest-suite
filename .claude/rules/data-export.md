@@ -62,3 +62,18 @@ holds real losses only and turns the summary red; `notes` are neutral. The staff
 is kept by a restore, and a pre-2c backup restores bills unstamped, read under today's setting.
 `pos_credit_notes.restock` (2e) restores as stored; the note's settle trigger links its bill and adds
 no refund or points on a restore, because the cash and points ledgers come back themselves.
+
+**The client row is never overwritten by a restore (S849, DATABASE-7).** `clientRowRestorePlan` fills
+only BLANK identity and legal columns on the target (location, contact, legal name, PAN, registered
+address, signatory) and lists everything commercial or structural it did not restore (plan, billing
+cycle, each module switch and end date, Customization, Suite and its date, the demo switch, the outlet
+group by name, which the export annotates as `group_name_exported`) as one `notes` line, because a
+restore must never silently change what a client pays or which group's Owners reach it.
+
+**A generated column is never inserted.** `GENERATED_COLUMNS` is exported and
+`restoreClientData.test.js` scans every migration for `GENERATED ALWAYS AS` (last definition wins,
+dropped columns ignored) and requires each one there (S849 ASSETS-3: `assets_register.total_cost`;
+`ims_stock_transfer_lines.value`). Stock transfers restore after their months: a header whose
+`sent_period_id` is not one of the backup's own months is left out and reported under `skipped`, its
+lines keep their figures with `transfer_id` emptied, and a `to_client_id` that no longer exists is
+emptied (`transferHeadersForRestore` / `transferLinesForRestore`).

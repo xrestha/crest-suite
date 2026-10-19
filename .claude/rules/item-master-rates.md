@@ -114,8 +114,13 @@ Migrated from the root `CLAUDE.md` (S663).
 ## Deleting an item: the database backs up five of eleven tables (S706)
 
 **`src/modules/ims/items/itemRefTables.js` is the one list of every table with an FK to
-`items.id`**, in an order that is safe to delete in, with a `cascades` flag per table. Read it, and
-`itemRefTables.test.js` beside it, before changing anything about the delete path.
+`items.id`**, in an order that is safe to delete in, with a `cascades` flag per table (count the rows there; the list grows). Read it, and
+`itemRefTables.test.js` beside it, before changing anything about the delete path. **A table can also
+block the force-delete outright (`blocksForceDelete`)**: since S849 (PNL-8) `ims_stock_transfer_lines`
+(TR) does, because the other outlet keeps the transfer on its books. Items offers no force-delete for
+such an item and points at Hide; `force_delete_item` refuses before its clearing loop
+(`force_delete_item_transferred`, `FORCE_DELETE_BLOCKING_CODES`). The SQL twins of the list are
+`item_reference_counts`, `force_delete_item` and `item_has_references`, all three pinned by the test.
 
 **Three of the eleven are `ON DELETE CASCADE`** — `requisition_lines`, `staff_meals`,
 `vendor_returns`. This is the `confdeltype` rule from `vendor-payables.md` landing in the one place

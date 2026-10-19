@@ -190,7 +190,7 @@ export const HR_GUIDE_GROUPS = [
         route: '/hr/roster',
         plan: 'Supervisor+',
         summary:
-          'The shift board: assign shift types to employees per day in week or month view, drag to fill ranges, copy a whole week onto the next one, publish days to employees\' Self-Service, approve shift swaps, and see a planned-labor-cost forecast with the demand overlay from the Holiday Calendar and Demand Forecast.',
+          'The shift board: assign shift types to employees per day in week or month view, drag to fill ranges, copy a whole week onto the next one, publish days to employees\' Self-Service, approve shift swaps, and see a planned-labor-cost forecast with the demand overlay from the Holiday Calendar and, where the outlet has Crest Suite Pro with Inventory, Demand Forecast.',
         workflow: [
           'Define shift types once (name, start/end, colour, and Normal hours for a long shift — a 12-hour Full Day with 9 normal hours carries 3 hours of overtime) in the shift settings panel; assign them to cells by click or drag-select (touch devices get an explicit tap-first/tap-last "Select range" mode).',
           'Publish when a stretch is ready — publishing is per DAY, and only scheduled staff on those days are notified (web push where enabled).',

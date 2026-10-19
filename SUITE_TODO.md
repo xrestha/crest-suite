@@ -80,6 +80,11 @@ there.
 
 ## S848.0 Index
 
+**S849 (2026-10-19, crest-v465): all 138 fixed** (✅), migrations `20261019100000`–`20261019100600`. One partial (◐):
+OWNER-DASHBOARD-9, where the Owner Dashboard's HR reads now start right after the month read rather than beside it
+(one extra round trip). Deferred, not a finding: the DATABASE-9 policy wording on `monthly_owner_reports` (cosmetic;
+no access changes). Post-release support task: regenerate the seven newer frozen owner reports (SU answer, S849).
+
 Group: **A** = security, tenant boundaries and admin tools; **B** = money, tax and frozen records stored
 or printed wrong; **C** = figures and screens that mislead or lose work; **D** = copy, docs, polish
 and hygiene. Within a severity, rows run A → D. Mig = the finding's fix needs a migration (as its
@@ -89,154 +94,154 @@ area file's Fix line says). Decision = the SU question in S848.1.
 
 | ID | Finding | Group | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| DATABASE-2 | Admin → Clients "Create User" and "Move login" fail since 2026-09-10: the login is never linked to its client | A | SU20 | yes |
-| FORECAST-1 | An IMS supervisor/manager's Recompute replaces the Owner's forecast with an empty one and says "rebuilt"; Roster loses its staffing for that week | A | SU1 | yes |
-| GROUP-1 | Once the HQ outlet leaves its group, its items, purchase rates, recipes and prices can still be pushed to the remaining outlets (P0 if a live group's HQ is already outside it) | A |  | yes |
-| ASSETS-1 | Tax repair-cost cap is 5% of the post-depreciation value; the Act says 7% of the depreciation base | B |  |  |
-| ASSETS-2 | A pool sold above its value goes negative on the locked tax schedule with no income line; an emptied pool never writes off | B |  | yes |
-| GAPS-1 | The Owner Report's Net Margin never subtracts wastage or staff meals, the P&L's does, and the tip says they take off "the same costs" (23.8% vs 19.8%) | B | SU23 |  |
-| GROUP-2 | A push deletes branch recipe lines whose ingredient has no match at the branch, with no preview warning and no audit trail | B | SU2 | yes |
-| PNL-1 | Delivery-partner commission (Foodmandu, Pathao) is recorded but on no P&L line, so Net Profit is overstated by all of it | B | SU3 | yes |
-| OWNER-DASHBOARD-1 | True Net Margin subtracts a whole month of fixed costs from part of a month's sales (−10% on day 12 for a 17% month); main Dashboard too | C | SU4 |  |
+| ✅ DATABASE-2 | Admin → Clients "Create User" and "Move login" fail since 2026-09-10: the login is never linked to its client | A | SU20 | yes |
+| ✅ FORECAST-1 | An IMS supervisor/manager's Recompute replaces the Owner's forecast with an empty one and says "rebuilt"; Roster loses its staffing for that week | A | SU1 | yes |
+| ✅ GROUP-1 | Once the HQ outlet leaves its group, its items, purchase rates, recipes and prices can still be pushed to the remaining outlets (P0 if a live group's HQ is already outside it) | A |  | yes |
+| ✅ ASSETS-1 | Tax repair-cost cap is 5% of the post-depreciation value; the Act says 7% of the depreciation base | B |  |  |
+| ✅ ASSETS-2 | A pool sold above its value goes negative on the locked tax schedule with no income line; an emptied pool never writes off | B |  | yes |
+| ✅ GAPS-1 | The Owner Report's Net Margin never subtracts wastage or staff meals, the P&L's does, and the tip says they take off "the same costs" (23.8% vs 19.8%) | B | SU23 |  |
+| ✅ GROUP-2 | A push deletes branch recipe lines whose ingredient has no match at the branch, with no preview warning and no audit trail | B | SU2 | yes |
+| ✅ PNL-1 | Delivery-partner commission (Foodmandu, Pathao) is recorded but on no P&L line, so Net Profit is overstated by all of it | B | SU3 | yes |
+| ✅ OWNER-DASHBOARD-1 | True Net Margin subtracts a whole month of fixed costs from part of a month's sales (−10% on day 12 for a 17% month); main Dashboard too | C | SU4 |  |
 
 ### P2 (52)
 
 | ID | Finding | Group | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| ACCESS-1 | A lapsed outlet stays in the group roll-ups (Console, P&L matrix, Item Prices); the server filter never reads the Suite end date (+ PNL-9) | A |  | yes |
-| ACCESS-2 | A Suite (or any add-on) end date keeps the whole outlet open after its modules lapse | A | SU5 | yes |
-| ASSETS-4 | Posted run headers stay writable by any IMS manager: a tax year can be un-posted or relabelled | A |  | yes |
-| GROUP-3 | A stock-count PIN can be given a sibling outlet and then counts into it (S809 ACCESS-4 covered till PINs only) | A |  | yes |
-| GROUP-9 | Access grants to an outlet that left the group stay behind and block that person's row | A |  | yes |
-| GROUP-11 | Crest support joins a client to another group with one dropdown change and no confirm | A |  |  |
-| OWNER-REPORT-4 | "Frozen" is page-only: the Owner's login can rewrite or delete a report over REST, including who made it; no audit | A | SU9 | yes |
-| ACCESS-3 | Switching IMS off keeps Suite billed while every Suite page says "needs Crest IMS" | B |  |  |
-| ACCESS-5 | The billing export prices a blank IMS tier at NPR 0, so hss-suite under-invoices | B |  |  |
-| ASSETS-3 | Restore cannot bring back the asset register (generated total_cost), so posted book depreciation is lost on Archive → Restore | B |  |  |
-| ASSETS-5 | An asset left "Not tracked" silently drops out of the tax schedule | B |  |  |
-| ASSETS-6 | Any personal-use % removes an asset from the Valuation Report while everything else counts it in full | B | SU6 |  |
-| ASSETS-8 | A gap between depreciation runs is never charged or warned about, not even at disposal | B |  |  |
-| ASSETS-9 | A wrong typed opening value cannot be corrected once a tax schedule is posted | B | SU7 | yes |
-| GAPS-2 | An outlet switch in another tab or on the phone makes the Owner Report save a permanent report for the new outlet on the old outlet's month | B |  | yes |
-| OWNER-REPORT-2 | A section that fails at close is frozen out for good; the close says it went fine; print and Excel show no gap | B |  |  |
-| OWNER-REPORT-3 | Regenerate ignores its own write error and overwrites a complete report with a partial one, saying "Regenerated" | B |  |  |
-| OWNER-REPORT-7 | A report made after the close reads staff status as of today, so leavers drop out of headcount and labour | B |  |  |
-| ACCESS-4 | Operator screens disagree with the gate on whether Suite is on (no end date, grace week, long-lapsed ★ SUITE) (+ DOCS-M5) | C | SU12 |  |
-| FORECAST-2 | Forecast Revenue ignores bill discounts, so it runs high and the Roster over-staffs by the same share | C |  |  |
-| FORECAST-3 | The buying list leaves out every guest-chosen ingredient (Customization, build-your-own) | C | SU13 |  |
-| FORECAST-4 | The rainy-day factor is applied twice in the monsoon (about 11% under-buy) | C |  |  |
-| FORECAST-5 | Bills are sorted into weekdays by the device clock, not Nepal time | C |  |  |
-| GAPS-3 | After an outlet switch on Home, every tile keeps the old outlet's figures under the new name until the new loads land | C |  |  |
-| GAPS-4 | Labour comes from a different source on each Suite page while payroll is not finalized (HR estimate vs Overheads Labor tab vs none) | C | SU11 |  |
-| GAPS-5 | For the running month the Group Console bands a whole month's labour over part of a month's revenue, red and "Highest" | C |  |  |
-| GROUP-4 | On the running month every outlet reads red "▼ vs last month", and Spend % is banded from day 1 | C |  |  |
-| GROUP-5 | Group Spend % and Net Purchases leave out a PAN-only outlet's unclaimable VAT (+ DOCS-2; KNOWN IMS_TODO:202) | C |  | yes |
-| GROUP-6 | Push preview, push result and item-price comparison are cut at 1,000 rows silently | C |  | yes |
-| GROUP-7 | Two branch recipes with the same name or code abort the whole push with a raw constraint error | C |  | yes |
-| GROUP-8 | Saving one Outlet Access row throws away other rows' unsaved ticks, including a removal | C |  |  |
-| GROUP-10 | A failed push says "the branches are unchanged" whatever happened, and a hung push has no timeout | C |  |  |
-| GROUP-12 | A push never carries the Veg / Egg / Non-veg mark, so a guest menu can call a now-meat dish vegetarian | C | SU8 | yes |
-| OWNER-DASHBOARD-2 | After a failed read the tiles still show figures with green ticks behind a dismissible banner (+ DOCS-M1) | C |  |  |
-| OWNER-DASHBOARD-3 | Labour estimate picks staff differently from payroll: leavers counted twice or left out | C |  |  |
-| OWNER-DASHBOARD-4 | Labour estimate ignores attendance: no overtime, daily staff paid every calendar day | C | SU16 |  |
-| OWNER-DASHBOARD-5 | Staff with no pay set read Labour "0.0% ✓"; wages typed on Overheads are ignored | C | SU17 |  |
-| OWNER-DASHBOARD-6 | Retry on one section during load leaves every tile on shimmers until reload | C |  |  |
-| OWNER-DASHBOARD-7 | Overdue Payables ignores VAT, discounts and returns and counts lines as bills (KNOWN S747) | C |  |  |
-| OWNER-DASHBOARD-8 | Labour % reads high early each morning: today's full wages against part of today's sales | C |  |  |
-| OWNER-REPORT-1 | A failed Inventory Depth sub-section is invisible ("Not enough history", Excel 0s) | C |  |  |
-| OWNER-REPORT-5 | The Executive Summary uses fixed 35/45 food-cost bands against the client's own thresholds (+ DOCS-M2) | C |  |  |
-| OWNER-REPORT-6 | Report generation has no timeout: the close dialog can sit on "Closing…" for good | C |  |  |
-| OWNER-REPORT-8 | Both "unpaid credit" figures compare VAT-added payments with ex-VAT totals (KNOWN IMS_TODO:302, + the IMS row) | C |  |  |
-| PNL-2 | A month closed with uncounted stock prints a coloured Net Profit and no warning | C |  | yes |
-| PNL-3 | Net Profit is before depreciation but claims "every cost" (+ ASSETS-7) | C | SU19 | yes |
-| PNL-4 | Arrowing the period select can show and export one month's figures under another month's name | C |  |  |
-| PNL-5 | An outlet with no period adds nothing yet counts in "N outlets" | C |  |  |
-| PNL-6 | The Excel export drops the warnings the screen carries | C |  |  |
-| PNL-7 | A group outlet without HR shows Labour NPR 0 with no word | C |  |  |
-| PNL-8 | No inter-outlet stock transfer, so central-kitchen supply booked as a purchase is counted twice in the group | C | SU10 |  |
-| DOCS-1 | Help files the Suite pages under IMS tiers ("IMS Pro unlocks Fixed Assets, Demand Forecast") | D |  |  |
+| ✅ ACCESS-1 | A lapsed outlet stays in the group roll-ups (Console, P&L matrix, Item Prices); the server filter never reads the Suite end date (+ PNL-9) | A |  | yes |
+| ✅ ACCESS-2 | A Suite (or any add-on) end date keeps the whole outlet open after its modules lapse | A | SU5 | yes |
+| ✅ ASSETS-4 | Posted run headers stay writable by any IMS manager: a tax year can be un-posted or relabelled | A |  | yes |
+| ✅ GROUP-3 | A stock-count PIN can be given a sibling outlet and then counts into it (S809 ACCESS-4 covered till PINs only) | A |  | yes |
+| ✅ GROUP-9 | Access grants to an outlet that left the group stay behind and block that person's row | A |  | yes |
+| ✅ GROUP-11 | Crest support joins a client to another group with one dropdown change and no confirm | A |  |  |
+| ✅ OWNER-REPORT-4 | "Frozen" is page-only: the Owner's login can rewrite or delete a report over REST, including who made it; no audit | A | SU9 | yes |
+| ✅ ACCESS-3 | Switching IMS off keeps Suite billed while every Suite page says "needs Crest IMS" | B |  |  |
+| ✅ ACCESS-5 | The billing export prices a blank IMS tier at NPR 0, so hss-suite under-invoices | B |  |  |
+| ✅ ASSETS-3 | Restore cannot bring back the asset register (generated total_cost), so posted book depreciation is lost on Archive → Restore | B |  |  |
+| ✅ ASSETS-5 | An asset left "Not tracked" silently drops out of the tax schedule | B |  |  |
+| ✅ ASSETS-6 | Any personal-use % removes an asset from the Valuation Report while everything else counts it in full | B | SU6 |  |
+| ✅ ASSETS-8 | A gap between depreciation runs is never charged or warned about, not even at disposal | B |  |  |
+| ✅ ASSETS-9 | A wrong typed opening value cannot be corrected once a tax schedule is posted | B | SU7 | yes |
+| ✅ GAPS-2 | An outlet switch in another tab or on the phone makes the Owner Report save a permanent report for the new outlet on the old outlet's month | B |  | yes |
+| ✅ OWNER-REPORT-2 | A section that fails at close is frozen out for good; the close says it went fine; print and Excel show no gap | B |  |  |
+| ✅ OWNER-REPORT-3 | Regenerate ignores its own write error and overwrites a complete report with a partial one, saying "Regenerated" | B |  |  |
+| ✅ OWNER-REPORT-7 | A report made after the close reads staff status as of today, so leavers drop out of headcount and labour | B |  |  |
+| ✅ ACCESS-4 | Operator screens disagree with the gate on whether Suite is on (no end date, grace week, long-lapsed ★ SUITE) (+ DOCS-M5) | C | SU12 |  |
+| ✅ FORECAST-2 | Forecast Revenue ignores bill discounts, so it runs high and the Roster over-staffs by the same share | C |  |  |
+| ✅ FORECAST-3 | The buying list leaves out every guest-chosen ingredient (Customization, build-your-own) | C | SU13 |  |
+| ✅ FORECAST-4 | The rainy-day factor is applied twice in the monsoon (about 11% under-buy) | C |  |  |
+| ✅ FORECAST-5 | Bills are sorted into weekdays by the device clock, not Nepal time | C |  |  |
+| ✅ GAPS-3 | After an outlet switch on Home, every tile keeps the old outlet's figures under the new name until the new loads land | C |  |  |
+| ✅ GAPS-4 | Labour comes from a different source on each Suite page while payroll is not finalized (HR estimate vs Overheads Labor tab vs none) | C | SU11 |  |
+| ✅ GAPS-5 | For the running month the Group Console bands a whole month's labour over part of a month's revenue, red and "Highest" | C |  |  |
+| ✅ GROUP-4 | On the running month every outlet reads red "▼ vs last month", and Spend % is banded from day 1 | C |  |  |
+| ✅ GROUP-5 | Group Spend % and Net Purchases leave out a PAN-only outlet's unclaimable VAT (+ DOCS-2; KNOWN IMS_TODO:202) | C |  | yes |
+| ✅ GROUP-6 | Push preview, push result and item-price comparison are cut at 1,000 rows silently | C |  | yes |
+| ✅ GROUP-7 | Two branch recipes with the same name or code abort the whole push with a raw constraint error | C |  | yes |
+| ✅ GROUP-8 | Saving one Outlet Access row throws away other rows' unsaved ticks, including a removal | C |  |  |
+| ✅ GROUP-10 | A failed push says "the branches are unchanged" whatever happened, and a hung push has no timeout | C |  |  |
+| ✅ GROUP-12 | A push never carries the Veg / Egg / Non-veg mark, so a guest menu can call a now-meat dish vegetarian | C | SU8 | yes |
+| ✅ OWNER-DASHBOARD-2 | After a failed read the tiles still show figures with green ticks behind a dismissible banner (+ DOCS-M1) | C |  |  |
+| ✅ OWNER-DASHBOARD-3 | Labour estimate picks staff differently from payroll: leavers counted twice or left out | C |  |  |
+| ✅ OWNER-DASHBOARD-4 | Labour estimate ignores attendance: no overtime, daily staff paid every calendar day | C | SU16 |  |
+| ✅ OWNER-DASHBOARD-5 | Staff with no pay set read Labour "0.0% ✓"; wages typed on Overheads are ignored | C | SU17 |  |
+| ✅ OWNER-DASHBOARD-6 | Retry on one section during load leaves every tile on shimmers until reload | C |  |  |
+| ✅ OWNER-DASHBOARD-7 | Overdue Payables ignores VAT, discounts and returns and counts lines as bills (KNOWN S747) | C |  |  |
+| ✅ OWNER-DASHBOARD-8 | Labour % reads high early each morning: today's full wages against part of today's sales | C |  |  |
+| ✅ OWNER-REPORT-1 | A failed Inventory Depth sub-section is invisible ("Not enough history", Excel 0s) | C |  |  |
+| ✅ OWNER-REPORT-5 | The Executive Summary uses fixed 35/45 food-cost bands against the client's own thresholds (+ DOCS-M2) | C |  |  |
+| ✅ OWNER-REPORT-6 | Report generation has no timeout: the close dialog can sit on "Closing…" for good | C |  |  |
+| ✅ OWNER-REPORT-8 | Both "unpaid credit" figures compare VAT-added payments with ex-VAT totals (KNOWN IMS_TODO:302, + the IMS row) | C |  |  |
+| ✅ PNL-2 | A month closed with uncounted stock prints a coloured Net Profit and no warning | C |  | yes |
+| ✅ PNL-3 | Net Profit is before depreciation but claims "every cost" (+ ASSETS-7) | C | SU19 | yes |
+| ✅ PNL-4 | Arrowing the period select can show and export one month's figures under another month's name | C |  |  |
+| ✅ PNL-5 | An outlet with no period adds nothing yet counts in "N outlets" | C |  |  |
+| ✅ PNL-6 | The Excel export drops the warnings the screen carries | C |  |  |
+| ✅ PNL-7 | A group outlet without HR shows Labour NPR 0 with no word | C |  |  |
+| ✅ PNL-8 | No inter-outlet stock transfer, so central-kitchen supply booked as a purchase is counted twice in the group | C | SU10 |  |
+| ✅ DOCS-1 | Help files the Suite pages under IMS tiers ("IMS Pro unlocks Fixed Assets, Demand Forecast") | D |  |  |
 
 ### P3 (77)
 
 | ID | Finding | Group | Decision | Mig |
 | --- | --- | --- | --- | --- |
-| ACCESS-6 | Suite is a browser-only paywall, and no rule says that is the agreed design | A | SU14 |  |
-| ASSETS-12 | The server takes every depreciation figure as the browser sent it | A |  | yes |
-| ASSETS-13 | "Viewing is supervisor+" is page-only: staff and count PINs can read the register over REST | A |  | yes |
-| DATABASE-3 | Another client's id can be planted in a Suite row and then blocks that client's Danger Zone partway | A |  | yes |
-| DATABASE-4 | Posting a tax-pool schedule has no per-client lock or duplicate refusal; the fiscal year is free text | A |  | yes |
-| DATABASE-5 | Outlet Access grants, repair expenses, asset categories and HQ changes leave no Audit Log trace | A |  | yes |
-| DATABASE-8 | The dashboard's frozen monthly Target can still be planted or blocked by any login, a till PIN included | A |  | yes |
-| FORECAST-7 | The weather function fetches any point in Nepal at 1 km resolution, with no per-client budget | A |  | yes |
-| GAPS-12 | The operator's Delete asset erases posted depreciation lines with no record | A |  | yes |
-| GROUP-15 | Outlet Access judges "Owner" with a fourth, out-of-step copy and lists Self-Service logins (+ DATABASE-6) | A |  | yes |
-| ACCESS-7 | Group pages are gated on the outlet the Owner is in, not the group | C | SU15 |  |
-| ACCESS-8 | The Crest operator cannot see a client's Group Console | C |  | yes |
-| DOCS-9 | A Group Console branch with no period prints NPR 0 though Help says it is not shown as zero | C | SU21 |  |
-| ACCESS-9 | Every Suite page loads its data behind the upsell card and the role redirect | D |  |  |
-| ACCESS-10 | The Roster's Labor Forecast sends every HR client to Demand Forecast without saying it is Suite (+ DOCS-M8) | D |  |  |
-| ACCESS-11 | Suite state is read once per page load, so a switch-off or lapse mid-session does not reach an open tab | D |  |  |
-| ACCESS-12 | Three hand-written copies of the Suite gate test, each narrower | D |  |  |
-| ACCESS-13 | Docs and copy drift around the Suite gate (+ DOCS-M9) | D |  |  |
-| ACCESS-14 | No Suite countdown or grace notice before Suite closes | D |  |  |
-| ASSETS-10 | A tax schedule row does not add up when last year's repair excess joins the base | D |  |  |
-| ASSETS-11 | A tax schedule can be posted for the unfinished or next fiscal year, locking the openings | D |  |  |
-| ASSETS-14 | A 366-day BS year charges 366/365 of the annual straight-line figure | D |  |  |
-| ASSETS-15 | Blocking awaits without withTimeout; the register read is unpaged | D |  |  |
-| ASSETS-16 | The Disposal Report totals every disposal ever, with no fiscal-year filter | D |  |  |
-| ASSETS-17 | Three post failures say nothing was written when the server may have saved; a late retry can double-charge | D |  |  |
-| ASSETS-18 | A pool under NPR 2,000 is carried forward instead of written off that year | D |  |  |
-| DATABASE-7 | Delete → recreate → Restore loses the Suite plan, end date and group, silently | D |  |  |
-| DATABASE-9 | Hygiene: asset numbering jammed by one edit, inline admin tests, the SQL rules file's first example | D |  | yes |
-| DOCS-3 | Docs still say no client has an outlet group | D |  |  |
-| DOCS-4 | The Suite guide's report-version list is stale | D |  |  |
-| DOCS-5 | With no open period the Owner Dashboard says "create one in Periods", which only Crest admin can do | D |  |  |
-| DOCS-6 | The Suite price card says it needs only IMS; Owner Dashboard also needs HR, covers need POS | D |  |  |
-| DOCS-7 | Fixed Assets Help says IMS staff can view the register; the page refuses below supervisor | D |  |  |
-| DOCS-8 | Three Suite messages break the error rules (raw server text, "branches unchanged") | D |  |  |
-| DOCS-10 | PRODUCT.md and the rules miss Suite and the multi-outlet owner | D |  |  |
-| FORECAST-6 | A client that turns POS off is forecast from old till bills for up to six weeks | D |  |  |
-| FORECAST-8 | The run log is not per horizon; a failed clean-up says no forecast was made when one was | D |  |  |
-| FORECAST-9 | Help, the IMS guide and Settings describe the buying list and rain setting as before S756/S800 (+ DOCS-M4) | D |  |  |
-| FORECAST-10 | Small items | D |  |  |
-| GAPS-6 | An operator whose own profile had a grouped client would see its own group on every client (latent) | D |  |  |
-| GAPS-7 | The page cache is cleared only by this tab's own Sign out | D |  |  |
-| GAPS-8 | The P&L's Wastage line leaves out wasted prep and its tip does not say so (KNOWN design FIGURES-5) | D |  |  |
-| GAPS-9 | An operator's "view as" switch keeps the previous client's module switches until the new ones load | D |  |  |
-| GAPS-10 | A switch whose profile reload fails shows the old outlet's name over the new outlet's reads | D |  |  |
-| GAPS-11 | An operator-made report is headed with the operator's personal name until reload | D |  |  |
-| GAPS-13 | Demand Forecast records nobody: every Recompute is an anonymous run on the device clock | D |  | yes |
-| GROUP-13 | A refused outlet switch from the Console wipes every figure and calls it a failed read | D |  |  |
-| GROUP-14 | Two quick outlet links race: the window shows one outlet while the login is in the other | D |  |  |
-| GROUP-16 | Smaller items: docs drift and hygiene (free bill lines in "Same item, different price") | D | SU22 |  |
-| OWNER-DASHBOARD-9 | About 13 serial round trips on a busy till outlet; five tables read twice | D |  |  |
-| OWNER-DASHBOARD-10 | With no open period, Items Below Par counts every item; a failed read reads as "No open period" | D |  |  |
-| OWNER-DASHBOARD-11 | The trend card reads a failed load as "no history yet" and names only Food Cost's step (+ DOCS-M7) | D |  |  |
-| OWNER-DASHBOARD-12 | Revenue does not say before VAT and after discounts; always green | D |  |  |
-| OWNER-DASHBOARD-13 | Purchases · Cash / Credit does not tie to the Payment Report | D |  |  |
-| OWNER-DASHBOARD-14 | The approved-overtime read is unpaged | D |  |  |
-| OWNER-DASHBOARD-15 | Staff and non-Suite Owners fire about 25 reads before the guard decides | D |  |  |
-| OWNER-DASHBOARD-16 | A hung read loads forever; banners not announced; nested focusable controls | D |  |  |
-| OWNER-DASHBOARD-17 | "Today" comes from the viewer's device clock, not Nepal time | D |  |  |
-| OWNER-REPORT-9 | A Suite client without HR gets no Net Margin or labour line | D | SU18 |  |
-| OWNER-REPORT-10 | Labour on page one never says "estimated" | D |  |  |
-| OWNER-REPORT-11 | The Net Margin gate leaks and names the wrong tier; a downgrade hides a frozen figure (+ DOCS-M6) | D |  |  |
-| OWNER-REPORT-12 | Trend calls months better/worse where the summary withholds verdicts | D |  |  |
-| OWNER-REPORT-13 | Attendance Rate counts weekly offs and holidays: perfect attendance reads about 84% | D |  |  |
-| OWNER-REPORT-14 | A leave crossing a month boundary counts in full in both months | D |  |  |
-| OWNER-REPORT-15 | Inventory Turnover's "value used" is not the report's own COGS | D |  |  |
-| OWNER-REPORT-16 | Three HR reads behind the labour estimate are unpaged | D |  |  |
-| OWNER-REPORT-17 | Loads run outside SuiteGate: an Owner without Suite mints and saves a snapshot | D |  |  |
-| OWNER-REPORT-18 | Letterhead read drops errors; Export/Print not gated, a PAN outlet can print as VAT (+ DOCS-M10) | D |  |  |
-| OWNER-REPORT-19 | A month whose prior report was not made freezes "No report was generated" into its Trend | D |  |  |
-| OWNER-REPORT-20 | Docs drift: regenerate is not admin-only, labour labelling, "read from snapshot" (+ DOCS-M3) | D |  |  |
-| PNL-10 | On an open month Gross and Net Profit are coloured over a whole-shelf COGS | D |  |  |
-| PNL-11 | Till bills still waiting for Inventory after close are missing from revenue, unsaid | D |  | yes |
-| PNL-12 | A closed month's statement moves when item prices change (KNOWN D5; the export says nothing) | D |  |  |
-| PNL-13 | The group matrix depends on a sibling read that drops its error | D |  |  |
-| PNL-14 | Print never gated; a stalled read leaves "Building the statement…" forever | D |  |  |
-| PNL-15 | Hygiene: two reads off the scoped layer, an unpaged read, a dropped error detail | D |  |  |
-| PNL-16 | No fiscal-year (Shrawan→Ashadh) or multi-month statement | D |  |  |
+| ✅ ACCESS-6 | Suite is a browser-only paywall, and no rule says that is the agreed design | A | SU14 |  |
+| ✅ ASSETS-12 | The server takes every depreciation figure as the browser sent it | A |  | yes |
+| ✅ ASSETS-13 | "Viewing is supervisor+" is page-only: staff and count PINs can read the register over REST | A |  | yes |
+| ✅ DATABASE-3 | Another client's id can be planted in a Suite row and then blocks that client's Danger Zone partway | A |  | yes |
+| ✅ DATABASE-4 | Posting a tax-pool schedule has no per-client lock or duplicate refusal; the fiscal year is free text | A |  | yes |
+| ✅ DATABASE-5 | Outlet Access grants, repair expenses, asset categories and HQ changes leave no Audit Log trace | A |  | yes |
+| ✅ DATABASE-8 | The dashboard's frozen monthly Target can still be planted or blocked by any login, a till PIN included | A |  | yes |
+| ✅ FORECAST-7 | The weather function fetches any point in Nepal at 1 km resolution, with no per-client budget | A |  | yes |
+| ✅ GAPS-12 | The operator's Delete asset erases posted depreciation lines with no record | A |  | yes |
+| ✅ GROUP-15 | Outlet Access judges "Owner" with a fourth, out-of-step copy and lists Self-Service logins (+ DATABASE-6) | A |  | yes |
+| ✅ ACCESS-7 | Group pages are gated on the outlet the Owner is in, not the group | C | SU15 |  |
+| ✅ ACCESS-8 | The Crest operator cannot see a client's Group Console | C |  | yes |
+| ✅ DOCS-9 | A Group Console branch with no period prints NPR 0 though Help says it is not shown as zero | C | SU21 |  |
+| ✅ ACCESS-9 | Every Suite page loads its data behind the upsell card and the role redirect | D |  |  |
+| ✅ ACCESS-10 | The Roster's Labor Forecast sends every HR client to Demand Forecast without saying it is Suite (+ DOCS-M8) | D |  |  |
+| ✅ ACCESS-11 | Suite state is read once per page load, so a switch-off or lapse mid-session does not reach an open tab | D |  |  |
+| ✅ ACCESS-12 | Three hand-written copies of the Suite gate test, each narrower | D |  |  |
+| ✅ ACCESS-13 | Docs and copy drift around the Suite gate (+ DOCS-M9) | D |  |  |
+| ✅ ACCESS-14 | No Suite countdown or grace notice before Suite closes | D |  |  |
+| ✅ ASSETS-10 | A tax schedule row does not add up when last year's repair excess joins the base | D |  |  |
+| ✅ ASSETS-11 | A tax schedule can be posted for the unfinished or next fiscal year, locking the openings | D |  |  |
+| ✅ ASSETS-14 | A 366-day BS year charges 366/365 of the annual straight-line figure | D |  |  |
+| ✅ ASSETS-15 | Blocking awaits without withTimeout; the register read is unpaged | D |  |  |
+| ✅ ASSETS-16 | The Disposal Report totals every disposal ever, with no fiscal-year filter | D |  |  |
+| ✅ ASSETS-17 | Three post failures say nothing was written when the server may have saved; a late retry can double-charge | D |  |  |
+| ✅ ASSETS-18 | A pool under NPR 2,000 is carried forward instead of written off that year | D |  |  |
+| ✅ DATABASE-7 | Delete → recreate → Restore loses the Suite plan, end date and group, silently | D |  |  |
+| ✅ DATABASE-9 | Hygiene: asset numbering jammed by one edit, inline admin tests, the SQL rules file's first example | D |  | yes |
+| ✅ DOCS-3 | Docs still say no client has an outlet group | D |  |  |
+| ✅ DOCS-4 | The Suite guide's report-version list is stale | D |  |  |
+| ✅ DOCS-5 | With no open period the Owner Dashboard says "create one in Periods", which only Crest admin can do | D |  |  |
+| ✅ DOCS-6 | The Suite price card says it needs only IMS; Owner Dashboard also needs HR, covers need POS | D |  |  |
+| ✅ DOCS-7 | Fixed Assets Help says IMS staff can view the register; the page refuses below supervisor | D |  |  |
+| ✅ DOCS-8 | Three Suite messages break the error rules (raw server text, "branches unchanged") | D |  |  |
+| ✅ DOCS-10 | PRODUCT.md and the rules miss Suite and the multi-outlet owner | D |  |  |
+| ✅ FORECAST-6 | A client that turns POS off is forecast from old till bills for up to six weeks | D |  |  |
+| ✅ FORECAST-8 | The run log is not per horizon; a failed clean-up says no forecast was made when one was | D |  |  |
+| ✅ FORECAST-9 | Help, the IMS guide and Settings describe the buying list and rain setting as before S756/S800 (+ DOCS-M4) | D |  |  |
+| ✅ FORECAST-10 | Small items | D |  |  |
+| ✅ GAPS-6 | An operator whose own profile had a grouped client would see its own group on every client (latent) | D |  |  |
+| ✅ GAPS-7 | The page cache is cleared only by this tab's own Sign out | D |  |  |
+| ✅ GAPS-8 | The P&L's Wastage line leaves out wasted prep and its tip does not say so (KNOWN design FIGURES-5) | D |  |  |
+| ✅ GAPS-9 | An operator's "view as" switch keeps the previous client's module switches until the new ones load | D |  |  |
+| ✅ GAPS-10 | A switch whose profile reload fails shows the old outlet's name over the new outlet's reads | D |  |  |
+| ✅ GAPS-11 | An operator-made report is headed with the operator's personal name until reload | D |  |  |
+| ✅ GAPS-13 | Demand Forecast records nobody: every Recompute is an anonymous run on the device clock | D |  | yes |
+| ✅ GROUP-13 | A refused outlet switch from the Console wipes every figure and calls it a failed read | D |  |  |
+| ✅ GROUP-14 | Two quick outlet links race: the window shows one outlet while the login is in the other | D |  |  |
+| ✅ GROUP-16 | Smaller items: docs drift and hygiene (free bill lines in "Same item, different price") | D | SU22 |  |
+| ◐ OWNER-DASHBOARD-9 | About 13 serial round trips on a busy till outlet; five tables read twice | D |  |  |
+| ✅ OWNER-DASHBOARD-10 | With no open period, Items Below Par counts every item; a failed read reads as "No open period" | D |  |  |
+| ✅ OWNER-DASHBOARD-11 | The trend card reads a failed load as "no history yet" and names only Food Cost's step (+ DOCS-M7) | D |  |  |
+| ✅ OWNER-DASHBOARD-12 | Revenue does not say before VAT and after discounts; always green | D |  |  |
+| ✅ OWNER-DASHBOARD-13 | Purchases · Cash / Credit does not tie to the Payment Report | D |  |  |
+| ✅ OWNER-DASHBOARD-14 | The approved-overtime read is unpaged | D |  |  |
+| ✅ OWNER-DASHBOARD-15 | Staff and non-Suite Owners fire about 25 reads before the guard decides | D |  |  |
+| ✅ OWNER-DASHBOARD-16 | A hung read loads forever; banners not announced; nested focusable controls | D |  |  |
+| ✅ OWNER-DASHBOARD-17 | "Today" comes from the viewer's device clock, not Nepal time | D |  |  |
+| ✅ OWNER-REPORT-9 | A Suite client without HR gets no Net Margin or labour line | D | SU18 |  |
+| ✅ OWNER-REPORT-10 | Labour on page one never says "estimated" | D |  |  |
+| ✅ OWNER-REPORT-11 | The Net Margin gate leaks and names the wrong tier; a downgrade hides a frozen figure (+ DOCS-M6) | D |  |  |
+| ✅ OWNER-REPORT-12 | Trend calls months better/worse where the summary withholds verdicts | D |  |  |
+| ✅ OWNER-REPORT-13 | Attendance Rate counts weekly offs and holidays: perfect attendance reads about 84% | D |  |  |
+| ✅ OWNER-REPORT-14 | A leave crossing a month boundary counts in full in both months | D |  |  |
+| ✅ OWNER-REPORT-15 | Inventory Turnover's "value used" is not the report's own COGS | D |  |  |
+| ✅ OWNER-REPORT-16 | Three HR reads behind the labour estimate are unpaged | D |  |  |
+| ✅ OWNER-REPORT-17 | Loads run outside SuiteGate: an Owner without Suite mints and saves a snapshot | D |  |  |
+| ✅ OWNER-REPORT-18 | Letterhead read drops errors; Export/Print not gated, a PAN outlet can print as VAT (+ DOCS-M10) | D |  |  |
+| ✅ OWNER-REPORT-19 | A month whose prior report was not made freezes "No report was generated" into its Trend | D |  |  |
+| ✅ OWNER-REPORT-20 | Docs drift: regenerate is not admin-only, labour labelling, "read from snapshot" (+ DOCS-M3) | D |  |  |
+| ✅ PNL-10 | On an open month Gross and Net Profit are coloured over a whole-shelf COGS | D |  |  |
+| ✅ PNL-11 | Till bills still waiting for Inventory after close are missing from revenue, unsaid | D |  | yes |
+| ✅ PNL-12 | A closed month's statement moves when item prices change (KNOWN D5; the export says nothing) | D |  |  |
+| ✅ PNL-13 | The group matrix depends on a sibling read that drops its error | D |  |  |
+| ✅ PNL-14 | Print never gated; a stalled read leaves "Building the statement…" forever | D |  |  |
+| ✅ PNL-15 | Hygiene: two reads off the scoped layer, an unpaged read, a dropped error detail | D |  |  |
+| ✅ PNL-16 | No fiscal-year (Shrawan→Ashadh) or multi-month statement | D |  |  |
 
 ## S848.1 Owner decisions (SU1–SU23)
 

@@ -442,7 +442,7 @@ export const POS_GUIDE_GROUPS = [
           'On a long menu (more than 30 dishes) a search box sits above the section buttons; a dish with no photo or description is one line (name, price, Add), so a big menu is a few screens, not dozens. Sections follow the Recipe Categories order, which the Owner or a manager sets from POS Setup → Guest Menu or Settings → Recipe Categories.',
         ],
         fields: [
-          { label: 'A locked account (S809)', desc: 'A client locked out of Crest (getAccessState: deactivated or archived, trial pending or ended, past the 7-day grace) gets exactly what POS switched off gets: no menu, no ordering, no booking page, because every public function calls client_access_open() beside pos_enabled. It comes back the moment the account is active again.' },
+          { label: 'A locked account (S809)', desc: 'A client locked out of Crest (getAccessState: deactivated or archived, trial pending or ended, past the 7-day grace on IMS, HR or POS) gets exactly what POS switched off gets: no menu, no ordering, no booking page, because every public function calls client_access_open() beside pos_enabled. It comes back the moment the account is active again.' },
           { label: 'Why requests, not direct orders', desc: 'Anyone can scan a QR — staff acceptance is the fraud gate. Items reach the kitchen only after a signed-in staff member accepts them, saves the order and sends the tickets.' },
         ],
         formulas: [],

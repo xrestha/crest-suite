@@ -1277,11 +1277,14 @@ whether their bill saved.
 - **Nav links** are 13px fog at `4px 12px`, square; active takes `accent-ink` on the
   focus-ring tint at 600. Hover is the table-hover tint. A pin-to-favourites star appears on
   `:hover` **and `:focus-within`**, since it is keyboard-reachable.
-- **The skip link** is WCAG 2.4.1 and not optional here: about **20** focusable controls sit in the
-  top bar before the main content on the busiest panel — 9 in band one (brand, up to four module
-  tabs, the tenant switcher, search, calculator, account) and 11 in band two (Dashboard, Pinned,
-  Crest Suite, the seven IMS groups, Settings). That is half the 41 the sidebar put there, and the
-  link matters just as much: they still all precede the content in DOM order, on every route.
+- **The skip link** is WCAG 2.4.1 and not optional here: about twenty focusable controls sit in the
+  top bar before the main content on the busiest panel (the number moves with the modules a property
+  has). Band one holds the brand, one tab per module the property has (Home, IMS, HR, POS, Custom
+  and, with Crest Suite Pro, Suite), the tenant switcher, search, the calculator and the account
+  menu. Band two holds the active panel's Dashboard, Pinned, its groups and Settings, plus the
+  PRO-badged Crest Suite menu on a property without Suite. That is about half what the sidebar put
+  there, and the link matters just as much: they still all precede the content in DOM order, on
+  every route.
 - **The context bar** answers "which tenant, which period" on every route as a hairline and a row
   of text, not a card.
 - **The drawer is hidden, never unmounted.** Above 768px `.sidebar-wrap` is `display: none`; below

@@ -199,7 +199,7 @@ VAT-status rule and `ims_first_till_bill_at` (D35 for IMS-rank logins).
 - ✅ S798 stage 4c (crest-v386) — The HR Staff page's Last Seen was still an AD `toLocaleDateString` (the ImsStaff/PosStaff fix, `nepalBsLong`). HR is shared with hss-suite: fixed here and filed in `docs/CROSS-REPO.md` there.
 - `PosOrders.jsx` (`writeSalesEntries`) and `IssueCreditNoteModal.jsx` date "today" with `getBsToday()` (the device's clock zone) while the backfills now use the Nepal date (SALES-6). Fine on a till in Nepal; `nepalBs(new Date())` would make them agree.
 - `ClosedPeriodBanner` could take a prop to drop its "regenerate the snapshot" clause, so Requisitions can use the component too.
-- (stage 4) `get_group_summary` — the Group Console's Spend % — still values a PAN outlet's purchases ex-VAT (D32 covered `get_group_pnl` only).
+- ✅ S849 (GROUP-5, crest-v465) — `get_group_summary` — the Group Console's Spend % — still values a PAN outlet's purchases ex-VAT (D32 covered `get_group_pnl` only). Fixed: the summary now adds the unclaimable 13% for a PAN-only outlet, as its own dashboard does.
 - (stage 4) On a bill line, ticking VAT after the rate was prefilled from Item Master does not re-divide it by 1.13; the Item Master VAT review banner looks back 3 months of bills.
 
 ## S792.5 Stage 4 — design first, shown before building — ✅ built S792 stage 4

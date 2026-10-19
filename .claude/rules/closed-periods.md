@@ -55,9 +55,10 @@ that synced late, or any login over REST, wrote straight into a closed month. Mi
 
 **Who may change the month row itself is enforced too** (`ims_monthly_periods_guard`): create or
 close — Owner, IMS supervisor/manager, admin; reopen or relabel — Owner or admin. The Dashboard's
-projection snapshots stay writable by any viewer (best-effort captures), but since S792 only
-FORWARD: a well-formed snapshot of a strictly newer model, or into an empty column
-(`snapshot_frozen`). And the Dashboard's
+projection snapshots are best-effort captures, writable since S849 only by the Owner, admin or an
+IMS staff+ login that is not a count PIN (`snapshot_rank`), and only as the current model with seven
+non-negative weekday values; a stored snapshot of the current model is frozen for the month
+(`snapshot_frozen`). `canCaptureTarget` (`dailyForecast.js`) is the browser twin. And the Dashboard's
 "End month" button renders only for `isOwner || hasImsAccess('supervisor')` — it had no role check.
 
 ## The page that writes a locked table is not always the page that looks locked (S709)
@@ -97,7 +98,7 @@ Sales, Stock Count, Overheads)* — and, when HR is on, says HR stays open. A **
 many of the month's till bills and credit notes are not in Inventory yet, amber, never blocking. The payroll one is amber when payroll is
 not finalized, because the frozen report then carries an ESTIMATED labour cost
 (`computeMonthlyReport.js` prefers a finalized run and falls back to an estimate, labelled
-`payrollSource: 'estimated'`) until an admin runs Regenerate Snapshot. It informs and never blocks,
+`payrollSource: 'estimated'`) until the Owner (or Crest admin) runs Regenerate Snapshot. It informs and never blocks,
 on the same contract as the closing-count note. **Do not add a period-close lock to an HR page**
 without re-reading this; if the product ever wants one, it has to be "closed AND payroll
 finalized", which is just the payroll lock that already exists.
@@ -257,7 +258,7 @@ same fact, and only one of them was being shown.
 Adding a bill to a closed month changes that month's COGS, and `monthly_owner_reports` is captured
 at close and never recomputed (see `owner-report.md`). The banner says so and names **Regenerate
 Snapshot** — deliberately *not* automatic, because that button is an explicit overwrite of a frozen
-artifact and stays an admin decision. A closing-count correction has a second follow-up,
+artifact and stays a deliberate decision by the Owner or Crest admin (see line 41). A closing-count correction has a second follow-up,
 **Resync Opening Stock**, which pushes the corrected count into the next period; a purchase bill
 does not need it, since carry-forward is built from physical counts, not purchases.
 

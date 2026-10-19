@@ -6,7 +6,7 @@ web
 
 ## Users
 
-Primary: restaurant and hotel owners and managers in Nepal, tracking cost, stock, and staff day to day, mostly across the IMS and HR modules and now POS. They're in the app to make operational calls, not to audit numbers line by line.
+Primary: restaurant and hotel owners and managers in Nepal, tracking cost, stock, and staff day to day, mostly across the IMS and HR modules and now POS. They're in the app to make operational calls, not to audit numbers line by line. Some run more than one outlet as a group, a café with a Pokhara branch or a central kitchen feeding satellites, and need every outlet on one screen without a second login.
 
 Tertiary: floor and store staff — a waiter on the till, a cashier on the counter, an employee checking a payslip, a store-keeper counting a shelf. They reach the product on a shared device with a 4-digit PIN, do one task, and are the only users who never chose it. The waiter and the cashier are not one person in a busy outlet and their screens should not be one screen — the waiter is standing at a table with the order open, the cashier is holding a guest who just asked for the bill (S762). Design for the thumb, the interruption and the person who will not report a bug: a control they cannot use is not a smaller problem than a wrong number, it is the same problem arriving as "the app is broken".
 
@@ -14,7 +14,7 @@ Secondary: accountants and bookkeepers doing reconciliation and compliance, veri
 
 ## Product Purpose
 
-Crest Suite is a SaaS platform for the Nepal F&B market, covering inventory and costing (purchasing, recipes, variance, stock counts), HR (payroll, attendance, roster, leave, TADA), and POS (ordering, billing, and — as the paid Crest Customization add-on — sizes, extras, build-your-own dishes guests assemble, and combos sold at one price) in one product. Success looks like an owner trusting the margin and labor-cost numbers enough to act on them, and an accountant trusting the same numbers enough to file on them.
+Crest Suite is a SaaS platform for the Nepal F&B market, covering inventory and costing (purchasing, recipes, variance, stock counts, and stock transfers between a group's outlets), HR (payroll, attendance, roster, leave, TADA), and POS (ordering, billing, and — as the paid Crest Customization add-on — sizes, extras, build-your-own dishes guests assemble, and combos sold at one price) in one product. On top sits Crest Suite Pro, a paid owner layer priced per outlet: the Owner Dashboard, the frozen Monthly Owner Report, Consolidated P&L, the multi-outlet Group Console, Demand Forecast and Fixed Assets. These are the pages that read across modules and outlets. Success looks like an owner trusting the margin and labor-cost numbers enough to act on them, and an accountant trusting the same numbers enough to file on them.
 
 ## Positioning
 
