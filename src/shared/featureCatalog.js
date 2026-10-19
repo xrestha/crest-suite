@@ -43,6 +43,9 @@ export const FEATURE_GROUPS = [
     { key: 'wastage_report',  label: 'Wastage Report' },
     { key: 'settings',        label: 'Settings' },
     { key: 'staff_meals',     label: 'Staff Meals' },
+    // S849 (PNL-8): recording stock that really moved between two outlets of a group is Record &
+    // Comply, and every tier's stock figures must agree with it.
+    { key: 'stock_transfers', label: 'Stock Transfers' },
   ]},
   // Growth sells Control — the recipe-driven cost loop. Overheads lives here rather than Pro
   // because it is the data-entry page behind Fixed Costs %/Est. Net Margin and Recipes' True

@@ -1,4 +1,5 @@
 import { DEFAULT_PLAN_PRICES, annualOf } from '../data/pricingPlans'
+import { suiteState } from '../utils/subscription'
 
 // What one client pays us per month, in one place.
 //
@@ -17,6 +18,11 @@ import { DEFAULT_PLAN_PRICES, annualOf } from '../data/pricingPlans'
 //     money can never disagree on the same screen (S552/S574).
 //   * Annual billing is 25% off the monthly rate, applied uniformly wherever annual pricing
 //     appears, so an annually-billed client contributes the discounted figure and not the list one.
+//   * Suite bills only as suiteState(c).billed (S849): 'pro' only, and never while Crest IMS is
+//     off (it is an IMS add-on; ACCESS-3). The ★ SUITE pills, the Admin Dashboard's count and the
+//     gate read the same predicate.
+//   * Crest's own demo / practice outlets (`is_internal`, S849) total 0 with no lines: they work
+//     like any outlet and are never income. billing-export sends them to HSS as not billable.
 //
 // Pure: takes the client row and the resolved price table, touches no context and no network.
 
@@ -40,6 +46,8 @@ export function monthlyRate(base, billingCycle) {
  * @returns {{ total: number, lines: Array<{key: string, label: string, amount: number}> }}
  */
 export function clientMrrBreakdown(c, planPrices) {
+  // Crest's own demo or practice outlet (S849): never income, whatever its modules and dates say.
+  if (c?.is_internal) return { total: 0, lines: [], internal: true }
   const prices    = planPrices || DEFAULT_PLAN_PRICES
   const imsPrices = prices.ims || DEFAULT_PLAN_PRICES.ims
   const hrPrice   = prices.hr ?? DEFAULT_PLAN_PRICES.hr
@@ -51,9 +59,10 @@ export function clientMrrBreakdown(c, planPrices) {
   const imsActive = windowOpen(c.ims_enabled !== false, imsEnd)
 
   // `suite_ends_at` is independent of any single module's expiry; the IMS fallback covers rows
-  // written before that column existed and applies only while IMS itself is live.
-  const suiteEnd    = c.suite_ends_at || (imsActive ? imsEnd : null)
-  const suiteActive = Boolean(c.suite_plan) && Boolean(suiteEnd) && daysLeft(suiteEnd) > 0
+  // written before that column existed and applies only while IMS itself is live. That rule, the
+  // 'pro'-only test and the IMS floor live in suiteState (utils/subscription.js), so the money and
+  // every Suite pill answer from one predicate.
+  const suiteActive = suiteState(c).billed
 
   const lines = []
   if (imsActive) {

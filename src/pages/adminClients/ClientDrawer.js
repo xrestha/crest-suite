@@ -5,7 +5,8 @@ import { useAuth } from '../../context/AuthContext'
 import { useSettings } from '../../context/SettingsContext'
 import { formatAd, BS_MONTHS, bsDayOrdinal } from '../../utils/bsCalendar'
 import BsCalendarPicker from '../../components/BsCalendarPicker'
-import { getDateStatus, extendedFrom } from '../../utils/subscription'
+import { getDateStatus, extendedFrom, suiteState } from '../../utils/subscription'
+import { groupChangeCopy } from './groupChangeCopy'
 import { validateEmvQr } from '../../utils/emvQr'
 import Tip from '../../components/Tip'
 import Modal from '../../components/Modal'
@@ -18,7 +19,7 @@ import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../shar
 // figure under each module button is the one Settings > Plan Pricing actually charges. It used
 // to import the constants, which meant the screen where an operator picks a client's modules
 // quoted the shipped price while the MRR line beside it used the admin's edited one.
-import { MODULE_COLORS, MODULE_INK, moduleTint } from '../../data/pricingPlans'
+import { MODULE_COLORS, MODULE_INK, moduleTint, suitePagesText } from '../../data/pricingPlans'
 import ClientLegalTab from './ClientLegalTab'
 import { runBackup } from '../../modules/admin/dataExport/runBackup'
 import { restoreClientData } from '../../modules/admin/dataExport/restoreClientData'
@@ -220,6 +221,12 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [groups, setGroups]         = useState([])
   const [newGroupName, setNewGroupName] = useState('')
   const [savingGroup, setSavingGroup]   = useState(false)
+  // S849 (GROUP-1): this client's group's outlets, for the HQ select. Members only, so an outlet
+  // outside the group can never be picked as the group's HQ.
+  const [groupMembers, setGroupMembers] = useState([])
+  const [savingHq, setSavingHq]         = useState(false)
+  // S849: Crest's own demo or practice outlet — never counted as income (clientMrr, billing-export).
+  const [isInternal, setIsInternal]     = useState(!!client.is_internal)
 
   // Billing tab state — per-module end dates; fall back to legacy subscription_ends_at for IMS
   const _legacyEnd = client.subscription_ends_at ? formatAd(new Date(client.subscription_ends_at)) : ''
@@ -306,12 +313,32 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     }
     // Outlet groups live on the Billing tab; loaded on first visit rather than with the drawer,
     // since most clients are single-outlet and never open it.
-    if (activeTab === 'billing') {
-      supabase.from('client_groups').select('id, name, hq_client_id').order('name')
-        .then(({ data }) => setGroups(data || []))
-    }
+    if (activeTab === 'billing') reloadGroups()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
+
+  // The groups, re-read after any group change: the database clears a group's HQ when the HQ
+  // outlet leaves it (GROUP-1), so the HQ select must show what is stored, not what was.
+  function reloadGroups() {
+    return supabase.from('client_groups').select('id, name, hq_client_id').order('name')
+      .then(({ data, error }) => {
+        if (error) { console.error('[ClientDrawer] outlet groups read failed:', error); return }
+        setGroups(data || [])
+      })
+  }
+
+  // The outlets of this client's group (S849 GROUP-1 / GROUP-11): the HQ select's options and the
+  // names the leave confirm gives. The operator reads every client.
+  useEffect(() => {
+    if (activeTab !== 'billing' || !groupId) { setGroupMembers([]); return }
+    let cancelled = false
+    supabase.from('clients').select('id, name').eq('group_id', groupId).order('name')
+      .then(({ data, error }) => {
+        if (error) console.error('[ClientDrawer] group outlets read failed:', error)
+        if (!cancelled) setGroupMembers(error ? [] : (data || []))
+      })
+    return () => { cancelled = true }
+  }, [activeTab, groupId])
 
   // ── Staff PINs ──
   // Reads profiles and staff_pin_vault directly rather than through an RPC: both are readable
@@ -716,7 +743,44 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     onClientUpdated()
     if (client.id === adminViewClientId) refreshViewModules()
   }
-  const handleToggleIms = () => toggleModule('ims_enabled', 'Crest IMS', imsEnabled, setImsEnabled)
+  // S849 (ACCESS-3): Crest Suite Pro is an IMS add-on, so switching IMS off while Suite is on asks
+  // first and takes Suite off in the same write — otherwise every Suite page closes while Suite
+  // looks switched on here and on the client list.
+  const handleToggleIms = () => {
+    if (!imsEnabled || suitePlan !== 'pro') return toggleModule('ims_enabled', 'Crest IMS', imsEnabled, setImsEnabled)
+    askConfirm({
+      title: `Switch Crest IMS off for ${client.name}?`,
+      body: <p style={{ margin: 0 }}>{`Crest Suite Pro needs IMS, so all six Suite pages stop and Suite stops billing. Suite is switched off in the same step.`}</p>,
+      confirmLabel: 'Switch IMS and Suite off', busyLabel: 'Switching off…', danger: true,
+      run: async () => {
+        setSubMsg('')
+        const { data, error } = await supabase.from('clients')
+          .update({ ims_enabled: false, suite_plan: null }).eq('id', client.id)
+          .select('ims_enabled, suite_plan')
+        if (error || !data?.length) {
+          setSubMsg(`error:Crest IMS and Crest Suite Pro are still on — the change did not save. ${error ? errorLine(error) : 'No row was updated; reload the drawer.'}`)
+          return
+        }
+        setImsEnabled(data[0].ims_enabled !== false)
+        setSuitePlan(data[0].suite_plan || null)
+        onClientUpdated()
+        if (client.id === adminViewClientId) refreshViewModules()
+      },
+    })
+  }
+
+  // S849 (demo outlets, owner answer (a)): Crest's own demo or practice outlet. Saves instantly with
+  // the module switches' revert-on-failure shape; switching it ON asks first, because it changes
+  // what HSS bills. Access is untouched: nothing that locks, gates or filters reads it.
+  const handleToggleInternal = () => {
+    if (isInternal) return toggleModule('is_internal', 'The demo outlet switch', isInternal, setIsInternal)
+    askConfirm({
+      title: `Mark ${client.name} as a demo outlet?`,
+      body: <p style={{ margin: 0 }}>{`${client.name} will stop counting as income in Crest and be sent to HSS as not billable. Its modules, dates and access do not change.`}</p>,
+      confirmLabel: 'Mark as demo outlet', busyLabel: 'Saving…',
+      run: () => toggleModule('is_internal', 'The demo outlet switch', isInternal, setIsInternal),
+    })
+  }
   const handleToggleHr  = () => toggleModule('hr_enabled',  'Crest HR',  hrEnabled,  setHrEnabled)
   // POS off takes Customization with it — the database trigger does the same, so the switch on
   // screen follows what the row will hold rather than waiting for the next re-read.
@@ -740,31 +804,117 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // The clients.group_id trigger nulls profiles.active_client_id for anyone pointed at this
   // outlet, so a regrouping can never leave a user resolved to an outlet they can no longer
   // reach. That is what keeps my_client_id() a join-free COALESCE.
-  async function handleGroupChange(nextGroupId) {
-    setSavingGroup(true)
-    const { error } = await supabase.from('clients').update({ group_id: nextGroupId }).eq('id', client.id)
-    setSavingGroup(false)
-    if (error) { setSubMsg('error:The outlet group was not changed — this client is still in its previous group. ' + errorLine(error)); return }
-    setGroupId(nextGroupId)
-    setSubMsg('ok:' + (nextGroupId ? 'Outlet added to group.' : 'Outlet removed from its group.'))
-    onClientUpdated()
+  // The OTHER outlets of a group, by name, for the confirm (GROUP-11). A failed read returns null,
+  // and the change is not offered on a sentence that could be missing names.
+  async function otherOutletNames(gid) {
+    if (!gid) return []
+    const { data, error } = await supabase.from('clients').select('id, name').eq('group_id', gid).order('name')
+    if (error) { console.error('[ClientDrawer] group outlets read failed:', error); return null }
+    return (data || []).filter(c => c.id !== client.id).map(c => c.name)
   }
 
+  // S849 (GROUP-11): joining another group is one dropdown change that hands its Owners the reach of
+  // an Owner into this client, so it asks first and names both sides. Cancel leaves the select on the
+  // saved value (it is controlled by groupId, which only a landed write changes).
+  async function handleGroupChange(nextGroupId) {
+    if ((nextGroupId || null) === (groupId || null)) return
+    const fromGroup = groups.find(g => g.id === groupId) || null
+    const toGroup = groups.find(g => g.id === nextGroupId) || null
+    const [fromOthers, toOthers] = await Promise.all([otherOutletNames(groupId), otherOutletNames(nextGroupId)])
+    if (fromOthers === null || toOthers === null) {
+      setSubMsg('error:The outlet group was not changed — the outlets in the group could not be read, so the change could not be confirmed. Reload the drawer and try again.')
+      return
+    }
+    const copy = groupChangeCopy({ clientName: client.name, clientId: client.id, fromGroup, toGroup, fromOthers, toOthers })
+    askConfirm({
+      title: copy.title,
+      body: <>{copy.body.map((line, i) => <p key={i} style={{ margin: i ? '8px 0 0' : 0 }}>{line}</p>)}</>,
+      confirmLabel: copy.confirmLabel, busyLabel: 'Saving…', danger: !!toGroup,
+      run: async () => {
+        setSavingGroup(true)
+        const { data, error } = await supabase.from('clients').update({ group_id: nextGroupId }).eq('id', client.id).select('id')
+        setSavingGroup(false)
+        if (error || !data?.length) {
+          setSubMsg('error:The outlet group was not changed — this client is still in its previous group. ' + (error ? errorLine(error) : 'No row was updated; reload the drawer.'))
+          return
+        }
+        setGroupId(nextGroupId)
+        setSubMsg('ok:' + (nextGroupId ? 'Outlet added to group.' : 'Outlet removed from its group.'))
+        reloadGroups()
+        onClientUpdated()
+        if (client.id === adminViewClientId) refreshViewModules()
+      },
+    })
+  }
+
+  // Create & Assign (S849 GROUP-1 / GROUP-11): asks first like any group change, then in three steps
+  // — insert the group with no HQ, join this client, set this client as HQ — so it stays valid if
+  // the database checks that a group's HQ is one of its outlets.
   async function handleCreateGroup() {
     const name = newGroupName.trim()
     if (!name) return
-    setSavingGroup(true)
-    const { data, error } = await supabase.from('client_groups')
-      .insert({ name, hq_client_id: client.id }).select().single()
-    if (error) { setSavingGroup(false); setSubMsg('error:The group was not created, so this client has not been grouped. ' + errorLine(error)); return }
-    const { error: linkErr } = await supabase.from('clients').update({ group_id: data.id }).eq('id', client.id)
-    setSavingGroup(false)
-    if (linkErr) { setSubMsg('error:' + linkErr.message); return }
-    setGroups(g => [...g, data].sort((a, b) => a.name.localeCompare(b.name)))
-    setGroupId(data.id)
-    setNewGroupName('')
-    setSubMsg(`ok:Created group "${name}" with this outlet as HQ.`)
-    onClientUpdated()
+    const fromGroup = groups.find(g => g.id === groupId) || null
+    const fromOthers = await otherOutletNames(groupId)
+    if (fromOthers === null) {
+      setSubMsg('error:The group was not created — the outlets in this client\'s current group could not be read, so the change could not be confirmed. Reload the drawer and try again.')
+      return
+    }
+    const copy = groupChangeCopy({ clientName: client.name, clientId: client.id, fromGroup, toGroup: { id: null, name }, fromOthers, toOthers: [] })
+    askConfirm({
+      title: `Create the outlet group "${name}" with ${client.name} in it?`,
+      body: <>
+        {copy.body.map((line, i) => <p key={i} style={{ margin: i ? '8px 0 0' : 0 }}>{line}</p>)}
+        <p style={{ margin: '8px 0 0' }}>{`${client.name} becomes the group's HQ, the outlet Push to branches copies from. Other outlets join from their own Billing tab.`}</p>
+      </>,
+      confirmLabel: 'Create and join', busyLabel: 'Creating…',
+      run: async () => {
+        setSavingGroup(true)
+        try {
+          const { data, error } = await supabase.from('client_groups').insert({ name }).select().single()
+          if (error) { setSubMsg('error:The group was not created, so this client has not been grouped. ' + errorLine(error)); return }
+          const { data: joined, error: linkErr } = await supabase.from('clients').update({ group_id: data.id }).eq('id', client.id).select('id')
+          if (linkErr || !joined?.length) {
+            setGroups(g => [...g, data].sort((a, b) => a.name.localeCompare(b.name)))
+            setSubMsg(`error:Group "${name}" was created, but ${client.name} was not put in it — it is still in its previous group. ` + (linkErr ? errorLine(linkErr) : 'No row was updated; reload the drawer.'))
+            return
+          }
+          setGroupId(data.id)
+          setNewGroupName('')
+          const { data: hqRow, error: hqErr } = await supabase.from('client_groups').update({ hq_client_id: client.id }).eq('id', data.id).select('id')
+          await reloadGroups()
+          onClientUpdated()
+          if (client.id === adminViewClientId) refreshViewModules()
+          if (hqErr || !hqRow?.length) {
+            setSubMsg('error:Group created and joined, but HQ was not set — pick it under HQ outlet. ' + (hqErr ? errorLine(hqErr) : ''))
+            return
+          }
+          setSubMsg(`ok:Created group "${name}" with this outlet as HQ.`)
+        } finally {
+          setSavingGroup(false)
+        }
+      },
+    })
+  }
+
+  // S849 (GROUP-1): the group's HQ — the outlet whose items, recipes and prices Push to branches
+  // copies — chosen from the group's own outlets. Saves instantly, put back on failure.
+  async function handleHqChange(nextHqId) {
+    const current = groups.find(g => g.id === groupId)
+    if (!current) return
+    const prevHq = current.hq_client_id || null
+    const next = nextHqId || null
+    if (next === prevHq) return
+    setGroups(gs => gs.map(g => (g.id === groupId ? { ...g, hq_client_id: next } : g)))
+    setSavingHq(true)
+    setSubMsg('')
+    const { data, error } = await supabase.from('client_groups').update({ hq_client_id: next }).eq('id', groupId).select('id, hq_client_id')
+    setSavingHq(false)
+    if (error || !data?.length) {
+      setGroups(gs => gs.map(g => (g.id === groupId ? { ...g, hq_client_id: prevHq } : g)))
+      setSubMsg(`error:The group's HQ outlet was not changed. ${error ? errorLine(error) : 'No row was updated; reload the drawer.'}`)
+      return
+    }
+    setSubMsg('ok:' + (next ? 'HQ outlet set.' : 'The group has no HQ now, so Push to branches is off.'))
   }
 
   // ── Billing ──
@@ -1054,7 +1204,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     const labels = {
       // Clear IMS also wipes Fixed Assets, setup included (S834): the register and its categories
       // go with their depreciation, tax-pool and repair rows — admin-user-ops clearModuleData.
-      ims: 'IMS transactions (purchases, vendor returns, stock counts, wastage, staff meals, hand-entered sales and their stock movements, budgets, payables, POs, requisitions, gate passes, overheads, demand forecast runs)\n\nALSO DELETED: the whole Fixed Assets register and its asset categories, with their depreciation runs, tax pool runs and openings, and repair expenses\n\nKEPT: items, vendors, categories, recipes, par levels, periods, and everything the till posted to Inventory (its sales and stock movements stay with its bills)',
+      ims: 'IMS transactions (purchases, vendor returns, stock counts, wastage, staff meals, hand-entered sales and their stock movements, budgets, payables, POs, requisitions, gate passes, overheads, demand forecast runs, stock transfers with other outlets)\n\nALSO DELETED: the whole Fixed Assets register and its asset categories, with their depreciation runs, tax pool runs, openings and their corrections, and repair expenses\n\nOTHER OUTLETS: stock transfers with other outlets stay on those outlets\' books.\n\nKEPT: items, vendors, categories, recipes, par levels, periods, and everything the till posted to Inventory (its sales and stock movements stay with its bills)',
       hr:  'HR transactions (attendance, payroll runs, payslips, leave requests, overtime, advances + repayments, festival allowances, roster)\n\nKEPT: employees, salary components, leave types, holiday calendar, shift types',
       pos: 'POS transactions (orders, order items, shifts, customers, and what the till posted to Inventory: its sales entries and stock movements)\n\nKEPT: tables, floor plan, staff accounts + PINs, and hand-entered sales with their stock movements. Occupied tables are freed.\n\nAFTERWARDS: the hand-entered sales days the till also covered get their stock re-counted, because it was skipped while the till covered them. Other days are left as they were saved.',
     }
@@ -1637,12 +1787,26 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px' }}>
                     Modules
                   </p>
-                  {suitePlan && (
-                    <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 12px' }}>
-                      Crest Suite Pro is active. It sits on top of these modules rather than including them, so each stays individually toggleable — only Crest IMS is required.
-                    </p>
-                  )}
+                  {/* S849 (ACCESS-4): what the gate will do with the values on screen, through
+                      suiteState() — the one predicate the Suite pages, the MRR and the export read. */}
+                  {suitePlan === 'pro' && (() => {
+                    const ss = suiteState({ suite_plan: suitePlan, ims_enabled: imsEnabled, suite_ends_at: suiteEndsAt || null, ims_ends_at: imsEndsAt || null, subscription_ends_at: client.subscription_ends_at })
+                    return (
+                      <p style={{ fontSize: 11, color: ss.live ? 'var(--theme-text3)' : 'var(--theme-amber-text)', margin: '0 0 12px' }}>
+                        {!ss.imsOn
+                          ? 'Crest Suite Pro is switched on, but Crest IMS is off, so every Suite page is closed and Suite is not billed.'
+                          : ss.lapsed
+                            ? 'Crest Suite Pro is switched on, but its end date passed more than 7 days ago, so its pages are closed and it is not billed.'
+                            : `Crest Suite Pro is active${ss.inGrace ? ' (in its 7-day grace)' : ''}. It sits on top of these modules rather than including them, so each stays individually toggleable — only Crest IMS is required.`}
+                      </p>
+                    )
+                  })()}
                   {[
+                    // S849: Crest's own demo or practice outlet. First, because it decides whether
+                    // everything below is income at all.
+                    { key: 'internal', label: 'Demo outlet, not a customer', sub: 'Never counted as income; sent to HSS as not billable',
+                      tip: "Crest's own demo or practice outlet. Works like any outlet; never counted as income and sent to HSS as not billable.",
+                      enabled: isInternal, toggle: handleToggleInternal },
                     { key: 'ims', label: 'Crest IMS', sub: 'Inventory Management', enabled: imsEnabled, toggle: handleToggleIms,
                       // S831 5f-3 (owner Q31 a): for a till outlet, Inventory starts the day it is switched
                       // on, and every switch-on starts it again (clients.ims_since, stamped by the database).
@@ -1658,7 +1822,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   ].map(mod => (
                     <div key={mod.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--theme-border-lt)' }}>
                       <div>
-                        <p style={{ margin: '0 0 1px', fontSize: 13, fontWeight: 700, color: mod.enabled ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{mod.label}</p>
+                        <p style={{ margin: '0 0 1px', fontSize: 13, fontWeight: 700, color: mod.enabled ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>
+                          {mod.tip ? <Tip text={mod.tip} width={280}>{mod.label}</Tip> : mod.label}
+                        </p>
                         <p style={{ margin: 0, fontSize: 11, color: 'var(--theme-text2)' }}>{mod.sub}</p>
                         {mod.note && <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--theme-text2)', maxWidth: 520 }}>{mod.note}</p>}
                       </div>
@@ -1699,7 +1865,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     the client bought, so it neither implies HR/POS nor dictates the IMS tier.
                     Only IMS is implied — SuiteGate's requireModules floor. */}
                 <p style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>
-                  <Tip text="The owner layer — Owner Dashboard, Monthly Owner/Manager Report, Multi-Outlet Group Console, Demand Forecast and Fixed Assets. Priced per outlet on top of this client's modules, not instead of them. Requires IMS." width={300}>
+                  <Tip text={`The owner layer — ${suitePagesText()}. Priced per outlet on top of this client's modules, not instead of them. Requires Crest IMS; Owner Dashboard also needs Crest HR. Switching Crest IMS off takes Suite off with it.`} width={300}>
                     Crest Suite Pro
                   </Tip>
                 </p>
@@ -1771,9 +1937,32 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     Create & Assign
                   </button>
                 </div>
+                {/* S849 (GROUP-1): the group's HQ, from its own outlets only. Saves instantly. */}
+                {groupId && (() => {
+                  const g = groups.find(x => x.id === groupId)
+                  const hq = g?.hq_client_id || ''
+                  const hqListed = !hq || groupMembers.some(m => m.id === hq)
+                  return (
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <label htmlFor="group-hq-outlet" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+                        <Tip text="The outlet whose items, recipes and prices Push to branches copies. Only an outlet in this group can be HQ.">HQ outlet</Tip>
+                      </label>
+                      <select id="group-hq-outlet"
+                        className="form-select"
+                        style={{ maxWidth: 240 }}
+                        value={hqListed ? hq : ''}
+                        onChange={e => handleHqChange(e.target.value || null)}
+                        disabled={savingHq || savingGroup || !g}
+                      >
+                        <option value="">No HQ (master push off)</option>
+                        {groupMembers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      </select>
+                    </div>
+                  )
+                })()}
                 <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
                   {groupId
-                    ? 'Changing or clearing the group signs every affected user back into their own outlet.'
+                    ? 'Changing or clearing the group asks first, names whose Owners gain or lose this outlet, and signs every affected user back into their own outlet.'
                     : 'Leave as “No group” for a single-outlet client — nothing about their app changes.'}
                 </p>
 
@@ -1781,7 +1970,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     module's end date (borrowing IMS's date as a proxy elsewhere is a fallback
                     for pre-migration clients only, not a substitute for tracking this directly). */}
                 {suitePlan && (() => {
-                  const s = getDateStatus(suiteEndsAt)
+                  // S849 (ACCESS-4 / SU12): a Suite with no date says so instead of showing no badge.
+                  const s = suiteEndsAt ? getDateStatus(suiteEndsAt)
+                    : { label: 'No end date', color: 'var(--theme-text2)', bg: 'color-mix(in srgb, var(--theme-text2) 12%, var(--theme-card))', border: 'color-mix(in srgb, var(--theme-text2) 30%, transparent)' }
                   return (
                     <div style={{ marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid var(--theme-border)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -1793,7 +1984,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                         )}
                       </div>
                       <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 6px' }}>
-                        <Tip text="Date when this client's Crest Suite Pro add-on expires — independent of each module's own expiry above. Seven days after it passes, Owner Dashboard, Monthly Owner Report, Multi-Outlet, Demand Forecast and Fixed Assets close (the same grace the app-wide lock gives). Left blank, Suite stays open for as long as it is switched on — and stops counting toward MRR." width={300}>Suite subscription end date</Tip>
+                        <Tip text={`Date this client's Crest Suite Pro ends, independent of the module dates above. Left blank, Suite stays open while it is switched on and bills from the IMS date if there is one; with no IMS date either it is not billed, and the client list marks it 'no end date'. Seven days after the date passes, ${suitePagesText()} close. It never keeps the outlet itself open: the account lock follows the IMS, HR and POS dates.`} width={320}>Suite subscription end date</Tip>
                       </p>
                       <div style={{ marginBottom: 8 }}>
                         <BsCalendarPicker value={suiteEndsAt} onChange={setSuiteEndsAt} clearable />
@@ -2351,7 +2542,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   Per-module buttons clear only that module's transactions and keep its setup (items, employees, tables…),
                   except that Clear IMS also deletes the Fixed Assets register and its asset categories.
                   "Clear Client Data" wipes all operational data across IMS, HR and POS; the client record, user accounts,
-                  feature flags, and settings are kept intact.
+                  feature flags, and settings are kept intact. Stock transfers with other outlets stay on those outlets' books.
                   <br /><strong style={{ color: 'var(--theme-red-text)' }}>None of these can be undone.</strong>
                 </p>
               </div>
@@ -2367,7 +2558,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 Clear one module — transactions only, setup kept (IMS also clears Fixed Assets)
               </p>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
-                <Tip text="Deletes IMS activity: purchases, vendor returns, stock counts, wastage, staff meals, hand-entered sales and their stock movements, budgets, payables, POs, requisitions, gate passes, overheads, demand forecast runs. Also deletes the whole Fixed Assets register and its asset categories, with their depreciation runs, tax pool runs and openings, and repair expenses. Keeps items, vendors, categories, recipes, par levels, and periods (periods are shared with HR payroll), and what the till posted to Inventory. Cannot be undone.">
+                <Tip text="Deletes IMS activity: purchases, vendor returns, stock counts, wastage, staff meals, hand-entered sales and their stock movements, budgets, payables, POs, requisitions, gate passes, overheads, demand forecast runs, stock transfers with other outlets (the other outlets keep their side). Also deletes the whole Fixed Assets register and its asset categories, with their depreciation runs, tax pool runs, openings and their corrections, and repair expenses. Keeps items, vendors, categories, recipes, par levels, and periods (periods are shared with HR payroll), and what the till posted to Inventory. Cannot be undone.">
                   <button onClick={() => handleClearModule('ims')} disabled={deleting}
                     className="btn btn-danger" style={{ fontSize: 13 }}>
                     {deletingAction === 'ims' ? 'Working…' : 'Clear IMS Transactions'}
@@ -2494,7 +2685,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
               sales, payables, periods), HR (employees, attendance, payroll, leave, roster) and POS (tables,
               orders, shifts, customers). The client record, user accounts, feature flags and settings are
               kept. Every POS tablet key is revoked and the shared till key is switched off, so each tablet has to be
-              activated again from Till Devices. <strong>This cannot be undone.</strong></>,
+              activated again from Till Devices. Stock transfers with other outlets stay on those outlets&apos; books.{' '}
+              <strong>This cannot be undone.</strong></>,
             run: handleDeleteClientData,
           },
           deleteClient: {
@@ -2502,6 +2694,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
             verb: 'Delete Client',
             body: <>Removes <strong>everything</strong>: all operational data, every user account and login,
               feature flags, settings, and the client record itself. The email is freed for re-registration.
+              Stock transfers with other outlets stay on those outlets&apos; books.
               <strong> This cannot be undone.</strong></>,
             run: handleDeleteClient,
           },

@@ -62,12 +62,14 @@ export function getAccessState(client) {
     return { ...open, locked: true, reason: 'trial' }
   }
 
+  // The main modules' dates and the legacy date only (S849 ACCESS-2, SU5 (a)). An add-on — Crest
+  // Suite Pro or Customization — paid further ahead used to hold the whole outlet open after IMS, HR
+  // and POS had all run out. The add-ons keep their own dates for their own pages and their money
+  // (suiteState, clientMrr), never for the lock. client_access_open() weighs the same four.
   const ends = [
     client.ims_ends_at,
     client.hr_ends_at,
     client.pos_ends_at,
-    client.customization_ends_at,
-    client.suite_ends_at,
     client.subscription_ends_at,
   ].filter(Boolean).map(d => new Date(d).getTime())
 
@@ -85,15 +87,49 @@ export function getAccessState(client) {
 // AuthContext, so SuiteGate and the nav's PRO chip both honour the date. Until S736 nothing did:
 // `suite_ends_at` drove the ★ SUITE pill and the MRR figure, so a lapsed Suite read "Not billing"
 // on Admin → Clients while every Suite page stayed open, and the drawer's own tooltip claimed the
-// date gated them. Same resolution as clientMrr.js (suite_ends_at, else the IMS window for rows
-// written before that column existed), same GRACE_DAYS as the app-wide lock, and it fails OPEN
-// on a client with no date at all, like every other date check here.
+// date gated them. It is `suiteState(client).live` (below), so the gate, the money and the operator
+// screens answer from one predicate (S849). public.client_suite_live() is its SQL twin, used by the
+// group roll-ups; clientSuiteLive.test.js holds the two together.
 export function suiteLive(client) {
-  if (!client || client.suite_plan !== 'pro') return false
-  const end = client.suite_ends_at || client.ims_ends_at || client.subscription_ends_at
-  if (!end) return true
-  const daysLeft = Math.ceil((new Date(end).getTime() - Date.now()) / 86400000)
-  return daysLeft >= -GRACE_DAYS
+  return suiteState(client).live
+}
+
+// Everything every screen needs to know about one client's Crest Suite Pro, from one predicate
+// (S849 ACCESS-3/-4, SU12). The gate (via suiteLive), the MRR figure, the billing export's hand copy,
+// Admin → Clients' ★ SUITE pill, Features ⊞, the drawer and the Admin Dashboard all read it, so they
+// can no longer disagree about whether Suite is on.
+//   subscribed — suite_plan is 'pro' ('starter'/'growth' were retired in S548 and count as off)
+//   imsOn      — Crest IMS is switched on: Suite is an IMS add-on, so with IMS off it is neither
+//                live nor billed (the IMS floor, ACCESS-3)
+//   endsAt     — the Suite date, else the IMS date, else the legacy date (rows from before
+//                suite_ends_at existed); null with no date at all
+//   daysLeft   — whole days to endsAt, negative once past; null with no date
+//   noDate     — subscribed with no date at all: it stays open, is not billed, and the operator
+//                screens mark it "no end date" (SU12)
+//   live       — the pages open: subscribed, IMS on, and no date or not more than GRACE_DAYS past
+//   inGrace    — live, but the date has passed (the 7 days after it)
+//   lapsed     — subscribed but not live (past the grace week, or IMS off)
+//   billed     — counted as income: subscribed, IMS on, not Crest's demo outlet, and clientMrr's
+//                Suite date (suite_ends_at, else the IMS date while the IMS window is open) still
+//                ahead. A Suite with no date of its own after IMS has lapsed is live (it fails open)
+//                but not billed.
+export function suiteState(client) {
+  const subscribed = client?.suite_plan === 'pro'
+  const imsOn = client?.ims_enabled !== false
+  const endsAt = client?.suite_ends_at || client?.ims_ends_at || client?.subscription_ends_at || null
+  const daysLeft = endsAt ? Math.ceil((new Date(endsAt).getTime() - Date.now()) / 86400000) : null
+  const noDate = subscribed && !endsAt
+  const live = subscribed && imsOn && (daysLeft === null || daysLeft >= -GRACE_DAYS)
+  const inGrace = live && daysLeft !== null && daysLeft <= 0
+  const lapsed = subscribed && !live
+  // clientMrr.js's rule, restated here so the count and the money agree (clientMrr.test.js checks
+  // both against the same rows): the IMS fallback counts only while the IMS window itself is open.
+  const days = d => Math.ceil((new Date(d).getTime() - Date.now()) / 86400000)
+  const imsEnd = client?.ims_ends_at || client?.subscription_ends_at || null
+  const imsWindowOpen = imsOn && !!imsEnd && days(imsEnd) > 0
+  const billEnd = client?.suite_ends_at || (imsWindowOpen ? imsEnd : null)
+  const billed = subscribed && imsOn && !client?.is_internal && !!billEnd && days(billEnd) > 0
+  return { subscribed, imsOn, endsAt, daysLeft, noDate, live, inGrace, lapsed, billed }
 }
 
 // "+N days" on a subscription ADDS to the time the client already has. The base is the later of
@@ -110,16 +146,15 @@ export function extendedFrom(currentEndsAt, days, now = new Date()) {
   return d
 }
 
-// Client-level badge — uses the latest active end date across all modules, falls back to trial
+// Client-level badge — the farthest end date across IMS, HR, POS and the legacy date (the same four
+// getAccessState locks on; an add-on's date never holds the outlet open, S849 ACCESS-2), falling
+// back to the trial.
 export function getSubStatus(client) {
   const now = Date.now()
-  // Take the farthest end date across all module subscriptions
   const candidates = [
     client?.ims_ends_at,
     client?.hr_ends_at,
     client?.pos_ends_at,
-    client?.customization_ends_at,
-    client?.suite_ends_at,
     client?.subscription_ends_at,
   ].filter(Boolean).map(d => new Date(d).getTime())
 

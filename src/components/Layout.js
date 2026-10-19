@@ -44,8 +44,12 @@ import {
   Receipt, ReceiptText, RefreshCw, Scale, ScrollText, Search, Settings, Settings2,
   ShieldCheck, ShoppingCart, Sigma, SlidersHorizontal, Store, Tag, Tags, Target, Timer,
   Trash2, TrendingUp, TriangleAlert, Trophy, Truck, Undo2, UserCheck, Users, Users2,
-  Utensils, UtensilsCrossed, Wallet, Warehouse,
+  Utensils, UtensilsCrossed, Wallet, Warehouse, Forklift,
 } from 'lucide-react'
+import { suiteAccess, SUITE_PAGE_BY_PATH } from './SuiteGate'
+import { suiteLive } from '../utils/subscription'
+import { formatAdAsBs } from '../utils/bsCalendar'
+import { suitePagesText } from '../data/pricingPlans'
 import './Layout.css'
 
 // minPlan: 'growth' | 'pro' — used for lock icon and tier badge
@@ -68,6 +72,10 @@ const NAV = [
   { to: '/purchase-orders',  label: 'Purchase Orders',   icon: ClipboardList, featureKey: 'purchase_orders', minPlan: 'growth', minImsRole: 'supervisor' },
   { to: '/stock',            label: 'Stock Count',       icon: ClipboardCheck, minImsRole: 'staff' },
   { to: '/requisitions',     label: 'Requisitions',      icon: ArrowRightLeft, featureKey: 'requisitions',    minPlan: 'growth', minImsRole: 'staff' },
+  // S849 (PNL-8): stock sent between outlets of one group. `inGroup`: offered only to an outlet in a
+  // group (groupId; the operator's viewed group). Forklift, not ArrowLeftRight: the mirror of
+  // Requisitions' ArrowRightLeft would read as the same concept (navigation.md, S606).
+  { to: '/stock-transfers',  label: 'Stock Transfers',   icon: Forklift, featureKey: 'stock_transfers', minPlan: 'starter', minImsRole: 'supervisor', inGroup: true },
   { to: '/recipes',          label: 'Recipe Costing',    icon: ChefHat, featureKey: 'recipe_costing',  minPlan: 'growth', minImsRole: 'supervisor' },
   // S754: no minImsRole — Menu Pricing's audience spans two modules (see menuPricingAccess in isItemVisible).
   { to: '/menu-pricing',     label: 'Menu Pricing',      icon: Tag, featureKey: 'menu_pricing',    minPlan: 'starter', menuPricingAccess: true },
@@ -137,8 +145,9 @@ const REPORTS = [
 // sidebar has 240px. The palette builds from THIS list, so the two can no longer disagree about
 // who may see a Suite destination (they did, and it was an S617-shaped bug found in S638).
 //
-// Note these routes are deliberately absent from the panel-resolution list further down: a Suite
-// page keeps whatever panel you were on, because the group is on all of them.
+// Since S763 a Suite route selects the Suite tab for a client that has Suite (the panel-routing
+// effect below); for a client without it, the route keeps whatever panel you were on, because the
+// PRO-badged group is on all of them.
 const SUITE_NAV = [
   { to: '/owner-dashboard', label: 'Owner Dashboard', icon: Crown,      ownerOnly: true },
   { to: '/owner-report',    label: 'Owner Report',    icon: ScrollText, ownerOnly: true, longLabel: 'Monthly Owner/Manager Report' },
@@ -151,8 +160,8 @@ const SUITE_NAV = [
 
 // Reports are split by characteristic instead of one 20+-item list — open just the slice you need.
 const IMS_GROUPS = [
-  { key: 'ops',             label: 'Operations',       items: NAV.slice(1, 10) }, // Periods … Requisitions
-  { key: 'costing',         label: 'Costing',          items: NAV.slice(10) },    // Recipe Costing … Overheads
+  { key: 'ops',             label: 'Operations',       items: NAV.slice(1, 11) }, // Periods … Stock Transfers
+  { key: 'costing',         label: 'Costing',          items: NAV.slice(11) },    // Recipe Costing … Overheads
   { key: 'reports-summary', label: 'Summary Reports',  items: REPORTS.filter(r => r.cat === 'summary') },
   { key: 'reports-stock',   label: 'Stock Reports',    items: REPORTS.filter(r => r.cat === 'stock') },
   { key: 'reports-money',   label: 'Finance Reports',  items: REPORTS.filter(r => r.cat === 'money') },
@@ -393,6 +402,7 @@ function Dropdown({ id, isOpen, setOpen, triggerClass, triggerLabel, triggerTitl
 }
 
 export default function Layout() {
+  const auth = useAuth()
   const { profile, isAdmin, plan, hasFeature, clientModules, signOut, adminViewClientId, switchAdminClient,
           isTrial, trialPending, trialExpired, trialDaysLeft, subscribeRequested, requestSubscription,
           accessReason, graceDaysLeft, clientId,
@@ -400,7 +410,7 @@ export default function Layout() {
           outletMoved, dismissOutletMoved, checkOutlet, outletHeld, returnToOutlet,
           hasPosAccess, posRole, canReachPosPath, hasImsAccess, imsRole, hasHrAccess, hrRole, isOwner,
           imsCountOnly, isStationTeam, session,
-          suitePlan } = useAuth()
+          suitePlan, groupId, clientKnown, suite } = auth
   const { settings } = useSettings()
   const { scopedFrom } = useScopedDb()
 
@@ -739,6 +749,9 @@ export default function Layout() {
     // any page in the product bar Stock Count, so every item is tested. ProtectedRoute enforces
     // the same predicate on the route; this only decides what is OFFERED.
     if (!imsCountPathReachable(imsCountOnly, item.to)) return false
+    // A page that only exists between outlets of a group (S849, Stock Transfers). groupId, not
+    // outlets: for the operator it is the viewed client's group (ACCESS-8).
+    if (item.inGroup && !groupId) return false
     return true
   }
 
@@ -751,6 +764,15 @@ export default function Layout() {
   // minImsRole) that `suiteNavItems` deliberately does not, so a tab can never render empty — an
   // IMS supervisor on a Suite client sees a two-item tab, and a POS-only staff login sees none.
   const suiteVisible = suiteEntitled && unlockedItems(suiteNavItems).length > 0
+  // S849 ACCESS-12: the PRO chip asks the same question SuiteGate does, per visible row. A viewer
+  // whose every visible Suite row opens (a grandfathered IMS supervisor with the Demand Forecast and
+  // Fixed Assets overrides; an Owner at a branch whose group has Suite elsewhere) gets no PRO.
+  // `suiteEntitled` (the tab) stays plan-level. The Group Console takes the group-wide test it opens
+  // on (ACCESS-7): any outlet of the group with a live Suite.
+  const groupSuiteLive = (outlets || []).some(o => suiteLive(o))
+  const suiteRowsVisible = unlockedItems(suiteNavItems)
+  const suiteRowsAllOpen = suiteRowsVisible.length > 0 && suiteRowsVisible.every(i =>
+    suiteAccess(auth, SUITE_PAGE_BY_PATH[i.to], { entitled: i.to === '/group-dashboard' && groupSuiteLive }).allowed)
 
   const MAX_PINS = 8
   function togglePin(e, to) {
@@ -840,7 +862,7 @@ export default function Layout() {
       label: 'Crest Suite',
       // The chip is the entitlement, so it shows only when the viewer does not have it. An admin
       // is exempt from SuiteGate entirely, so an admin never sees it either.
-      badge: (isAdmin || suitePlan === 'pro') ? null : 'PRO',
+      badge: (isAdmin || suitePlan === 'pro' || suiteRowsAllOpen) ? null : 'PRO',
       // Not pinnable: this group renders on every panel already, so a pin would be a shortcut to
       // something that is never more than one glance away. Preserves the pre-S638 behaviour.
       pinnable: false,
@@ -1671,9 +1693,8 @@ export default function Layout() {
         ))()}
 
         <nav className="sidebar-nav" id="sidebar-nav" aria-label={`${PANEL_TITLES[panel] || 'Crest'} pages`}>
-          {/* Owner Dashboard (cross-module, renders regardless of active panel — SuiteGate inside
-              the page itself handles the ineligible-viewer upsell) + this panel's own Dashboard,
-              paired side by side by renderDashboardRow() below instead of two stacked rows. */}
+          {/* This panel's own Dashboard, paired side by side with its neighbour by renderDashboardRow()
+              below instead of two stacked rows. */}
 
           {panel === 'admin' && isAdmin && (
             <>
@@ -2069,10 +2090,10 @@ export default function Layout() {
               {renderBarPill({ to: '/admin/guest-menu', label: 'Guest Menu', icon: QrCode })}
               {renderBarPill({ to: '/admin/audit', label: 'Audit Log', icon: History })}
               {renderBarPill({ to: '/settings', label: 'Settings', icon: Settings })}
-              {/* Crest Suite renders LAST on this panel, unlike every other one — on a module panel
-                  it is the Owner's own destination, here it is a client-facing layer the operator
-                  looks at from outside, and Clients / Periods / Guest Menu / Audit Log are the work. */}
-              {renderBarGroup(suiteGroup())}
+              {/* Crest Suite would render LAST on this panel, like every other panel's upsell. The
+                  operator counts as Suite-entitled, so it has the Suite tab and this never renders;
+                  gated like its siblings rather than drawn unconditionally (S849 ACCESS-13). */}
+              {suiteUpsellInPanels && renderBarGroup(suiteGroup())}
             </>
           )}
 
@@ -2195,6 +2216,53 @@ export default function Layout() {
             </span>
           </div>
         )}
+
+        {/* S849 ACCESS-11: this outlet's own row did not load, so every module switch, the plan and
+            Suite read as their defaults. One line, rather than a page of wrong "off" states. */}
+        {!clientKnown && (
+          <div inert={tillLayerUp} role="status" style={{
+            background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+            borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+          }}>
+            <span style={{ fontSize: 13, color: 'var(--theme-amber-text)', fontWeight: 600 }}>
+              Could not load this outlet&apos;s settings, so some modules may show as off. Reload the page.
+            </span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => window.location.reload()}>Reload</button>
+          </div>
+        )}
+
+        {/* S849 ACCESS-14: Crest Suite Pro ends with a warning to the Owner, the one person who can
+            renew it — in its last week, and through the 7-day grace after, naming the date the Suite
+            pages close. Only the Suite rows this Owner can see are named. */}
+        {isOwner && suite?.live && suite.daysLeft !== null && suite.daysLeft <= 7 && suiteRowsVisible.length > 0 && (() => {
+          const ends = formatAdAsBs(suite.endsAt)
+          const closes = formatAdAsBs(new Date(new Date(suite.endsAt).getTime() + 7 * 86400000).toISOString())
+          const pages = suitePagesText(suiteRowsVisible.map(i => i.label))
+          const plural = suiteRowsVisible.length > 1
+          return (
+            <div inert={tillLayerUp} role="status" style={{
+              background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+              borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+            }}>
+              <span style={{ fontSize: 13, color: 'var(--theme-amber-text)', fontWeight: 600 }}>
+                {suite.inGrace
+                  ? `Crest Suite Pro ended on ${ends}. ${pages} ${plural ? 'close' : 'closes'} on ${closes}.`
+                  : `Crest Suite Pro ends on ${ends}. ${pages} ${plural ? 'close' : 'closes'} 7 days after unless it is renewed.`}
+              </span>
+              {!subscribeRequested ? (
+                <button type="button" className="btn btn-primary btn-sm"
+                  onClick={async () => { setSubscribing(true); await requestSubscription(); setSubscribing(false) }}
+                  disabled={subscribing}>
+                  {subscribing ? 'Sending…' : 'Renew →'}
+                </button>
+              ) : (
+                <span style={{ fontSize: 12, color: 'var(--theme-amber-text)', fontWeight: 600 }}>✓ Request sent — we&apos;ll be in touch</span>
+              )}
+            </div>
+          )
+        })()}
 
         {/* Grace period — the subscription end date has passed but access is not cut yet. This is
             the only warning a paying client gets before SubscriptionLock replaces the whole app,

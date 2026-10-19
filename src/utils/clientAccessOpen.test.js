@@ -44,7 +44,8 @@ describe('client_access_open mirrors getAccessState', () => {
   it('weighs exactly the end dates getAccessState weighs', () => {
     const sqlCols = [...new Set([...helper.matchAll(/c\.(\w+_ends_at)/g)].map(m => m[1]))].sort()
     // Guards the parsers: a regex that matched nothing would make the comparison pass vacuously.
-    expect(jsEndDateColumns().length).toBeGreaterThanOrEqual(6)
+    // Four since S849 (ACCESS-2): IMS, HR, POS and the legacy date. The add-ons' dates are not here.
+    expect(jsEndDateColumns().length).toBeGreaterThanOrEqual(4)
     expect(sqlCols).toEqual(jsEndDateColumns())
   })
 
@@ -93,7 +94,14 @@ describe('getAccessState at the edges the SQL probe uses', () => {
   })
 
   it('the farthest end date wins', () => {
-    expect(getAccessState({ ims_ends_at: ago(60 * DAY), suite_ends_at: ago(-10 * DAY) }).locked).toBe(false)
+    expect(getAccessState({ ims_ends_at: ago(60 * DAY), hr_ends_at: ago(-10 * DAY) }).locked).toBe(false)
+  })
+
+  // S849 ACCESS-2 (SU5 (a)): an add-on paid further ahead does not keep the outlet open.
+  it.each(['suite_ends_at', 'customization_ends_at'])('an add-on date alone does not hold the outlet open (%s)', col => {
+    expect(getAccessState({ ims_ends_at: ago(60 * DAY), [col]: ago(-300 * DAY) }))
+      .toMatchObject({ locked: true, reason: 'expired' })
+    expect(jsEndDateColumns()).not.toContain(col)
   })
 
   it('a pending signup is locked even with its provisional expiry still ahead', () => {

@@ -308,6 +308,13 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
     await del(admin.from('budgets').delete().in('period_id', periodIds), 'budgets')
   }
 
+  // S849 (PNL-8): stock transfers. This outlet's own lines first (sent, received, returned), then the
+  // transfers it SENT. A sister outlet's received lines stay and keep counting there, unlinked
+  // (transfer_id → NULL): that stock really arrived. Transfers this outlet RECEIVED belong to the sender
+  // and stay. Both before monthly_periods and items (NO ACTION FKs); the guard lets the service role through.
+  await del(admin.from('ims_stock_transfer_lines').delete().eq('client_id', clientId), 'ims_stock_transfer_lines')
+  await del(admin.from('ims_stock_transfers').delete().eq('client_id', clientId), 'ims_stock_transfers')
+
   // POS module data (orders reference tables; movements/orders must go before periods)
   // Circular FK: pos_orders.credit_note_id -> pos_credit_notes.id AND
   // pos_credit_notes.order_id -> pos_orders.id, neither ON DELETE CASCADE.
@@ -419,6 +426,8 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   await del(admin.from('assets_tax_pool_lines').delete().eq('client_id', clientId), 'assets_tax_pool_lines')
   await del(admin.from('assets_tax_pool_runs').delete().eq('client_id', clientId), 'assets_tax_pool_runs')
   await del(admin.from('assets_tax_pool_openings').delete().eq('client_id', clientId), 'assets_tax_pool_openings')
+  // S849 (ASSETS SU7 b): the record of corrections to locked openings. Names only clients.
+  await del(admin.from('assets_tax_pool_opening_corrections').delete().eq('client_id', clientId), 'assets_tax_pool_opening_corrections')
   await del(admin.from('assets_repair_expenses').delete().eq('client_id', clientId), 'assets_repair_expenses')
   await del(admin.from('assets_register').delete().eq('client_id', clientId), 'assets_register')
   await del(admin.from('assets_categories').delete().eq('client_id', clientId), 'assets_categories')
@@ -2573,6 +2582,11 @@ Deno.serve(async (req) => {
         // The manual Sales Entry depletion only; the till's movements stay with its bills (DATABASE-2).
         await del(admin.from('stock_movements').delete().eq('client_id', clientId).in('source', IMS_MOVEMENT_SOURCES), 'stock_movements')
 
+        // S849 (PNL-8): stock transfers, as in deleteClientDataFor — this outlet's own lines, then the
+        // transfers it sent. A sister outlet's side stays on its books, unlinked.
+        await del(admin.from('ims_stock_transfer_lines').delete().eq('client_id', clientId), 'ims_stock_transfer_lines')
+        await del(admin.from('ims_stock_transfers').delete().eq('client_id', clientId), 'ims_stock_transfers')
+
         const poIds = await readAllIds('purchase_orders', (f, t) =>
           admin.from('purchase_orders').select('id').eq('client_id', clientId).order('id').range(f, t))
         await deleteByIdChunks(admin, 'purchase_order_items', 'po_id', poIds, 'purchase_order_items')
@@ -2595,6 +2609,8 @@ Deno.serve(async (req) => {
         await del(admin.from('assets_tax_pool_runs').delete().eq('client_id', clientId), 'assets_tax_pool_runs')
         // D40: the typed pool openings (A–D). After the runs, though the service role passes its lock anyway.
         await del(admin.from('assets_tax_pool_openings').delete().eq('client_id', clientId), 'assets_tax_pool_openings')
+        // S849 (ASSETS SU7 b): the corrections to locked openings, beside the openings.
+        await del(admin.from('assets_tax_pool_opening_corrections').delete().eq('client_id', clientId), 'assets_tax_pool_opening_corrections')
         await del(admin.from('assets_repair_expenses').delete().eq('client_id', clientId), 'assets_repair_expenses')
         await del(admin.from('assets_register').delete().eq('client_id', clientId), 'assets_register')
         await del(admin.from('assets_categories').delete().eq('client_id', clientId), 'assets_categories')

@@ -13,9 +13,12 @@
  * every table a backup carries is restored or left out with a stated reason (DATABASE-6).
  */
 import { foreignKeysFromMigrations, MIGRATIONS_DIR } from '../../../shared/migrationForeignKeys'
+import fs from 'fs'
+import path from 'path'
 import {
-  RESTORE_ORDER, RESTORE_LEFT_OUT, RESTORED_ELSEWHERE, DEFERRED_LINKS,
+  RESTORE_ORDER, RESTORE_LEFT_OUT, RESTORED_ELSEWHERE, DEFERRED_LINKS, GENERATED_COLUMNS,
   isAttributionColumn, restoreCoverage, lostRowsLine, partBillsAfterParents,
+  transferHeadersForRestore, transferLinesForRestore, clientRowRestorePlan, CLIENT_IDENTITY_COLUMNS,
 } from './restoreClientData'
 import { PERIOD_SCOPED_TABLES, PARENT_SCOPED_TABLES } from './exportClientData'
 import { CLIENT_SCOPED_TABLES } from '../../../shared/scopedDb'
@@ -168,5 +171,141 @@ describe('lostRowsLine', () => {
       .toBe('pos_cash_movements: 6 of 6 rows not restored (violates foreign key constraint)')
     expect(lostRowsLine('pos_order_items', 1200, 1000, 'x')).toBe('pos_order_items: 200 of 1,200 rows not restored (x)')
     expect(lostRowsLine('items', 1, 0, 'y')).toBe('items: 1 of 1 row not restored (y)')
+  })
+})
+
+// S849 ASSETS-3: Postgres refuses a generated column in an INSERT, so a restored table carrying one
+// that GENERATED_COLUMNS does not name loses every row. Read every migration for them.
+function generatedColumnsFromMigrations(dir) {
+  const files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort()
+  const cols = new Map() // "table.column" -> true
+  for (const f of files) {
+    const sql = fs.readFileSync(path.join(dir, f), 'utf8').replace(/--[^\n]*/g, '')
+    // Walk statements in order so a later DROP undoes an earlier definition (last definition wins).
+    let table = null
+    const re = /(CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?"?(\w+)"?)|(ALTER\s+TABLE\s+(?:ONLY\s+)?(?:IF\s+EXISTS\s+)?(?:public\.)?"?(\w+)"?)|(DROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?"?(\w+)"?)|(DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:public\.)?"?(\w+)"?)|((?:ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?)?"?(\w+)"?\s+[\w ()]+?\s+GENERATED\s+ALWAYS\s+AS\s*\()/gi
+    let m
+    while ((m = re.exec(sql))) {
+      if (m[2]) table = m[2]
+      else if (m[4]) table = m[4]
+      else if (m[6] && table) cols.delete(`${table}.${m[6]}`)
+      else if (m[8]) { for (const k of [...cols.keys()]) if (k.startsWith(`${m[8]}.`)) cols.delete(k) }
+      else if (m[10] && table) cols.set(`${table}.${m[10]}`, true)
+    }
+  }
+  return [...cols.keys()]
+}
+
+describe('GENERATED_COLUMNS', () => {
+  const found = generatedColumnsFromMigrations(MIGRATIONS_DIR)
+
+  it('the migration reader finds the generated columns at all', () => {
+    expect(found).toEqual(expect.arrayContaining(['items.per_uom_rate', 'pos_customers.phone_canonical', 'assets_register.total_cost']))
+  })
+
+  it('names every generated column of every restored table', () => {
+    const missing = found
+      .map(k => k.split('.'))
+      .filter(([table]) => RESTORE_ORDER.includes(table))
+      .filter(([table, col]) => !(GENERATED_COLUMNS[table] || []).includes(col))
+      .map(([table, col]) => `${table}.${col}`)
+    expect(missing).toEqual([])
+  })
+})
+
+describe('S849 tables in the restore', () => {
+  const at = t => RESTORE_ORDER.indexOf(t)
+  it('restores stock transfers after items and months, headers before lines', () => {
+    expect(at('ims_stock_transfers')).toBeGreaterThan(at('items'))
+    expect(at('ims_stock_transfers')).toBeGreaterThan(at('monthly_periods'))
+    expect(at('ims_stock_transfer_lines')).toBeGreaterThan(at('ims_stock_transfers'))
+  })
+  it('restores tax pool opening corrections right after the openings', () => {
+    expect(at('assets_tax_pool_opening_corrections')).toBe(at('assets_tax_pool_openings') + 1)
+  })
+})
+
+describe('transferHeadersForRestore', () => {
+  const header = over => ({ id: 't1', to_client_id: 'b', sent_period_id: 'p1', ended_period_id: null, status: 'on_the_way', ...over })
+
+  it('empties a receiver that no longer exists, keeping the row', () => {
+    const { rows, dropped } = transferHeadersForRestore([header()], ['c'], ['p1'])
+    expect(dropped).toBe(0)
+    expect(rows).toEqual([header({ to_client_id: null })])
+  })
+
+  it("empties a received transfer's ending month (the receiver's), keeps a cancelled one's own month", () => {
+    const { rows } = transferHeadersForRestore([
+      header({ id: 'r', status: 'received', ended_period_id: 'their-month' }),
+      header({ id: 'c', status: 'cancelled', ended_period_id: 'p2' }),
+    ], ['b'], ['p1', 'p2'])
+    expect(rows.find(r => r.id === 'r').ended_period_id).toBeNull()
+    expect(rows.find(r => r.id === 'c').ended_period_id).toBe('p2')
+    expect(rows.every(r => r.to_client_id === 'b')).toBe(true)
+  })
+
+  it('leaves out and counts a header whose sending month is not in the backup', () => {
+    const { rows, dropped } = transferHeadersForRestore([header(), header({ id: 't2', sent_period_id: 'elsewhere' })], ['b'], ['p1'])
+    expect(rows.map(r => r.id)).toEqual(['t1'])
+    expect(dropped).toBe(1)
+  })
+})
+
+describe('transferLinesForRestore', () => {
+  it("empties the link to a header the restore does not hold (a received line's), keeping the line", () => {
+    const lines = [
+      { id: 'l1', transfer_id: 't1', period_id: 'p1', leg: 'sent' },
+      { id: 'l2', transfer_id: 'senders', period_id: 'p1', leg: 'received' },
+    ]
+    const { rows, dropped } = transferLinesForRestore(lines, ['t1'], ['p1'])
+    expect(dropped).toBe(0)
+    expect(rows).toEqual([lines[0], { ...lines[1], transfer_id: null }])
+  })
+
+  it('leaves out and counts a line whose month the backup does not hold', () => {
+    const { rows, dropped } = transferLinesForRestore([{ id: 'l1', transfer_id: null, period_id: 'gone' }], [], ['p1'])
+    expect(rows).toEqual([])
+    expect(dropped).toBe(1)
+  })
+})
+
+describe('clientRowRestorePlan (S849 DATABASE-7)', () => {
+  const exported = {
+    id: 'old', name: 'BLOOM CAFE', created_at: '2026-01-01', last_backup_at: '2026-10-01', trial_purge_at: null,
+    location: 'Thamel', contact_person: 'Asha', contact_phone: '98', legal_name: 'Bloom Pvt Ltd', pan_no: '123',
+    registered_address: 'KTM', signatory_name: 'Asha', signatory_title: 'Director',
+    plan: 'growth', billing_cycle: 'annual', ims_enabled: true, ims_ends_at: '2027-06-30',
+    hr_enabled: true, hr_ends_at: '2027-06-30', pos_enabled: true, pos_ends_at: null,
+    customization_enabled: true, customization_ends_at: '2027-01-01',
+    suite_plan: 'pro', suite_ends_at: '2027-07-15', is_internal: true, group_id: 'g1',
+  }
+  const fresh = { id: 'new', location: '', contact_person: null, pan_no: '999', plan: 'starter', ims_enabled: true }
+
+  it('fills blank identity details only, never overwriting one', () => {
+    const { fill } = clientRowRestorePlan(exported, fresh)
+    expect(fill.location).toBe('Thamel')
+    expect(fill.contact_person).toBe('Asha')
+    expect(fill.pan_no).toBeUndefined()
+    expect(Object.keys(fill).every(k => CLIENT_IDENTITY_COLUMNS.includes(k))).toBe(true)
+  })
+
+  it('names every commercial and structural value it did not restore, the group by name', () => {
+    const { notes } = clientRowRestorePlan(exported, fresh, { groupName: 'Bloom Cafe Group' })
+    expect(notes).toMatch(/^Not restored, re-enter in Billing/)
+    for (const word of ['IMS Growth', 'annual billing', 'HR on', 'POS on', 'Customization on', 'Crest Suite Pro', 'Demo outlet', "outlet group 'Bloom Cafe Group'"]) {
+      expect(notes).toContain(word)
+    }
+  })
+
+  it('never carries ids, stamps or the backup date', () => {
+    const { fill, notes } = clientRowRestorePlan(exported, fresh)
+    for (const k of ['id', 'created_at', 'last_backup_at', 'trial_purge_at', 'name']) expect(fill[k]).toBeUndefined()
+    expect(notes).not.toMatch(/last_backup|created_at/)
+  })
+
+  it('says nothing when the target already matches, and names a group that is gone', () => {
+    const same = { ...exported, id: 'new' }
+    expect(clientRowRestorePlan(exported, same).notes).toBeNull()
+    expect(clientRowRestorePlan({ group_id: 'g' }, {}).notes).toMatch(/an outlet group that no longer exists/)
   })
 })

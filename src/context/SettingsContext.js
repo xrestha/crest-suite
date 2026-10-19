@@ -70,6 +70,8 @@ const DEFAULT_FLAGS = {
   multi_outlet: false,
   stock_count_assignment: false,
   weather_forecast: false,
+  // S849 (PNL-8): Stock Transfers between outlets of a group. Starter; the column is mig-PNL §3.
+  stock_transfers: false,
 }
 
 export function SettingsProvider({ children }) {

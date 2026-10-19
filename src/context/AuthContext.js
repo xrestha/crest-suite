@@ -7,7 +7,8 @@ import { accountOutlet, outletMovedElsewhere, announceOutletSwitch, listenForOut
 import { runBeforePosLock, lockedCartFor, sessionEndKeepsCart, beforePosLockRunning } from '../modules/pos/posLockedCart'
 import { outletSwitchArg, readTillDevice } from '../modules/pos/tillOutlet'
 import { signOutThisDevice } from '../shared/deviceSignOut'
-import { getAccessState, suiteLive } from '../utils/subscription'
+import { getAccessState, suiteLive, suiteState } from '../utils/subscription'
+import { setPageCacheUser, clearPageCache } from '../shared/sessionDataCache'
 import { docsRequiringReacceptance, reacceptDocTypes } from '../legal'
 import { weatherEntitled } from '../modules/dashboard/weatherSettings'
 
@@ -33,6 +34,9 @@ const STARTER_KEYS = new Set([
   'monthly_summary', 'annual_summary', 'vat_report', 'non_vat_report', 'wastage_report', 'settings',
   'sales_entry', 'payment_summary', 'menu_pricing', 'staff_meals',
   'outstanding_payables', 'vendor_balance_confirmation',
+  // Stock Transfers between outlets of a group (S849, PNL-8). Starter: recording stock that really
+  // moved is Record & Comply, and every tier's stock figures must agree with it.
+  'stock_transfers',
 ])
 // Requires Growth plan or above
 const GROWTH_KEYS = new Set([
@@ -134,6 +138,13 @@ function nextIdsOrSame(prev, ids) {
   return prev.every((id, i) => id === next[i]) ? prev : next
 }
 
+// The outlet list's columns: enough for the switcher (name, location), suiteLive() per outlet
+// (suite_plan, the dates, and ims_enabled for its IMS floor, S849) and the subscription badge.
+// Shared by the Owner's sibling read and the operator's viewed-group read, so the two lists carry
+// the same fields.
+const NO_OUTLETS = []
+const OUTLET_COLS = 'id, name, location, group_id, is_active, ims_enabled, suite_plan, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, subscription_ends_at, trial_ends_at, is_trial, trial_expires_at'
+
 export function AuthProvider({ children }) {
   const [session, setSession]                   = useState(null)
   const [profile, setProfile]                   = useState(null)
@@ -187,6 +198,9 @@ export function AuthProvider({ children }) {
     async function initialize() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!mounted) return
+      // The page cache belongs to this login (S849 GAPS-7): told before anything renders from it.
+      setPageCacheUser(session?.user?.id || null)
+      if (!session) clearPageCache()
       setSession(session)
       if (session) {
         await fetchProfile(session.user.id, mounted)
@@ -232,6 +246,13 @@ export function AuthProvider({ children }) {
         // A new sign-in: no sign-out of ours is still waiting for its event.
         if (event === 'SIGNED_IN') ownSignOutRef.current = false
       }
+      // Every auth event re-keys the page cache, so a sign-out in another tab, a session that ended
+      // by itself and a sign-in as someone else in this tab all stop serving the previous login's
+      // cached pages (S849 GAPS-7). Only the cache's own keys go: the guest menu and booking pages
+      // keep their sessionStorage state under this provider and see the no-session branch on every
+      // load, so this is never sessionStorage.clear().
+      setPageCacheUser(session?.user?.id || null)
+      if (!session) clearPageCache()
       setSession(session)
       if (!session) {
         setProfile(null)
@@ -301,7 +322,7 @@ export function AuthProvider({ children }) {
         // my_client_id() resolved to the selected outlet while every scopedDb query still filtered
         // .eq('client_id', <home>), so every client-scoped table returned zero rows with
         // error: null — the whole app empty, and by the S594 rule indistinguishable from an empty
-        // tenant. Never noticed because no client has a group_id yet.
+        // tenant. Never noticed because no client had a group_id then (the first arrived in S789).
         // pos_email (the caller's own row only) is a staff marker in its own right: a PIN login whose
         // pos_role was cleared must never read as the Owner (S752) — see isOwner below.
         // ims_email likewise (S756): imsCountOnly below keys on it, and without it in this list the
@@ -316,16 +337,26 @@ export function AuthProvider({ children }) {
       if (!mounted) return
       if (error) { console.error('Profile fetch error:', error); return }
 
+      // S849 (ACCESS-11): the profile this provider held before this read, so a failed outlet read can
+      // keep what is already known instead of describing a different outlet, or none.
+      const prev = profileRef.current
+      const prevOutlet = prev ? (prev.active_client_id || prev.client_id || null) : null
+      // S849 (GAPS-6): the operator's own profile row never builds an outlet list or a group. Its
+      // client_id is whatever it was created with, so a grouped one would have put that group on
+      // every client support views. The operator's outlets come from the viewed client (below).
+      const isAdminProfile = data?.role === 'admin'
+
       if (data?.client_id) {
         // The client row to load is the SELECTED outlet (profiles.active_client_id), not
         // necessarily the home one — my_client_id() resolves the same way server-side, so
         // loading the home client here would leave the UI describing a different outlet than
         // every query returns.
         const effectiveClientId = data.active_client_id || data.client_id
+        const sameOutlet = !!prev && prevOutlet === effectiveClientId
         // clients + feature_flags depend only on client_id, not on each other — run them
         // concurrently instead of waterfalling two more round trips after the profile fetch.
         // The outlet list joins them rather than adding a third sequential round trip (S460).
-        const [{ data: client }, { data: flags }, { data: siblings }] = await Promise.all([
+        const [clientRes, flagsRes, siblingsRes] = await Promise.all([
           supabase
             .from('clients')
             .select('id, name, location, group_id, is_active, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, ims_enabled, ims_since, hr_enabled, pos_enabled, customization_enabled, suite_plan, is_trial, trial_approved_at, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested, pan_no, contact_phone')
@@ -338,15 +369,49 @@ export function AuthProvider({ children }) {
             .maybeSingle(),
           // clients_select allows same-group rows, so this returns the outlet list for a grouped
           // client and exactly one row (their own) for everyone else — no group, no switcher.
-          supabase
-            .from('clients')
-            .select('id, name, location, group_id, is_active, suite_plan, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, subscription_ends_at, trial_ends_at, is_trial, trial_expires_at')
-            .order('name'),
+          // ims_enabled rides along (S849) so suiteLive(outlet) applies the IMS floor per outlet:
+          // the group pages' "any outlet of the group has a live Suite" test (ACCESS-7) reads it.
+          isAdminProfile
+            ? Promise.resolve({ data: null, error: null })
+            : supabase
+              .from('clients')
+              .select(OUTLET_COLS)
+              .order('name'),
         ])
-        if (mounted) {
+        if (!mounted) return
+        const { data: client, error: clientErr } = clientRes
+        const { data: flags, error: flagsErr } = flagsRes
+        const { data: siblings, error: siblingsErr } = siblingsRes
+
+        // A failed outlet read is not "this outlet has nothing" (S849 ACCESS-11). The same outlet as
+        // the one already held keeps the row it has. A DIFFERENT outlet keeps the whole previous state
+        // and reports false, so the caller can say the switch landed but the page did not reload
+        // (switchOutlet, GAPS-10) rather than show one outlet's name over another's data. A first load
+        // sets the profile with no client row, which clientKnown reports and SuiteGate / Layout say.
+        if (clientErr) {
+          console.error('[AuthContext] outlet read failed:', clientErr)
+          if (sameOutlet && prev?.clients) data.clients = prev.clients
+          else if (prev) return false
+          else data.clients = null
+        } else {
           data.clients = client
-          setFeatureFlags(flags || {})
-          setOutlets(prev => nextOutletsOrSame(prev, client, siblings))
+        }
+        if (mounted) {
+          if (flagsErr) {
+            console.error('[AuthContext] feature flags read failed:', flagsErr)
+            // The same outlet keeps the flags it has; another outlet's are never this one's.
+            setFeatureFlags(prevFlags => (sameOutlet ? prevFlags : {}))
+          } else {
+            setFeatureFlags(flags || {})
+          }
+          if (isAdminProfile) {
+            setOutlets(prevList => (prevList.length ? [] : prevList))
+          } else if (siblingsErr) {
+            // Keep the list held: an empty one would take the switcher away mid-session.
+            console.error('[AuthContext] outlet list read failed:', siblingsErr)
+          } else {
+            setOutlets(prevList => nextOutletsOrSame(prevList, data.clients, siblings))
+          }
         }
 
         // Legal re-acceptance. Deliberately shaped like the profile_outlet_access read below: it is
@@ -390,19 +455,20 @@ export function AuthProvider({ children }) {
         // load runs it, so per the standing rule about migration hot paths, it must not reference
         // a table that may not exist yet on a given deployment. Gating on group_id means an
         // ungrouped deployment never issues the query at all, and a grouped one only reaches it
-        // after the multi-outlet migrations have been applied. supabase-js resolves rather than
-        // throws on a missing table, so even then the failure mode is an empty allowlist — no
-        // switcher — which is the safe direction.
-        if (mounted && client?.group_id) {
-          const { data: access } = await supabase
+        // after the multi-outlet migrations have been applied. A failed read keeps the allowlist
+        // already held (S849), never an empty one mid-session; on a first load that is empty — no
+        // switcher — which is the safe direction. Never for the operator (GAPS-6).
+        if (mounted && !isAdminProfile && data.clients?.group_id) {
+          const { data: access, error: accessErr } = await supabase
             .from('profile_outlet_access')
             .select('client_id')
             .eq('profile_id', userId)
-          if (mounted) {
-            setAllowedOutletIds(prev => nextIdsOrSame(prev, (access || []).map(a => a.client_id)))
+          if (accessErr) console.error('[AuthContext] outlet access read failed:', accessErr)
+          else if (mounted) {
+            setAllowedOutletIds(prevIds => nextIdsOrSame(prevIds, (access || []).map(a => a.client_id)))
           }
         } else if (mounted) {
-          setAllowedOutletIds(prev => nextIdsOrSame(prev, []))
+          setAllowedOutletIds(prevIds => nextIdsOrSame(prevIds, []))
         }
       }
 
@@ -537,13 +603,16 @@ export function AuthProvider({ children }) {
   // and a switch would make that tablet bill in another outlet's name, PAN and invoice series every
   // time it signs in there. set_active_outlet refuses it whatever this says; this only keeps the
   // switcher from offering a door that is shut. The raw pos_email column, as isOwner reads it.
-  const isPinLogin = !isAdmin && !!profile?.pos_email
+  // A stock-count PIN (ims_email) is pinned the same way since S849 (GROUP-3): it signs in only on
+  // its own outlet's counting tablets, and set_active_outlet refuses it (ims_count_pin_outlet_pinned).
+  const isPinLogin = !isAdmin && (!!profile?.pos_email || !!profile?.ims_email)
   const switchableOutlets = useMemo(() => {
-    if (isPinLogin) return []
+    // The operator never switches outlet: view-as is its only switch (S849 ACCESS-8).
+    if (isAdmin || isPinLogin) return []
     if (isOwner) return outlets
     if (!allowedOutletIds.length) return []
     return outlets.filter(o => o.id === homeClientId || allowedOutletIds.includes(o.id))
-  }, [isPinLogin, isOwner, outlets, allowedOutletIds, homeClientId])
+  }, [isAdmin, isPinLogin, isOwner, outlets, allowedOutletIds, homeClientId])
   const canSwitchOutlet = switchableOutlets.length > 1
 
   // Offline changes this browser still has to send, in either queue. Stock ops write against the
@@ -573,6 +642,23 @@ export function AuthProvider({ children }) {
   // silently flushes a queued write against the wrong tenant. Guarding the privileged action
   // itself makes that unbypassable.
   async function switchOutlet(targetClientId) {
+    // One switch at a time (S849 GROUP-14). Two quick presses used to run two set_active_outlet
+    // calls and two profile reloads side by side, and whichever reload landed last decided which
+    // outlet the window showed, whatever the server held. The ref is taken synchronously, before
+    // the first await, so the second press is refused rather than raced; checkOutletStillCurrent
+    // already stands down while it is set.
+    if (switchingRef.current) {
+      return { error: { message: 'Already switching outlet — wait for it to finish.' } }
+    }
+    switchingRef.current = true
+    try {
+      return await switchOutletNow(targetClientId)
+    } finally {
+      switchingRef.current = false
+    }
+  }
+
+  async function switchOutletNow(targetClientId) {
     // Bringing the login back to the outlet THIS window already shows moves no queued change to
     // another outlet: it is how a window held by its own queue gets going again (S809 GAP-OUTLETS-1).
     // Nor does going to a bound till's own outlet: the till pages run nowhere else (TillOutletGate),
@@ -587,24 +673,27 @@ export function AuthProvider({ children }) {
         return { error: { message: `${pending} offline change${pending === 1 ? '' : 's'} still syncing — reconnect and let them finish before switching outlet.` } }
       }
     }
-    switchingRef.current = true
-    try {
-      const { error } = await supabase.rpc('set_active_outlet', { p_client_id: targetClientId || null })
-      if (error) return { error }
-      // sessionStorage caches are namespaced per clientId, but clearing is cheaper than reasoning
-      // about which page cached what against the outlet we are leaving.
-      try { sessionStorage.clear() } catch { /* private mode */ }
-      if (session?.user?.id) {
-        await fetchProfile(session.user.id)
-        // The login is where this window is again (or the window followed it here).
-        setOutletHeld(null)
-        // Every other tab of this browser is now filtering by the outlet we left (S798).
-        announceOutletSwitch(session.user.id)
+    const { error } = await supabase.rpc('set_active_outlet', { p_client_id: targetClientId || null })
+    if (error) return { error }
+    // sessionStorage caches are namespaced per clientId, but clearing is cheaper than reasoning
+    // about which page cached what against the outlet we are leaving.
+    try { sessionStorage.clear() } catch { /* private mode */ }
+    const uid = session?.user?.id
+    if (uid) {
+      // The switch has landed server-side whatever happens next. A reload that fails keeps the old
+      // outlet's details on screen (fetchProfile, ACCESS-11), so say so rather than report success
+      // under the old outlet's name (S849 GAPS-10). Layout keeps the panel open on an error and does
+      // not navigate, so Home does not cache empty figures. Other tabs still re-check.
+      if (!(await fetchProfile(uid))) {
+        announceOutletSwitch(uid)
+        return { error: { message: 'Switched outlet, but this page could not reload its details. Reload the page.' } }
       }
-      return {}
-    } finally {
-      switchingRef.current = false
+      // The login is where this window is again (or the window followed it here).
+      setOutletHeld(null)
+      // Every other tab of this browser is now filtering by the outlet we left (S798).
+      announceOutletSwitch(uid)
     }
+    return {}
   }
 
   // "Take my login back to this outlet", from a stopped till or a held window (S809). Home goes as
@@ -619,7 +708,7 @@ export function AuthProvider({ children }) {
   // Layout take the reader to the dashboard with a notice (S798 GAP-OUTLETS-2).
   //
   // Only a login whose client is in a group can change outlet, so everyone else returns before any
-  // request: no client has a group today, and this costs them nothing. For a grouped login it is one
+  // request: an ungrouped login, which is most of them, makes no request and this costs it nothing. For a grouped login it is one
   // two-column read of the caller's own row — never fetchProfile on every wake, which was the S463
   // slow-load cause; the full reload runs only when the outlet really moved. Best effort: a failed
   // or slow read leaves the window as it is, and the next wake or page change asks again.
@@ -743,6 +832,13 @@ export function AuthProvider({ children }) {
   // When admin "views as" a client, fetch that client's actual module subscription so the
   // sidebar + dashboard show ONLY their modules (admin's isAdmin bypass otherwise shows all).
   const [viewModules, setViewModules] = useState(null)
+  // ACCESS-8 support view (S849): the viewed client's outlet group, read with its switches. null for
+  // everyone but the operator viewing a grouped client. Group pages pass it as p_group_id, which the
+  // group read functions honour for the operator only.
+  const [viewGroupId, setViewGroupId] = useState(null)
+  // The viewed group's outlets, for the operator only (GAPS-6). null = not known (a failed read),
+  // [] = no group.
+  const [viewOutlets, setViewOutlets] = useState([])
   const MODULE_COLS = 'ims_enabled, ims_since, hr_enabled, pos_enabled, customization_enabled'
   // imsSince (S831 5f-3, owner Q31 a): when this outlet's Inventory began, the start of the Nepal day
   // it was last switched on, or null for "from the start". A till bill closed before it is never sent
@@ -754,19 +850,43 @@ export function AuthProvider({ children }) {
   // (clientModulesKnown false, the default module set), but it says so in the console, and a failed
   // refresh keeps the last good list for the same client rather than blanking it.
   async function fetchViewModules(id) {
-    const { data, error } = await supabase.from('clients').select(MODULE_COLS).eq('id', id).single()
+    const { data, error } = await supabase.from('clients').select(`${MODULE_COLS}, group_id`).eq('id', id).single()
     if (error) { console.error('[AuthContext] view-as module refresh failed:', error); return }
     setViewModules(modulesOf(data))
+    // The drawer's group change (Billing → Outlet Group) refreshes through here too (S849).
+    const groupId = data?.group_id || null
+    setViewGroupId(groupId)
+    if (!groupId) { setViewOutlets([]); return }
+    const { data: members, error: membersErr } = await supabase
+      .from('clients').select(OUTLET_COLS).eq('group_id', groupId).order('name')
+    if (membersErr) { console.error('[AuthContext] view-as outlet list refresh failed:', membersErr); return }
+    setViewOutlets(members || [])
   }
   useEffect(() => {
-    if (!isAdmin || !adminViewClientId) { setViewModules(null); return }
+    // Reset on every run (S849 GAPS-9): the switches and the group held are the client viewed BEFORE,
+    // which is never this one's. clientModulesKnown is false until the read lands, and the gates
+    // already wait on it; a group page reads no group until it is known.
+    setViewModules(null)
+    setViewGroupId(null)
+    setViewOutlets([])
+    if (!isAdmin || !adminViewClientId) return
     let cancelled = false
     // On a failure this one still writes null ("not known"): the list it holds may be the client
     // viewed before, which is never this client's.
-    supabase.from('clients').select(MODULE_COLS).eq('id', adminViewClientId).single()
-      .then(({ data, error }) => {
+    supabase.from('clients').select(`${MODULE_COLS}, group_id`).eq('id', adminViewClientId).single()
+      .then(async ({ data, error }) => {
         if (error) console.error('[AuthContext] view-as module read failed:', error)
-        if (!cancelled) setViewModules(error ? null : modulesOf(data))
+        if (cancelled) return
+        setViewModules(error ? null : modulesOf(data))
+        const groupId = error ? null : (data?.group_id || null)
+        setViewGroupId(groupId)
+        if (!groupId) return
+        // The viewed group's members, the same columns an Owner's list carries. A failed read is
+        // "not known" (null), never the previous client's list.
+        const { data: members, error: membersErr } = await supabase
+          .from('clients').select(OUTLET_COLS).eq('group_id', groupId).order('name')
+        if (membersErr) console.error('[AuthContext] view-as outlet list read failed:', membersErr)
+        if (!cancelled) setViewOutlets(membersErr ? null : (members || []))
       })
     return () => { cancelled = true }
   // MODULE_COLS/modulesOf are module-level-stable helpers declared inline for locality.
@@ -863,6 +983,13 @@ export function AuthProvider({ children }) {
   // account type belonging to the client — Owner, IMS/HR/POS staff, POS PIN tills — is not.
   const clientRecord  = profile?.clients
   const accessState   = useMemo(() => getAccessState(clientRecord), [clientRecord])
+  // Crest Suite Pro for the Owner's notice (S849 ACCESS-14): the one predicate the gate, the money
+  // and the operator screens read. null for the operator, who has no Suite of their own.
+  const suite         = useMemo(() => (isAdmin ? null : suiteState(clientRecord)), [isAdmin, clientRecord])
+  // False only when this login belongs to an outlet whose row did not load (S849 ACCESS-11).
+  // Every module switch, the plan and Suite read that row, so a gate must not take its absence for
+  // "off": SuiteGate shows a neutral card and Layout one banner instead of the sales pitch.
+  const clientKnown   = isAdmin || !profile?.client_id || !!profile?.clients
 
   // A document that demands re-acceptance and has no matching row for this client's CURRENT
   // version. `null` means the read failed, which is treated as "not required" — see the fetch.
@@ -906,11 +1033,19 @@ export function AuthProvider({ children }) {
       featureFlags, hasFeature, hasWeather,
       // Multi-outlet. `outlets` is [] for everyone not in a group, so every consumer of these
       // degrades to today's single-outlet behavior without a special case.
-      outlets, switchableOutlets, allowedOutletIds, canSwitchOutlet, switchOutlet,
+      // For the operator (S849 GAPS-6 / ACCESS-8) `outlets` and `groupId` are the VIEWED client's
+      // group, never the operator's own row; `outletsKnown` is false when that list did not load.
+      outlets: isAdmin ? (viewOutlets || NO_OUTLETS) : outlets,
+      outletsKnown: !isAdmin || viewOutlets !== null,
+      switchableOutlets, allowedOutletIds, canSwitchOutlet, switchOutlet,
       outletMoved, dismissOutletMoved, checkOutlet,
       // S809 GAP-OUTLETS-1: a window that stayed put for its offline queue, and the way back.
       outletHeld, returnToOutlet,
-      groupId: profile?.clients?.group_id || null,
+      groupId: isAdmin ? viewGroupId : (profile?.clients?.group_id || null),
+      // The operator's view-as group, passed as p_group_id to the group read functions (ACCESS-8).
+      // null for an Owner or staff, so the server keeps resolving my_group_id().
+      viewGroupId: isAdmin ? viewGroupId : null,
+      clientKnown,
       imsEnabled,
       hrEnabled,
       posEnabled,
@@ -935,9 +1070,11 @@ export function AuthProvider({ children }) {
       // know whether a client has HR or POS reads hrEnabled/posEnabled.
       // Crest Suite Pro — an independent axis from `plan` above. NULL = not subscribed.
       // Resolves to null once suite_ends_at (or the IMS window, for pre-column rows) is past its
-      // grace — the same date the ★ SUITE pill and the MRR figure already read (S736). No date at
-      // all still fails open. Admin always 'pro'.
+      // grace, or while Crest IMS is off — suiteState() / suiteLive(), the one predicate the ★ SUITE
+      // pill, the MRR figure and the billing export also read (S736, S849). No date at all still
+      // fails open. Admin always 'pro'.
       suitePlan: isAdmin ? 'pro' : (suiteLive(profile?.clients) ? 'pro' : null),
+      suite,
       adminViewClientId, adminViewClientName, switchAdminClient, refreshViewModules,
     }}>
       {children}

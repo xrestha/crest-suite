@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { scopedInsert } from '../shared/scopedDb'
-import { getBsToday } from '../utils/bsCalendar'
-import { getSubStatus, getAccessState } from '../utils/subscription'
+import { getBsToday, formatAdAsBs } from '../utils/bsCalendar'
+import { getSubStatus, getAccessState, suiteState } from '../utils/subscription'
 import { fetchAllRows } from '../shared/fetchAllRows'
 import { useConfirm } from '../shared/hooks/useConfirm'
 import { useAutoPurgeBackup, refreshBackupPermission } from '../modules/admin/dataExport/useAutoPurgeBackup'
@@ -653,7 +653,15 @@ export default function AdminClients() {
                           "NPR 6,500" without it cannot be checked against the pills beside it. */}
                       <span aria-hidden="true">·</span>
                       {(() => {
-                        const { total, lines } = clientMrrBreakdown(c, planPrices)
+                        const { total, lines, internal } = clientMrrBreakdown(c, planPrices)
+                        // Crest's own demo outlet (S849): not a zero we charge, a customer we don't have.
+                        if (internal) {
+                          return (
+                            <Tip text="Crest's own demo or practice outlet. Works like any outlet; never counted as income and sent to HSS as not billable." width={280}>
+                              <span style={{ color: 'var(--theme-text3)' }}>Demo · not billed</span>
+                            </Tip>
+                          )
+                        }
                         // Zero is a real state, not a missing figure, so it says WHY rather than
                         // printing "NPR 0" — every module window is closed or switched off, which
                         // is exactly what an expired card above already shows.
@@ -721,13 +729,47 @@ export default function AdminClients() {
                         rather than joining the map above and printing "SUITE · off" on every row
                         that doesn't. It had no representation in the admin UI at all until
                         2026-08-13, despite being priced into the MRR figure on the dashboard. */}
-                    {c.suite_plan && (
-                      <span style={{
+                    {/* S849 (ACCESS-4, SU12): the pill states what the gate does, through suiteState() —
+                        the one predicate the Suite pages, the MRR figure and the billing export read.
+                        Live "★ SUITE"; open with no date "· no end date" (not billed); the 7 days after
+                        the date "· grace"; past that "· lapsed"; Suite on with IMS off "· needs IMS". */}
+                    {(() => {
+                      const ss = suiteState(c)
+                      if (!ss.subscribed) return null
+                      const box = {
                         fontSize: 12, fontWeight: 700, padding: '5px 10px', borderRadius: 'var(--radius-sm)',
-                        border: '1px solid color-mix(in srgb, var(--theme-accent) 45%, transparent)', background: 'color-mix(in srgb, var(--theme-accent) 20%, transparent)',
-                        color: 'var(--theme-accent-ink)', whiteSpace: 'nowrap',
-                        minWidth: 100, textAlign: 'center', boxSizing: 'border-box',
-                      }}>★ SUITE</span>
+                        whiteSpace: 'nowrap', minWidth: 100, textAlign: 'center', boxSizing: 'border-box',
+                      }
+                      const tone = ss.noDate
+                        ? { label: '★ SUITE · no end date', color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 12%, var(--theme-card))', border: '1px solid color-mix(in srgb, var(--theme-text2) 30%, transparent)',
+                            tip: 'Crest Suite Pro is on with no end date: its pages are open and it is not billed. Set a Suite end date in Manage → Billing.' }
+                        : ss.inGrace
+                        ? { label: '★ SUITE · grace', color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+                            tip: `Crest Suite Pro ended on ${formatAdAsBs(ss.endsAt)}. Its pages stay open for the 7-day grace and close after; it is no longer billed.` }
+                        : ss.live
+                        ? { label: '★ SUITE', color: 'var(--theme-accent-ink)', background: 'color-mix(in srgb, var(--theme-accent) 20%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 45%, transparent)',
+                            tip: `Crest Suite Pro is live${ss.endsAt ? ` to ${formatAdAsBs(ss.endsAt)}` : ''}.` }
+                        : !ss.imsOn
+                        ? { label: '★ SUITE · needs IMS', color: 'var(--theme-text3)', background: 'transparent', border: '1px solid var(--theme-border)',
+                            tip: 'Crest Suite Pro is switched on, but Crest IMS is off, so every Suite page is closed and Suite is not billed.' }
+                        : { label: '★ SUITE · lapsed', color: 'var(--theme-text3)', background: 'transparent', border: '1px solid var(--theme-border)',
+                            tip: `Crest Suite Pro lapsed: it ended on ${formatAdAsBs(ss.endsAt)} and the 7-day grace has passed, so its pages are closed and it is not billed.` }
+                      return (
+                        <Tip text={tone.tip} width={280} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
+                          <span style={{ ...box, color: tone.color, background: tone.background, border: tone.border }}>{tone.label}</span>
+                        </Tip>
+                      )
+                    })()}
+                    {/* Crest's own demo or practice outlet (S849): neutral, a fact about the row. */}
+                    {c.is_internal && (
+                      <Tip text="Crest's own demo or practice outlet. Works like any outlet; never counted as income and sent to HSS as not billable." width={280}
+                        style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
+                        <span style={{
+                          fontSize: 12, fontWeight: 700, padding: '5px 10px', borderRadius: 'var(--radius-sm)', whiteSpace: 'nowrap',
+                          color: 'var(--theme-text2)', background: 'color-mix(in srgb, var(--theme-text2) 12%, var(--theme-card))',
+                          border: '1px solid color-mix(in srgb, var(--theme-text2) 30%, transparent)',
+                        }}>Demo</span>
+                      </Tip>
                     )}
                   </div>
 

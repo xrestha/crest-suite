@@ -5,7 +5,8 @@ import { useSettings } from '../../context/SettingsContext'
 import { supabase } from '../../supabaseClient'
 import Tip from '../../components/Tip'
 import { BS_MONTHS, adToBsSafe } from '../../utils/bsCalendar'
-import { getSubStatus, getDateStatus } from '../../utils/subscription'
+import { getSubStatus, getDateStatus, suiteState } from '../../utils/subscription'
+import { suitePagesText } from '../../data/pricingPlans'
 import { clientMRR } from '../../shared/clientMrr'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 
@@ -39,7 +40,7 @@ export default function AdminDashboardOverview() {
     const since24h = new Date(Date.now() - 86400000).toISOString()
     const results = await Promise.all([
       supabase.from('clients')
-        .select('id, name, plan, suite_plan, is_active, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, billing_cycle, location, ims_enabled, hr_enabled, pos_enabled, customization_enabled, is_trial, trial_approved_at, subscribe_requested, trial_expires_at')
+        .select('id, name, plan, suite_plan, is_active, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, billing_cycle, location, ims_enabled, hr_enabled, pos_enabled, customization_enabled, is_trial, trial_approved_at, subscribe_requested, trial_expires_at, is_internal')
         .order('name'),
       // Paged (S734). This is EVERY client's every period — one row per tenant per BS month, so
       // 30 properties two years in is already past PostgREST's 1000-row cap, and a bare select
@@ -89,16 +90,9 @@ export default function AdminDashboardOverview() {
   // which is why it was missing from this strip and from the row pills below entirely, while
   // clientMRR() was quietly billing NPR 2,000/outlet for it. Revenue you cannot see on the
   // screen that reports revenue.
-  // Same date resolution as clientMRR's suiteActive (suite_ends_at, falling back to the IMS
-  // window) — presence-only counting included lapsed Suites the MRR beside it excludes, so the
-  // pill and the money could disagree on the same screen (S574).
-  const suiteCount = active.filter(c => {
-    if (!c.suite_plan) return false
-    const imsEnd = c.ims_ends_at || c.subscription_ends_at
-    const imsOk  = c.ims_enabled !== false && imsEnd && new Date(imsEnd) > new Date()
-    const suiteEnd = c.suite_ends_at || (imsOk ? imsEnd : null)
-    return suiteEnd && new Date(suiteEnd) > new Date()
-  }).length
+  // suiteState(c).billed — the very rule clientMRR's Suite line uses (S849: 'pro' only, IMS on,
+  // not a demo outlet), so the count and the money beside it cannot disagree (S574).
+  const suiteCount = active.filter(c => suiteState(c).billed).length
 
   // Subscription health buckets
   const expiring30  = active.filter(c => { const s = getSubStatus(c); return s.days !== null && s.days >= 0 && s.days <= 30 })
@@ -550,13 +544,12 @@ export default function AdminDashboardOverview() {
                     const hrDays = c.hr_ends_at ? Math.ceil((new Date(c.hr_ends_at) - Date.now()) / 86400000) : null
                     const hrExpiring = hrDays !== null && hrDays <= 30 && hrDays >= 0
 
-                    // Suite Pro rides its own suite_ends_at, falling back to IMS's window for rows
-                    // written before that column existed — the same resolution clientMRR() uses, so
-                    // the pill and the money always agree about whether Suite is live.
-                    const suiteEndIso = c.suite_ends_at || (isPaying ? endDate : null)
-                    const suiteDays = suiteEndIso ? Math.ceil((new Date(suiteEndIso) - Date.now()) / 86400000) : null
-                    const suiteLive = !!c.suite_plan && suiteDays !== null && suiteDays > 0
-                    const suiteExpiring = suiteLive && suiteDays <= 30
+                    // Suite Pro through suiteState() / suiteLive(), one predicate (S849): the same answer
+                    // the gate, the MRR figure and Admin → Clients give, IMS floor and grace week included.
+                    const ss = suiteState(c)
+                    const suiteLive = ss.live
+                    const suiteDays = ss.daysLeft
+                    const suiteExpiring = ss.live && !ss.inGrace && suiteDays !== null && suiteDays <= 30
 
                     return (
                       <Fragment key={c.id}>
@@ -605,16 +598,28 @@ export default function AdminDashboardOverview() {
                                 the accent rather than a fourth hue — the star and the heavier fill
                                 are what separate it from the IMS pill. A lapsed one greys out
                                 instead of disappearing, or an expiry looks like a cancellation. */}
-                            {c.suite_plan && (
+                            {ss.subscribed && (
                               <Tip text={suiteLive
-                                ? `Crest Suite Pro — Owner Dashboard, Monthly Owner Report, Group Console, Demand Forecast and Fixed Assets. Sold per outlet.${suiteDays !== null ? ` Renews in ${suiteDays}d.` : ''}`
-                                : 'Crest Suite Pro has lapsed — the Suite features are locked and this outlet is no longer counted in the Suite MRR.'} width={280}>
+                                ? `Crest Suite Pro — ${suitePagesText()}. Sold per outlet.${
+                                  ss.noDate ? ' No end date, so it is open and not billed.'
+                                  : ss.inGrace ? ` Ended ${-suiteDays}d ago — in its 7-day grace, pages still open.`
+                                  : ` Renews in ${suiteDays}d.`}`
+                                : ss.imsOn
+                                  ? 'Crest Suite Pro has lapsed — locked, and this outlet is no longer counted in the Suite MRR.'
+                                  : 'Crest Suite Pro needs Crest IMS, which is off — locked and not billed.'} width={280}>
                                 <span style={{
                                   fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 'var(--radius-sm)',
                                   background: suiteLive ? 'color-mix(in srgb, var(--theme-accent) 20%, transparent)' : 'transparent',
                                   color: suiteLive ? 'var(--theme-accent-ink)' : 'var(--theme-text3)',
                                   border: `1px solid ${suiteLive ? 'color-mix(in srgb, var(--theme-accent) 45%, transparent)' : 'var(--theme-border)'}`,
                                 }}>★ SUITE</span>
+                              </Tip>
+                            )}
+                            {/* Crest's own demo or practice outlet (S849): a neutral tag, never a verdict. */}
+                            {c.is_internal && (
+                              <Tip text="Crest's own demo or practice outlet. Works like any outlet; never counted as income and sent to HSS as not billable." width={260}
+                                style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
+                                <span className="badge-gray" style={{ fontSize: 11 }}>Demo</span>
                               </Tip>
                             )}
                           </div>
@@ -656,8 +661,11 @@ export default function AdminDashboardOverview() {
                             {suiteExpiring && (
                               <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>Suite exp. {suiteDays}d</div>
                             )}
-                            {c.suite_plan && !suiteLive && (
-                              <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>Suite lapsed</div>
+                            {ss.inGrace && (
+                              <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>Suite in grace</div>
+                            )}
+                            {ss.lapsed && (
+                              <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>{ss.imsOn ? 'Suite lapsed' : 'Suite needs IMS'}</div>
                             )}
                           </div>
                         </td>

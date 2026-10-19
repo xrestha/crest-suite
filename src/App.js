@@ -61,6 +61,9 @@ const Settings = lazy(() => import('./pages/Settings'))
 const Pricing = lazy(() => import('./pages/Pricing'))
 const TheoreticalVariance = lazy(() => import('./modules/ims/variance/TheoreticalVariance'))
 const Requisitions = lazy(() => import('./modules/ims/sales/Requisitions'))
+// Stock Transfers between outlets of a group (S849, PNL-8). The page redirects below IMS supervisor and
+// when the outlet is in no group; the nav shows it only then too.
+const StockTransfers = lazy(() => import('./modules/ims/transfers/StockTransfers'))
 const WastageReport = lazy(() => import('./modules/ims/variance/WastageReport'))
 const StockReport = lazy(() => import('./modules/ims/stockcount/StockReport'))
 const DemandForecast = lazy(() => import('./modules/ims/stockcount/DemandForecast'))
@@ -245,6 +248,8 @@ export default function App() {
                 element={<ModuleGate module="ims"><PremiumGate featureKey="combo_builder" minPlan="growth"><ComboBuilder /></PremiumGate></ModuleGate>} />
               <Route path="/requisitions"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="requisitions" minPlan="growth"><Requisitions /></PremiumGate></ModuleGate>} />
+              <Route path="/stock-transfers"
+                element={<ModuleGate module="ims"><PremiumGate featureKey="stock_transfers" minPlan="starter"><StockTransfers /></PremiumGate></ModuleGate>} />
               <Route path="/dead-stock"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="dead_stock" minPlan="growth"><DeadStock /></PremiumGate></ModuleGate>} />
               <Route path="/recipe-margin"

@@ -1,4 +1,7 @@
-import { resolvePricing, annualOf, IMS_TIERS, HR_PRICING, POS_PRICING, CUSTOMIZATION_PRICING, SUITE_ADDON, DEFAULT_PLAN_PRICES } from './pricingPlans'
+import { resolvePricing, annualOf, IMS_TIERS, HR_PRICING, POS_PRICING, CUSTOMIZATION_PRICING, SUITE_ADDON, DEFAULT_PLAN_PRICES, SUITE_PAGE_NAMES, suitePagesText } from './pricingPlans'
+import { SUITE_KEYS } from '../context/AuthContext'
+
+jest.mock('../supabaseClient', () => ({ supabase: {} }))
 
 // resolvePricing is what stands between the admin's Settings > Plan Pricing figures and every
 // screen that prints money — the public pricing page, Help's Plan & Pricing tab, the admin's own
@@ -117,5 +120,21 @@ describe('annualOf', () => {
     expect(POS_PRICING.annual).toBe(annualOf(POS_PRICING.monthly))
     expect(CUSTOMIZATION_PRICING.annual).toBe(annualOf(CUSTOMIZATION_PRICING.monthly))
     expect(SUITE_ADDON.annual).toBe(annualOf(SUITE_ADDON.monthly))
+  })
+})
+
+// S849 DOCS-M9: the drawer's Suite Tip had dropped Consolidated P&L, because each copy listed the
+// Suite pages by hand. SUITE_PAGE_NAMES is now the one list, held to AuthContext's SUITE_KEYS.
+describe('SUITE_PAGE_NAMES', () => {
+  it('names one page per Suite key, each once', () => {
+    expect(SUITE_PAGE_NAMES.length).toBe(SUITE_KEYS.size)
+    expect(new Set(SUITE_PAGE_NAMES).size).toBe(SUITE_PAGE_NAMES.length)
+  })
+
+  it('reads as one sentence', () => {
+    expect(suitePagesText()).toBe('Owner Dashboard, Monthly Owner Report, Profit & Loss, Group Console, Demand Forecast and Fixed Assets')
+    expect(suitePagesText(['Owner Dashboard', 'Fixed Assets'])).toBe('Owner Dashboard and Fixed Assets')
+    expect(suitePagesText(['Fixed Assets'])).toBe('Fixed Assets')
+    expect(suitePagesText([])).toBe('')
   })
 })

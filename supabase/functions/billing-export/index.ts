@@ -47,6 +47,18 @@ function daysUntil(dateStr: string | null) {
 // fields the app side doesn't compute, purely for the HSS side's benefit: next_renewal_at, billable,
 // and pricing_basis (so a synced number is auditable, not a black box).
 function computeBilling(c: any, planPrices: any) {
+  // Crest's own demo or practice outlet (S849, clients.is_internal): it works like any outlet and is
+  // never income, so it goes to HSS at 0 and not billable whatever its modules say. Same rule as
+  // clientMrrBreakdown's first line; clientMrr.test.js checks this copy reads is_internal first.
+  if (c.is_internal) {
+    return {
+      monthly_amount: 0,
+      pricing_basis: 'internal',
+      module_breakdown: { ims: null, hr: null, pos: null, customization: null, suite: null },
+      next_renewal_at: null,
+      billable: false,
+    }
+  }
   const imsPrices = planPrices?.ims || DEFAULT_IMS_PRICES
   const hrPrice = planPrices?.hr ?? DEFAULT_HR_PRICE
   const posPrice = planPrices?.pos ?? DEFAULT_POS_PRICE
@@ -59,7 +71,9 @@ function computeBilling(c: any, planPrices: any) {
 
   const suiteEnd = c.suite_ends_at || (imsActive ? imsEnd : null)
   const suiteD = daysUntil(suiteEnd)
-  const suiteActive = !!c.suite_plan && !!suiteEnd && suiteD !== null && suiteD > 0
+  // suiteState(c).billed, hand-copied (S849 ACCESS-3): 'pro' only, and never while Crest IMS is off
+  // — Suite is an IMS add-on, so with IMS off its pages are closed and it is not sold.
+  const suiteActive = c.suite_plan === 'pro' && c.ims_enabled !== false && !!suiteEnd && suiteD !== null && suiteD > 0
 
   const hrD = daysUntil(c.hr_ends_at)
   const hrActive = !!c.hr_enabled && !!c.hr_ends_at && hrD !== null && hrD > 0
@@ -75,7 +89,10 @@ function computeBilling(c: any, planPrices: any) {
 
   // Suite ADDS to the module sum — it never replaces it. A Starter tier priced at 0 is a real
   // configuration, so an active module is listed at whatever it costs rather than dropped.
-  if (imsActive) { const v = monthlyRate(imsPrices[c.plan] || 0, c.billing_cycle); monthlyAmount += v; breakdown.ims = v }
+  // `??` per TIER, falling back to the shipped price (S849 ACCESS-5): a tier left blank in Plan
+  // Pricing is absent from the stored table, and `|| 0` priced every such client at NPR 0 while the
+  // app showed the shipped figure. `??` keeps a deliberate 0.
+  if (imsActive) { const v = monthlyRate(imsPrices[c.plan] ?? DEFAULT_IMS_PRICES[c.plan] ?? 0, c.billing_cycle); monthlyAmount += v; breakdown.ims = v }
   if (hrActive) { const v = monthlyRate(hrPrice, c.billing_cycle); monthlyAmount += v; breakdown.hr = v }
   if (posActive) { const v = monthlyRate(posPrice, c.billing_cycle); monthlyAmount += v; breakdown.pos = v }
   if (custActive) { const v = monthlyRate(custPrice, c.billing_cycle); monthlyAmount += v; breakdown.customization = v }
@@ -137,7 +154,9 @@ Deno.serve(async (req) => {
       .select(
         'id, name, location, contact_person, contact_phone, is_active, is_premium, plan, ' +
         'hr_enabled, hr_plan, ims_enabled, pos_enabled, pos_plan, customization_enabled, suite_plan, billing_cycle, ' +
-        'is_trial, trial_expires_at, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, subscription_ends_at',
+        'is_trial, trial_expires_at, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, subscription_ends_at, ' +
+        // S849: needs mig 20261019100000 applied first (the column), or every call 500s.
+        'is_internal',
       )
     if (cErr) return json({ error: cErr.message }, 500)
 
@@ -180,6 +199,8 @@ Deno.serve(async (req) => {
         pos_ends_at: c.pos_ends_at,
         customization_ends_at: c.customization_ends_at,
         suite_ends_at: c.suite_ends_at,
+        // Crest's own demo / practice outlet (S849): sent so HSS can label it; its amount is 0.
+        is_internal: !!c.is_internal,
         ...billing,
         buyer: s
           ? {

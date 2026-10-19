@@ -26,6 +26,7 @@ import ActionError, { asActionError } from '../components/ActionError'
 import { printWithTitle } from '../utils/printTitle'
 import { adToBsSafe, BS_MONTHS } from '../utils/bsCalendar'
 import { clientMrrBreakdown } from '../shared/clientMrr'
+import { suiteState } from '../utils/subscription'
 import { COMPANY, DOC_TYPES, PRODUCT_NAME, legalDoc, legalAbsoluteUrl, siteOrigin, legalReadiness } from '../legal'
 import './SubscriptionAgreement.css'
 
@@ -177,8 +178,9 @@ export default function SubscriptionAgreement() {
               {breakdown.lines.length === 0 ? (
                 <tr>
                   <td colSpan={4}>
-                    No module is currently billable on this account. Set the module end dates on the
-                    Billing tab before generating the agreement.
+                    {breakdown.internal
+                      ? "This is Crest's own demo outlet, so nothing on it is billed."
+                      : 'No module is currently billable on this account. Set the module end dates on the Billing tab before generating the agreement.'}
                   </td>
                 </tr>
               ) : (
@@ -191,6 +193,20 @@ export default function SubscriptionAgreement() {
                   </tr>
                 ))
               )}
+              {/* S849 (SU12): Crest Suite Pro switched on with no end date is open and not billed,
+                  so it is listed as such rather than left off an agreement it is part of. */}
+              {client && !breakdown.internal && (() => {
+                const ss = suiteState(client)
+                if (!ss.live || ss.billed) return null
+                return (
+                  <tr>
+                    <td>Crest Suite Pro</td>
+                    <td>—</td>
+                    <td>{ss.noDate ? 'No end date set' : 'Not billed'}</td>
+                    <td className="agr-num">—</td>
+                  </tr>
+                )
+              })()}
               <tr className="agr-total-row">
                 <td colSpan={3}>Subtotal (excl. VAT)</td>
                 <td className="agr-num">{npr(subtotal)}</td>

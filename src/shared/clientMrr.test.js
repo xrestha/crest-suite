@@ -118,6 +118,27 @@ describe('Crest Suite is an add-on, not a bundle', () => {
   it('bills nothing extra without suite_plan, whatever the date says', () => {
     expect(clientMRR(client({ suite_plan: null, suite_ends_at: future }), PRICES)).toBe(5000)
   })
+
+  // S849 ACCESS-3: Suite is an IMS add-on; with IMS switched off it is neither open nor billed.
+  it('bills no Suite line while Crest IMS is off', () => {
+    const b = clientMrrBreakdown(client({ ims_enabled: false, suite_plan: 'pro', suite_ends_at: future, hr_enabled: true, hr_ends_at: future }), PRICES)
+    expect(b.lines.map(l => l.key)).toEqual(['hr'])
+  })
+
+  it("bills only 'pro': the retired 'starter'/'growth' values are no Suite", () => {
+    for (const plan of ['starter', 'growth']) {
+      expect(clientMrrBreakdown(client({ suite_plan: plan, suite_ends_at: future }), PRICES).lines.map(l => l.key)).toEqual(['ims'])
+    }
+  })
+})
+
+// S849 (owner answer (a), 2026-10-16): Crest's demo / practice outlets are never income.
+describe("Crest's demo outlet", () => {
+  it('totals 0 with no lines, every module live', () => {
+    const c = client({ is_internal: true, hr_enabled: true, hr_ends_at: future, pos_enabled: true, pos_ends_at: future, suite_plan: 'pro', suite_ends_at: future })
+    expect(clientMrrBreakdown(c, PRICES)).toEqual({ total: 0, lines: [], internal: true })
+    expect(clientMRR(c, PRICES)).toBe(0)
+  })
 })
 
 describe('annual billing', () => {
@@ -226,6 +247,26 @@ describe('the billing-export copy keeps step with this file', () => {
     expect(m).not.toBeNull()
     return Number(m[1])
   }
+
+  // S849 ACCESS-3 / -5 and the demo switch, on the copy hss-suite bills from.
+  it("sends Suite only for 'pro' with Crest IMS on", () => {
+    expect(CODE).toMatch(/suiteActive = c\.suite_plan === 'pro' && c\.ims_enabled !== false/)
+  })
+
+  it('prices a blank IMS tier at the shipped price, never 0', () => {
+    expect(CODE).not.toMatch(/imsPrices\[c\.plan\] \|\| 0/)
+    expect(CODE).toMatch(/imsPrices\[c\.plan\] \?\? DEFAULT_IMS_PRICES\[c\.plan\] \?\? 0/)
+  })
+
+  it("reads is_internal before any line, and sends a demo outlet as not billable", () => {
+    const fnStart = CODE.indexOf('function computeBilling')
+    const internalAt = CODE.indexOf('if (c.is_internal)', fnStart)
+    expect(internalAt).toBeGreaterThan(fnStart)
+    expect(internalAt).toBeLessThan(CODE.indexOf('const imsPrices', fnStart))
+    expect(CODE).toMatch(/pricing_basis: 'internal'/)
+    expect(CODE).toMatch(/billable: false/)
+    expect(CODE).toMatch(/is_internal/)
+  })
 
   it('prices Suite additively, not as a bundle', () => {
     expect(CODE).not.toMatch(/SUITE_BUNDLES/)

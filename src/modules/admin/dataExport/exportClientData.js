@@ -165,6 +165,14 @@ export async function exportClientData(clientId, onProgress = () => {}) {
     supabase.from('staff_pin_vault').select('user_id, client_id, kind, pin_cipher, updated_at').eq('client_id', clientId),
   ])
   if (!clientRow) throw new Error('Client not found, or not readable by this account.')
+  // The outlet group by NAME, as an annotation on the row (not a column): a restore never writes the
+  // group back, but names it so the operator can re-join it in Billing (S849 DATABASE-7), and a group
+  // id alone means nothing once the group is gone. Best effort: a failed read leaves it out.
+  if (clientRow.group_id) {
+    const { data: grp, error: grpErr } = await supabase.from('client_groups').select('name').eq('id', clientRow.group_id).maybeSingle()
+    if (grpErr) console.error('export: outlet group name read failed:', grpErr.message)
+    if (grp?.name) clientRow.group_name_exported = grp.name
+  }
   data.clients = [clientRow]
   data.settings = settingsRows || []
   data.profiles = profileRows || []

@@ -20,6 +20,11 @@ export const CLIENT_SCOPED_TABLES = [
   'par_levels', 'payable_payments', 'recipe_suggestions',
   'demand_forecast_daily', 'demand_forecast_run_log', 'stock_movements', 'ims_gate_passes',
   'ims_count_assignments',
+  // Stock transfers (S849): both client_id NOT NULL; client sessions only read them
+  // (send/receive/end_stock_transfer write). The header's client_id is the SENDER; the receiver reads
+  // its incoming headers by to_client_id through transferFlows.readIncomingTransfers (RLS allows
+  // exactly that), the one documented exception to this layer.
+  'ims_stock_transfers', 'ims_stock_transfer_lines',
   // Fixed Assets — assets_depreciation_schedule/assets_tax_pool_lines get their own direct
   // client_id (denormalized from their parent run) rather than following the parent-scoped
   // precedent (recipe_ingredients) below, because each is independently queried three different
@@ -29,6 +34,9 @@ export const CLIENT_SCOPED_TABLES = [
   'assets_tax_pool_runs', 'assets_tax_pool_lines', 'assets_repair_expenses',
   // D40: one row per pool (A–D), typed once from last year's return; locked once a posted run uses it.
   'assets_tax_pool_openings',
+  // S849 (ASSETS SU7 b): one row per corrected locked opening (old → new, reason, who), written only by
+  // correct_tax_pool_openings(); read back on the Tax Depreciation tab.
+  'assets_tax_pool_opening_corrections',
   // HR
   'hr_employees', 'hr_attendance', 'hr_advances', 'hr_advance_repayments',
   'hr_leave_requests', 'hr_leave_types', 'hr_holiday_calendar', 'hr_festival_allowances',

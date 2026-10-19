@@ -38,6 +38,7 @@
 // stated reason in RESTORE_LEFT_OUT, and ClientDrawer shows any gap as an error.
 import { supabase } from '../../../supabaseClient'
 import { runChunkedByIds } from '../../../shared/fetchAllRows'
+import { formatAdAsBs } from '../../../utils/bsCalendar'
 
 // Parents before children, so every FK target exists first (header).
 export const RESTORE_ORDER = [
@@ -54,6 +55,9 @@ export const RESTORE_ORDER = [
   'assets_categories', 'assets_register', 'assets_repair_expenses',
   // D40: before the runs, so its lock trigger (a posted run for its year or later) never sees one.
   'assets_tax_pool_openings',
+  // S849 (ASSETS SU7 b): the record of each correction to a locked opening (old → new, reason). It
+  // names no other table but clients; the operator's restore inserts it as it was.
+  'assets_tax_pool_opening_corrections',
   'assets_tax_pool_runs', 'assets_tax_pool_lines',
   'assets_depreciation_runs', 'assets_depreciation_schedule',
   // IMS operational
@@ -62,6 +66,12 @@ export const RESTORE_ORDER = [
   'demand_forecast_run_log', 'demand_forecast_daily',
   'purchase_entries', 'payable_payments', 'vendor_returns',
   'opening_stock', 'closing_stock', 'wastages', 'staff_meals', 'budgets',
+  // Stock transfers between outlets (S849, PNL-8): after items and monthly_periods (both NO ACTION
+  // keys), the header before its lines. A backup holds this outlet's own lines (every leg) and the
+  // transfers it SENT; never the headers of transfers it received, which are the sender's rows.
+  // transferHeadersForRestore / transferLinesForRestore empty a link to an outlet, a month or a header
+  // that is not there, which is what each key's ON DELETE SET NULL would have done.
+  'ims_stock_transfers', 'ims_stock_transfer_lines',
   // HR setup then transactions
   'hr_shift_types', 'hr_holiday_calendar', 'hr_leave_types', 'hr_employees',
   'hr_salary_components', 'hr_roster', 'hr_roster_publish_state', 'hr_shift_swap_requests',
@@ -121,10 +131,15 @@ export const RESTORE_ORDER = [
 // export carried it (select('*')) and Postgres refuses a generated column in an INSERT, so every
 // restore of the customer book was rejected while the backup looked complete. Found S677 while
 // registering pos_reservations, which carries the same generated column.
-const GENERATED_COLUMNS = {
+// restoreClientData.test.js reads every migration for `GENERATED ALWAYS AS` and fails on a column
+// missing here, so the next one cannot repeat that (S849: assets_register.total_cost had been missing
+// since the asset register shipped, ASSETS-3).
+export const GENERATED_COLUMNS = {
   items: ['per_uom_rate'],
   pos_customers: ['phone_canonical'],
   pos_reservations: ['phone_canonical'],
+  assets_register: ['total_cost'],
+  ims_stock_transfer_lines: ['value'],
 }
 
 // pos_orders.credit_note_id -> pos_credit_notes.id, while pos_credit_notes.order_id ->
@@ -156,6 +171,112 @@ export function partBillsAfterParents(rows) {
     else parents.push({ ...r, part_of_order_id: null })
   }
   return [...parents, ...parts]
+}
+
+// Stock transfer headers (S849, PNL-8). A header is the SENDER's row, so a backup holds only the
+// transfers this outlet sent. Three links can point outside what is restored:
+//   * to_client_id — the receiving outlet may no longer exist (SET NULL key). Emptied when it is not
+//     in `existingClientIds`; the stored to_name stands in, and an on-the-way one can still be cancelled.
+//   * ended_period_id — a RECEIVED transfer's ending month is the receiver's, never in this backup
+//     (SET NULL key). Emptied when it is not one of `backupPeriodIds`; the stored ended_bs_* label
+//     stands in. A cancelled or refused one ended in this outlet's own month and keeps it.
+//   * sent_period_id — NOT NULL, NO ACTION, and always the sender's own month, so a whole backup
+//     always holds it. When it does not (a damaged or partial file), the header cannot be inserted at
+//     all, and one such row would refuse its chunk and, this loop breaking a table there, every
+//     transfer after it. So it is left out and counted in `dropped`, which the restore reports as rows
+//     not restored; the lines that named it keep their figures, unlinked (transferLinesForRestore).
+// Pure, for the test.
+export function transferHeadersForRestore(rows, existingClientIds, backupPeriodIds) {
+  const clientsHere = new Set(existingClientIds || [])
+  const periodsHere = new Set(backupPeriodIds || [])
+  const kept = []
+  let dropped = 0
+  for (const r of rows || []) {
+    if (!r.sent_period_id || !periodsHere.has(r.sent_period_id)) { dropped += 1; continue }
+    const out = { ...r }
+    if (out.to_client_id && !clientsHere.has(out.to_client_id)) out.to_client_id = null
+    if (out.ended_period_id && !periodsHere.has(out.ended_period_id)) out.ended_period_id = null
+    kept.push(out)
+  }
+  return { rows: kept, dropped }
+}
+
+// Stock transfer lines (S849, PNL-8). A line stands without its header: it carries the counterpart's
+// name, the item, qty and rate. Its transfer_id is emptied when the header is not among those being
+// restored (always so for a 'received' line, whose header is the sender's), as the SET NULL key
+// would. A line whose own month is not in the backup cannot be inserted (period_id NOT NULL, NO
+// ACTION), so it is left out and counted rather than refusing every line after it. Pure, for the test.
+export function transferLinesForRestore(rows, headerIdsInBackup, backupPeriodIds) {
+  const headers = new Set(headerIdsInBackup || [])
+  const periodsHere = backupPeriodIds ? new Set(backupPeriodIds) : null
+  const kept = []
+  let dropped = 0
+  for (const r of rows || []) {
+    if (periodsHere && !periodsHere.has(r.period_id)) { dropped += 1; continue }
+    kept.push(r.transfer_id && !headers.has(r.transfer_id) ? { ...r, transfer_id: null } : r)
+  }
+  return { rows: kept, dropped }
+}
+
+// ── The client row (S849 DATABASE-7) ────────────────────────────────────────────────────────────
+// Delete → recreate → Restore used to bring back the data and none of the client row, silently: the
+// Suite add-on, its date and the outlet group were simply gone. A restore must not change what a
+// client PAYS, or which group's Owners reach it (GROUP-11), on its own, so it writes neither: it fills
+// only the identity and legal details the target has left blank, and NAMES every commercial and
+// structural value the backup had that the target does not, so the operator re-enters what still
+// applies in Billing.
+export const CLIENT_IDENTITY_COLUMNS = [
+  'location', 'contact_person', 'contact_phone', 'legal_name', 'pan_no', 'registered_address',
+  'signatory_name', 'signatory_title',
+]
+export const CLIENT_ROW_RESTORE_SELECT = [
+  'id', ...CLIENT_IDENTITY_COLUMNS,
+  'plan', 'billing_cycle', 'subscription_ends_at', 'ims_enabled', 'ims_ends_at', 'hr_enabled', 'hr_ends_at',
+  'pos_enabled', 'pos_ends_at', 'customization_enabled', 'customization_ends_at', 'suite_plan', 'suite_ends_at',
+  'is_internal', 'group_id',
+].join(', ')
+
+const blankValue = v => v == null || String(v).trim() === ''
+const tierName = plan => ({ starter: 'Starter', growth: 'Growth', pro: 'Pro' }[plan] || 'Starter')
+
+// → { fill, notes }: `fill` = the blank identity columns to write; `notes` = one line naming what was
+// not restored, or null. `groupName` is the backup's outlet group by name (the export annotates it).
+// Pure, for the test.
+export function clientRowRestorePlan(exported, target, { groupName } = {}) {
+  if (!exported) return { fill: {}, notes: null }
+  const t = target || {}
+  const fill = {}
+  for (const col of CLIENT_IDENTITY_COLUMNS) {
+    if (!blankValue(exported[col]) && blankValue(t[col])) fill[col] = exported[col]
+  }
+  const until = d => (d ? ` to ${formatAdAsBs(d)}` : '')
+  const same = (a, b) => (a ?? null) === (b ?? null)
+  const parts = []
+  const imsOn = exported.ims_enabled !== false
+  if (imsOn && (t.ims_enabled === false || !same(exported.plan, t.plan) || !same(exported.ims_ends_at, t.ims_ends_at))) {
+    parts.push(`IMS ${tierName(exported.plan)}${until(exported.ims_ends_at)}`)
+  }
+  if (exported.subscription_ends_at && !same(exported.subscription_ends_at, t.subscription_ends_at)) {
+    parts.push(`the subscription date${until(exported.subscription_ends_at)}`)
+  }
+  if (exported.billing_cycle === 'annual' && t.billing_cycle !== 'annual') parts.push('annual billing')
+  const moduleLine = (label, on, end, tOn, tEnd) => {
+    if (on && (!tOn || !same(end, tEnd))) parts.push(`${label} on${until(end)}`)
+  }
+  moduleLine('HR', !!exported.hr_enabled, exported.hr_ends_at, !!t.hr_enabled, t.hr_ends_at)
+  moduleLine('POS', !!exported.pos_enabled, exported.pos_ends_at, !!t.pos_enabled, t.pos_ends_at)
+  moduleLine('Customization', !!exported.customization_enabled, exported.customization_ends_at, !!t.customization_enabled, t.customization_ends_at)
+  if (exported.suite_plan === 'pro' && (t.suite_plan !== 'pro' || !same(exported.suite_ends_at, t.suite_ends_at))) {
+    parts.push(`Crest Suite Pro${exported.suite_ends_at ? until(exported.suite_ends_at) : ' (no end date)'}`)
+  }
+  if (exported.is_internal === true && t.is_internal !== true) parts.push('the "Demo outlet, not a customer" switch')
+  if (exported.group_id && !same(exported.group_id, t.group_id)) {
+    parts.push(groupName ? `outlet group '${groupName}'` : 'an outlet group that no longer exists')
+  }
+  const notes = parts.length
+    ? `Not restored, re-enter in Billing if this client should still have them: ${parts.join(', ')}.`
+    : null
+  return { fill, notes }
 }
 
 // Tables a backup carries that the loop below deliberately does not insert, each with the reason
@@ -341,6 +462,8 @@ export async function restoreClientData(clientId, parsed, { onProgress = () => {
   // these DID restore, and reporting them as skipped would say the opposite of what happened.
   const renamed = []
   let done = 0
+  // The stock transfer headers this restore inserts, for the lines' links (S849).
+  let restoredTransferIds = []
 
   const coverage = restoreCoverage(data)
   for (const t of coverage.unknown) {
@@ -362,6 +485,33 @@ export async function restoreClientData(clientId, parsed, { onProgress = () => {
       renamed.push(...deduped.renamed)
     }
     if (table === 'pos_orders') rows = partBillsAfterParents(rows)
+    // Stock transfers (S849): empty the links that point outside what is restored, and leave out a
+    // row whose month the backup does not hold (it could not be inserted), saying how many.
+    if (table === 'ims_stock_transfers' || table === 'ims_stock_transfer_lines') {
+      const periodIds = (data.monthly_periods || []).map(p => p.id)
+      let shaped
+      if (table === 'ims_stock_transfers') {
+        const toIds = [...new Set(rows.map(r => r.to_client_id).filter(Boolean))]
+        let existing = []
+        if (toIds.length) {
+          const { data: found, error: findErr } = await supabase.from('clients').select('id').in('id', toIds)
+          // A failed read is not "every receiver is gone": keep the links and let the key decide, so
+          // nothing is emptied on a guess. A gone receiver then refuses its chunk, which is reported.
+          if (findErr) console.error('restore ims_stock_transfers: receiving outlets read failed:', findErr.message)
+          existing = findErr ? toIds : (found || []).map(c => c.id)
+        }
+        shaped = transferHeadersForRestore(rows, existing, periodIds)
+        restoredTransferIds = shaped.rows.map(r => r.id)
+      } else {
+        shaped = transferLinesForRestore(rows, restoredTransferIds, periodIds)
+      }
+      if (shaped.dropped) {
+        skipped.push(lostRowsLine(table, rows.length, rows.length - shaped.dropped,
+          "its month is not in this backup's own months, so it cannot be put back"))
+      }
+      rows = shaped.rows
+      if (!rows.length) continue
+    }
 
     let tableFailed = false
     let tableRestored = 0
@@ -407,6 +557,31 @@ export async function restoreClientData(clientId, parsed, { onProgress = () => {
     const { error: setErr } = await op
     if (setErr) skipped.push(`settings (${setErr.message})`)
     else { inserted += 1; tables++ }
+  }
+
+  // The client row (S849 DATABASE-7): fill the identity details the target left blank, and name the
+  // commercial and structural values this restore does not write (clientRowRestorePlan).
+  const exportedClient = (data.clients || [])[0] || null
+  if (exportedClient) {
+    const { data: target, error: targetErr } = await supabase
+      .from('clients').select(CLIENT_ROW_RESTORE_SELECT).eq('id', clientId).single()
+    if (targetErr) {
+      skipped.push(`clients (this client's details could not be read, so its blank contact and legal details were not filled: ${targetErr.message})`)
+    } else {
+      let groupName = exportedClient.group_name_exported || null
+      if (!groupName && exportedClient.group_id) {
+        const { data: grp, error: grpErr } = await supabase
+          .from('client_groups').select('name').eq('id', exportedClient.group_id).maybeSingle()
+        if (grpErr) console.error('restore: outlet group name read failed:', grpErr.message)
+        groupName = grp?.name || null
+      }
+      const plan = clientRowRestorePlan(exportedClient, target, { groupName })
+      if (Object.keys(plan.fill).length) {
+        const { error: fillErr } = await supabase.from('clients').update(plan.fill).eq('id', clientId)
+        if (fillErr) skipped.push(`clients (blank contact and legal details not filled: ${fillErr.message})`)
+      }
+      if (plan.notes) notes.push(plan.notes)
+    }
   }
 
   // Second pass for the circular POS link, now that both sides exist. Since S809 2e a restored

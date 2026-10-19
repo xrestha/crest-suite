@@ -1,4 +1,4 @@
-import { getAccessState, suiteLive, extendedFrom, GRACE_DAYS } from './subscription'
+import { getAccessState, getSubStatus, suiteLive, suiteState, extendedFrom, GRACE_DAYS } from './subscription'
 
 // Three decisions Admin → Clients used to make on its own and now reads from here (S736). Each
 // case is one the page got wrong once.
@@ -92,5 +92,64 @@ describe('the auto-deactivation sweep is getAccessState(c).reason === "expired"'
 
   it('does not touch a client already deactivated', () => {
     expect(swept({ is_active: false, ims_ends_at: daysFromNow(-60) })).toBe(false)
+  })
+})
+
+// S849 (ACCESS-3/-4, SU12): one predicate for the gate, the money and the operator screens.
+describe('suiteState — one answer for every screen that shows Suite', () => {
+  it('a Suite with no date at all is open, not billed, and marked no end date', () => {
+    expect(suiteState({ suite_plan: 'pro' })).toMatchObject({ subscribed: true, noDate: true, live: true, inGrace: false, lapsed: false, billed: false })
+  })
+
+  it('is in grace from the day the date passes until the seventh day after', () => {
+    expect(suiteState({ suite_plan: 'pro', suite_ends_at: daysFromNow(-1) })).toMatchObject({ live: true, inGrace: true, billed: false })
+    expect(suiteState({ suite_plan: 'pro', suite_ends_at: daysFromNow(-GRACE_DAYS) })).toMatchObject({ live: true, inGrace: true })
+  })
+
+  it('lapses on the eighth day', () => {
+    expect(suiteState({ suite_plan: 'pro', suite_ends_at: daysFromNow(-(GRACE_DAYS + 1)) })).toMatchObject({ live: false, lapsed: true, inGrace: false })
+  })
+
+  it('with Crest IMS off it is neither live nor billed (the IMS floor)', () => {
+    const s = suiteState({ suite_plan: 'pro', ims_enabled: false, suite_ends_at: daysFromNow(60) })
+    expect(s).toMatchObject({ subscribed: true, imsOn: false, live: false, lapsed: true, billed: false })
+    expect(suiteLive({ suite_plan: 'pro', ims_enabled: false, suite_ends_at: daysFromNow(60) })).toBe(false)
+  })
+
+  it("only 'pro' counts: the retired 'starter'/'growth' values are not subscribed", () => {
+    for (const plan of ['starter', 'growth']) {
+      expect(suiteState({ suite_plan: plan, suite_ends_at: daysFromNow(60) })).toMatchObject({ subscribed: false, live: false, lapsed: false, billed: false })
+    }
+  })
+
+  it('is billed and live with its own date ahead', () => {
+    expect(suiteState({ suite_plan: 'pro', suite_ends_at: daysFromNow(60) })).toMatchObject({ live: true, billed: true, inGrace: false })
+  })
+
+  it('live but not billed when IMS has lapsed and Suite has no date of its own', () => {
+    // endsAt falls back to the lapsed IMS date, so live follows the grace week; the money needs an
+    // open IMS window for the fallback, as clientMrr.js does.
+    const inGraceWeek = suiteState({ suite_plan: 'pro', ims_ends_at: daysFromNow(-3) })
+    expect(inGraceWeek).toMatchObject({ live: true, inGrace: true, billed: false })
+    expect(suiteState({ suite_plan: 'pro', ims_ends_at: daysFromNow(30) })).toMatchObject({ live: true, billed: true })
+  })
+
+  it("Crest's demo outlet is never billed, and its pages stay as they are", () => {
+    const s = suiteState({ suite_plan: 'pro', suite_ends_at: daysFromNow(60), is_internal: true })
+    expect(s.billed).toBe(false)
+    expect(s.live).toBe(true)
+  })
+})
+
+describe('an add-on date never holds the outlet open (S849 ACCESS-2)', () => {
+  it.each(['suite_ends_at', 'customization_ends_at'])('%s ahead does not keep a lapsed outlet open, and the badge says Expired', col => {
+    const c = { ims_ends_at: daysFromNow(-60), [col]: daysFromNow(300) }
+    expect(getAccessState(c)).toMatchObject({ locked: true, reason: 'expired' })
+    expect(getSubStatus(c).label).toBe('Expired')
+  })
+
+  it('an outlet with only an add-on date has no main-module date, so it fails open as before', () => {
+    expect(getAccessState({ suite_ends_at: daysFromNow(-60) }).locked).toBe(false)
+    expect(getSubStatus({ suite_ends_at: daysFromNow(-60) }).label).toBe('No end date')
   })
 })

@@ -1295,6 +1295,262 @@ const rules = [
     operator: "A credit note's reversal is recorded in its own outlet's Inventory month, and this one named a note of another outlet, so nothing was recorded. Switch to the note's outlet and post it there.",
   },
 
+  // ── S849 (Crest Suite batch). Every rule below is matched by its HINT (each RAISE also leads its
+  // message with it), and every one is raised before the statement or function writes anything, in
+  // one transaction, so "nothing was …" is true of each. They sit ABOVE the generic 42501 rule and
+  // every generic FK / constraint rule further down, which would otherwise answer first.
+  // errorText.s849.test.js pins each code with its real errcode.
+
+  // A record pointing at another business's record (DATABASE-3, 20261019100000; 23503).
+  {
+    test: e => hasCode(e, 'suite_other_client'),
+    staff: 'That record belongs to another business, so it was not saved.',
+    operator: 'That record belongs to another business, so it was not saved. Reload the page and pick it again from this business\'s own list.',
+  },
+  // The Monthly Owner Report is frozen by the database (OR-4, 20261019100100).
+  {
+    test: e => hasCode(e, 'owner_report_locked'),
+    staff: 'This report was not changed: a frozen report can only be regenerated, never edited or deleted.',
+    operator: 'This report was not changed: a frozen report can only be regenerated, never edited or deleted.',
+  },
+  {
+    test: e => hasCode(e, 'owner_report_owner_only'),
+    staff: 'Only the Owner or Crest support can make or regenerate this report.',
+    operator: 'Only the Owner or Crest support can make or regenerate this report.',
+  },
+  {
+    test: e => hasCode(e, 'owner_report_period_open'),
+    staff: 'No report was made: the month is still open. It is made when the month is closed.',
+    operator: 'No report was made: the month is still open. It is made when the month is closed.',
+  },
+  {
+    test: e => hasCode(e, 'owner_report_other_client'),
+    staff: 'No report was made: that month belongs to another outlet. Reload the page and pick the month again.',
+    operator: 'No report was made: that month belongs to another outlet. Reload the page and pick the month again.',
+  },
+  // The dashboard's monthly target is captured only by the Owner's, the operator's or an IMS login's
+  // dashboard (OD DATABASE-8, 20261019100200). Its sibling snapshot_frozen is further up.
+  {
+    test: e => hasCode(e, 'snapshot_rank'),
+    staff: 'This month\'s target is set from the account owner\'s or an inventory login\'s dashboard, so nothing was changed. Nothing needs doing.',
+    operator: 'This month\'s dashboard target is captured only from the account owner\'s, Crest support\'s or an IMS login\'s dashboard (never a till or count PIN), so it was left as it was. Nothing needs doing.',
+  },
+  // Multi-outlet (GROUP, 20261019100500).
+  {
+    test: e => hasCode(e, 'group_hq_outside'),
+    staff: 'This group\'s HQ outlet is no longer in the group, so nothing was pushed. Ask the account owner to contact Crest support.',
+    operator: 'This group\'s HQ outlet is no longer in the group, so nothing was pushed. Ask Crest support to set a new HQ outlet.',
+  },
+  {
+    test: e => hasCode(e, 'ims_count_pin_outlet_pinned'),
+    staff: 'A stock-count PIN works only at its own outlet, so this login cannot switch to another one. Nothing was changed.',
+    operator: 'A stock-count PIN login works only at its own outlet, so it cannot switch to another one and nothing was changed. Someone who also counts at another outlet needs a count PIN there, from that outlet\'s Stock Count → Settings.',
+  },
+  {
+    test: e => hasCode(e, 'outlet_access_count_pin'),
+    staff: 'A stock-count PIN works only at its own outlet, so it cannot be given another one. Nothing was saved.',
+    operator: 'A stock-count PIN login works only on its own outlet\'s tablets, so it cannot be given another outlet and nothing was saved. Give the person a count PIN at the other outlet too, from its Stock Count → Settings.',
+  },
+  {
+    test: e => hasCode(e, 'outlet_access_self_service'),
+    staff: 'A Crest Staff self-service login works only at its own outlet, so it cannot be given another one. Nothing was saved.',
+    operator: 'A Crest Staff self-service login works only at its own outlet, so it cannot be given another one. Nothing was saved.',
+  },
+  // Crest support reading a group by id (ACCESS-8 support view): get_group_summary,
+  // get_group_item_prices, get_group_outlet_access, get_group_pnl and get_group_labour_inputs all raise
+  // this one sentence for an unknown group id.
+  {
+    test: e => e.code === 'P0002' && /outlet group does not exist/i.test(e.message || ''),
+    staff: 'That outlet group no longer exists. Reload the page.',
+    operator: 'That outlet group no longer exists. Reload Admin → Clients.',
+  },
+  // Stock transfers between outlets of a group (PNL-8, 20261019100400). The 42501 and 23503 ones must
+  // stay above the generic rules below; the 22023 ones need no particular place but live together.
+  {
+    test: e => hasCode(e, 'stock_transfer_rank'),
+    staff: 'Only an Inventory supervisor or manager of the outlet, or the Owner, can do that. Nothing was changed.',
+    operator: 'This login can\'t do that. Stock is sent by the sending outlet\'s Inventory supervisor or manager, received or refused by the receiving outlet\'s, and cancelled by the sending outlet\'s manager — or by the Owner of the group. Nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_not_sibling'),
+    staff: 'Stock can only be sent to another outlet in your group. Nothing was sent.',
+    operator: 'Stock can only move between two different outlets of the same group, and this login must belong to that group. Nothing was sent.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_rpc_only'),
+    staff: 'Stock transfers are recorded only from Stock Transfers. Nothing was saved.',
+    operator: 'Stock transfer records are written only by Stock Transfers (send, receive, cancel, refuse) and the operator\'s restore. Nothing was saved.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_period_other_client'),
+    staff: "That didn't work. Nothing was saved.",
+    operator: 'A stock transfer line named a month of another outlet, so it was refused. Nothing was saved. If this came from a restore, the backup\'s months and lines belong to different outlets.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_no_inventory'),
+    staff: 'Both outlets need Crest Inventory to move stock between them. Nothing was sent.',
+    operator: 'Both outlets need Crest Inventory switched on to move stock between them. Nothing was sent.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_no_open_period'),
+    staff: 'That outlet has no open month in Inventory, so the stock can\'t be recorded there yet. Nothing was changed — ask your manager to open the month.',
+    operator: 'That outlet has no open month in Inventory (its name is in the detail below), so the stock can\'t be recorded there. Nothing was changed. Open the month in Periods, then try again.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_month_ahead'),
+    staff: 'That outlet\'s open month hasn\'t started yet, so today\'s stock can\'t go in it. Nothing was changed.',
+    operator: 'That outlet has opened a month that hasn\'t started yet, so stock moved today can\'t be recorded in it. Nothing was changed. Try again once the month begins.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_empty'),
+    staff: 'Add at least one item to send. Nothing was sent.',
+    operator: 'Add at least one item to send. Nothing was sent.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_too_many_lines'),
+    staff: 'A transfer can hold at most 500 lines. Send it as two transfers. Nothing was sent.',
+    operator: 'A transfer can hold at most 500 lines (the detail says how many this one had). Split it into two transfers. Nothing was sent.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_item_hidden'),
+    staff: 'An item on this transfer is hidden at the sending outlet, so the stock can\'t go back onto it yet. Ask the sending outlet to show the item in Item Master, then try again. Nothing was changed.',
+    operator: 'The stock would go back onto an item that is hidden at the sending outlet (named in the detail), where Stock Count could never count it. Nothing was changed. Show the item again in that outlet\'s Item Master, then cancel or refuse again.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_lines_bad'),
+    staff: 'Some lines can\'t be sent. Press Preview to see which and why. Nothing was sent.',
+    operator: 'Some lines can\'t be sent (no matching item at the other outlet, a different unit, a prep item or no price). Press Preview to see each reason. Nothing was sent.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_bad'),
+    staff: 'That request was incomplete. Reload Stock Transfers and try again. Nothing was changed.',
+    operator: 'The request was incomplete or reused an old transfer number. Reload Stock Transfers and try again. Nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_not_found'),
+    staff: 'That transfer is no longer there. Reload Stock Transfers. Nothing was changed.',
+    operator: 'That transfer is no longer there. Reload Stock Transfers. Nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_not_on_the_way'),
+    staff: 'That transfer was already received, cancelled or refused, so it can\'t be changed now. Nothing was changed.',
+    operator: 'That transfer is no longer on the way — it was already received, cancelled or refused (the detail says which). Nothing was changed. Reload Stock Transfers to see where it stands.',
+  },
+  // Operator only in practice: every other login is refused with stock_transfer_rank first, because
+  // the receiver no longer exists. The staff key still has a sentence, since every rule needs both.
+  {
+    test: e => hasCode(e, 'stock_transfer_outlet_gone'),
+    staff: 'The receiving outlet no longer exists. Ask the sending outlet\'s manager to cancel this transfer.',
+    operator: 'The receiving outlet no longer exists, so this transfer can only be cancelled, which puts the stock back on the sending outlet\'s books. Nothing was received.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_receiver_behind'),
+    staff: 'Your outlet is still on an earlier month than the one this stock was sent in. Close that month first, then press Received. Nothing was received.',
+    operator: 'The receiving outlet\'s open month is earlier than the month the stock was sent in, so receiving now would count it there before it left. Close that month in Periods, then press Received. Nothing was received.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_sender_behind'),
+    staff: 'The sending outlet has an earlier month open than the one the stock was sent in, so the stock can\'t go back yet. Nothing was changed.',
+    operator: 'The sending outlet has reopened an earlier month than the one the stock was sent in, so the stock can\'t be put back yet. Nothing was changed. Close that month again (so the later month is open), then try again.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_item_changed'),
+    staff: 'An item on this transfer has changed at your outlet since it was sent. Refuse the transfer, say why, and ask for it to be sent again. Nothing was received.',
+    operator: 'An item on this transfer was hidden, deleted, made a prep item or given a different unit at the receiving outlet since it was sent, so it can\'t be received as it is. Nothing was received. Refuse it with that reason and send it again.',
+  },
+  {
+    test: e => hasCode(e, 'stock_transfer_reason'),
+    staff: 'Say why in a few words. Nothing was changed.',
+    operator: 'A reason of at least 3 characters is needed to cancel or refuse a transfer. Nothing was changed.',
+  },
+  // Demand Forecast's history read (FORECAST-1, 20261019100300): both raised before any write.
+  {
+    test: e => hasCode(e, 'demand_forecast_forbidden'),
+    staff: "You can't rebuild the demand forecast. Ask the Owner or an inventory supervisor or manager. Nothing was changed.",
+    operator: 'Only the Owner, or an inventory supervisor or manager of this outlet, can rebuild its demand forecast. Nothing was changed; the forecast below is the last one made.',
+  },
+  {
+    test: e => hasCode(e, 'demand_forecast_range'),
+    staff: 'The forecast asked the server for a history length it does not allow, so nothing was rebuilt. Reload the page and try again.',
+    operator: 'The forecast asked the server for a history length it does not allow, so nothing was rebuilt. Reload the page and try again.',
+  },
+  // Fixed Assets (ASSETS, 20261019100600). dep_run_duplicate and ims_rank already have rules.
+  {
+    test: e => hasCode(e, 'asset_run_posted'),
+    staff: 'A posted run cannot be changed or deleted. Nothing was changed.',
+    operator: 'A posted depreciation run or tax schedule is final, so it was not changed or deleted. To correct it, post a new run instead.',
+  },
+  {
+    test: e => hasCode(e, 'asset_code_locked'),
+    staff: 'Crest numbers each asset itself, and an asset\'s code never changes. Nothing was saved.',
+    operator: 'Crest numbers each asset itself, and an asset\'s code never changes once given, so nothing was saved. Describe the asset in its name or notes instead.',
+  },
+  {
+    test: e => hasCode(e, 'asset_other_client'),
+    staff: 'That record belongs to another business, so it was not saved.',
+    operator: 'That category, asset or run belongs to another business on Crest, so nothing was saved. Reload the page and pick it again from this business\'s own list.',
+  },
+  {
+    test: e => hasCode(e, 'dep_run_asset_not_active'),
+    staff: 'An asset in this run is no longer active, so nothing was posted. Reload the page and preview the run again.',
+    operator: 'An asset in this run (named in the detail below) is no longer active — disposed, written off or archived since the preview — so nothing was posted. Reload the Depreciation Runs tab and preview again.',
+  },
+  {
+    test: e => hasCode(e, 'tax_run_duplicate'),
+    staff: 'This tax schedule was posted moments ago, so it was not posted again.',
+    operator: 'This tax pool schedule was posted moments ago — from this page or another tab — so it was not posted a second time. Reload the Tax Depreciation tab to see it.',
+  },
+  {
+    test: e => hasCode(e, 'tax_pool_fy_format'),
+    staff: 'The fiscal year must be written like 83/84. Nothing was saved.',
+    operator: 'The fiscal year must be written like 83/84 (two short years with a slash), so nothing was saved.',
+  },
+  {
+    test: e => hasCode(e, 'tax_pool_no_lines'),
+    staff: 'This tax schedule has no pool lines, so nothing was posted. Preview it again.',
+    operator: 'A tax pool schedule needs its pool lines and this one had none, so nothing was posted. Preview the schedule again, then post it.',
+  },
+  {
+    test: e => hasCode(e, 'tax_pool_correction_denied'),
+    staff: 'This login cannot correct tax pool opening values. Nothing was changed.',
+    operator: 'This login cannot correct this business\'s tax pool opening values, so nothing was changed. An IMS manager or the account owner of this outlet can.',
+  },
+  {
+    test: e => hasCode(e, 'tax_pool_correction_reason'),
+    staff: 'Give a reason of 10 to 500 characters. Nothing was changed.',
+    operator: 'A correction needs a reason of 10 to 500 characters, which is kept with it. Nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'tax_pool_correction_values'),
+    staff: 'Some of the values were not valid. Nothing was changed.',
+    operator: 'Some values were not valid (each of Pool A to D at most once, amounts of 0 or more; the detail below names the problem), so nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'tax_pool_correction_unchanged'),
+    staff: 'Every value is the one already saved, so nothing was changed.',
+    operator: 'Every value sent is the one already saved, so nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'tax_pool_opening_unused'),
+    staff: 'That year opens from the schedule posted for the year before, so its opening values were not changed.',
+    operator: 'That fiscal year opens from the schedule posted for the year before, not from typed values, so nothing was changed. Correct the earlier year\'s schedule instead.',
+  },
+  {
+    test: e => hasCode(e, 'tax_pool_opening_not_locked'),
+    staff: 'No posted schedule uses that year yet, so change the values on the card instead. Nothing was changed.',
+    operator: 'No posted schedule uses that fiscal year yet, so its opening values are still open: change them on the card instead. Nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'tax_pool_opening_year'),
+    staff: 'That pool\'s opening value is saved for a different year. Nothing was changed.',
+    operator: 'That pool\'s opening value is saved for a different fiscal year (the detail below names both), so nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'tax_pool_opening_locked'),
+    staff: 'That opening value is locked because a posted schedule carries it forward. Nothing was changed — ask your manager.',
+    operator: 'That opening value is locked because a posted schedule carries it forward, so nothing was changed. If it was typed wrong, use Correct these values on the Tax Depreciation tab (a reason is recorded), then post the years it lists again.',
+  },
+
   // RLS refused, or EXECUTE was never granted on a new function signature.
   {
     test: e => e.code === '42501' || /permission denied|row-level security|violates row-level/i.test(e.message || ''),
@@ -1954,6 +2210,13 @@ const rules = [
     test: e => /force_delete_item_missing/i.test(e.message || ''),
     staff: 'That item is no longer there.',
     operator: 'That item no longer exists — someone else may have deleted it already. Nothing was removed. Reload Item Master.',
+  },
+  // S849 (PNL-8): an item on a stock transfer between outlets. Removing one outlet's half of a
+  // movement would leave the other half standing, so it is hidden instead.
+  {
+    test: e => /force_delete_item_transferred/i.test(e.message || ''),
+    staff: 'That item can\'t be deleted.',
+    operator: 'This item was sent or received between outlets, so it can\'t be force-deleted — both outlets keep the transfer on their books. Nothing was removed. Hide the item instead.',
   },
 
   // One item name per client, case-insensitive, mirrors and hidden items included (S707). Ahead of

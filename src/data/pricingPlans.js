@@ -163,21 +163,38 @@ export const CUSTOMIZATION_PRICING = {
 //
 // Sold PER OUTLET. Five of the six features are per-outlet by nature (each outlet has its own
 // Owner Dashboard, Monthly Report, Fixed Asset Register); Multi-Outlet is the group-level one,
-// and it resolves under the same rule — the group console rolls up exactly those outlets whose
-// suite_plan = 'pro' and names the ones it excluded.
+// and it resolves under the same rule — the group console rolls up exactly those outlets whose own
+// Suite is live (client_suite_live: plan, IMS on, end date within the grace) and names the ones it
+// excluded. Since S849 the console itself opens from any outlet of a group that has one live Suite.
 export const SUITE_ADDON = {
   key: 'pro',
   label: 'Crest Suite Pro',
   monthly: 2000, annual: 1500,
-  requiresLabel: 'Requires Crest IMS · added on top of your modules',
+  requiresLabel: 'Requires Crest IMS (Owner Dashboard also needs Crest HR) · added on top of your modules',
   features: [
-    'Owner Dashboard — live margin & labour cost % across modules',
+    'Owner Dashboard — live margin & labour cost %, from Crest IMS and Crest HR together',
     'Monthly Owner/Manager Report — frozen snapshot per closed period',
     'Multi-Outlet Group Console — every branch on one screen',
-    'Demand Forecast (7/30-Day Covers & Revenue Prediction)',
+    'Demand Forecast — plates, revenue and (with Crest POS) covers for the next 7 or 30 days, and what to buy',
     'Fixed Assets — depreciation, valuation & Nepal statutory tax pools',
     'Consolidated P&L — the full statement, revenue to net profit, per outlet and consolidated',
   ],
+}
+
+// The six Suite pages by the names the nav shows, for a sentence that lists them (the drawer's Suite
+// Tips, the Admin Dashboard pill, the Owner's end-of-Suite notice). One list, so a page added to
+// Suite cannot be left out of one copy (DOCS-M9: the drawer's Tip had dropped Consolidated P&L).
+// Same order as Layout's SUITE_NAV. pricingPlans.test.js holds its length to AuthContext's
+// SUITE_KEYS.
+export const SUITE_PAGE_NAMES = Object.freeze([
+  'Owner Dashboard', 'Monthly Owner Report', 'Profit & Loss', 'Group Console', 'Demand Forecast', 'Fixed Assets',
+])
+
+// "A, B and C" over SUITE_PAGE_NAMES, or over a subset passed in (the pages one Owner can see).
+export function suitePagesText(names = SUITE_PAGE_NAMES) {
+  const list = (names || []).filter(Boolean)
+  if (list.length <= 1) return list.join('')
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`
 }
 
 // Annual is monthly less 25%, everywhere — every `annual` field above is exactly that, and

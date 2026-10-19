@@ -1,27 +1,55 @@
 // Shared short-lived per-tab cache so a page can show its last-known data instantly on
 // revisit instead of a blank skeleton while it re-fetches from Supabase from scratch.
-// sessionStorage (not localStorage) so nothing survives past this tab/session. That is NOT on its
-// own enough to stop data lingering across a sign-out/sign-in — this header used to claim it was.
-// sessionStorage lives as long as the TAB, not the session, and the key below carries the client
-// id but no user id, so signing out and back in as a different account of the same client used to
-// read the previous account's cached data straight back — past the RESTRICTIVE staff-isolation
-// policies that are the whole reason two accounts of one client see different rows. `signOut()`
-// in AuthContext now clears sessionStorage, the same way `switchOutlet()` already did; keep that
-// call alive if either is rewritten. Deliberately dumb
-// key-value storage of already-computed values — this file does no calculation of its own, so
-// it carries none of the risk of touching a page's actual data/logic.
+// sessionStorage (not localStorage) so nothing survives past this tab. That is NOT on its own
+// enough to stop data lingering across a sign-out/sign-in: sessionStorage lives as long as the TAB,
+// not the session, and two accounts of one client see different rows (the RESTRICTIVE
+// staff-isolation policies), so a cache filled by one must never be read by the other.
+//
+// Since S849 (GAPS-7) the key carries the signed-in USER as well as the client, and nothing is read
+// or written with no user known. AuthContext tells this file who is signed in (`setPageCacheUser`)
+// wherever it learns the session — on load and on every auth event, so a sign-out in ANOTHER tab,
+// a session that ends by itself, and a sign-in as someone else in this tab all re-key it — and on
+// no session it calls `clearPageCache()`, which removes only this cache's own keys (the guest menu
+// and booking pages keep their own sessionStorage state under the same provider and see that
+// branch on every load). `signOut()` and `switchOutlet()` still clear sessionStorage as before.
+// Deliberately dumb key-value storage of already-computed values — this file does no calculation
+// of its own, so it carries none of the risk of touching a page's actual data/logic.
 //
 // `page` namespaces keys per page (e.g. 'dashboard', 'purchases') so two pages caching a
 // section with the same name (e.g. both having an 'items' section) never collide.
 const MAX_AGE_MS = 10 * 60 * 1000 // 10 minutes: long enough to help normal page-to-page
 // navigation, short enough that stale data is never shown as if current.
 
+const PREFIX = 'crest_cache_'
+
+// Module-level: one signed-in user per tab. null = nobody known, which reads and writes nothing.
+let cacheUserId = null
+
+/** Who the cache belongs to. Called by AuthContext wherever it learns the session. */
+export function setPageCacheUser(userId) {
+  cacheUserId = userId || null
+}
+
+/** Removes every page-cache entry in this tab and nothing else. */
+export function clearPageCache() {
+  try {
+    const keys = []
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i)
+      if (k && k.startsWith(PREFIX)) keys.push(k)
+    }
+    keys.forEach(k => sessionStorage.removeItem(k))
+  } catch {
+    // sessionStorage can throw (private browsing) — nothing to clear then
+  }
+}
+
 function cacheKey(page, section, clientId) {
-  return `crest_cache_${page}_${section}_${clientId}`
+  return `${PREFIX}${cacheUserId}_${page}_${section}_${clientId}`
 }
 
 export function readPageCache(page, section, clientId) {
-  if (!clientId) return null
+  if (!clientId || !cacheUserId) return null
   try {
     const raw = sessionStorage.getItem(cacheKey(page, section, clientId))
     if (!raw) return null
@@ -34,7 +62,7 @@ export function readPageCache(page, section, clientId) {
 }
 
 export function writePageCache(page, section, clientId, value) {
-  if (!clientId) return
+  if (!clientId || !cacheUserId) return
   try {
     sessionStorage.setItem(cacheKey(page, section, clientId), JSON.stringify({ value, savedAt: Date.now() }))
   } catch {

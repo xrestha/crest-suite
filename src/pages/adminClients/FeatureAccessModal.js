@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 import { useSettings } from '../../context/SettingsContext'
 import Modal from '../../components/Modal'
 import { colorTint } from '../../data/pricingPlans'
+import { suiteState } from '../../utils/subscription'
+import { formatAdAsBs } from '../../utils/bsCalendar'
 
 // null = no override (plan decides), true = explicit grant.
 //
@@ -39,6 +41,9 @@ const DEFAULT_FLAGS = {
   weather_forecast: null,
   fixed_asset_register: null,
   multi_outlet: null,
+  // S849 (PNL-8): Stock Transfers. Every key here must be a feature_flags column
+  // (featureFlagsSchema.test.js): mig-PNL §3 adds it.
+  stock_transfers: null,
 }
 
 
@@ -64,20 +69,22 @@ function isPlanIncluded(tier, clientPlan, posEnabled) {
 // glyph in the tier's textColor; an admin-granted box is solid accent with the accent's paired
 // accent-text glyph — so "came with the plan" and "granted as an exception" read differently at a
 // glance, which the broken var()+hex concatenations had silently erased.
-function FeatureRow({ label, locked, granted, isCore, chip, note, color, textColor, onToggle, style }) {
+// `unavailable` (S849): off and not offered — a row that cannot be granted here at all, unlike
+// `locked`, which is on because the plan or Suite includes it.
+function FeatureRow({ label, locked, unavailable, granted, isCore, chip, note, color, textColor, onToggle, style }) {
   const isOn = locked || granted
   return (
     <button
       type="button"
       role="checkbox"
       aria-checked={isOn}
-      disabled={locked}
+      disabled={locked || unavailable}
       onClick={onToggle}
       style={{
         display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
         font: 'inherit', background: 'var(--theme-bg)', borderRadius: 'var(--radius-sm)', padding: '6px 8px',
         border: `1px solid ${locked ? colorTint(color, 15) : granted ? colorTint('var(--theme-accent)', 35) : 'var(--theme-border)'}`,
-        cursor: locked ? 'default' : 'pointer', transition: 'border-color 0.15s',
+        cursor: locked || unavailable ? 'default' : 'pointer', transition: 'border-color 0.15s',
         ...style,
       }}
     >
@@ -185,7 +192,15 @@ export default function FeatureAccessModal({ client, onClose }) {
       {imsEnabled && (() => {
         // One tier. suite_plan was starter|growth|pro, but both gates were minTier="growth",
         // so Suite Starter unlocked nothing and Suite Pro added nothing over Suite Growth.
-        const locked = client.suite_plan === 'pro'
+        // S849 (ACCESS-4): `locked` follows the gate (suiteState(client).live), not suite_plan
+        // alone, so a lapsed Suite is no longer shown as included while every page is closed.
+        const suite = suiteState(client)
+        const locked = suite.live
+        const lapsedNote = suite.lapsed
+          ? (suite.imsOn
+            ? `Suite lapsed on ${formatAdAsBs(suite.endsAt)}; an override here still opens the page`
+            : 'Suite needs Crest IMS on; an override here still opens the page')
+          : null
         const suiteFeatures = [
           { key: 'owner_dashboard', label: 'Owner Dashboard' },
           { key: 'monthly_owner_report', label: 'Monthly Owner/Manager Report' },
@@ -217,17 +232,28 @@ export default function FeatureAccessModal({ client, onClose }) {
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {suiteFeatures.map(({ key, label }) => {
                   const isAdminGranted = !locked && flags[key] === true
+                  // S849 (ACCESS-7): the Group Console opens on a group-wide test — any outlet of the
+                  // group with a live Suite — so a per-outlet override no longer decides it and is no
+                  // longer offered. One already granted can still be switched off here.
+                  const groupWide = key === 'multi_outlet' && !locked && !isAdminGranted
                   return (
                     <FeatureRow
                       key={key}
                       label={label}
                       locked={locked}
+                      unavailable={groupWide}
                       granted={isAdminGranted}
-                      chip={locked ? { label: 'Suite Pro' } : isAdminGranted ? { label: 'Override', granted: true } : null}
-                      note={!client.suite_plan && !isAdminGranted ? 'Not subscribed to Suite' : null}
+                      chip={locked
+                        ? { label: 'Suite Pro' }
+                        : isAdminGranted ? { label: 'Override', granted: true }
+                        : suite.lapsed ? { label: 'Suite Pro · lapsed' } : null}
+                      note={groupWide
+                        ? 'Opens when any outlet of its group has Crest Suite Pro; no override'
+                        : !suite.subscribed && !isAdminGranted ? 'Not subscribed to Suite'
+                        : lapsedNote}
                       color="var(--theme-accent)"
                       textColor="var(--theme-accent-ink)"
-                      onToggle={() => !locked && toggleFeat(key, isAdminGranted)}
+                      onToggle={() => !locked && !groupWide && toggleFeat(key, isAdminGranted)}
                       style={{ flex: '1 1 300px', maxWidth: 420, width: 'auto' }}
                     />
                   )

@@ -25,6 +25,10 @@ const TABLE_LABELS = {
   wastages:         'Wastage',
   monthly_periods:  'Period',
   items:            'Item Master',
+  // audited since S849 (PNL-8) — a stock transfer between outlets (sent, received, cancelled,
+  // refused) and the lines that count at each outlet
+  ims_stock_transfers:      'Stock Transfer',
+  ims_stock_transfer_lines: 'Stock Transfer Line',
   // HR module
   hr_final_settlements: 'Final Settlement',
   hr_employees:           'Employee',
@@ -68,11 +72,21 @@ const TABLE_LABELS = {
   assets_depreciation_runs: 'Depreciation Run',
   assets_tax_pool_runs:     'Tax Pool Run',
   assets_tax_pool_openings: 'Tax Pool Opening',
+  // audited since S849 — repairs, categories, each depreciation line, and the record of a correction
+  // to a locked tax pool opening
+  assets_repair_expenses:   'Asset Repair',
+  assets_categories:        'Asset Category',
+  assets_depreciation_schedule: 'Depreciation Line',
+  assets_tax_pool_opening_corrections: 'Tax Pool Opening Correction',
   // User & client management
   profiles:               'User',
   // audited since S798 3f-1 — a login's employee record at another outlet decides whose requests it
   // may never decide
   profile_employee_links: 'Login Link',
+  // audited since S849 (DATABASE-5) — who was given access to another outlet of the group, and who
+  // took it away; and changes to an outlet group (its name, its HQ)
+  profile_outlet_access:  'Outlet Access',
+  client_groups:          'Outlet Group',
   staff_pin_vault:        'Staff PIN',
   clients:                'Client Account',
   feature_flags:          'Feature Flags',
@@ -128,6 +142,8 @@ const FIELD_LABELS = {
   ims_enabled: 'IMS Enabled', hr_enabled: 'HR Enabled', pos_enabled: 'POS Enabled',
   customization_enabled: 'Customization Enabled', customization_ends_at: 'Customization Ends',
   suite_plan: 'Suite Plan', hr_plan: 'HR Plan', pos_plan: 'POS Plan',
+  // S849: Crest's own demo or practice outlet, never counted as income
+  is_internal: 'Demo Outlet', hq_client_id: 'HQ Outlet',
   is_premium: 'Premium', is_trial: 'Trial',
   close_type: 'Close Type', close_reason: 'Close Reason', discount_amount: 'Discount',
   discount_reason: 'Discount Reason', invoice_no: 'Invoice No.', invoice_fy: 'Invoice FY',
