@@ -4,8 +4,10 @@
 // worked out here so the SQL stays a set of sums.
 //
 // An item counts only where two or more outlets paid a real price for it in the SAME unit. Units
-// that differ (one outlet counts KG, another GM) are listed but never compared; a zero-value line
-// (a free sample) is not a price and cannot be "the cheapest".
+// that differ (one outlet counts KG, another GM) are listed but never compared.
+// Free lines (rate 0) never reach this file: get_group_item_prices leaves them out (S849, SU22), so a
+// price is what was paid. The zero-value guard below stays as a backstop: a zero value is not a
+// price and cannot be "the cheapest".
 
 const EPS = 1e-9
 

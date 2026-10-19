@@ -3,7 +3,8 @@ import { supabase } from '../../supabaseClient'
 import Tip from '../../components/Tip'
 import ReportLoadError from '../../components/ReportLoadError'
 import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
-import { withTimeout } from '../../utils/withTimeout'
+import { settleWithin } from '../../utils/withTimeout'
+import { fetchAllRows } from '../../shared/fetchAllRows'
 import { npr } from '../../shared/nepalMoney'
 import { unitRateParts } from '../../shared/unitRate'
 import { fmtQty } from '../../modules/ims/stockcount/reorderPacks'
@@ -19,6 +20,12 @@ import { compareItemPrices } from './groupItemPriceMath'
 // VAT, after each bill's discount; the month is the one picked at the top of the Group Console.
 //
 // Its own read and its own states: a failure here costs this panel only, never the branch table.
+//
+// S849: the read is paged (GROUP-6) — a group of five outlets buying a few hundred linked items passes
+// PostgREST's 1,000-row cut, and a cut list silently drops an outlet's price — on the RPC's own unique
+// order (item_key, client_id, uom). An outlet is compared while its own Crest Suite Pro is live
+// (ACCESS-1), free lines are left out in SQL (SU22), and Crest support reads a client's group by id
+// (ACCESS-8, `readGroupId`). `refreshKey` is bumped by the page's Refresh, so this panel re-reads too.
 
 const LIMIT = 10
 
@@ -27,30 +34,28 @@ const rateText = (rate, uom) => {
   return p ? `${p.primary.value}${p.primary.unit ? ` / ${p.primary.unit}` : ''}` : '—'
 }
 
-export default function GroupItemPrices({ bsYear, bsMonth }) {
+// readGroupId: null for the Owner (the server reads their own group); the viewed client's group for
+// Crest support. refreshKey: the page's Refresh counter.
+export default function GroupItemPrices({ bsYear, bsMonth, readGroupId = null, refreshKey = 0 }) {
   const [state, setState] = useState({ loading: true, error: null, rows: [] })
   const [showAll, setShowAll] = useState(false)
   const latest = useLatestRequest()
 
   useEffect(() => {
-    const key = `${bsYear}-${bsMonth}`
+    const key = `${bsYear}-${bsMonth}-${readGroupId || 'own'}-${refreshKey}`
     latest.begin(key)
     setState(s => ({ ...s, loading: true, error: null }))
     setShowAll(false)
+    const args = { p_bs_year: bsYear, p_bs_month: bsMonth, ...(readGroupId ? { p_group_id: readGroupId } : {}) }
     ;(async () => {
-      let res
-      try {
-        res = await withTimeout(
-          supabase.rpc('get_group_item_prices', { p_bs_year: bsYear, p_bs_month: bsMonth }),
-          20000, 'Same item, different price')
-      } catch (err) {
-        res = { data: null, error: err }
-      }
+      const res = await settleWithin(
+        fetchAllRows(() => supabase.rpc('get_group_item_prices', args).order('item_key').order('client_id').order('uom')),
+        20000, 'Same item, different price')
       if (!latest.isCurrent(key)) return
       if (res.error) setState({ loading: false, error: res.error, rows: [] })
       else setState({ loading: false, error: null, rows: res.data || [] })
     })()
-  }, [bsYear, bsMonth]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bsYear, bsMonth, readGroupId, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const cmp = useMemo(() => compareItemPrices(state.rows), [state.rows])
   // One column per outlet that bought any compared item, in name order.
@@ -67,7 +72,7 @@ export default function GroupItemPrices({ bsYear, bsMonth }) {
       <div style={{ marginBottom: 12 }}>
         <h2 style={{ fontSize: 15, fontWeight: 700, margin: '0 0 4px', color: 'var(--theme-text1)' }}>
           Same item, different price{' '}
-          <Tip text="Items count as the same only when your HQ has pushed them to a branch (Push master data, below) — two items that merely share a name are never compared, because renaming either one would then mix up two different things. Prices are before VAT and after each bill's discount, averaged over everything that outlet bought of the item this month, so a VAT-registered outlet and a PAN-only one buying at the same price show the same price. Only outlets on Crest Suite Pro are included." width={340}>ⓘ</Tip>
+          <Tip text="Items count as the same only when your HQ has pushed them to a branch (Push master data, below) — two items that merely share a name are never compared, because renaming either one would then mix up two different things. Prices are before VAT and after each bill's discount, averaged over what that outlet paid for the item this month — free lines (a sample, a 'buy 10 get 1') are left out — so a VAT-registered outlet and a PAN-only one buying at the same price show the same price. Only outlets whose own Crest Suite Pro is live are included." width={340}>ⓘ</Tip>
         </h2>
         <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0 }}>
           What each outlet paid in {monthLabel} for the same item, cheapest marked. A higher price can have a reason — a smaller order, a nearer supplier, a better grade — so this shows where to ask, not who is wrong.
