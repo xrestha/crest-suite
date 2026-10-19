@@ -1,74 +1,102 @@
 // Demand Forecast arithmetic (S694). Each test pins a claim that, if it broke, would produce a
 // plausible-looking number rather than an error — the danger with any forecast.
 import {
-  buildDailyHistory, buildManualDailyHistory, periodsInLookback, weightedMean, forecastByWeekday,
+  historyFromDailyTotals, mergeManualHistory, dateOfIso, hasForecastEvidence,
+  periodsInLookback, weightedMean, forecastByWeekday,
   platesOf, splitDishList, totalQtyByRecipe, aggregateIngredientDemand, ingredientBuyList,
   scaleForecastDays, usualSupplierByItem, holidaysByKeyOf, holidayKey,
+  averageChoicesPerPlate, addDemand,
   SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD,
 } from './demandForecastMath'
-import { computeOrderAmounts } from './posBillingMath'
 import { bsToAd, adToBs } from './bsCalendar'
 
 // Tuesday 8 September 2026, 08:11 local — the recompute in the screenshot that started this.
 const NOW = new Date(2026, 8, 8, 8, 11)
 const daysAgo = (n, h = 13) => new Date(2026, 8, 8 - n, h)
 const wed = n => daysAgo(6 + 7 * n) // n weeks back from Wednesday 2 Sep (n = 0)
+const midnight = d => new Date(d.getFullYear(), d.getMonth(), d.getDate())
 
-describe('buildDailyHistory', () => {
-  const order = (id, closed, extra = {}) => ({ id, covers: 2, closed_at: closed.toISOString(), credit_note_id: null, discount_amount: 0, ...extra })
-  const line = (recipe_id, qty, unit_price, extra = {}) => ({ recipe_id, qty, unit_price, vat_rate: 0.13, comped: false, ...extra })
+// A monthly_periods row for whichever BS month an AD date falls in, and the sales_entries row
+// for that date — so a fixture can be written in AD and read the way the page reads BS.
+const periodOf = date => { const bs = adToBs(date); return { id: `p${bs.year}-${bs.month}`, bs_year: bs.year, bs_month: bs.month } }
+const entryOn = (date, recipe_id, qty_sold, extra = {}) => ({ period_id: periodOf(date).id, recipe_id, bs_day: adToBs(date).day, qty_sold, source: 'manual', ...extra })
+const periodsFor = dates => Object.fromEntries(dates.map(periodOf).map(p => [p.id, p]))
 
-  it('revenue is gross less discount, before VAT — the figure every other Revenue means', () => {
-    const rows = buildDailyHistory(
-      [order('o1', daysAgo(1), { discount_amount: 50 })],
-      { o1: [line('r1', 2, 500)] },
-      computeOrderAmounts,
-    )
-    expect(rows).toHaveLength(1)
-    expect(rows[0].revenue).toBe(950) // 1000 − 50, not 1073.5 (= ×1.13) and not rounded
-    expect(rows[0].basis).toBe('pos')
+// S849 FORECAST-1/-2/-5: the till's history arrives as daily totals from the server.
+describe('historyFromDailyTotals', () => {
+  it('keeps each Nepal date as that calendar day wherever the device is (FORECAST-5)', () => {
+    const [row] = historyFromDailyTotals([{ date: '2026-10-16', bills: 3, covers: 7, revenue: 4520.5, qty: { r1: 2, r2: '1.5' } }])
+    expect(row.weekday).toBe(5) // Friday 16 October 2026
+    expect(row.date.getFullYear()).toBe(2026)
+    expect(row.date.getMonth()).toBe(9)
+    expect(row.date.getDate()).toBe(16)
+    expect(adToBs(row.date)).toEqual(adToBs(new Date(2026, 9, 16)))
+    expect(row).toMatchObject({ bills: 3, covers: 7, revenue: 4520.5, basis: 'pos', qtyByRecipe: { r1: 2, r2: 1.5 } })
   })
 
-  it('a comped line is left out of revenue but counted as demand, and a credit-noted bill is dropped', () => {
-    const rows = buildDailyHistory(
-      [order('o1', daysAgo(1)), order('o2', daysAgo(1), { credit_note_id: 'cn' })],
-      { o1: [line('r1', 1, 400), line('r2', 3, 100, { comped: true })], o2: [line('r1', 9, 400)] },
-      computeOrderAmounts,
-    )
-    expect(rows).toHaveLength(1)
-    expect(rows[0].revenue).toBe(400)
-    expect(rows[0].qtyByRecipe).toEqual({ r1: 1, r2: 3 })
-    expect(rows[0].covers).toBe(2)
+  it('sorts by date, drops an undated object, and treats a missing qty as no dishes', () => {
+    const rows = historyFromDailyTotals([
+      { date: '2026-10-12', bills: 1, covers: 1, revenue: 100 },
+      { date: null, bills: 9 },
+      { date: '2026-10-10', bills: 2, covers: 2, revenue: 200, qty: { r1: 0, r2: 3 } },
+    ])
+    expect(rows.map(r => r.date.getDate())).toEqual([10, 12])
+    expect(rows[0].qtyByRecipe).toEqual({ r2: 3 }) // a zero is not a dish sold
+    expect(rows[1].qtyByRecipe).toEqual({})
   })
 
-  it('a bill with no covers counts as one, and bills on one day fold into one row', () => {
-    const rows = buildDailyHistory(
-      [order('a', daysAgo(2, 12), { covers: null }), order('b', daysAgo(2, 20), { covers: 4 })],
-      { a: [line('r1', 1, 100)], b: [line('r1', 1, 100)] },
-      computeOrderAmounts,
-    )
-    expect(rows).toHaveLength(1)
-    expect(rows[0].covers).toBe(5)
-    expect(rows[0].qtyByRecipe.r1).toBe(2)
+  it('dateOfIso builds a local-midnight Date, never UTC midnight', () => {
+    const d = dateOfIso('2026-10-16')
+    expect([d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()]).toEqual([2026, 9, 16, 0])
+    expect(dateOfIso('')).toBeNull()
   })
 })
 
-describe('buildManualDailyHistory', () => {
-  const periods = { p: { id: 'p', bs_year: 2083, bs_month: 5 } }
+// S849 FORECAST-6: hand-entered daily sales always count, per (day, dish), by the stock rule.
+describe('mergeManualHistory', () => {
+  const till = (date, qtyByRecipe, extra = {}) => ({ date: midnight(date), weekday: date.getDay(), covers: 10, revenue: 1000, qtyByRecipe, basis: 'pos', ...extra })
+  const window = { from: midnight(daysAgo(84)), today: midnight(NOW) }
 
-  it('skips the bulk sentinel, unknown periods and days POS already covered', () => {
-    const covered = new Set([bsToAd(2083, 5, 10).toDateString()])
-    const rows = buildManualDailyHistory([
-      { period_id: 'p', recipe_id: 'r1', bs_day: 0, qty_sold: 300 },   // bulk month — never a day
-      { period_id: 'zz', recipe_id: 'r1', bs_day: 3, qty_sold: 5 },    // period unknown
-      { period_id: 'p', recipe_id: 'r1', bs_day: 10, qty_sold: 7 },    // POS has this day
-      { period_id: 'p', recipe_id: 'r1', bs_day: 11, qty_sold: '2.5' },
-      { period_id: 'p', recipe_id: 'r1', bs_day: 11, qty_sold: 1 },
-    ], periods, covered)
-    expect(rows).toHaveLength(1)
-    expect(rows[0].qtyByRecipe).toEqual({ r1: 3.5 })
-    expect(rows[0].basis).toBe('manual')
-    expect(rows[0].covers).toBe(0)
+  it('a dish the till did not sell that day joins the till day; a dish it did sell keeps the till figure', () => {
+    const tillDay = till(wed(0), { r1: 4 })
+    const { history, manualDays } = mergeManualHistory([tillDay], [
+      entryOn(wed(0), 'x', 3),   // the till did not sell X that Wednesday → counted
+      entryOn(wed(0), 'r1', 99), // the till sold r1 that day → the till's 4 stands
+    ], periodsFor([wed(0)]), window)
+    expect(history).toHaveLength(1)
+    expect(history[0].qtyByRecipe).toEqual({ r1: 4, x: 3 })
+    expect(history[0].basis).toBe('pos')
+    expect(history[0].covers).toBe(10) // covers and revenue stay the till's
+    expect(manualDays).toBe(0)
+    expect(tillDay.qtyByRecipe).toEqual({ r1: 4 }) // the input is not changed
+  })
+
+  it('a day with no till bill becomes a manual-basis day; a Bulk row is skipped and counted; rows outside the window drop', () => {
+    const { history, manualDays, undatedRows } = mergeManualHistory([], [
+      entryOn(wed(1), 'r1', '2.5'),
+      entryOn(wed(1), 'r1', 1),
+      { ...entryOn(wed(1), 'r1', 300), bs_day: 0 },   // a month's Bulk total: no day
+      entryOn(daysAgo(0, 9), 'r1', 50),               // today: never a sample
+      entryOn(daysAgo(120), 'r1', 50),                // before the window
+      { ...entryOn(wed(2), 'r1', 5), period_id: 'zz' }, // period outside the window's list
+    ], periodsFor([wed(1), daysAgo(0), daysAgo(120)]), window)
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ basis: 'manual', covers: 0, revenue: 0, qtyByRecipe: { r1: 3.5 } })
+    expect(manualDays).toBe(1)
+    expect(undatedRows).toBe(1)
+  })
+
+  it('four recent hand-entered Wednesdays after the till was switched off outrank older till ones', () => {
+    const tillWeds = [4, 5, 6, 7, 8, 9, 10, 11].map(n => till(wed(n), { r1: 2 }))
+    const manual = [0, 1, 2, 3].map(n => entryOn(wed(n), 'r1', 10))
+    const { history, manualDays } = mergeManualHistory(tillWeds, manual, periodsFor([0, 1, 2, 3].map(wed)), window)
+    expect(manualDays).toBe(4)
+    const nextWed = forecastByWeekday(history, 7, {}, NOW).find(f => f.weekday === 3)
+    expect(nextWed.sampleCount).toBe(8)
+    expect(nextWed.posSampleCount).toBe(4)
+    // weights 8,7,6,5 on the four hand-entered 10s, 4,3,2,1 on the four till 2s
+    expect(nextWed.forecastQtyByRecipe.r1).toBeCloseTo((26 * 10 + 10 * 2) / 36)
+    expect(nextWed.forecastCovers).toBe(10) // covers from the till days only
   })
 })
 
@@ -82,6 +110,15 @@ describe('periodsInLookback', () => {
       { id: 'prevyear', bs_year: 2082, bs_month: 12 },
     ], start)
     expect(kept.map(p => p.id)).toEqual(['edge', 'new'])
+  })
+
+  it('with an end, also drops periods that start after the window', () => {
+    const kept = periodsInLookback([
+      { id: 'edge', bs_year: 2083, bs_month: 3 },
+      { id: 'in', bs_year: 2083, bs_month: 5 },
+      { id: 'after', bs_year: 2083, bs_month: 7 },
+    ], bsToAd(2083, 3, 20), bsToAd(2083, 6, 2))
+    expect(kept.map(p => p.id)).toEqual(['edge', 'in'])
   })
 })
 
@@ -189,6 +226,55 @@ describe('forecastByWeekday', () => {
     expect(sun.forecastQtyByRecipe).toEqual({})
     expect(sun.forecastRevenue).toBeNull()
   })
+
+  it('with the server\'s Nepal date as now, starts the next day and never uses that date as a sample (FORECAST-5)', () => {
+    const history = historyFromDailyTotals([
+      { date: '2026-10-16', bills: 1, covers: 1, revenue: 1, qty: { r1: 99 } }, // "today" by the server
+      { date: '2026-10-09', bills: 1, covers: 1, revenue: 1, qty: { r1: 4 } },
+    ])
+    const out = forecastByWeekday(history, 7, {}, dateOfIso('2026-10-16'))
+    expect(out[0].date.getDate()).toBe(17)
+    const fri = out.find(f => f.weekday === 5)
+    expect(fri.sampleCount).toBe(1)
+    expect(fri.forecastQtyByRecipe.r1).toBe(4)
+  })
+
+  // S849 FORECAST-4: how rainy the samples were, so the list does not count rain twice.
+  it('a rain sampler gives the recency-weighted share of rain in the average, and the count of rainy samples', () => {
+    const history = Array.from({ length: 8 }, (_, i) => sample(wed(i), 10))
+    const rainy = new Set([0, 1, 2, 3, 4, 5].map(i => midnight(wed(i)).getTime())) // the most recent six
+    const sampleFactorOf = s => (rainy.has(midnight(s.date).getTime()) ? 0.5 : 1)
+    const nextWed = forecastByWeekday(history, 7, {}, NOW, { sampleFactorOf }).find(f => f.weekday === 3)
+    expect(nextWed.sampleRainFactor).toBeCloseTo(19.5 / 36, 10) // ((8+7+6+5+4+3)·0.5 + (2+1)·1) / 36
+    expect(nextWed.rainySampleCount).toBe(6)
+    expect(nextWed.forecastQtyByRecipe.r1).toBe(10) // the observed average is unchanged
+    // On a rainy day ahead the list buys 0.5 ÷ 0.5417 of the observed average: 0.923 of it.
+    expect(0.5 / nextWed.sampleRainFactor).toBeCloseTo(0.923, 3)
+
+    const plain = forecastByWeekday(history, 7, {}, NOW).find(f => f.weekday === 3)
+    expect(plain.sampleRainFactor).toBeNull()
+    expect(plain.rainySampleCount).toBeNull()
+    expect(plain.forecastQtyByRecipe.r1).toBe(10)
+  })
+
+  it('exactly half a dry day on a rainy day ahead, when every dry day sold the same', () => {
+    // Dry Wednesdays sold 20, rainy ones 10 (the Owner's 50%): the average holds the rain.
+    const rainyIdx = new Set([0, 1, 2, 3, 4, 5])
+    const history = Array.from({ length: 8 }, (_, i) => sample(wed(i), rainyIdx.has(i) ? 10 : 20))
+    const rainyAt = new Set([...rainyIdx].map(i => midnight(wed(i)).getTime()))
+    const nextWed = forecastByWeekday(history, 7, {}, NOW, { sampleFactorOf: s => (rainyAt.has(midnight(s.date).getTime()) ? 0.5 : 1) }).find(f => f.weekday === 3)
+    const listQty = nextWed.forecastQtyByRecipe.r1 * (0.5 / nextWed.sampleRainFactor)
+    expect(listQty).toBeCloseTo(10, 10) // 50% of the dry 20
+  })
+})
+
+describe('hasForecastEvidence (FORECAST-1)', () => {
+  it('false when every day has no sample, true when any day has one', () => {
+    expect(hasForecastEvidence([{ sampleCount: 0 }, { sampleCount: 0 }])).toBe(false)
+    expect(hasForecastEvidence([])).toBe(false)
+    expect(hasForecastEvidence(forecastByWeekday([], 7, {}, NOW))).toBe(false)
+    expect(hasForecastEvidence([{ sampleCount: 0 }, { sampleCount: 2 }])).toBe(true)
+  })
 })
 
 describe('presentation', () => {
@@ -246,6 +332,65 @@ describe('ingredientBuyList (S756, D21)', () => {
     expect(ingredientBuyList({ oil: 200 }, { oil: 900 }, { oil: 500 })[0].toBuy).toBe(0)
     // a par with an unreadable shelf is still unknown, never "buy the par"
     expect(ingredientBuyList({ oil: 200 }, null, { oil: 500 })[0].toBuy).toBeNull()
+  })
+
+  it('S849: a net-negative use (a "no onion" average) is no use, so the purchase is par − in store, floor 0', () => {
+    expect(ingredientBuyList({ onion: -40 }, { onion: 100 }, { onion: 300 })[0]).toEqual({ id: 'onion', use: 0, par: 300, inStore: 100, toBuy: 200 })
+    expect(ingredientBuyList({ onion: -40 }, { onion: 500 }, { onion: 300 })[0].toBuy).toBe(0)
+    expect(ingredientBuyList({ onion: -40 }, null)[0]).toEqual({ id: 'onion', use: 0, par: 0, inStore: null, toBuy: null })
+  })
+})
+
+// S849 FORECAST-3 (owner decision SU13 a): the guests' usual choices join the buying list.
+describe('averageChoicesPerPlate', () => {
+  const day = n => midnight(daysAgo(n))
+  const periods = periodsFor([day(3), day(40), day(100), day(0)])
+  const row = (n, qty_sold, ingredient_deltas, extra = {}) => ({ ...entryOn(day(n), 'bowl', qty_sold, { source: 'pos' }), ingredient_deltas, ...extra })
+  const window = { periodsById: periods, from: day(84), to: day(0) }
+
+  it('averages over every till plate of the dish: 60 bowls, 40 with +30 g banana, is 20 g a plate', () => {
+    const out = averageChoicesPerPlate([
+      row(3, 40, [{ item_id: 'banana', qty: 30 }]),
+      row(40, 20, null), // 20 plain bowls: no choice, still plates
+    ], window)
+    expect(out.bowl).toEqual([{ item_id: 'banana', qty: 20 }])
+  })
+
+  it('ignores hand-entered, credit, unsold and undated rows, and rows outside the window', () => {
+    const out = averageChoicesPerPlate([
+      row(3, 10, [{ item_id: 'banana', qty: 30 }]),
+      row(3, 10, [{ item_id: 'banana', qty: 999 }], { source: 'manual' }),
+      row(3, 10, [{ item_id: 'banana', qty: 999 }], { source: null }),
+      row(3, -10, [{ item_id: 'banana', qty: 999 }], { source: 'pos_credit' }),
+      row(3, 0, [{ item_id: 'banana', qty: 999 }]),
+      row(3, 10, [{ item_id: 'banana', qty: 999 }], { bs_day: 0 }),
+      row(100, 10, [{ item_id: 'banana', qty: 999 }]), // before the window
+      row(0, 10, [{ item_id: 'banana', qty: 999 }]),   // the run's own day: after the window
+    ], window)
+    expect(out.bowl).toEqual([{ item_id: 'banana', qty: 30 }])
+  })
+
+  it('a comped till plate (pos_comp) counts; a sub-recipe line stays a sub-recipe line; a negative line keeps its sign', () => {
+    const out = averageChoicesPerPlate([
+      row(3, 3, [{ sub_recipe_id: 'granola', qty: 2 }, { item_id: 'onion', qty: -10 }]),
+      row(40, 1, [{ sub_recipe_id: 'granola', qty: 2 }], { source: 'pos_comp' }),
+    ], window)
+    expect(out.bowl).toEqual(expect.arrayContaining([
+      { sub_recipe_id: 'granola', qty: 2 },
+      { item_id: 'onion', qty: -7.5 },
+    ]))
+    expect(out.bowl).toHaveLength(2)
+  })
+
+  it('a dish with no choice lines at all is absent', () => {
+    expect(averageChoicesPerPlate([row(3, 5, null), row(3, 5, [])], window)).toEqual({})
+  })
+})
+
+describe('addDemand', () => {
+  it('sums two per-item maps, signs kept', () => {
+    expect(addDemand({ rice: 100, onion: 20 }, { onion: -5, banana: 30 })).toEqual({ rice: 100, onion: 15, banana: 30 })
+    expect(addDemand(null, { a: 1 })).toEqual({ a: 1 })
   })
 })
 

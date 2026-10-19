@@ -1274,8 +1274,8 @@ export default function Settings() {
             <>
               {hasFeature('weather_forecast') ? (
                 <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
-                  The Dashboard's <strong>Daily Purchases vs Sales</strong> chart can lower (or raise) its sales forecast on the
-                  days rain is expected, for the next {WEATHER_HORIZON_DAYS} days. Purchases and the dotted targets never change
+                  The Dashboard's <strong>Daily Purchases vs Sales</strong> chart, and with Crest Suite Pro the Demand Forecast buying
+                  list, can lower (or raise) their sales forecast on the days rain is expected, for the next {WEATHER_HORIZON_DAYS} days. Purchases and the dotted targets never change
                   with the weather. The city also puts today's and the next three days' weather at the top of the Dashboard.
                 </p>
               ) : (
@@ -1294,7 +1294,7 @@ export default function Settings() {
                   <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Weather data from MET Norway.</span>
                 </div>
                 {hasFeature('weather_forecast') && <div className="form-field">
-                  <label htmlFor="set-rain_sales_pct"><Tip text={`What a rainy day does to your trade, as a share of a normal day. 85 means a rainy day sells about 85% of what that weekday usually sells, so a Friday that usually takes NPR 40,000 is forecast at NPR 34,000 when rain is expected. Above 100 if rain brings you more trade (a delivery kitchen, a cosy café). A day counts as rainy at ${RAIN_MM} mm or more between 5:45 am and 11:45 pm. Blank = the weather does not change the forecast. The Dashboard also shows what your own sales say once it has recorded enough rainy days.`} width={300}>On a rainy day, sales are about</Tip></label>
+                  <label htmlFor="set-rain_sales_pct"><Tip text={`What a rainy day does to your trade, as a share of a normal day. 85 means a rainy day sells about 85% of what that weekday usually sells, so a Friday that usually takes NPR 40,000 is forecast at NPR 34,000 when rain is expected. Demand Forecast's buying list buys for the same lower figure on those days. Above 100 if rain brings you more trade (a delivery kitchen, a cosy café). A day counts as rainy at ${RAIN_MM} mm or more between 5:45 am and 11:45 pm. Blank = the weather does not change the forecast. The Dashboard also shows what your own sales say once it has recorded enough rainy days.`} width={300}>On a rainy day, sales are about</Tip></label>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <input id="set-rain_sales_pct" type="number" min={RAIN_PCT_MIN} max={RAIN_PCT_MAX} step="1"
                       value={form.rain_sales_pct ?? ''} onChange={e => update('rain_sales_pct', e.target.value)}

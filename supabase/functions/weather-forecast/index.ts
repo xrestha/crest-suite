@@ -16,6 +16,17 @@ const CORS = {
 // never coordinates from the request, so it is not a free proxy for anywhere in the world. Its two
 // tables (weather_locations, weather_daily) are service-role only.
 //
+// S849 (FORECAST-7) bounds the cache. Points are keyed on a 0.1° grid (~10 km; MET's model outside
+// the Nordics is about that coarse, so nothing is lost, and cities 6 km apart share a point): about
+// 3,600 points in Nepal's box instead of 350,000. A point nobody has opened yet is opened by
+// inserting its row first, recording the outlet that asked (created_for_client); an outlet may open
+// at most NEW_POINTS_PER_DAY new points in 24 hours (the operator is exempt), and past that the
+// answer is `days: [], reason: 'location_budget'` with no fetch. Only one caller fetches a point at
+// a time: the opener holds the new row, and an existing point is claimed by moving its expires_at
+// CLAIM_MS ahead only while it has run out; a caller that finds the claim taken serves what is
+// stored. The function never deletes (service_role holds SELECT, INSERT, UPDATE on both tables), so
+// no pruning lives here: a prune needs a GRANT DELETE in a migration first.
+//
 // A day's trading window is 05:45–23:45 Nepal time, which is exactly 00:00–18:00 UTC of the same
 // date — MET's 6-hourly blocks start at 00/06/12/18 UTC, so they tile it with no remainder, and the
 // 23:45–05:45 block (overnight monsoon rain, which keeps nobody from dinner) falls outside it.
@@ -48,8 +59,13 @@ const WINDOW_MS = 18 * HOUR_MS
 const COMPLETE_MIN_MS = WINDOW_MS - HOUR_MS
 const PAST_DAYS = 60
 const AHEAD_DAYS = 9
+// S849 (FORECAST-7): new points an outlet may open in 24 hours, and how long a fetch holds its claim.
+const NEW_POINTS_PER_DAY = 3
+const CLAIM_MS = 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000
 
-const round2 = (n: number) => Math.round(n * 100) / 100
+// The cache key and the MET request, on a 0.1° grid (S849; was 0.01°).
+const roundKey = (n: number) => Math.round(n * 10) / 10
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10)
 const dayStartUtc = (iso: string) => Date.parse(`${iso}T00:00:00Z`)
 
@@ -178,7 +194,7 @@ Deno.serve(async (req) => {
     if (lat < NEPAL.latMin || lat > NEPAL.latMax || lon < NEPAL.lonMin || lon > NEPAL.lonMax) {
       return json({ days: [], reason: 'outside_nepal' })
     }
-    const latKey = round2(lat), lonKey = round2(lon)
+    const latKey = roundKey(lat), lonKey = roundKey(lon)
 
     const { data: loc, error: locErr } = await admin
       .from('weather_locations').select('*').eq('lat_key', latKey).eq('lon_key', lonKey).maybeSingle()
@@ -204,9 +220,51 @@ Deno.serve(async (req) => {
       }
 
       const userAgent = Deno.env.get('MET_USER_AGENT')
+      // Whether this caller may fetch the point now (S849, FORECAST-7). `false` = another caller is
+      // opening or fetching it, so this one serves what is stored.
+      let claimed = false
+      if (userAgent && !loc) {
+        // A point nobody has opened: the outlet's budget of new points first (the operator is
+        // exempt), then the claim is the row's own insert. Upserts later never name
+        // created_for_client, so the first opener stays recorded.
+        if (!isCallerAdmin) {
+          const { count, error: countErr } = await admin.from('weather_locations')
+            .select('lat_key', { count: 'exact', head: true })
+            .eq('created_for_client', clientId)
+            .gte('created_at', new Date(now - DAY_MS).toISOString())
+          if (countErr) return json({ error: 'Could not read the weather cache' }, 500)
+          if ((count ?? 0) >= NEW_POINTS_PER_DAY) return json({ days: [], reason: 'location_budget' })
+        }
+        const { data: opened, error: openErr } = await admin.from('weather_locations').upsert({
+          lat_key: latKey, lon_key: lonKey, created_for_client: clientId,
+          expires_at: new Date(now + CLAIM_MS).toISOString(),
+        }, { onConflict: 'lat_key,lon_key', ignoreDuplicates: true }).select('lat_key')
+        if (openErr) {
+          console.error('weather-forecast: could not open the point', openErr.message)
+          reason = 'cache_write_failed'
+        } else {
+          claimed = (opened || []).length > 0
+        }
+      } else if (userAgent) {
+        // An existing point: claimed only while its expires_at has run out, so two dashboards
+        // loading at once fetch it once. No row back = someone else holds the claim.
+        const nowIso = new Date(now).toISOString()
+        const { data: held, error: claimErr } = await admin.from('weather_locations')
+          .update({ expires_at: new Date(now + CLAIM_MS).toISOString() })
+          .eq('lat_key', latKey).eq('lon_key', lonKey)
+          .or(`expires_at.is.null,expires_at.lte."${nowIso}"`)
+          .select('lat_key')
+        if (claimErr) {
+          console.error('weather-forecast: could not claim the point', claimErr.message)
+          reason = 'cache_write_failed'
+        } else {
+          claimed = (held || []).length > 0
+        }
+      }
+
       if (!userAgent) {
         reason = 'not_configured'
-      } else {
+      } else if (claimed) {
         const headers: Record<string, string> = { 'User-Agent': userAgent, 'Accept': 'application/json' }
         if (loc?.last_modified) headers['If-Modified-Since'] = loc.last_modified
         const ctrl = new AbortController()

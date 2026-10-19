@@ -7,6 +7,7 @@
 // exactly which eight Wednesdays produced a number — while still tracking a café that is growing
 // or shrinking within a few weeks, which a plain mean could not (S694).
 import { bsToAd, adToBs } from './bsCalendar'
+import { isPosSource } from '../modules/ims/sales/salesDepletion'
 
 export const LOOKBACK_DAYS = 84 // 12 weeks — enough same-weekday samples for the average
 export const SAMPLES_PER_WEEKDAY = 8 // cap how many historical same-weekday points feed the average
@@ -21,66 +22,112 @@ const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate())
 
 // ── History ────────────────────────────────────────────────────────────────
 
-// Collapses raw pos_orders + their items into one row per calendar day: total covers, total
-// ex-VAT revenue, and qty sold per recipe. Orders with a credit_note_id are excluded — the same
-// rule SalesReport.jsx's dailyRows uses, since a credit-noted bill's revenue correction is posted
-// as a new entry on the day it's issued, not retroactively.
-//
-// Revenue is gross less discount, BEFORE VAT — the figure every other "Revenue" in the product
-// means (Owner Dashboard, Sales Entries, the Labor Forecast's learned sales per labour hour).
-// It used to be the VAT-inclusive amount payable, with VAT registration hard-coded true, so a
-// VAT-registered outlet's forecast ran ~13% above the basis its required hours were divided by.
-export function buildDailyHistory(orders, itemsByOrder, computeOrderAmounts) {
-  const byDay = {}
-  for (const o of orders) {
-    if (o.credit_note_id) continue
-    const d = new Date(o.closed_at)
-    const key = dayKeyOf(d)
-    const items = itemsByOrder[o.id] || []
-    // Revenue excludes item-level comps (never billed at menu price — see PosOrders.jsx); the
-    // qtyByRecipe loop below still counts them, since a comped dish was still prepared/consumed
-    // and demand planning cares about that regardless of what it billed for.
-    const amounts = computeOrderAmounts(o, items.filter(i => !i.comped), false)
-    const row = byDay[key] = byDay[key] || { date: startOfDay(d), weekday: d.getDay(), covers: 0, revenue: 0, qtyByRecipe: {}, basis: 'pos' }
-    row.covers += o.covers || 1
-    row.revenue += amounts.grossAmt - amounts.discount
-    for (const i of items) {
-      if (!i.recipe_id) continue
-      row.qtyByRecipe[i.recipe_id] = (row.qtyByRecipe[i.recipe_id] || 0) + i.qty
-    }
-  }
-  return Object.values(byDay).sort((a, b) => a.date - b.date)
+// 'YYYY-MM-DD' (a Nepal calendar date, as the server sends it) → that date at the RUNTIME's local
+// midnight (S849, FORECAST-5). getDay() and adToBs() read a Date's local getters, so a Date built
+// this way names the same weekday and the same BS day in Kathmandu, Sydney or London. `new
+// Date('2026-10-16')` would be UTC midnight, which is the previous evening west of Greenwich.
+export function dateOfIso(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''))
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null
 }
 
-// Merges manual sales_entries history for days NOT already covered by POS history (`coveredKeys`
-// is the set of toDateString() keys the POS rows produced). bs_day=0 is a bulk-entry sentinel
-// (Sales.js) and MUST be excluded, or a whole month's lump quantity lands on a single fabricated
-// "day", corrupting the weekday average. A day present in both sources used to become two samples
-// with the day's quantity split between them, halving that day's weight.
-export function buildManualDailyHistory(salesEntries, periodsById, coveredKeys = new Set()) {
-  const byDay = {}
-  for (const e of salesEntries) {
-    if (e.bs_day === 0) continue
-    const period = periodsById[e.period_id]
-    if (!period) continue
-    const ad = bsToAd(period.bs_year, period.bs_month, e.bs_day)
-    const key = dayKeyOf(ad)
-    if (coveredKeys.has(key)) continue
-    const row = byDay[key] = byDay[key] || { date: ad, weekday: ad.getDay(), covers: 0, revenue: 0, qtyByRecipe: {}, basis: 'manual' }
-    row.qtyByRecipe[e.recipe_id] = (row.qtyByRecipe[e.recipe_id] || 0) + (parseFloat(e.qty_sold) || 0)
-    // manual entries carry no covers signal at all — basis:'manual' lets forecastByWeekday exclude
-    // these rows from the covers/revenue average instead of silently averaging in a false zero
+// The till's history as demand_forecast_history returns it (S849, FORECAST-1/-2/-5): one object
+// per Nepal day with a paid bill — bills, covers, revenue, and plates per dish — into the per-day
+// rows forecastByWeekday averages. The server does every rule a bill row used to need here:
+// revenue is Σ qty × unit_price over the lines that were not comped, less the bill discount, before
+// VAT (the Revenue every other screen means, and what the S830 post nets into sales_entries);
+// credit-noted bills are left out; comped lines and Complimentary bills add plates, never revenue
+// or covers; and a day belongs to Nepal's calendar, never the device's. So nothing here computes
+// money — it only reshapes.
+export function historyFromDailyTotals(days) {
+  const out = []
+  for (const d of days || []) {
+    const date = dateOfIso(d?.date)
+    if (!date) continue
+    const qtyByRecipe = {}
+    for (const [recipeId, q] of Object.entries(d.qty || {})) {
+      const n = Number(q)
+      if (Number.isFinite(n) && n !== 0) qtyByRecipe[recipeId] = n
+    }
+    out.push({
+      date, weekday: date.getDay(),
+      bills: Number(d.bills) || 0,
+      covers: Number(d.covers) || 0,
+      revenue: Number(d.revenue) || 0,
+      qtyByRecipe, basis: 'pos',
+    })
   }
-  return Object.values(byDay)
+  return out.sort((a, b) => a.date - b.date)
+}
+
+// Hand-entered daily Sales Entries merged into the till's history (S849, FORECAST-6). Always, not
+// only when the till's history is thin: an outlet that switches its till off is forecast from its
+// new hand entries at once, instead of from old bills for six weeks.
+//
+// The rule is the stock rule (posSupersedesManual), per (day, dish): a hand-entered dish counts
+// unless the till sold that dish that day. On a till day without that dish its quantity joins the
+// till day — one day, one sample; covers and revenue stay the till's. On a day with no till bill it
+// makes a manual-basis day, which forecastByWeekday keeps out of the covers and revenue average (a
+// manual day carries no covers signal, which is not the same as zero covers).
+//
+// bs_day 0 is a Bulk monthly total (Sales.js): it has no day, so it is never a sample — a whole
+// month's lump on one fabricated day would wreck that weekday. Those rows are counted
+// (`undatedRows`) so the page can say why a weekday has no samples. `from` / `today` are the
+// server's window (local-midnight Dates from dateOfIso): a row outside [from, today) drops.
+export function mergeManualHistory(tillHistory, entries, periodsById, { from = null, today = null } = {}) {
+  const byKey = new Map()
+  const tillDishes = new Map() // day → the dishes the till sold that day
+  for (const t of tillHistory || []) {
+    const key = dayKeyOf(t.date)
+    byKey.set(key, t)
+    tillDishes.set(key, new Set(Object.keys(t.qtyByRecipe || {})))
+  }
+  const cloned = new Set() // till days copied before a manual quantity is added, so the input is never changed
+  const manualKeys = new Set()
+  let undatedRows = 0
+  for (const e of entries || []) {
+    const period = periodsById?.[e.period_id]
+    if (!period) continue
+    const day = Number(e.bs_day) || 0
+    if (day <= 0) { undatedRows += 1; continue }
+    const ad = bsToAd(period.bs_year, period.bs_month, day)
+    if (!ad || (from && ad < from) || (today && ad >= today)) continue
+    const qty = parseFloat(e.qty_sold) || 0
+    if (!e.recipe_id || qty === 0) continue
+    const key = dayKeyOf(ad)
+    let row = byKey.get(key)
+    if (tillDishes.has(key)) {
+      // The till sold this dish this day: the till's figure stands (the stock rule).
+      if (tillDishes.get(key).has(e.recipe_id)) continue
+      if (!cloned.has(key)) {
+        row = { ...row, qtyByRecipe: { ...row.qtyByRecipe } }
+        byKey.set(key, row)
+        cloned.add(key)
+      }
+    } else if (!row) {
+      row = { date: ad, weekday: ad.getDay(), covers: 0, revenue: 0, qtyByRecipe: {}, basis: 'manual' }
+      byKey.set(key, row)
+      manualKeys.add(key)
+    }
+    row.qtyByRecipe[e.recipe_id] = (row.qtyByRecipe[e.recipe_id] || 0) + qty
+  }
+  const history = [...byKey.values()].sort((a, b) => a.date - b.date)
+  return { history, manualDays: manualKeys.size, undatedRows }
 }
 
 // Which monthly_periods can hold a day inside the lookback window. sales_entries has no date of
 // its own, only period + bs_day, so the manual read is bounded by period rather than by date —
 // it used to fetch every period the client ever had to use at most eight days per weekday.
-export function periodsInLookback(periods, lookbackStart) {
+// `lookbackEnd` (optional) drops periods that start after the window, for a window in the past.
+export function periodsInLookback(periods, lookbackStart, lookbackEnd = null) {
   const start = adToBs(lookbackStart)
   const startKey = start.year * 100 + start.month
-  return (periods || []).filter(p => p.bs_year * 100 + p.bs_month >= startKey)
+  const end = lookbackEnd ? adToBs(lookbackEnd) : null
+  const endKey = end ? end.year * 100 + end.month : Infinity
+  return (periods || []).filter(p => {
+    const k = p.bs_year * 100 + p.bs_month
+    return k >= startKey && k <= endKey
+  })
 }
 
 // ── Model ──────────────────────────────────────────────────────────────────
@@ -126,7 +173,19 @@ export function holidaysByKeyOf(rows) {
 // evidence about an ordinary Wednesday; averaged in, it inflated or flattened the next eight weeks
 // of that weekday, and the multiplier on the holiday itself then counted the festival twice. The
 // next-most-recent ordinary day of that weekday takes its place.
-export function forecastByWeekday(dailyHistory, horizonDays, holidaysByKey = {}, now = new Date()) {
+//
+// `now` is the server's Nepal date since S849 (FORECAST-5), handed in by runForecast as a
+// local-midnight Date, so the horizon starts at Nepal's tomorrow whatever the device's clock says.
+//
+// `sampleFactorOf(sample)` (S849, FORECAST-4) is the rain factor of one sample day: the Owner's
+// rainy-day % / 100 on a recorded rainy day, else 1. With it, each day also carries
+// `sampleRainFactor` — the recency-weighted mean of its samples' factors, with the SAME weights as
+// the quantity average, so it is exactly the share of rain inside that average — and
+// `rainySampleCount` (samples whose factor is not 1). The buying list divides by the first, so a
+// rainy day ahead is bought at the Owner's % of a DRY day rather than of a wet fortnight's average.
+// The averages themselves are unchanged: the dish table and the Roster show what was observed.
+// No sampler: both fields are null (no rain setting, or no weather when the forecast ran).
+export function forecastByWeekday(dailyHistory, horizonDays, holidaysByKey = {}, now = new Date(), { sampleFactorOf = null } = {}) {
   const todayStart = startOfDay(now)
   const byWeekday = Array.from({ length: 7 }, () => [])
   const hasHolidays = Object.keys(holidaysByKey || {}).length > 0
@@ -175,9 +234,20 @@ export function forecastByWeekday(dailyHistory, horizonDays, holidaysByKey = {},
     const rawCovers = weightedMean(posSamples.map(s => s.covers))
     const rawRevenue = weightedMean(posSamples.map(s => s.revenue))
 
+    let sampleRainFactor = null, rainySampleCount = null
+    if (typeof sampleFactorOf === 'function') {
+      const factors = samples.map(s => {
+        const f = Number(sampleFactorOf(s))
+        return Number.isFinite(f) && f > 0 ? f : 1
+      })
+      sampleRainFactor = weightedMean(factors)
+      rainySampleCount = factors.filter(f => f !== 1).length
+    }
+
     results.push({
       date: target, bs, weekday,
       sampleCount: n, posSampleCount: posSamples.length,
+      sampleRainFactor, rainySampleCount,
       forecastCovers: rawCovers != null && multiplier != null ? rawCovers * multiplier : rawCovers,
       forecastRevenue: rawRevenue != null && multiplier != null ? rawRevenue * multiplier : rawRevenue,
       forecastQtyByRecipe: qtyByRecipe,
@@ -185,6 +255,13 @@ export function forecastByWeekday(dailyHistory, horizonDays, holidaysByKey = {},
     })
   }
   return results
+}
+
+// Is there anything at all behind this forecast (S849, FORECAST-1)? A run whose every day has no
+// sample learned from nothing, and writing it would replace a good forecast with an empty one —
+// which is what an IMS supervisor's Recompute did while the till read came back empty under RLS.
+export function hasForecastEvidence(forecast) {
+  return (forecast || []).some(f => (f.sampleCount || 0) > 0)
 }
 
 // ── Presentation ───────────────────────────────────────────────────────────
@@ -233,6 +310,62 @@ export function aggregateIngredientDemand(totalsByRecipe, explodedByRecipe) {
   return byItem
 }
 
+// Two per-item demand maps summed (S849, FORECAST-3): the recipes' half and the guests' choices'.
+export function addDemand(a, b) {
+  const out = { ...(a || {}) }
+  for (const [id, q] of Object.entries(b || {})) out[id] = (out[id] || 0) + q
+  return out
+}
+
+// The guests' usual choices on each dish, per plate (S849, FORECAST-3, owner decision SU13 a).
+// A Crest Customization sale stores its choices' stock lines on the sales row as signed per-plate
+// deltas (`ingredient_deltas`, already scaled by size — S760); a till plate with no choice carries
+// none. So the average per plate is Σ (deltas × plates) ÷ Σ plates over EVERY till plate of the
+// dish, a plate with no choice counting as none — 40 of 60 bowls with +30 g banana is 20 g a plate.
+//
+// Only till rows count (`isPosSource`: 'pos' and 'pos_comp' — the one definition of "a till sale"),
+// sold (qty_sold > 0), and dated (bs_day > 0) inside [from, to): a hand-entered row has no choices,
+// a credit row is not a plate, and a Bulk row has no day. Lines stay in the shape they were stored
+// in — `{ item_id, qty }` or `{ sub_recipe_id, qty }` — and keep their sign ("no onion" is minus),
+// so the page runs them through the one conversion (orderLineIngredients' deltaItems), exactly as
+// stock does. Returns { recipeId: [{ item_id | sub_recipe_id, qty }] }; a dish with no choice
+// lines at all is absent.
+export function averageChoicesPerPlate(rows, { periodsById = {}, from = null, to = null } = {}) {
+  const plates = {}
+  const sums = {}
+  for (const r of rows || []) {
+    if (!isPosSource(r.source) || !r.recipe_id) continue
+    const n = Number(r.qty_sold) || 0
+    const day = Number(r.bs_day) || 0
+    if (!(n > 0) || day <= 0) continue
+    const period = periodsById[r.period_id]
+    if (!period) continue
+    const ad = bsToAd(period.bs_year, period.bs_month, day)
+    if (!ad || (from && ad < from) || (to && ad >= to)) continue
+    plates[r.recipe_id] = (plates[r.recipe_id] || 0) + n
+    for (const d of r.ingredient_deltas || []) {
+      const q = Number(d?.qty) || 0
+      if (!q) continue
+      const key = d.item_id ? `i:${d.item_id}` : d.sub_recipe_id ? `s:${d.sub_recipe_id}` : null
+      if (!key) continue
+      const bucket = sums[r.recipe_id] || (sums[r.recipe_id] = {})
+      bucket[key] = (bucket[key] || 0) + q * n
+    }
+  }
+  const out = {}
+  for (const [recipeId, bucket] of Object.entries(sums)) {
+    const p = plates[recipeId]
+    const lines = Object.entries(bucket)
+      .map(([key, total]) => {
+        const id = key.slice(2)
+        return key.startsWith('i:') ? { item_id: id, qty: total / p } : { sub_recipe_id: id, qty: total / p }
+      })
+      .filter(l => Math.abs(l.qty) > 1e-12)
+    if (lines.length) out[recipeId] = lines
+  }
+  return out
+}
+
 // What to buy for the horizon: forecast use, what is in store, and the difference (S756, D21).
 //
 // `onHandById` comes from `buildStockRows()` (stockReportCalc.js) — the one on-hand calculation,
@@ -245,9 +378,13 @@ export function aggregateIngredientDemand(totalsByRecipe, explodedByRecipe) {
 // Safety stock (S800, owner decision): `parById` is each item's par level — the minimum the owner
 // wants left on the shelf — and the list buys enough to cover the forecast AND keep it, so the days
 // ahead do not end on an empty shelf. No par (or null) is 0, which is the list as it was.
+//
+// Use is never below zero (S849, FORECAST-3): the guests' choices are signed, and an item whose
+// "no onion" average outweighs the recipes' onion would otherwise make a purchase negative.
 export function ingredientBuyList(demandByItem, onHandById, parById = null) {
   const known = onHandById != null
-  return Object.entries(demandByItem || {}).map(([id, use]) => {
+  return Object.entries(demandByItem || {}).map(([id, rawUse]) => {
+    const use = rawUse > 0 ? rawUse : 0
     const par = parById ? Math.max(0, Number(parById[id]) || 0) : 0
     if (!known) return { id, use, par, inStore: null, toBuy: null }
     const inStore = Math.max(0, Number(onHandById[id]) || 0)
@@ -259,7 +396,9 @@ export function ingredientBuyList(demandByItem, onHandById, parById = null) {
 // Rainy days (S800, owner decision): each forecast day's dishes scaled by `factorOfDay(day)` — the
 // Owner's rain percentage on a day with rain forecast, 1 otherwise (rainFactorForMonth decides
 // which, the rule the dashboard's sales forecast uses). A scaled day carries `rainFactor` so the
-// page can say which days it lowered. Days at 1 are returned as they were.
+// page can say which days it lowered. Days at 1 are returned as they were. Since S849 (FORECAST-4)
+// the page's factor is that rain % ÷ the day's stored `sampleRainFactor`, so the rain already
+// inside the weekday average is not counted a second time.
 export function scaleForecastDays(days, factorOfDay) {
   return (days || []).map(d => {
     const f = factorOfDay(d)

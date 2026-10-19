@@ -34,6 +34,8 @@ import SuggestPopover from './SuggestPopover'
 import ShiftSettingsPanel from './ShiftSettingsPanel'
 import SwapRequestsPanel from './SwapRequestsPanel'
 import { lcBand, bandFigure, LABOR_WARN, LABOR_CRITICAL } from '../../../shared/operatingBands'
+import { useSuiteAccess, SUITE_PAGES } from '../../../components/SuiteGate'
+import { nepalBsLong } from '../../../shared/nepalTime'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -164,6 +166,13 @@ export default function Roster() {
   // manual Sales Entries carry none, and Demand Forecast's covers come from POS history alone, so
   // without POS the Recommended Staff / Status axis can never hold a value on any row.
   const hasPos = !!clientModules?.pos
+  // Whether Demand Forecast is on this outlet (S849, ACCESS-10): Crest Suite Pro with Inventory, the
+  // gate Demand Forecast's own page asks (SuiteGate's one answer). The Labor Forecast reads that
+  // page's forecast for coming days, so its copy must not send an HR-only outlet to a page it does
+  // not have. An outlet row that did not load ('unknown') keeps the ordinary wording: "this outlet does
+  // not have it" would be a claim the page cannot make (ACCESS-11).
+  const forecastAccess = useSuiteAccess(SUITE_PAGES.demandForecast)
+  const forecastOpen = forecastAccess.allowed || forecastAccess.reason === 'unknown'
   const { colors } = useTheme()
   const { settings, saveSettings } = useSettings()
   const { scopedFrom, scopedInsert, scopedUpsert, scopedDelete } = useScopedDb()
@@ -255,6 +264,9 @@ export default function Roster() {
   // demand_forecast_daily, from src/utils/demandForecastData.js's runForecast). Best-effort — a
   // client who's never run Demand Forecast just sees an empty overlay, not an error.
   const [forecastByDay, setForecastByDay] = useState({}) // { 'y:m:d': { covers, revenue, generated_at } }
+  // The overlay read failed (S849, FORECAST-10e): a coming day with no row then says "not loaded",
+  // not "no forecast" — the forecast may well exist; this page just could not read it this time.
+  const [forecastLoadFailed, setForecastLoadFailed] = useState(false)
   // Guarded like the board's other three range loaders (S803). Without it, two quick ‹ › presses let
   // the older week's read land last; its map is keyed by date, so the week on screen showed no
   // forecast at all — "Rec" gone and Suggest hidden on exactly the short-staffed days it is for.
@@ -277,14 +289,15 @@ export default function Roster() {
         scopedFrom('demand_forecast_daily', 'bs_year, bs_month, bs_day, forecast_covers, forecast_revenue, revenue_estimated, generated_at, holiday_name, holiday_multiplier')
           .is('recipe_id', null).eq('bs_year', bs.year).eq('bs_month', bs.month)))
       if (!forecastReq.isCurrent(reqKey)) return
-      for (const r of results) { if (r && r.error) { setBoardError(boardLoadFailed(r.error)); return } all.push(...(r.data || [])) }
+      for (const r of results) { if (r && r.error) { setForecastLoadFailed(true); setBoardError(boardLoadFailed(r.error)); return } all.push(...(r.data || [])) }
     } else {
       const { data, error } = await scopedFrom('demand_forecast_daily', 'bs_year, bs_month, bs_day, forecast_covers, forecast_revenue, revenue_estimated, generated_at, holiday_name, holiday_multiplier')
         .is('recipe_id', null).eq('bs_year', bsYear).eq('bs_month', bsMonth)
       if (!forecastReq.isCurrent(reqKey)) return
-      if (error) { setBoardError(boardLoadFailed(error)); return }
+      if (error) { setForecastLoadFailed(true); setBoardError(boardLoadFailed(error)); return }
       all = data || []
     }
+    setForecastLoadFailed(false)
     const map = {}
     for (const r of all) {
       const key = `${r.bs_year}:${r.bs_month}:${r.bs_day}`
@@ -2064,9 +2077,22 @@ export default function Roster() {
           )}
 
           {/* Two sentences (S805): each holiday badge explains itself in its own Tip. */}
+          {/* S849 ACCESS-10: where coming days' revenue comes from depends on whether this outlet has
+              Demand Forecast at all (Crest Suite Pro with Inventory). */}
           <p className="page-footnote" style={{ margin: '0 0 8px' }}>
-            Coming days are priced from the roster at what each hour costs the business (basic pay, allowances and employer SSF),
-            with revenue and covers from Demand Forecast; a day with no forecast yet shows &quot;—&quot;. Past days, marked{' '}
+            {forecastOpen ? (
+              <>
+                Coming days are priced from the roster at what each hour costs the business (basic pay, allowances and employer SSF),
+                with revenue and covers from Demand Forecast (Crest Suite Pro), rebuilt by an inventory supervisor or manager, or the
+                Owner; a day with no forecast yet shows &quot;—&quot;.
+              </>
+            ) : (
+              <>
+                Coming days are priced from the roster at what each hour costs the business (basic pay, allowances and employer SSF);
+                their revenue and covers come from Demand Forecast, part of Crest Suite Pro with Inventory, which this outlet does not
+                have, so they show &quot;—&quot;.
+              </>
+            )}{' '}Past days, marked{' '}
             <span className="badge-gray" style={{ fontSize: 10 }}>actual</span>, show what was recorded, from Attendance, Sales Entries
             and closed POS bills, with the rostered figure underneath.
           </p>
@@ -2091,9 +2117,16 @@ export default function Roster() {
             if (!forecastGeneratedAt) return null
             const ageDays = Math.floor((Date.now() - new Date(forecastGeneratedAt).getTime()) / 86400000)
             const stale = ageDays > 7
+            // S849 ACCESS-10: the date by Nepal's calendar, and a next step only where there is one —
+            // who can re-run it on an outlet that has Demand Forecast, and the plain fact on one that
+            // no longer does (these rows are left from before).
+            const madeOn = nepalBsLong(forecastGeneratedAt) || formatAd(new Date(forecastGeneratedAt))
+            const tail = !forecastOpen
+              ? ' — Demand Forecast is no longer on this outlet\'s plan, so these figures will not be refreshed.'
+              : stale ? ' — ask an inventory supervisor or manager, or the Owner, to re-run Demand Forecast to bring these figures up to date.' : '.'
             return (
-              <p style={{ fontSize: 12, color: stale ? 'var(--theme-amber-text)' : 'var(--theme-text3)', margin: '0 0 8px' }}>
-                Forecast last generated {formatAd(new Date(forecastGeneratedAt))}{ageDays > 0 ? ` (${ageDays} day${ageDays === 1 ? '' : 's'} ago)` : ' (today)'}{stale ? ' — re-run Demand Forecast to bring these figures up to date.' : '.'}
+              <p style={{ fontSize: 12, color: stale || !forecastOpen ? 'var(--theme-amber-text)' : 'var(--theme-text3)', margin: '0 0 8px' }}>
+                Forecast last generated {madeOn}{ageDays > 0 ? ` (${ageDays} day${ageDays === 1 ? '' : 's'} ago)` : ' (today)'}{tail}
               </p>
             )
           })()}
@@ -2277,7 +2310,7 @@ export default function Roster() {
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             {r.forecastRevenue != null ? fmtNpr(r.forecastRevenue) : '—'}
-                            {r.forecastRevenue == null && plan('no forecast')}
+                            {r.forecastRevenue == null && plan(forecastLoadFailed ? 'not loaded' : 'no forecast')}
                           </td>
                           <td style={{ textAlign: 'right' }}>{r.plannedCost > 0 ? fmtNpr(r.plannedCost) : '—'}</td>
                           {/* The same band the Owner Dashboard and the Monthly Owner Report put on

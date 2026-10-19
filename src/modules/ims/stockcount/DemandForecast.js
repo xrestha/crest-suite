@@ -8,22 +8,24 @@ import { firstError } from '../../../shared/queryError'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
-import { nepalBs, nepalBsLong, nepalCivilDate } from '../../../shared/nepalTime'
+import { nepalBs, nepalBsLong, nepalCivilDate, nepalTime } from '../../../shared/nepalTime'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, bsToAd, getBsToday, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 import { runForecast } from '../../../utils/demandForecastData'
-import { splitDishList, totalQtyByRecipe, aggregateIngredientDemand, ingredientBuyList, scaleForecastDays, usualSupplierByItem, SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD } from '../../../utils/demandForecastMath'
+import { splitDishList, totalQtyByRecipe, aggregateIngredientDemand, ingredientBuyList, scaleForecastDays, usualSupplierByItem, addDemand, averageChoicesPerPlate, periodsInLookback, LOOKBACK_DAYS, SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD } from '../../../utils/demandForecastMath'
 import { packsFor, packText } from './reorderPacks'
 import { useSettings } from '../../../context/SettingsContext'
 import { useWeatherStrip } from '../../dashboard/useWeatherStrip'
-import { rainFactorForMonth, rainPctValue } from '../../dashboard/weatherEffect'
+import { rainFactorForMonth, rainPctValue, isRainyDay } from '../../dashboard/weatherEffect'
 import { buildStockRows } from './stockReportCalc'
+import { readPeriodTransfers } from '../transfers/transferFlows'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
-import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
+import { loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
 import { printWithTitle } from '../../../utils/printTitle'
-import { errorText } from '../../../shared/errorText'
-import SuiteGate from '../../../components/SuiteGate'
+import { errorText, isNetworkError } from '../../../shared/errorText'
+import { withTimeout, settleWithin, isTimeout } from '../../../utils/withTimeout'
+import SuiteGate, { SUITE_PAGES } from '../../../components/SuiteGate'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { FilterChips } from '../../../components/Tabs'
 
@@ -87,17 +89,20 @@ async function loadOnHand(scopedFrom, items) {
     fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', period.id).order('id')),
     // Safety stock (S800): each item's par — one row per item per client, so chunked by item.
     fetchAllRowsChunked(itemIds, ids => scopedFrom('par_levels', 'id, item_id, par_qty').in('item_id', ids).order('id')),
+    // Stock transfers between outlets (S849, PNL-8) move the shelf like a purchase and a return, the
+    // same as on Stock Report. A failed read is a failed shelf read, never "no transfers".
+    readPeriodTransfers(scopedFrom, period.id, { select: 'id, item_id, qty, direction' }),
   ])
   const failed = firstError(results)
   if (failed) throw failed
-  const [{ data: opening }, { data: closing }, { data: purchases }, { data: returns }, { data: wastages }, { data: staffMeals }, { data: sales }, { data: pars }] = results
+  const [{ data: opening }, { data: closing }, { data: purchases }, { data: returns }, { data: wastages }, { data: staffMeals }, { data: sales }, { data: pars }, { data: transfers }] = results
   const soldIds = [...new Set((sales || []).map(s => s.recipe_id).filter(Boolean))]
   // Both walks throw on a failed read, which the caller already turns into its own notice (S758).
   const [breakdown, explosion] = await Promise.all([
     soldIds.length > 0 ? explodeRecipeIngredients(supabase, soldIds) : {},
     loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
   ])
-  const rows = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion })
+  const rows = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion, transfers })
   return {
     onHandById: Object.fromEntries(rows.map(r => [r.item.id, r.onHand])),
     period,
@@ -132,17 +137,96 @@ async function loadUsualSuppliers(scopedFrom, itemIds, periods) {
   }
 }
 
+// The run's own 12-week window (S849): the Nepal date the shown run was made on, and 84 days back.
+// The forecast's history ended the day before the run, so the guests' choices and the Bulk-row
+// count below are read over the same days the forecast learned from, not over today's window.
+function runWindow(runAt) {
+  const to = runAt ? nepalCivilDate(runAt) : null
+  if (!to) return null
+  const from = new Date(to)
+  from.setDate(to.getDate() - LOOKBACK_DAYS)
+  return { from, to }
+}
+
+// The guests' usual choices on each forecast dish, per plate, as raw items (S849, FORECAST-3,
+// owner decision SU13 a). Learned from the till's posted sales over the run's own window
+// (averageChoicesPerPlate), then run through the ONE conversion stock uses (loadDeltaExplosion +
+// deltaItems), so the result has the recipe explosion's shape: { recipeId: [{ item_id, qty }] },
+// signed. A positive `.in` on `source` is deliberate: a NULL-source row is hand-entered and carries
+// no choices. Throws on any failed read; the caller shows its own notice and keeps the recipe half.
+async function loadUsualChoices(periodsP, recipeIds, runAt) {
+  const win = runWindow(runAt)
+  if (!win || recipeIds.length === 0) return {}
+  const { data: periods, error: pErr } = await periodsP
+  if (pErr) throw pErr
+  const windowPeriods = periodsInLookback(periods, win.from, win.to)
+  if (windowPeriods.length === 0) return {}
+  const periodIds = windowPeriods.map(p => p.id)
+  const { data: rows, error } = await fetchAllRowsChunked(recipeIds, ids => supabase.from('sales_entries')
+    .select('period_id, recipe_id, bs_day, qty_sold, source, ingredient_deltas')
+    .in('period_id', periodIds).in('recipe_id', ids).in('source', ['pos', 'pos_comp']).order('id'))
+  if (error) throw error
+  const avg = averageChoicesPerPlate(rows, { periodsById: Object.fromEntries(windowPeriods.map(p => [p.id, p])), ...win })
+  const lists = Object.values(avg)
+  if (lists.length === 0) return {}
+  const explosion = await loadDeltaExplosion(supabase, lists)
+  return Object.fromEntries(Object.entries(avg).map(([recipeId, lines]) => [recipeId, deltaItems(lines, explosion)]))
+}
+
+// How many Bulk monthly Sales Entries (bs_day 0) fall in the run's window (S849, FORECAST-10c). A
+// weekday with no samples on an outlet that enters sales as monthly totals is not "no sales" — the
+// sales are there, with no day on them. The run's own count is not stored, so this one head count
+// stands in for it, and only when some shown day has no samples.
+async function countUndatedRows(periodsP, runAt) {
+  const win = runWindow(runAt)
+  if (!win) return null
+  const { data: periods, error: pErr } = await periodsP
+  if (pErr) throw pErr
+  const ids = periodsInLookback(periods, win.from, win.to).map(p => p.id)
+  if (ids.length === 0) return 0
+  const { count, error } = await supabase.from('sales_entries').select('id', { count: 'exact', head: true })
+    .in('period_id', ids).eq('bs_day', 0).or('source.is.null,source.eq.manual')
+  if (error) throw error
+  return count || 0
+}
+
+// "18 Bhadra 2083, 9:14 AM": every time on this page, by Nepal's calendar and clock (S849, FORECAST-8).
+function whenText(ts) {
+  const d = nepalBsLong(ts)
+  const t = nepalTime(ts)
+  return d && t ? `${d}, ${t}` : (d || t || '')
+}
+
 // What stood behind a day's numbers — shown under the weekday and on every dish's hover, so a
 // forecast averaged over one week and one over eight no longer look identical (S694).
-function evidenceText(f) {
+// `undated` (S849): Bulk monthly rows in the window — the reason a weekday can have no samples.
+function evidenceText(f, { undated = 0 } = {}) {
   const weekday = WEEKDAYS_FULL[dayOf(f)]
   if (f.sampleCount == null) return null // written before sample_count existed — say nothing rather than guess
-  if (f.sampleCount === 0) return `no ${weekday}s in the last 12 weeks had sales`
+  if (f.sampleCount === 0) {
+    return undated > 0
+      ? `no dated sales on ${weekday}s in the last 12 weeks — monthly Bulk totals carry no day`
+      : `no ${weekday}s in the last 12 weeks had sales`
+  }
   return `from the last ${f.sampleCount} ${weekday}${f.sampleCount === 1 ? '' : 's'}${f.sampleCount >= SAMPLES_PER_WEEKDAY ? '' : ' with sales'}`
 }
 
+// The page behind its two gates (S849, ACCESS's Suite-page pattern, the render-prop form). The body
+// below holds every read and the weather hook, and SuiteGate calls it only once the page is open,
+// so nothing is read behind the upsell card (it used to load the whole forecast, the buying list's
+// stock reads and the weather there). The rank check stays here, before anything mounts.
 export default function DemandForecast() {
-  const { clientId, hasImsAccess, clientModules, hasFeature } = useAuth()
+  const { hasImsAccess } = useAuth()
+  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+  return (
+    <SuiteGate page={SUITE_PAGES.demandForecast}>
+      {() => <DemandForecastBody />}
+    </SuiteGate>
+  )
+}
+
+function DemandForecastBody() {
+  const { clientId, hasImsAccess, clientModules, hasFeature, customizationEnabled } = useAuth()
   const { settings } = useSettings()
   const navigate = useNavigate()
   const { scopedFrom } = useScopedDb()
@@ -166,13 +250,21 @@ export default function DemandForecast() {
   // forecast only runs when someone presses Recompute, so coming back eleven days later showed
   // "Next 7 Days" listing last week and an ingredient list for a week that was over.
   const [stale, setStale] = useState({ dropped: 0, total: 0 })
+  // When the shown run was made (S849, FORECAST-8): its own newest generated_at, the server's
+  // clock. The stale banner, the all-passed state and the print/Excel scope line say this, not the
+  // run log, whose newest row may be a refused or failed run of the same horizon.
+  const [runAt, setRunAt] = useState(null)
+  // Bulk monthly Sales Entries in the run's window (FORECAST-10c); null = not counted.
+  const [undatedRows, setUndatedRows] = useState(null)
   // Ingredient demand for the horizon — loads after the day table, independently, so a slow
   // recipe walk never holds the forecast itself hostage, and its failure is its own message.
   // `stockError`/`stockPeriod` are the in-store half (S756, D21), which fails on its own too: a
   // shelf that could not be read leaves forecast use on screen and blanks only In store / To buy.
   // S800: the loaded pieces, not the finished list. The list is derived below from these and the
   // forecast scaled for rain, so the weather arriving after the reads re-works it instead of re-reading.
-  const EMPTY_ING = { loading: false, error: null, exploded: {}, items: [], stock: null, stockError: null, suppliers: null, supplierError: null }
+  // S849: `choicePerPlate` is the guests' usual choices per plate (FORECAST-3), with its own error
+  // slot, so a failed choice read leaves the recipe half of the list standing.
+  const EMPTY_ING = { loading: false, error: null, exploded: {}, choicePerPlate: {}, choiceError: null, items: [], stock: null, stockError: null, suppliers: null, supplierError: null }
   const [ingredients, setIngredients] = useState(EMPTY_ING)
   const [showCovered, setShowCovered] = useState(false)
 
@@ -181,16 +273,26 @@ export default function DemandForecast() {
   // (the S693 Roster fix, applied here for the same reason).
   const hasPos = !!clientModules?.pos
 
-  const loadIngredients = useCallback(async (list, reqKey) => {
+  const loadIngredients = useCallback(async (list, reqKey, { periodsP, runAt: madeAt } = {}) => {
     const totals = totalQtyByRecipe(list)
     const recipeIds = Object.keys(totals).filter(id => totals[id] > 0)
     if (recipeIds.length === 0) { setIngredients(EMPTY_ING); return }
     setIngredients(s => ({ ...s, loading: true, error: null }))
     try {
       // Same walk the Reorder Report uses for theoretical usage: leaf items only, sub-recipes
-      // resolved through their yield, item yield_pct applied.
-      const exploded = await explodeRecipeIngredients(supabase, recipeIds)
-      const itemIds = Object.keys(aggregateIngredientDemand(totals, exploded))
+      // resolved through their yield, item yield_pct applied. Beside it, the guests' usual choices
+      // (Customization outlets only: elsewhere no sale carries any), which fail on their own.
+      const [exploded, choiceRes] = await Promise.all([
+        explodeRecipeIngredients(supabase, recipeIds),
+        customizationEnabled && periodsP
+          ? withTimeout(loadUsualChoices(periodsP, recipeIds, madeAt), 30000, 'Reading the guests\' usual choices')
+            .then(choicePerPlate => ({ choicePerPlate }), choiceError => ({ choiceError }))
+          : Promise.resolve({ choicePerPlate: {} }),
+      ])
+      const choicePerPlate = choiceRes.choicePerPlate || {}
+      const choiceError = choiceRes.choiceError || null
+      // Items reached only through a choice are loaded like any other: names, rates, in store, suppliers.
+      const itemIds = Object.keys(addDemand(aggregateIngredientDemand(totals, exploded), aggregateIngredientDemand(totals, choicePerPlate)))
       let items = []
       if (itemIds.length > 0) {
         const { data, error } = await fetchAllRowsChunked(itemIds, ids =>
@@ -224,12 +326,12 @@ export default function DemandForecast() {
         supplierError = err
       }
       if (!horizonReq.isCurrent(reqKey)) return
-      setIngredients({ loading: false, error: null, exploded, items, stock, stockError, suppliers, supplierError })
+      setIngredients({ loading: false, error: null, exploded, choicePerPlate, choiceError, items, stock, stockError, suppliers, supplierError })
     } catch (err) {
       if (!horizonReq.isCurrent(reqKey)) return
       setIngredients({ ...EMPTY_ING, error: err })
     }
-  }, [scopedFrom, horizonReq]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scopedFrom, horizonReq, customizationEnabled]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadStored = useCallback(async () => {
     if (!clientId) return
@@ -238,20 +340,29 @@ export default function DemandForecast() {
     setLoading(true)
     setLoadError(null)
     setExpandedIdx(null)
+    // The client's months, read once for the two follow-up reads over the run's window (the guests'
+    // choices and the Bulk-row count). Started now, beside the forecast, but never part of the
+    // forecast's own error: both follow-ups fail on their own.
+    const periodsP = settleWithin(scopedFrom('monthly_periods', 'id, bs_year, bs_month'), 20000, 'Loading the months')
+    // Bounded (S849, FORECAST-10a): a hung read becomes the read's own error, so the page shows
+    // ReportLoadError instead of "Loading…" for ever.
     const results = await Promise.all([
       // Paged (S792 PLANNING-1): one row per day plus one per dish forecast that day, so a 30-day
       // run on a 40-dish menu is ~1,230 rows, and past 1,000 the later days lost their dishes and
       // "Ingredients to buy" under-read with no error. `id` is the unique tiebreak paging needs.
-      fetchAllRows(() => scopedFrom('demand_forecast_daily')
+      settleWithin(fetchAllRows(() => scopedFrom('demand_forecast_daily')
         .eq('horizon_days', horizon)
-        .order('bs_year').order('bs_month').order('bs_day').order('id')),
-      scopedFrom('demand_forecast_run_log')
-        .order('run_at', { ascending: false }).limit(1),
+        .order('bs_year').order('bs_month').order('bs_day').order('id')), 20000, 'Loading the forecast'),
+      // This horizon's own last run (FORECAST-8): a 30-day Recompute is not the 7-day forecast's
+      // news. Rows written before S849 carry no horizon and are simply not shown.
+      settleWithin(scopedFrom('demand_forecast_run_log')
+        .eq('horizon_days', horizon)
+        .order('run_at', { ascending: false }).limit(1), 20000, 'Loading the forecast'),
     ])
     if (!horizonReq.isCurrent(reqKey)) return
     // A failed read must not wear the "no forecast yet — click Recompute" empty state (S612).
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setForecast([]); setLoading(false); return }
+    if (failed) { setLoadError(failed); setForecast([]); setRunAt(null); setLoading(false); return }
     const [{ data: rows }, { data: runs }] = results
     setLastRun(runs?.[0] || null)
 
@@ -259,18 +370,24 @@ export default function DemandForecast() {
     // same per-day shape the recompute path already produces, so the table renders identically
     // whether its data came from a fresh run or a prior one.
     const byDay = {}
-    for (const r of newestRunOnly(rows || [])) {
+    const shown = newestRunOnly(rows || [])
+    const madeAt = shown.reduce((a, r) => (!a || new Date(r.generated_at) > new Date(a) ? r.generated_at : a), null)
+    for (const r of shown) {
       const key = `${r.bs_year}:${r.bs_month}:${r.bs_day}`
       const day = byDay[key] = byDay[key] || {
         bs: { year: r.bs_year, month: r.bs_month, day: r.bs_day },
         forecastCovers: null, forecastRevenue: null, revenueEstimated: false, forecastQtyByRecipe: {}, holiday: null,
-        sampleCount: null, posSampleCount: null,
+        sampleCount: null, posSampleCount: null, sampleRainFactor: null, rainySampleCount: null,
       }
       if (r.recipe_id) day.forecastQtyByRecipe[r.recipe_id] = parseFloat(r.forecast_qty) || 0
       else {
         day.forecastCovers = r.forecast_covers; day.forecastRevenue = r.forecast_revenue; day.revenueEstimated = r.revenue_estimated
         day.holiday = r.holiday_name ? { name: r.holiday_name, multiplier: r.holiday_multiplier } : null
         day.sampleCount = r.sample_count ?? null; day.posSampleCount = r.pos_sample_count ?? null
+        // How rainy the days it learned from were (FORECAST-4); null on a run with no rain setting
+        // or no weather, and on every row written before S849.
+        day.sampleRainFactor = r.sample_rain_factor != null ? Number(r.sample_rain_factor) : null
+        day.rainySampleCount = r.rainy_sample_count ?? null
       }
     }
     const all = Object.values(byDay).sort((a, b) => a.bs.year - b.bs.year || a.bs.month - b.bs.month || a.bs.day - b.bs.day)
@@ -279,18 +396,28 @@ export default function DemandForecast() {
     const today = nepalBs(new Date()) || getBsToday()
     const list = all.filter(d => bsKey(d.bs) >= bsKey(today))
     setStale({ dropped: all.length - list.length, total: all.length })
+    setRunAt(madeAt)
     setForecast(list)
+    setUndatedRows(null)
 
     setNamesError(null)
     const recipeIds = [...new Set(list.flatMap(d => Object.keys(d.forecastQtyByRecipe)))]
     if (recipeIds.length > 0) {
-      const { data: recs, error: recErr } = await fetchAllRowsChunked(recipeIds, ids => scopedFrom('recipes', 'id, name').in('id', ids).order('id'))
+      const { data: recs, error: recErr } = await settleWithin(
+        fetchAllRowsChunked(recipeIds, ids => scopedFrom('recipes', 'id, name').in('id', ids).order('id')), 20000, 'Loading the dish names')
       if (!horizonReq.isCurrent(reqKey)) return
       if (recErr) { setNamesError(recErr); setRecipeNames({}) }
       else setRecipeNames(Object.fromEntries((recs || []).map(r => [r.id, r.name])))
     }
     setLoading(false)
-    loadIngredients(list, reqKey)
+    loadIngredients(list, reqKey, { periodsP, runAt: madeAt })
+    // Only when some day shown has no samples: then whether the outlet enters monthly Bulk totals
+    // is the difference between "no sales" and "no dated sales". Best-effort; a failure says nothing.
+    if (list.some(d => d.sampleCount === 0)) {
+      countUndatedRows(periodsP, madeAt).then(
+        n => { if (horizonReq.isCurrent(reqKey)) setUndatedRows(n) },
+        err => console.error('demand forecast: could not count the Bulk sales entries in the window:', err))
+    }
   }, [clientId, horizon, scopedFrom, horizonReq, loadIngredients])
 
   useEffect(() => { loadStored() }, [loadStored])
@@ -299,8 +426,20 @@ export default function DemandForecast() {
   // Owner's rain percentage, rain forecast within the next seven days (rainFactorForMonth). A day it
   // touches has its expected dishes scaled before the list is worked out.
   const weatherFeature = hasFeature('weather_forecast')
-  const { weather, weatherByAd, own: weatherOwn } = useWeatherStrip({})
+  const { weather, weatherByAd, own: weatherOwn, located: weatherLocated, stripState } = useWeatherStrip({})
   const rainPct = weatherOwn ? rainPctValue(settings?.rain_sales_pct) : null
+  // The rain setting applies (S849, FORECAST-4): the Growth weather feature, a percentage, a city.
+  // Then a Recompute learns how rainy each day's samples were, and waits for the weather while it
+  // is still loading, so a run made a second too early does not store "unknown" for a wet fortnight.
+  const rainApplies = weatherFeature && rainPct != null && weatherLocated
+  const weatherPending = rainApplies && stripState === 'loading'
+  // One sample day's rain factor: the Owner's % on a recorded rainy day, else 1. A day older than
+  // the weather store's 60 days has no row, so it counts as dry, which is the finding's own answer.
+  const sampleFactorOf = useMemo(() => (
+    rainApplies && weatherByAd
+      ? sample => (isRainyDay(weatherByAd[formatAd(sample.date)]) ? rainPct / 100 : 1)
+      : null
+  ), [rainApplies, weatherByAd, rainPct])
   const rainByMonth = useMemo(() => {
     if (!weatherFeature || !weatherByAd || rainPct == null || forecast.length === 0) return null
     const todayAd = weather?.today || formatAd(nepalCivilDate(Date.now()))
@@ -313,15 +452,53 @@ export default function DemandForecast() {
     }
     return out
   }, [weatherFeature, weatherByAd, rainPct, forecast, weather])
-  const listForecast = useMemo(() => scaleForecastDays(forecast, d => rainByMonth?.[`${d.bs.year}:${d.bs.month}`]?.factorOf(d.bs.day) ?? 1), [forecast, rainByMonth])
-  const rainDays = listForecast.filter(d => d.rainFactor)
+  // Each day's list factor (S849, FORECAST-4): the rain ahead (the Owner's % on a rainy day, else 1)
+  // ÷ how rainy the days it learned from were (the stored sampleRainFactor). A rainy day ahead is
+  // bought at the Owner's % of a DRY day, and a dry day after a wet fortnight at a dry day's level —
+  // the average already held that rain, and multiplying it by the % again counted it twice (~37%
+  // short at 50% in the monsoon). Only while the rain setting applies: without it, rain moves
+  // nothing (S800). The dish table and the Roster keep the observed average.
+  const rain = useMemo(() => {
+    const forwardOf = d => rainByMonth?.[`${d.bs.year}:${d.bs.month}`]?.factorOf(d.bs.day) ?? 1
+    const historyOf = d => (rainApplies && d.sampleRainFactor > 0 ? d.sampleRainFactor : 1)
+    const listForecast = scaleForecastDays(forecast, d => forwardOf(d) / historyOf(d))
+    const rainDays = forecast.filter(d => forwardOf(d) !== 1)
+    // One line per weekday whose samples were rainy: a 30-day run repeats each weekday's samples.
+    const seen = new Set()
+    const wetHistory = []
+    for (const d of forecast) {
+      if (historyOf(d) === 1 || !(d.rainySampleCount > 0)) continue
+      const w = dayOf(d)
+      if (seen.has(w)) continue
+      seen.add(w)
+      wetHistory.push({ weekday: WEEKDAYS_FULL[w], rainy: d.rainySampleCount, of: d.sampleCount })
+    }
+    return { listForecast, rainDays, wetHistory }
+  }, [forecast, rainByMonth, rainApplies])
+  const { listForecast, rainDays, wetHistory } = rain
+  const rainAheadText = rainDays.length > 0
+    ? `Rain is forecast on ${rainDays.map(d => `${WEEKDAYS[dayOf(d)]} ${d.bs.day} ${BS_MONTHS[d.bs.month - 1]}`).join(', ')}, so ${rainDays.length === 1 ? 'that day is' : 'those days are'} bought at ${rainPct}% of a dry day (your rainy-day setting).`
+    : ''
+  const wetHistoryText = wetHistory.length === 0 ? ''
+    : wetHistory.length === 1
+      ? `${wetHistory[0].rainy} of the ${wetHistory[0].of} ${wetHistory[0].weekday}s the forecast learned from ${wetHistory[0].rainy === 1 ? 'was' : 'were'} rainy, so the list is worked out from a dry day's level rather than counting that rain again.`
+      : `Some of the days the forecast learned from were rainy (${wetHistory.map(w => `${w.rainy} of the ${w.of} ${w.weekday}s`).join(', ')}), so the list is worked out from a dry day's level rather than counting that rain again.`
+  const rainChangedList = !!(rainAheadText || wetHistoryText)
 
   // The buying list, derived (S800): forecast use (rain applied) + the par to keep − in store,
   // rounded up to the pack it is bought in, grouped by the supplier it is usually bought from.
+  // Forecast use is the recipes plus the guests' usual choices (S849, FORECAST-3); rain and the
+  // horizon apply to both halves.
   const buy = useMemo(() => {
     const ing = ingredients
     const known = ing.stock?.onHandById != null
-    const byItem = aggregateIngredientDemand(totalQtyByRecipe(listForecast), ing.exploded || {})
+    const totals = totalQtyByRecipe(listForecast)
+    const recipeDemand = aggregateIngredientDemand(totals, ing.exploded || {})
+    const choiceDemand = aggregateIngredientDemand(totals, ing.choicePerPlate || {})
+    // An item reached only by choices that leave it OUT ("no onion" on a dish with no onion) is not
+    // used by the forecast at all, so it is not a line on the list.
+    const byItem = Object.fromEntries(Object.entries(addDemand(recipeDemand, choiceDemand))
+      .filter(([id]) => id in recipeDemand || choiceDemand[id] > 0))
     const itemById = Object.fromEntries((ing.items || []).map(i => [i.id, i]))
     let unpriced = 0
     const rows = ingredientBuyList(byItem, ing.stock?.onHandById ?? null, ing.stock?.parById ?? null).map(b => {
@@ -338,6 +515,7 @@ export default function DemandForecast() {
         id: b.id, item, name: item?.name || 'Unknown item', uom: item?.uom || '', category: item?.categories?.name || 'Uncategorised',
         inactive: item ? item.is_active === false : false,
         qty: b.use, par: b.par, inStore: b.inStore, toBuy: b.toBuy, buyQty, pack,
+        fromRecipes: recipeDemand[b.id] || 0, fromChoices: choiceDemand[b.id] || 0,
         packLabel: item && b.toBuy > 0 ? packText(b.toBuy, item) : '',
         orderLabel: b.toBuy > 0 ? (item && packText(b.toBuy, item)) || `${fmtQty(Math.ceil(b.toBuy - 1e-9))} ${item?.uom || ''}`.trim() : '',
         counted: ing.stock?.countedIds?.has(b.id) || false,
@@ -378,13 +556,12 @@ export default function DemandForecast() {
     navigate('/purchase-orders', { state: { poPrefill: { vendorId: group.supplierId, lines, note: `From the Demand Forecast buying list (${horizonLabel.toLowerCase()})` } } })
   }
 
-  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
-
   const horizonLabel = horizon === 7 ? 'Next 7 Days' : 'Next 30 Days'
   // A dish id with no name is never shown as a UUID (S756): unavailable when the read failed,
   // unnamed when it succeeded without it.
   const dishName = id => recipeNames[id] || (namesError ? 'Dish name unavailable' : 'Unnamed dish')
-  const lastRunLabel = lastRun ? (nepalBsLong(lastRun.run_at) || new Date(lastRun.run_at).toLocaleString()) : null
+  // When the SHOWN forecast was made (FORECAST-8) — its own rows' server stamp, not the run log.
+  const madeLabel = runAt ? whenText(runAt) : null
   const stockPeriodLabel = buy.stockPeriod
     ? `${BS_MONTHS[buy.stockPeriod.bs_month - 1]} ${buy.stockPeriod.bs_year}${buy.stockPeriod.status === 'open' ? '' : ' (closed)'}`
     : null
@@ -392,27 +569,56 @@ export default function DemandForecast() {
   // What a printed or exported copy covers, in one line (the S594 scope rule).
   const scopeLine = forecast.length > 0
     ? `${horizonLabel} · ${bsLabel(forecast[0])} – ${bsLabel(forecast[forecast.length - 1])} (${forecast.length} day${forecast.length === 1 ? '' : 's'})`
-      + (lastRunLabel ? ` · forecast run ${lastRunLabel}` : '')
+      + (madeLabel ? ` · forecast made ${madeLabel}` : '')
       + (inStoreKnown ? ` · in store as at ${stockPeriodLabel}` : ' · in store not available')
     : horizonLabel
   // Print and Export carry the figures, the dish names and the letterhead, so they wait on all
   // three (the S728 rule: a control that emits a file is where a stale or partial render sticks).
   const emitBlocked = loading || !!loadError || forecast.length === 0 || ingredients.loading || !biz.ready || !!namesError
+  // Whether the forecast has any dish to buy for (FORECAST-10d): the empty list says which case it is.
+  const forecastHasDishes = forecast.some(d => Object.values(d.forecastQtyByRecipe).some(q => q > 0))
 
   function handlePrint() {
     printWithTitle(`${biz.name ? biz.name + ' - ' : ''}Demand Forecast - ${horizonLabel}`)
   }
 
+  // Says what the rebuild learned from, and only says "rebuilt" when it was (FORECAST-1).
+  function rebuiltText(res) {
+    const days = n => `${n} day${n === 1 ? '' : 's'}`
+    const parts = []
+    if (res.tillDays > 0) parts.push(`${days(res.tillDays)} of till bills`)
+    if (res.manualDays > 0) parts.push(`${days(res.manualDays)} of hand-entered sales`)
+    let text = `Forecast rebuilt from ${parts.join(' and ') || 'your sales history'} in the last 12 weeks.`
+    if (rainApplies && !sampleFactorOf) text += ' Rain in the history was not allowed for: the weather could not be read.'
+    if (res.leftover) text += ' An older copy could not be cleared; it is not shown, and the next Recompute removes it.'
+    return text
+  }
+
   async function handleRecompute() {
     setRecomputing(true); setMsg('')
     try {
-      await runForecast(clientId, horizon)
-      setMsg('ok:Forecast rebuilt from your sales history.')
+      // Bounded (FORECAST-10a). A run is a server read, a write and a clear; a hang must end.
+      const res = await withTimeout(runForecast(clientId, horizon, { sampleFactorOf }), 60000, 'Rebuilding the forecast')
+      if (res.refused === 'no_history') {
+        setMsg('warn:There are no sales in the last 12 weeks to forecast from, so nothing was rebuilt; the forecast below is unchanged.')
+      } else {
+        setMsg('ok:' + rebuiltText(res))
+      }
       await loadStored()
     } catch (err) {
-      setMsg('error:' + errorText(err, 'operator') + ' The figures below are from the last forecast that ran, not a new one.')
+      // A timed-out or dropped rebuild may still have landed after the clock ran out: say so, and
+      // never claim the old figures are the newest (error-messages.md).
+      if (isTimeout(err)) {
+        setMsg('error:The rebuild took too long to answer, so it is not known whether a new forecast was saved. Reload the page to see which forecast is stored.')
+      } else if (isNetworkError(err)) {
+        setMsg('error:' + errorText(err, 'operator') + ' It is not known whether a new forecast was saved. Reload the page to see which forecast is stored.')
+      } else {
+        setMsg('error:' + errorText(err, 'operator') + ' The figures below are from the last forecast that ran, not a new one.')
+      }
+    } finally {
+      // The horizon chips re-enable here, whatever happened.
+      setRecomputing(false)
     }
-    setRecomputing(false)
   }
 
   async function handleExport() {
@@ -439,7 +645,12 @@ export default function DemandForecast() {
         inStoreKnown
           ? `In store is the Stock Report on-hand figure for ${stockPeriodLabel}: the closing count where entered, otherwise opening + net purchases − usage − wastage − staff meals. To buy = forecast use + the par to keep − in store, never below zero; Will arrive rounds it up to whole packs, and the value is of what will arrive.`
           : 'In store could not be worked out, so In store, To buy and the value are blank — this sheet is forecast use only.',
-        ...(rainDays.length ? [`Rain forecast lowered expected sales on ${rainDays.map(bsLabel).join(', ')} (× ${Math.round(rainDays[0].rainFactor * 100)}%, your rainy-day setting).`] : []),
+        // One sentence for both rain adjustments (S849, FORECAST-4).
+        ...(rainChangedList ? [`Rain changed the list: ${[
+          rainDays.length ? `${rainDays.map(bsLabel).join(', ')} ${rainDays.length === 1 ? 'is' : 'are'} bought at ${rainPct}% of a dry day (your rainy-day setting)` : '',
+          wetHistory.length ? `the rainy days in the forecast's history (${wetHistory.map(w => `${w.rainy} of ${w.of} ${w.weekday}s`).join(', ')}) are worked back to a dry day's level first, so that rain is not counted twice` : '',
+        ].filter(Boolean).join('; ')}.`] : []),
+        ...(Object.keys(ingredients.choicePerPlate || {}).length ? ['Forecast use includes the choices guests usually make on each dish (Crest Customization), learned per plate from the till sales of the 12 weeks the forecast learned from.'] : []),
       ],
     })
     wsIng['!cols'] = [22, 26, 16, 8, 18, 12, 14, 12, 24, 12, 14, 12, 14].map(w => ({ wch: w }))
@@ -462,9 +673,19 @@ export default function DemandForecast() {
     ? <Tip text="Average covers on this weekday, from closed POS bills. Scaled by the holiday multiplier where one is set. Covers: Seated guests on dine-in bills, and each takeaway or delivery order as one. The Owner Report's Guests Seated counts dine-in guests only." width={280}>Forecast Covers</Tip>
     : null
 
+  // A Forecast use figure, with the guests' choices named on hover where they are part of it
+  // (S849, FORECAST-3). Both halves are already scaled for rain and the horizon.
+  const forecastUseCell = r => {
+    if (!r.fromChoices) return fmtQty(r.qty)
+    const q = n => `${fmtQty(n)}${r.uom ? ` ${r.uom}` : ''}`
+    const text = r.fromChoices > 0
+      ? `${q(r.qty)} in all, of which ${q(r.fromChoices)} from the choices guests usually make (Crest Customization).`
+      : `The recipes use ${q(r.fromRecipes)}; the choices guests usually make take ${q(-r.fromChoices)} off it (choices that leave it out)${r.qty > 0 ? '.' : ', so forecast use is 0, never below.'}`
+    return <Tip text={text} width={260}>{fmtQty(r.qty)}</Tip>
+  }
+
   return (
     <div>
-      <SuiteGate featureKey="demand_forecast" featureLabel="Demand Forecast" requireModules={['ims']}>
       <style>{`
         @media print {
           @page { margin: 14mm 12mm; }
@@ -477,7 +698,7 @@ export default function DemandForecast() {
         {biz.address && <div style={{ fontSize: 12 }}>{biz.address}</div>}
         <div style={{ fontWeight: 700, fontSize: 14, marginTop: 8 }}>Demand Forecast — {horizonLabel}</div>
         <div style={{ fontSize: 11 }}>{scopeLine}</div>
-        <div style={{ fontSize: 11 }}>Generated: {new Date().toLocaleString()}</div>
+        <div style={{ fontSize: 11 }}>Printed: {whenText(new Date())}</div>
       </div>
 
       <div className="page-header no-print">
@@ -503,18 +724,26 @@ export default function DemandForecast() {
           onChange={setHorizon}
         />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Tip text="Rebuilds the forecast from your latest sales data. Run this whenever you want an up-to-date prediction — it does not run automatically.">
-            <button className="btn btn-primary" onClick={handleRecompute} disabled={recomputing}>
-              {recomputing ? 'Recomputing…' : '↻ Recompute Forecast'}
+          <Tip text={weatherPending
+            ? 'Waiting for the weather, so the rebuild can allow for the rainy days in your sales history. It takes a moment.'
+            : 'Rebuilds the forecast from your latest sales data. Run this whenever you want an up-to-date prediction — it does not run automatically. The Owner and an inventory supervisor or manager can run it.'}>
+            <button className="btn btn-primary" onClick={handleRecompute} disabled={recomputing || weatherPending}>
+              {recomputing ? 'Recomputing…' : weatherPending ? 'Loading weather…' : '↻ Recompute Forecast'}
             </button>
           </Tip>
           <button className="btn btn-ghost" onClick={handleExport} disabled={emitBlocked || !!ingredients.error}>📊 Export Excel</button>
           <button className="btn btn-ghost" onClick={handlePrint} disabled={emitBlocked}>🖨 Print</button>
         </div>
+        {/* This horizon's latest Recompute (FORECAST-8, GAPS-13): when by the server's clock, who
+            (the stamp trigger writes the name; "Crest support" for the operator), and what it did. */}
         {lastRun && (
           <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 'auto' }}>
-            Last run: {new Date(lastRun.run_at).toLocaleString()}
-            {lastRun.error ? <span style={{ color: 'var(--theme-red-text)' }}> — failed: {lastRun.error}</span> : ` (${lastRun.rows_written} rows)`}
+            Last run {whenText(lastRun.run_at)}{lastRun.run_by_name ? ` by ${lastRun.run_by_name}` : ''}
+            {lastRun.error
+              ? <span style={{ color: 'var(--theme-red-text)' }}> — failed: {errorText({ message: lastRun.error }, 'operator')}</span>
+              : lastRun.rows_written === 0
+                ? ' — found no sales history, so nothing was replaced'
+                : ` (${lastRun.rows_written} rows)`}
           </span>
         )}
       </div>
@@ -526,7 +755,12 @@ export default function DemandForecast() {
         {!hasPos && 'Covers are counted from POS bills. This outlet has no Crest POS, so the forecast is dishes and revenue only, with revenue priced at the current menu rather than measured.'}
       </p>
 
-      {msg && <p className="no-print" style={{ color: msg.startsWith('error:') ? 'var(--theme-red-text)' : 'var(--theme-green-text)', fontSize: 13, marginBottom: 12 }}>{msg.replace(/^(error|ok):/, '')}</p>}
+      {msg && (
+        <p role={msg.startsWith('ok:') ? 'status' : 'alert'} className="no-print" style={{
+          color: msg.startsWith('error:') ? 'var(--theme-red-text)' : msg.startsWith('warn:') ? 'var(--theme-amber-text)' : 'var(--theme-green-text)',
+          fontSize: 13, marginBottom: 12,
+        }}>{msg.replace(/^(error|warn|ok):/, '')}</p>
+      )}
 
       {biz.error && (
         <p role="alert" className="no-print" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
@@ -544,7 +778,7 @@ export default function DemandForecast() {
           so say how much of it has gone by and what that does to the ingredient list. */}
       {!loading && !loadError && stale.dropped > 0 && forecast.length > 0 && (
         <p role="alert" className="no-print" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-amber-text)' }}>
-          △ This forecast was last run{lastRunLabel ? ` on ${lastRunLabel}` : ''}, and {stale.dropped} of its {stale.total} days
+          △ This forecast was made{madeLabel ? ` on ${madeLabel}` : ''}, and {stale.dropped} of its {stale.total} days
           have already passed. Only the {forecast.length} day{forecast.length === 1 ? '' : 's'} from today {forecast.length === 1 ? 'is' : 'are'} shown,
           and Ingredients to buy covers only {forecast.length === 1 ? 'that day' : 'those'}. Click Recompute Forecast for a full {horizonLabel.toLowerCase()}.
         </p>
@@ -559,7 +793,7 @@ export default function DemandForecast() {
           <div className="empty-state">
             <p className="empty-state-text">
               {stale.dropped > 0
-                ? `Every day in the last forecast for this horizon has already passed${lastRunLabel ? ` — it was run on ${lastRunLabel}` : ''}. Click "Recompute Forecast" to forecast the days ahead.`
+                ? `Every day in the last forecast for this horizon has already passed${madeLabel ? ` — it was made on ${madeLabel}` : ''}. Click "Recompute Forecast" to forecast the days ahead.`
                 : 'No forecast yet for this horizon — click "Recompute Forecast" to generate one.'}
             </p>
           </div>
@@ -572,7 +806,7 @@ export default function DemandForecast() {
               <tr>
                 <th>Date (BS)</th><th>Day</th>
                 {hasPos && <th style={{ textAlign: 'right' }}>{coversHeader}</th>}
-                <th style={{ textAlign: 'right' }}><Tip text="Before VAT — the same Revenue figure Owner Dashboard and Sales Entries use, so it can be compared with them and with the Labor Forecast's cost %." width={260}>Forecast Revenue</Tip></th>
+                <th style={{ textAlign: 'right' }}><Tip text="Before VAT and after bill discounts — the same Revenue figure Owner Dashboard and Sales Entries use, so it can be compared with them and with the Labor Forecast's cost %." width={260}>Forecast Revenue</Tip></th>
                 <th></th>
               </tr>
             </thead>
@@ -583,7 +817,7 @@ export default function DemandForecast() {
                 const showingAll = expandedIdx === idx
                 const visiblePlates = showingAll ? plates : plates.slice(0, PREVIEW_COUNT)
                 const hiddenPlates = plates.length - visiblePlates.length
-                const evidence = evidenceText(f)
+                const evidence = evidenceText(f, { undated: undatedRows || 0 })
                 const nameOf = dishName
                 const avgTip = qty => `${qty.toFixed(1)} a day on average${evidence ? ', ' + evidence : ''}, recent weeks weighted more`
                 const colSpan = hasPos ? 5 : 4
@@ -598,7 +832,9 @@ export default function DemandForecast() {
                       {hasPos && (
                         <td style={{ textAlign: 'right' }}>
                           {f.forecastCovers != null ? Math.round(f.forecastCovers)
-                            : <Tip text="No closed POS bills on this weekday in the last 12 weeks — the dishes came from manual Sales Entries, which carry no covers.">—</Tip>}
+                            : <Tip text={f.sampleCount === 0
+                              ? 'No closed till bills on this weekday in the last 12 weeks.'
+                              : 'No closed POS bills on this weekday in the last 12 weeks — the dishes came from manual Sales Entries, which carry no covers.'}>—</Tip>}
                         </td>
                       )}
                       <td style={{ textAlign: 'right', fontWeight: 700 }}>
@@ -676,15 +912,22 @@ export default function DemandForecast() {
         <div style={{ marginTop: 32 }}>
           <h2 style={{ margin: '0 0 2px', fontSize: 18, color: 'var(--theme-text1)' }}>
             Ingredients to buy — {horizonLabel.toLowerCase()}{' '}
-            <Tip text="Every dish above, multiplied through its recipe (and any sub-recipes, adjusted for yield) at the per-portion quantities in Recipe Costing, then summed per raw item for the days shown. In store is the same on-hand figure Stock Report and Reorder Report show; Keep is the item's par level from the Reorder Report, the minimum you want left on the shelf; To buy covers the forecast and keeps that par." width={340}>ⓘ</Tip>
+            <Tip text="Every dish above, multiplied through its recipe (and any sub-recipes, adjusted for yield) at the per-portion quantities in Recipe Costing, then summed per raw item for the days shown. With Crest Customization it also adds the choices guests usually make on each dish (toppings, add-ons, a build-your-own bowl's contents), learned per plate from the till sales of the 12 weeks the forecast learned from. In store is the same on-hand figure Stock Report and Reorder Report show; Keep is the item's par level from the Reorder Report, the minimum you want left on the shelf; To buy covers the forecast and keeps that par." width={340}>ⓘ</Tip>
           </h2>
           <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 12px' }}>
             In each item's base unit. To buy = forecast use + the par to keep − in store, never below zero, rounded up to whole packs where the item has a pack size, and grouped by the supplier you last bought it from. The value is of what will arrive, at the Item Master rate. Occasional dishes are included at their average, so a rarely-sold dish still puts a little of its ingredients on the list.
             {!ingredients.loading && !ingredients.error && inStoreKnown && ` In store is as at ${stockPeriodLabel}.`}
           </p>
-          {rainDays.length > 0 && (
+          {/* S849 FORECAST-4: both halves of the rain rule, the rain ahead and the rain already
+              inside the weekday average, so neither is counted twice and both are named. */}
+          {rainChangedList && (
             <p className="note-banner" role="status" style={{ margin: '0 0 12px', fontSize: 12 }}>
-              <strong>Rain lowered the list.</strong> Rain is forecast on {rainDays.map(d => `${WEEKDAYS[dayOf(d)]} ${d.bs.day} ${BS_MONTHS[d.bs.month - 1]}`).join(', ')}, so expected sales on {rainDays.length === 1 ? 'that day are' : 'those days are'} taken at {Math.round(rainDays[0].rainFactor * 100)}% — your rainy-day setting. The dish table above still shows the usual numbers.
+              <strong>Rain changed the list.</strong> {[rainAheadText, wetHistoryText].filter(Boolean).join(' ')} The dish table above still shows the usual numbers.
+            </p>
+          )}
+          {!ingredients.loading && !ingredients.error && ingredients.choiceError && (
+            <p role="status" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+              The guests' usual choices could not be read, so the list covers the recipes only. Reload to try again.
             </p>
           )}
           {!ingredients.loading && !ingredients.error && buy.rows.length > 0 && !inStoreKnown && (
@@ -705,7 +948,9 @@ export default function DemandForecast() {
             <ReportLoadError error={ingredients.error} />
           ) : buy.rows.length === 0 ? (
             <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
-              None of the forecast dishes has ingredients in Recipe Costing yet, so there is nothing to explode.
+              {forecastHasDishes
+                ? 'None of the forecast dishes has ingredients in Recipe Costing, or guest choices with stock lines, yet, so there is nothing to explode.'
+                : 'This forecast has no dishes, so there is nothing to buy for it.'}
             </div>
           ) : (
             <div className="table-wrap">
@@ -713,7 +958,7 @@ export default function DemandForecast() {
                 <thead>
                   <tr>
                     <th>Item</th><th>Category</th>
-                    <th style={{ textAlign: 'right' }}><Tip text={`Total the forecast will use over the ${forecast.length} day${forecast.length === 1 ? '' : 's'} shown, in the item's base unit${rainDays.length ? ', lowered on the rainy days named above' : ''}.`}>Forecast use</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text={`Total the forecast will use over the ${forecast.length} day${forecast.length === 1 ? '' : 's'} shown, in the item's base unit: the recipes, plus the choices guests usually make where there are any (hover a figure to see that part)${rainDays.length ? `. On the rainy days named above it is bought at ${rainPct}% of a dry day` : ''}${wetHistory.length ? `. Where the days it learned from were rainy, it is worked from a dry day's level so that rain is not counted twice` : ''}. Never below zero.`} width={300}>Forecast use</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text={`What is on the shelf now — the same figure as Stock Report's On-hand${stockPeriodLabel ? ` for ${stockPeriodLabel}` : ''}: the closing count where one is entered, otherwise opening + net purchases − usage − wastage − staff meals. A dash means it could not be worked out.`} width={300}>In store</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="The item's par level — the least you want left on the shelf — set on the Reorder Report. The list buys enough to keep it. A dash means no par is set." width={260}>Keep</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Forecast use + Keep − In store, never below zero. Zero means what is on the shelf already covers the forecast and the par." width={240}>To buy</Tip></th>
@@ -751,7 +996,7 @@ export default function DemandForecast() {
                             {r.inactive && <Tip text="This item is inactive in Item Master but a forecast dish still uses it — reactivate it or update the recipe."><span className="badge badge-amber" style={{ marginLeft: 6 }}>inactive</span></Tip>}
                           </td>
                           <td style={{ color: 'var(--theme-text2)' }}>{r.category}</td>
-                          <td style={{ textAlign: 'right' }}>{fmtQty(r.qty)}</td>
+                          <td style={{ textAlign: 'right' }}>{forecastUseCell(r)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtQty(r.inStore)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.par > 0 ? fmtQty(r.par) : '—'}</td>
                           <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtQty(r.toBuy)}</td>
@@ -778,7 +1023,7 @@ export default function DemandForecast() {
                         <tr key={r.id}>
                           <td style={{ color: 'var(--theme-text1)' }}><span style={{ whiteSpace: 'nowrap' }}>{r.name}</span></td>
                           <td style={{ color: 'var(--theme-text2)' }}>{r.category}</td>
-                          <td style={{ textAlign: 'right' }}>{fmtQty(r.qty)}</td>
+                          <td style={{ textAlign: 'right' }}>{forecastUseCell(r)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{fmtQty(r.inStore)}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{r.par > 0 ? fmtQty(r.par) : '—'}</td>
                           <td style={{ textAlign: 'right' }}>0</td>
@@ -806,7 +1051,6 @@ export default function DemandForecast() {
         </div>
         </>
       )}
-      </SuiteGate>
     </div>
   )
 }
