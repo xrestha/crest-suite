@@ -39,8 +39,9 @@ import { returnCostValue } from '../ims/reports/supplierAttribution'
 // Per kind, because the purchase snapshot changed shape after the sales one (S783: flat daily
 // average → per weekday). A stored snapshot of an older model is treated as absent and replaced
 // once; bumping one kind never disturbs the other's frozen Target. S850 bumped both (festival days
-// left out of the history): the database's snapshot guard compares models, so a bump here is
-// accepted as newer, and any guard that names the current models must move in the same commit.
+// left out of the history). Since S849 (DATABASE-8) the database guard (ims_monthly_periods_guard)
+// accepts exactly these models, so a bump changes its two literals in the same commit
+// (snapshotModelGuard.test.js compares them).
 export const SNAPSHOT_MODEL = { sales: 3, purch: 4 }
 export const HISTORY_DAYS = 28
 export const MIN_HISTORY_DAYS = 14
@@ -278,16 +279,36 @@ export function targetTotal(byWeekday, { monthEndDay, weekdayOf, dayFactor = () 
 
 // The frozen Target, as stored in monthly_periods.sales/purch_projection_snapshot. It holds the
 // usual week only; festivals are applied where it is drawn (targetValue, targetTotal).
+//
+// S849 (DATABASE-8): a weekday below zero is stored as 0. A weekday average goes negative only when
+// refunds outweigh that weekday's trade in the sample (a POS credit note posts a NEGATIVE qty_sold;
+// a return-only day nets purchases below zero), and four samples per weekday is few enough for one
+// big refund to do it. A negative "usual day" is not a target, and the database guard refuses one,
+// so without the clamp such a month would be refused on every visit and never get a Target. A NaN
+// would serialise as null, which the guard refuses too. The bases stay unclamped.
 export function makeSnapshot(kind, base, { monthEndDay, weekdayOf, capturedDay }) {
+  const byWeekday = (base.byWeekday || []).map(v => (Number.isFinite(v) && v > 0 ? v : 0))
   return {
     model: SNAPSHOT_MODEL[kind],
     source: base.source,
-    byWeekday: base.byWeekday,
+    byWeekday,
     sampleDays: base.sampleDays,
     capturedDay,
     capturedAt: new Date().toISOString(),
-    projectedMonthEnd: targetTotal(base.byWeekday, { monthEndDay, weekdayOf }),
+    projectedMonthEnd: targetTotal(byWeekday, { monthEndDay, weekdayOf }),
   }
+}
+
+// Who may capture the month's Target: exactly the logins the database guard accepts
+// (`ims_caller_has_rank('staff')`: the operator, the Owner, an IMS login of staff rank or above that
+// is not a count PIN and is not settlement-blocked). `hasImsAccess('staff')` alone is not the mirror:
+// a count PIN's rank is 'staff' and its `ims_email` is what marks it (AuthContext imsCountOnly). A
+// till PIN or an HR-only login would be refused with only a console line, on every visit, so it does
+// not try (DATABASE-8). Nothing visible changes for them: none of them reaches the chart.
+export function canCaptureTarget({ isAdmin, isOwner, hasImsAccess, profile } = {}) {
+  if (isAdmin || isOwner) return true
+  const staffPlus = typeof hasImsAccess === 'function' && hasImsAccess('staff') === true
+  return staffPlus && !profile?.ims_email && !profile?.settlement_blocked_by
 }
 
 // A snapshot of an older model (a pre-S780 slope fit, or S780's flat purchase line) is treated as

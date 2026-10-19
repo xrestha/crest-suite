@@ -1,22 +1,24 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
-import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourNotJudgedText, otherLabourLine, PAYSLIP_LABOUR_COLUMNS } from '../../dashboard/labourSource'
-import { loadMonthOtherLabour } from '../../dashboard/loadOtherLabourPay'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { isPayrollFenced, resolveOutletLabour, outletLabourNotes, labourNotJudgedText, otherLabourLine } from '../../dashboard/labourSource'
+import { loadOutletLabour } from '../../dashboard/loadOutletLabour'
+import { readPeriodTransfers, transferTotals } from '../transfers/transferFlows'
+import { SUITE_PAGES, useSuiteAccess } from '../../../components/SuiteGate'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
-import { BS_MONTHS, daysInBsMonth, bsToAd, formatAd } from '../../../utils/bsCalendar'
+import { BS_MONTHS, daysInBsMonth } from '../../../utils/bsCalendar'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { useSettings } from '../../../context/SettingsContext'
 import { fcFigure, fcThresholds } from '../../../shared/imsFormulas'
 import { bandFigure, lcBand, LABOR_WARN } from '../../../shared/operatingBands'
 import { allocateBillDiscounts, returnCostValue } from './supplierAttribution'
-import { depreciationInWindow } from '../assets/depreciationCompute'
+import { loadDepreciationMemo } from './depreciationMemo'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { disabledStyle } from '../../../shared/inlineFieldState'
@@ -25,6 +27,10 @@ import { groupSavedRows, nearestPeriodWithFigures, overheadInserts } from './ove
 import { SPEND_LABEL, SPEND_SO_FAR_LABEL, SPEND_TIP, SPEND_SO_FAR_TIP } from './foodCostBasis'
 import { COST_BREAKDOWN_COLORS } from '../../../shared/chartColors'
 import Tabs from '../../../components/Tabs'
+
+// The month's depreciation memo lives in depreciationMemo.js (S849, PNL-3) so Consolidated P&L reads the
+// same figure without this page's chunk; re-exported under the name the contract gave it.
+export { loadDepreciationMemo } from './depreciationMemo'
 
 // A bucket is a CATEGORY, so its fill takes a chart slot, never a semantic token (S796): Overhead
 // was green and Tax & Fees purple on the page that says "✓ Profitable" in green. The slots are the
@@ -100,7 +106,7 @@ function seedBucket(key) {
 }
 
 export default function Overheads() {
-  const { profile, clientId, canEditClosedPeriods, hasImsAccess, clientModules, isAdmin, isOwner, suitePlan, hasFeature } = useAuth()
+  const { profile, clientId, canEditClosedPeriods, hasImsAccess, clientModules, isAdmin, isOwner } = useAuth()
   const { settings } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedInsert, scopedDelete } = useScopedDb()
@@ -111,9 +117,12 @@ export default function Overheads() {
   // Profit green while the Owner, reading the same month, saw a loss (S756). On such a login the
   // page no longer asks — it says labour could not be read here and withholds the verdict.
   // S756: the rule lives in labourSource.js, shared with ClientDashboard, so the two cannot drift.
+  // S849 (SU11 (a)): on a fenced login labour is a dash, never the Labor tab in payroll's place.
   const payrollFenced = isPayrollFenced({ hrOn, isAdmin, isOwner, imsRole: profile?.ims_role })
-  // D23: the depreciation memo is only offered where Fixed Assets is (SuiteGate's own test).
-  const assetsOn = !!(isAdmin || suitePlan === 'pro' || hasFeature?.('fixed_asset_register'))
+  // D23: the depreciation memo is only offered where Fixed Assets opens: the SAME test SuiteGate renders
+  // from (S849, ACCESS C3), so 'unknown' (the client row did not load) reads as not offered, never as
+  // Suite on.
+  const assetsOn = useSuiteAccess(SUITE_PAGES.fixedAssets).allowed
 
   const [periods, setPeriods]       = useState([])
   const [periodId, setPeriodId]     = useState('')
@@ -267,7 +276,7 @@ export default function Overheads() {
     const periodObj = periods.find(p => p.id === pid)
     // D23: a memo only. Its own promise, outside the batch below: a failed or fenced depreciation
     // read must never block the statement, it only changes what the memo line says.
-    const deprPromise = assetsOn && periodObj ? loadDepreciationMemo(periodObj) : Promise.resolve(null)
+    const deprPromise = assetsOn && periodObj ? loadDepreciationMemo((t, c) => scopedFrom(t, c), periodObj) : Promise.resolve(null)
     const results = await Promise.all([
       // The bill discount comes off purchases (S601/S720/S747): `discount_amount` is BILL-level and
       // repeated per line, so it is spread across the bill's lines by allocateBillDiscounts(), which
@@ -293,50 +302,37 @@ export default function Overheads() {
       fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', pid).order('id')),
       // Master data read as a MAP: a recipe past a truncated read would price its sales at 0 (S734).
       fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
-      // Labour is payroll XOR the Overheads 'labor' bucket, never the sum (.claude/rules/
-      // dashboards.md). Only asked for when HR is on AND this login can read payroll at all;
-      // `{ data: [] }` keeps the tuple shape.
-      hrOn && !payrollFenced ? scopedFrom('hr_payroll_runs', 'id, status').eq('period_id', pid).eq('status', 'finalized') : { data: [] },
-      // Festival, incentive and final-settlement pay of the month (S798 3c, H18), which joins
-      // finalized payroll. Same fence as the run read; `error` makes it fail the page like it.
-      hrOn && !payrollFenced && periodObj
-        ? loadMonthOtherLabour((t, c) => scopedFrom(t, c), periodObj.bs_year, periodObj.bs_month)
-        : { other: null },
+      // Stock received from / sent to the group's other outlets (S849, PNL-8): in adds like a
+      // purchase, out comes off like a return, at the sender's frozen value.
+      readPeriodTransfers(scopedFrom, [pid]),
     ])
+    // Labour by the one rule (S849, OVERHEADS-SU11 / SU11 (a)): with Crest HR the finalized run, else
+    // the HR wage estimate for the WHOLE month (this page shows whole-month fixed costs, D7, so the
+    // estimate matches its rent); without HR, the Labor tab, resolved at render from the live rows.
+    // Its payslip read is paged with a unique tiebreaker inside loadOutletLabour. A fenced login
+    // reads nothing and gets a dash, never the Labor tab in payroll's place.
+    const labourRes = periodObj
+      ? await loadOutletLabour((t, c) => scopedFrom(t, c), { period: periodObj, hrOn, fenced: payrollFenced })
+      : { labour: null, parts: null, error: null }
     if (!periodReq.isCurrent(pid)) return
-    // The reference figures (revenue, food cost) must not print as NPR 0 off a failed read (S612).
-    const failed = firstError(results)
+    // The reference figures (revenue, food cost) must not print as NPR 0 off a failed read (S612),
+    // and a failed labour read blocks the page like any other: an entry page never shows a statement
+    // computed without one of its reads.
+    const failed = firstError(results) || (labourRes.labour?.source === 'failed' ? (labourRes.error || 'Labour could not be loaded') : null)
     if (failed) { setLoadError(failed); setPeriodData(null); return }
     const [
       { data: purchases },
       { data: returns },
       { data: salesData },
       { data: recipes },
-      { data: runs },
-      { other: labourOther },
+      { data: transfers },
     ] = results
-
-    // Finalized payroll for this period — pay earned + overtime + employer SSF (payrollLabourTotal),
-    // the definition every labour reader shares. A finalized run whose payslips cannot be read must REFUSE rather than fall through
-    // to the Overheads bucket: that would quietly substitute a different labour source for the
-    // one the page says it used.
-    let labourPayroll = null
-    const runIds = (runs || []).map(r => r.id)
-    if (runIds.length > 0) {
-      // Paged with a unique tiebreaker (S756): one row per employee per run, so a bare read is a
-      // silent truncation past 1000 payslips — a wage bill short by the rows past the cut, under a
-      // label that says it came from payroll.
-      const { data: slips, error: slipErr } = await fetchAllRowsChunked(runIds, chunk =>
-        scopedFrom('hr_payslips', PAYSLIP_LABOUR_COLUMNS).in('run_id', chunk).order('id'))
-      if (!periodReq.isCurrent(pid)) return
-      if (slipErr) { setLoadError(slipErr); setPeriodData(null); return }
-      labourPayroll = payrollLabourTotal(slips || [])
-    }
 
     // Cost basis (S792, D32): a PAN-bill outlet's supplier VAT is part of what the food cost it.
     const gross  = allocateBillDiscounts(purchases || []).reduce((s, p) => s + p.lineCost, 0)
     const ret    = (returns  || []).reduce((s, r) => s + returnCostValue(r), 0)
-    const foodCost = gross - ret
+    const { inVal, outVal } = transferTotals(transfers || [])
+    const foodCost = gross - ret + inVal - outVal
 
     const recipeMap = {}
     ;(recipes || []).forEach(r => { recipeMap[r.id] = parseFloat(r.selling_price) || 0 })
@@ -361,24 +357,11 @@ export default function Overheads() {
     // and the count so avg dish price divides like with like.
     const dishes  = Object.values(soldMap).reduce((s, qty) => s + qty, 0)
 
-    setPeriodData({ revenue, foodCost, dishes, labourPayroll, labourOther: labourOther || null })
+    setPeriodData({ revenue, foodCost, dishes, labourParts: labourRes.parts, transfersIn: inVal, transfersOut: outVal })
 
     const memo = await deprPromise
     if (!periodReq.isCurrent(pid)) return
     setDeprMemo(memo)
-  }
-
-  // D23 (owner decision, S756): depreciation for the month, from POSTED Fixed Asset runs whose
-  // dates overlap the month's AD dates, pro-rated by overlapping days. Returned, never thrown, and
-  // never subtracted from anything on this page.
-  async function loadDepreciationMemo(periodObj) {
-    const start = formatAd(bsToAd(periodObj.bs_year, periodObj.bs_month, 1))
-    const end = formatAd(bsToAd(periodObj.bs_year, periodObj.bs_month, daysInBsMonth(periodObj.bs_year, periodObj.bs_month)))
-    const { data, error } = await fetchAllRows(() => scopedFrom('assets_depreciation_schedule', 'id, period_start, period_end, depreciation_amount, override_amount')
-      .eq('is_posted', true).lte('period_start', end).gte('period_end', start)
-      .order('period_end').order('id'))
-    if (error) return { error }
-    return depreciationInWindow(data || [], start, end)
   }
 
   function updateRow(bucket, idx, field, value) {
@@ -485,21 +468,15 @@ export default function Overheads() {
   const foodCost = periodData?.foodCost || 0
   const dishes   = periodData?.dishes   || 0
 
-  // Labour is payroll XOR the Overheads 'labor' bucket, NEVER the sum — the two are different
-  // measurements of the same cost and adding them double-counts (S526, .claude/rules/
-  // dashboards.md). A finalized HR payroll run supersedes whatever was typed on the Labor tab.
-  // Before this, the page could see neither: an HR client who runs payroll properly and leaves
-  // the Labor tab blank had a Net Profit overstated by their entire wage bill, painted green,
-  // under the words "✓ Profitable this period".
-  // The precedence is resolveLabour() in labourSource.js (S756) — this page carried its own inline
-  // copy, and a second copy is how it and the Dashboard would come to disagree again.
-  // 'unreadable': payroll is fenced from this login (payrollFenced above). Not 'none' — the page
-  // does not know that no run exists, only that it cannot see one. A failed payroll READ never
-  // reaches here: it blocks the whole page through loadError instead.
-  const labourPayroll  = periodData?.labourPayroll ?? null
-  // S798 3c: festival, incentive and final-settlement pay of the month joins finalized payroll and
-  // is named either way (otherLabourLine): "includes …", or "Not included: … paid through HR".
-  const labour = resolveLabour({ labourBucket: totals.labor, payroll: labourPayroll, hrOn, fenced: payrollFenced, otherPay: periodData?.labourOther ?? null })
+  // Labour is ONE figure, never the sum of two (S526, .claude/rules/dashboards.md), by the one rule
+  // (resolveOutletLabour, S849 SU11 (a)): with Crest HR the finalized payroll run, else the HR wage
+  // estimate; the Labor tab is NAMED "not counted" (an unsaved edit to it shows as not counted at once,
+  // since it is resolved here from the live rows). Without Crest HR, the Labor tab. A login fenced from
+  // payroll gets no labour figure ('unreadable') and no Net Profit — the Labor tab is not substituted.
+  // A failed labour read never reaches here: it blocks the whole page through loadError instead.
+  const labour = resolveOutletLabour(periodData?.labourParts
+    ? { ...periodData.labourParts, labourBucket: totals.labor }
+    : { hrOn, fenced: payrollFenced, payrollReadFailed: hrOn && !payrollFenced, labourBucket: totals.labor })
   const {
     amount: labourEffective,
     source: labourSource,
@@ -510,9 +487,13 @@ export default function Overheads() {
     other: labourOtherCounted,
   } = labour
   const labourOtherNote = otherLabourLine(labour)
+  const labourNotes = outletLabourNotes(labour)
+  // The labour figure without other labour, for the breakdown table's Payroll / HR estimate line.
+  const labourBase = labourSource === 'payroll' ? (periodData?.labourParts?.payroll ?? null)
+    : labourSource === 'estimate' ? (labour.estimate?.amount ?? null) : null
 
-  const totalFixed = totals.overhead + labourEffective + totals.tax_fees
-  const netProfit = revenue > 0 ? revenue - foodCost - totalFixed : null
+  const totalFixed = totals.overhead + (labourEffective ?? 0) + totals.tax_fees
+  const netProfit = revenue > 0 && labourEffective != null ? revenue - foodCost - totalFixed : null
 
   // A bucket with nothing in it has not been measured at 0 — it has not been entered. The
   // distinction has to be carried from here to the cell, because the first `? :` that defaults it
@@ -526,7 +507,7 @@ export default function Overheads() {
   // wage bill of zero there.
   const entered = {
     food:  foodCost > 0,
-    labor: labourSource === 'payroll' || totals.labor > 0 || (savedEmpty && !hrOn),
+    labor: ['payroll', 'estimate', 'overheads'].includes(labourSource) || (savedEmpty && !hrOn),
     oh:    totals.overhead > 0 || savedEmpty,
     tax:   totals.tax_fees > 0 || savedEmpty,
   }
@@ -592,9 +573,10 @@ export default function Overheads() {
       note: 'bought, not stock used' },
     { key: 'labor',  label: 'Labor',      amount: entered.labor ? labourEffective  : null, target: LABOR_WARN, color: COST_BREAKDOWN_COLORS['Labor'], textColor: 'var(--theme-text1)',
       note: labourSource === 'payroll' ? `from finalized payroll${labourOtherNote ? `; ${labourOtherNote}` : ''}`
+          : labourSource === 'estimate' ? `HR wage estimate — payroll not finalized${labourOtherNote ? `; ${labourOtherNote}` : ''}`
           : labourOtherNote && labourSource === 'overheads' ? `from Overheads entry. ${labourOtherNote}`
-          : labourSource === 'unreadable' ? (totals.labor > 0 ? 'payroll cannot be read on this login — Labor tab only' : 'payroll cannot be read on this login')
-          : labourSource === 'overheads' ? 'from Overheads entry' : hrOn ? 'no finalized payroll run, and nothing on the Labor tab' : 'nothing on the Labor tab' },
+          : labourSource === 'unreadable' ? 'payroll cannot be read on this login'
+          : labourSource === 'overheads' ? 'from Overheads entry' : 'nothing on the Labor tab' },
     { key: 'oh',     label: 'Overhead',   amount: entered.oh    ? totals.overhead  : null, target: 25, color: COST_BREAKDOWN_COLORS['Overheads'], textColor: 'var(--theme-text1)' },
     { key: 'tax',    label: 'Tax & Fees', amount: entered.tax   ? totals.tax_fees  : null, target: 5,  color: COST_BREAKDOWN_COLORS['Tax & Fees'], textColor: 'var(--theme-text1)' },
     { key: 'profit', label: 'Net Profit', amount: netProfit,       target: 10,
@@ -637,10 +619,10 @@ export default function Overheads() {
   // Cross-bucket ranked pivot — all line items with amount > 0, sorted by spend
   const allLineItems = useMemo(() => {
     const lines = Object.entries(rows).flatMap(([bucket, bucketRows]) =>
-      // When finalized payroll supersedes the Labor bucket, the typed labour rows are NOT part of
-      // this statement — listing them would make the table's own TOTAL disagree with the
-      // "100%" it prints underneath, which is the two-tables-must-tie-out rule.
-      bucket === 'labor' && labourPayroll != null ? [] :
+      // With Crest HR the typed labour rows are NOT part of this statement (S849: payroll, else the
+      // HR wage estimate, is the labour) — listing them would make the table's own TOTAL disagree
+      // with the "100%" it prints underneath, which is the two-tables-must-tie-out rule.
+      bucket === 'labor' && hrOn ? [] :
       bucketRows
         .filter(r => parseFloat(r.amount) > 0)
         .map(r => ({
@@ -650,12 +632,20 @@ export default function Overheads() {
           amount:      parseFloat(r.amount),
         }))
     )
-    if (labourPayroll != null && labourPayroll > 0) {
+    if (labourSource === 'payroll' && labourBase > 0) {
       lines.push({
         bucket: 'labor',
         category: 'Payroll',
         description: 'Finalized HR payroll run — pay earned + overtime + employer SSF',
-        amount: labourPayroll,
+        amount: labourBase,
+      })
+    }
+    if (labourSource === 'estimate' && labourBase > 0) {
+      lines.push({
+        bucket: 'labor',
+        category: 'HR wage estimate',
+        description: 'Pay for the month from the staff list and attendance — payroll not finalized',
+        amount: labourBase,
       })
     }
     // Its own lines, so the table still totals to the statement above (S798 3c).
@@ -672,7 +662,7 @@ export default function Overheads() {
         pctOfRev:   revenue    > 0 ? (l.amount / revenue)    * 100 : null,
       }))
       .sort((a, b) => b.amount - a.amount)
-  }, [rows, totalFixed, revenue, labourPayroll, labourOtherCounted])
+  }, [rows, totalFixed, revenue, hrOn, labourSource, labourBase, labourOtherCounted])
 
   // Break-even
   const avgDishPrice = dishes > 0 ? revenue / dishes : 0
@@ -773,8 +763,9 @@ export default function Overheads() {
           one the statement used. */}
       {ignoredLabourBucket > 0 && (
         <div className="note-banner">
-          <strong>Labour comes from your finalized payroll run this period ({fmt(labourEffective)}).</strong>{' '}
-          The {fmt(ignoredLabourBucket)} on the Labor tab is <strong>not</strong> added to the P&amp;L below — payroll and the Labor bucket are two measurements of the same cost, and summing them would double-count it. The tab stays editable for months with no payroll run.
+          {labourSource === 'payroll' && <><strong>Labour comes from your finalized payroll run this period ({fmt(labourEffective)}).</strong>{' '}</>}
+          {labourSource === 'estimate' && <><strong>Labour is the HR wage estimate this period ({fmt(labourEffective)}) — payroll is not finalized yet.</strong>{' '}</>}
+          The {fmt(ignoredLabourBucket)} on the Labor tab is <strong>not</strong> added — with Crest HR, labour is the finalized payroll or, until it is finalized, the HR wage estimate. The tab stays for outlets without Crest HR.
         </div>
       )}
 
@@ -796,12 +787,14 @@ export default function Overheads() {
           },
           {
             label: 'Labor Costs', value: entered.labor ? fmt(labourEffective) : '—',
-            sub: labourSource === 'unreadable' && !entered.labor ? 'Payroll cannot be read on this login'
-               : !entered.labor ? (hrOn ? 'No finalized payroll run, nothing entered' : 'Not entered yet')
-               : fmtPct(labourEffective, revenue) ? `${fmtPct(labourEffective, revenue)} ${ofRevenue}${labourSource === 'payroll' ? ' · payroll' : ''}${labourOtherCounted ? ' + bonus/final pay' : ''}` : 'No sales data',
+            sub: labourSource === 'unreadable' ? 'Payroll cannot be read on this login'
+               : !entered.labor ? 'Not entered yet'
+               : fmtPct(labourEffective, revenue) ? `${fmtPct(labourEffective, revenue)} ${ofRevenue}${labourSource === 'payroll' ? ' · payroll' : labourSource === 'estimate' ? ' · HR estimate' : ''}${labourOtherCounted ? ' + bonus/final pay' : ''}` : 'No sales data',
             color: 'var(--theme-text1)',
             tip: labourSource === 'payroll'
-              ? `Your finalized HR payroll run for this period — pay earned (salary less unpaid days and days before joining) plus overtime plus employer SSF, the payroll sheet's Cost to business — plus any festival allowance, incentives and leavers' final settlements finalized for this month.${labourOtherNote ? ` This month it ${labourOtherNote}.` : ''} It supersedes whatever is typed on the Labor tab; the two are never added together. Industry target: ~30% of revenue.`
+              ? `Your finalized HR payroll run for this period — pay earned (salary less unpaid days and days before joining) plus overtime plus employer SSF, the payroll sheet's Cost to business — plus any festival allowance, incentives and leavers' final settlements finalized for this month.${labourOtherNote ? ` This month it ${labourOtherNote}.` : ''} With Crest HR the Labor tab is not counted; the two are never added together. Industry target: ~30% of revenue.`
+              : labourSource === 'estimate'
+              ? `The HR wage estimate for the month, until this month's payroll is finalized: each person's pay from the staff list and attendance sheet (monthly staff less unpaid days; daily and hourly staff for the days or hours on the sheet, and a full day where nothing is marked), plus overtime from approved entries and the attendance sheet, plus employer SSF for staff enrolled with an SSF number — plus any festival allowance, incentives and leavers' final settlements finalized for this month.${labourOtherNote ? ` This month it ${labourOtherNote}.` : ''} With Crest HR the Labor tab is not counted. Industry target: ~30% of revenue.`
               : `Salaries, wages, and benefits, as entered on the Labor tab.${labourOtherNote ? ` ${labourOtherNote}.` : ''} Industry target: ~30% of revenue.`
           },
           {
@@ -1039,17 +1032,16 @@ export default function Overheads() {
             </p>
           )}
 
-          {verdictWithheld && labourSource === 'unreadable' && (
+          {labourSource === 'unreadable' && (
             <p role="alert" style={{ marginTop: 16, marginBottom: 0, fontSize: 12, color: 'var(--theme-amber-text)', lineHeight: 1.6 }}>
-              △ Payroll cannot be read on this login, so labour from any finalized payroll run is <strong>not</strong> in this statement{totals.labor > 0 ? ' (only the Labor tab is)' : ''}. Net Profit is shown without a verdict — the account owner sees the payroll figure.
+              △ Labour is payroll's; it cannot be read on this login, so labour is <strong>not</strong> in this statement and Net Profit is not shown. The Labor tab is not counted in its place. The account owner sees the full statement.
             </p>
           )}
-          {/* S796: an HR client whose payroll is not finalized yet has no labour in this statement
-              at all. The Labor line already reads as not entered; this says what that does to the
-              verdict, so a profit with no wage bill in it is never called "Profitable". */}
-          {verdictWithheld && labourSource === 'none' && (
+          {/* S849 (SU17): staff on payroll with no pay set, or nobody on payroll: the figure is kept
+              and the verdict withheld, with the reason and the next step. */}
+          {verdictWithheld && (labour.reason === 'nopay' || labour.reason === 'nostaff') && (
             <p role="status" style={{ marginTop: 16, marginBottom: 0, fontSize: 12, color: 'var(--theme-amber-text)', lineHeight: 1.6 }}>
-              △ No payroll run is finalized for {period?.label || 'this month'} yet, so labour is <strong>not</strong> in this statement. Net Profit is shown without a verdict until payroll is finalized in Crest HR.
+              △ {labourNotes.long.filter(l => /^(Pay not set|No staff on payroll)/.test(l)).join(' ')} Net Profit is shown without a verdict.
             </p>
           )}
 
@@ -1075,7 +1067,7 @@ export default function Overheads() {
               display: 'flex', justifyContent: 'space-between', alignItems: 'center'
             }}>
               <span style={{ fontSize: 13, color: 'var(--theme-text2)' }}>
-                {verdictWithheld ? `Net profit before payroll — ${labourNotJudgedText({ source: labourSource, verdictWithheld }).replace(/^Not/, 'not')}`
+                {verdictWithheld ? `Net profit — ${labourNotJudgedText(labour).replace(/^Not/, 'not')}`
                   : periodOpen ? 'Net profit so far — not judged while the month is open'
                   : netProfit >= 0 ? '✓ Profitable this period' : '✗ Operating at a loss this period'}
               </span>
@@ -1162,9 +1154,11 @@ export default function Overheads() {
                   {/* These are the TYPED rows. When payroll supersedes them they are still worth
                       showing — they are what is stored — but the card must not imply they are in
                       the statement above. */}
-                  {key === 'labor' && labourPayroll != null && (
+                  {key === 'labor' && hrOn && (
                     <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 10px', lineHeight: 1.5 }}>
-                      Superseded by finalized payroll ({fmt(labourEffective)}) in the P&amp;L above.
+                      {labourSource === 'payroll' ? <>Not counted: the finalized payroll ({fmt(labourEffective)}) is the labour in the P&amp;L above.</>
+                        : labourSource === 'estimate' ? <>Not counted: the HR wage estimate ({fmt(labourEffective)}) is the labour in the P&amp;L above until payroll is finalized.</>
+                        : 'Not counted: with Crest HR, labour is payroll\'s.'}
                     </p>
                   )}
                   {total === 0 ? (
@@ -1306,9 +1300,9 @@ export default function Overheads() {
               color: beTone ? `var(--theme-${beTone}-text)` : 'var(--theme-text1)'
             }}>
               {verdictWithheld
-                ? labourSource === 'none'
-                  ? 'Not judged until payroll is finalized — labour is not in the fixed costs yet, so the real break-even is higher'
-                  : 'Not judged on this login — payroll cannot be read here, so the real fixed costs may be higher'
+                ? labourSource === 'unreadable'
+                  ? 'Not judged on this login — payroll cannot be read here, so the real fixed costs are higher'
+                  : `${labourNotJudgedText(labour)} — so the real break-even may be higher`
                 : breakEvenRev && periodOpen
                   ? `So far: ${fmt(revenue)} of the ${fmt(breakEvenRev)} needed. Not judged while ${period?.label || 'the month'} is open.`
                 : isAboveBreakEven && breakEvenRev

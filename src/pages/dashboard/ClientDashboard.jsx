@@ -6,12 +6,12 @@ import { fcBand, fcThresholds, recipeCostOf } from '../../shared/imsFormulas'
 import { nmBand, descendingBand, bandFigure } from '../../shared/operatingBands'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
-import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
+import { fetchAllRows } from '../../shared/fetchAllRows'
 import { firstError } from '../../shared/queryError'
 import {
   dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
   projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue, splitAtToday,
-  monthFestivals, salesFestivalFactor, salesFestivalJudged, purchFestivalJudged, targetTotal, dayRanges,
+  monthFestivals, salesFestivalFactor, salesFestivalJudged, purchFestivalJudged, targetTotal, dayRanges, canCaptureTarget,
 } from '../../modules/dashboard/dailyForecast'
 import { holidaysByKeyOf } from '../../utils/demandForecastMath'
 import {
@@ -19,8 +19,13 @@ import {
   WEATHER_HORIZON_DAYS, RAIN_MM, MIN_MEASURE_DAYS,
 } from '../../modules/dashboard/weatherEffect'
 import { useWeatherStrip } from '../../modules/dashboard/useWeatherStrip'
-import { isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel, labourNotJudgedText, otherLabourLine, PAYSLIP_LABOUR_COLUMNS } from '../../modules/dashboard/labourSource'
-import { loadMonthOtherLabour } from '../../modules/dashboard/loadOtherLabourPay'
+import { isPayrollFenced, resolveOutletLabour, outletLabourNotes, labourNotJudgedText, splitOverheadBuckets } from '../../modules/dashboard/labourSource'
+import { loadOutletLabour } from '../../modules/dashboard/loadOutletLabour'
+import { mtdClock, nepalBsToday, countedDaysText, prorate } from '../../modules/dashboard/mtdClock'
+import { revenueOf, netSpendOf, operatingFigures } from '../../modules/dashboard/ownerDashboardData'
+import { readPeriodTransfers, transferValueByItem } from '../../modules/ims/transfers/transferFlows'
+import { loadDeliveryCommission, bsMonthWindow } from '../../shared/deliveryCommission'
+import { settleWithin } from '../../utils/withTimeout'
 import { fcTrendView, MIN_COMPARED_MONTHS } from '../../modules/dashboard/fcTrendMath'
 import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom'
 import {
@@ -39,12 +44,12 @@ import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClos
 import { backfillLeaveText } from '../../modules/hr/leave/backfillApprovedLeave'
 import { closingCountNote } from '../periods/closingCountNote'
 import CloseConfirmBody from '../periods/CloseConfirmBody'
-import { getBsToday, BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd, formatAd, bsDayBoundaryIso } from '../../utils/bsCalendar'
+import { BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd, formatAd, bsDayBoundaryIso } from '../../utils/bsCalendar'
 import { nepalBs, nepalCivilDate, serviceDayStartIso } from '../../shared/nepalTime'
 import { carryOverFrom, stillInPlay } from '../../modules/pos/reservations/reservationStatus'
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients, getSuggestedPrice } from '../../utils/recipeCost'
-import { buildStockRows, buildUsageMap } from '../../modules/ims/stockcount/stockReportCalc'
+import { buildStockRows, buildUsageMap, transferNetQtyMap } from '../../modules/ims/stockcount/stockReportCalc'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { allocateBillDiscounts, returnCostValue } from '../../modules/ims/reports/supplierAttribution'
 import { valuePeriods, periodWastageValue, WASTAGE_VALUE_SELECT } from '../../modules/ims/reports/periodCost'
@@ -70,12 +75,8 @@ import { waitingRequests } from '../../shared/reservationSeen'
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
 const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
 
-// Today's BS date as Kathmandu reads it (S792, PLANNING-9). getBsToday() reads the VIEWER's clock,
-// so an operator abroad near midnight saw this month end (or not) a day off — the "has ended"
-// banner, whether the month is the one in progress, today's day for the forecast, and the day a
-// frozen Target was captured on — while the weather code on the same page already used Nepal's
-// civil date. The viewer clock stays only as the fallback outside the verified BS table.
-const nepalBsToday = () => nepalBs(new Date()) || getBsToday()
+// Today's BS date as Kathmandu reads it (S792, PLANNING-9) is `nepalBsToday`, which moved to
+// mtdClock.js in S849 (OWNER-DASHBOARD-17) so the Owner Dashboard reads the same "today".
 
 // Roving-tabindex tab row for in-card view switches — completes the tablist contract the bare
 // role="tablist"/"tab" markup used to promise without delivering (aria-controls, roving tabIndex,
@@ -318,7 +319,8 @@ const WEEKDAY_INITIALS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 //
 // It also reads the Holiday Calendar over those months and this one (S850), through the DEFINER
 // get_forecast_holidays: the table reads EMPTY, not failed, for an IMS staff or till login, and
-// whichever login opens the dashboard first captures the month's Target. A failed holiday read is a
+// whichever Owner, operator or IMS login opens the dashboard first captures the month's Target
+// (canCaptureTarget, S849). A failed holiday read is a
 // failed history read, so no Target is captured from a calendar that could not be read.
 async function loadForecastHistory(scopedFrom, period, clientId) {
   const prev = k => {
@@ -446,8 +448,18 @@ export default function ClientDashboard({ scope = 'home' }) {
   // typed Labor bucket. `hr_payroll_runs`/`hr_payslips` carry the rank-blind RESTRICTIVE
   // `no_ims_staff` policy, so an IMS login reads both as `[]` with no error — which would look
   // exactly like "no finalized run" and quietly fall back to the bucket. Such a login does not ask.
+  // S849 (GAPS-4, SU11 (a)): labour on an HR outlet is the finalized run, else the HR wage estimate
+  // (loadOutletLabour); the Labor tab is named "not counted". A fenced login does not ask and gets no
+  // labour figure ('unreadable'), never the Labor tab in its place.
   const hrOn = !!clientModules.hr
   const payrollFenced = isPayrollFenced({ hrOn, isAdmin, isOwner, imsRole: profile?.ims_role })
+  // The till tables carry the RESTRICTIVE no_ims_staff and no_hr_role_staff policies, so an IMS or HR
+  // login reads pos_orders as `[]` with no error: the delivery commission is not readable there and
+  // is not asked for (PNL-1 parity).
+  const posOn = !!clientModules.pos
+  const posFenced = posOn && !isAdmin && !isOwner && (!!profile?.ims_role || !!profile?.hr_role)
+  // Who may write this month's frozen Target: exactly the logins the database guard accepts (DATABASE-8).
+  const canCapture = canCaptureTarget({ isAdmin, isOwner, hasImsAccess, profile })
   const [advancingPeriod, setAdvancingPeriod] = useState(false)
   // The close's outcome sentence, or null. `neutral` when nothing went wrong on this press: the
   // month had already been ended by someone else (S792, STOCK-8) and nothing was written.
@@ -549,7 +561,13 @@ export default function ClientDashboard({ scope = 'home' }) {
       .limit(1).single()
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
 
-    setAndCache(setActivePeriod, 'activePeriod', period)
+    const periodFailed = !!(periodErr && periodErr.code !== 'PGRST116')
+    // A failed period read is not cached (S849, OWNER-DASHBOARD-2): the next visit asks again.
+    if (periodFailed) setActivePeriod(period)
+    else setAndCache(setActivePeriod, 'activePeriod', period)
+    // The month-to-date clock (S849): ratios count the days already finished, and whole-month fixed
+    // costs are counted for those days. Fixed for this load, and kept in `stats` with its figures.
+    const clock = mtdClock(period)
 
     // Fired here (as soon as `period` is known) rather than after this whole function finishes —
     // it used to run only once loadStats had computed Food Cost % from its own big batch below,
@@ -614,18 +632,30 @@ export default function ClientDashboard({ scope = 'home' }) {
       // here UNDER-deducts staff meals, which makes on-hand look higher than it is and quietly
       // drops items off the "below par" list this tile exists to show.
       period ? fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', period.id).order('id')) : { data: [] },
-      // Finalized payroll for this period (S756, D22) — only asked when HR is on AND this login can
-      // read payroll at all (payrollFenced). `{ data: [] }` keeps the tuple shape. At most one run
-      // per period, but paged anyway so this read carries its rows-per-what in code, not in a hope.
-      period && hrOn && !payrollFenced
-        ? fetchAllRows(() => scopedFrom('hr_payroll_runs', 'id').eq('period_id', period.id).eq('status', 'finalized').order('id'))
-        : { data: [] },
-      // The month's festival, incentive and final-settlement pay (S798 3c, H18), which joins the
-      // finalized run. Same fence; a failed read is a failed payroll read.
-      period && hrOn && !payrollFenced
-        ? loadMonthOtherLabour((t, c) => scopedFrom(t, c), period.bs_year, period.bs_month)
-        : { other: null },
+      // Stock received from / sent to the group's other outlets (S849, PNL-8): in adds like a
+      // purchase, out comes off like a return, at the sender's frozen value — in Net Purchases, Spend %
+      // so far, Est. Net Margin %, the cost pie and on-hand. A failed read fails the figures.
+      period ? readPeriodTransfers(scopedFrom, [period.id]) : { data: [] },
     ])
+    // Labour by the one rule (S849, GAPS-4): finalized payroll, else the HR wage estimate accrued to
+    // yesterday; no HR read at all without HR or on a fenced login. Its own promise beside the batch.
+    const labourPromise = period
+      ? loadOutletLabour((t, c) => scopedFrom(t, c), {
+          period, hrOn, fenced: payrollFenced, throughDay: clock.countedDays, scale: clock.fraction,
+        })
+      : Promise.resolve(null)
+    // Delivery-partner commission on bills SOLD in the counted days (PNL-1 parity): a profit figure
+    // takes it off. Only for a POS outlet, only for a login that can read the till.
+    const commissionPromise = !period || !posOn ? Promise.resolve({ status: 'none', amount: 0, unsettledBills: 0 })
+      : posFenced ? Promise.resolve({ status: 'unreadable', amount: null, unsettledBills: null })
+      : clock.firstDay ? Promise.resolve({ status: 'ok', amount: 0, unsettledBills: 0 })
+      : settleWithin(loadDeliveryCommission({ scopedFrom }, {
+          startIso: bsDayBoundaryIso(period.bs_year, period.bs_month, 1, false),
+          endIso: clock.running ? bsDayBoundaryIso(period.bs_year, period.bs_month, clock.countedDays + 1, false) : bsMonthWindow(period.bs_year, period.bs_month).endIso,
+          posEnabled: true,
+        }), 20000, 'Delivery commission').then(r => (r.error
+          ? { status: 'failed', amount: null, unsettledBills: null, error: r.error }
+          : { status: 'ok', amount: r.amount || 0, unsettledBills: r.unsettledBills || 0 }))
 
     const independentResults = await independentPromise
     const [
@@ -654,7 +684,7 @@ export default function ClientDashboard({ scope = 'home' }) {
       ? explodeRecipeIngredients(supabase, dashRecipeIds).catch(err => { console.error('Dashboard: recipe walk failed', err); return null })
       : Promise.resolve({})
 
-    const [dependentResults, rawBreakdown, forecastHistory] = await Promise.all([dependentPromise, ingredientBreakdownPromise, historyPromise])
+    const [dependentResults, rawBreakdown, forecastHistory, labourResult, commission] = await Promise.all([dependentPromise, ingredientBreakdownPromise, historyPromise, labourPromise, commissionPromise])
     if (loadIdRef.current !== myId) return // superseded again after these more awaits
     const ingredientBreakdown = rawBreakdown || {}
 
@@ -667,8 +697,7 @@ export default function ClientDashboard({ scope = 'home' }) {
       { data: overheadsData },
       { data: wastagesData },
       { data: staffMealsData },
-      { data: payrollRuns, error: payrollRunsErr },
-      { other: labourOther, error: labourOtherErr },
+      { data: transfersData },
     ] = dependentResults
 
     // What customized plates used beyond their recipes (S758). Throws on a failed read, like the
@@ -677,25 +706,18 @@ export default function ClientDashboard({ scope = 'home' }) {
       .catch(err => { console.error('Dashboard: option stock-line walk failed', err); return null })
     if (loadIdRef.current !== myId) return // superseded during the option stock-line read
 
-    // The run's payslips — pay earned + overtime + employer SSF (payrollLabourTotal), the definition
-    // every labour reader shares. One row per employee per run; paged and chunked all the same. A
-    // failed read is carried as `labourReadFailed` and must NOT fall through to the typed Labor
-    // bucket: that would quietly substitute a different labour source for the one the tile names.
-    let labourPayroll = null
-    let labourReadFailed = !!payrollRunsErr || !!labourOtherErr
-    const payrollRunIds = (payrollRuns || []).map(r => r.id)
-    if (!labourReadFailed && payrollRunIds.length > 0) {
-      const { data: slips, error: slipErr } = await fetchAllRowsChunked(payrollRunIds, ids =>
-        scopedFrom('hr_payslips', PAYSLIP_LABOUR_COLUMNS).in('run_id', ids).order('id'))
-      if (loadIdRef.current !== myId) return // superseded during the payslip read
-      if (slipErr) labourReadFailed = true
-      else labourPayroll = payrollLabourTotal(slips || [])
-    }
-
-    const hadRealError = (periodErr && periodErr.code !== 'PGRST116')
+    const labourFailed = labourResult?.labour?.source === 'failed'
+    const hadRealError = periodFailed
       || independentResults.some(r => r.error) || dependentResults.some(r => r.error)
-      || rawBreakdown === null || deltaExplosion === null || labourReadFailed
+      || rawBreakdown === null || deltaExplosion === null || labourFailed || commission.status === 'failed'
     setLoadErrors(prev => ({ ...prev, ims: hadRealError ? 'Inventory data failed to load — figures below may be incomplete or stale.' : '' }))
+    // A load with any failed read is shown but never cached (S849, OWNER-DASHBOARD-2): a cached
+    // partial load would outlive the failure as a confident figure on the next visit.
+    const put = hadRealError ? (setter, _section, value) => setter(value) : setAndCache
+    // The reads every money figure and ratio on the page is built from. One of them missing is a dash
+    // on those tiles, never a figure computed without it.
+    const figuresFailed = periodFailed || !!independentResults[4]?.error
+      || [0, 1, 2, 5, 8].some(i => !!dependentResults[i]?.error)
 
     // purchaseTotal = purchases NET of bill discounts − returns. `discount_amount` is a BILL-level
     // figure repeated on every line, so a raw Σ qty × rate charged the undiscounted price into
@@ -706,11 +728,11 @@ export default function ClientDashboard({ scope = 'home' }) {
     // Spend by Category can never add up to more than the Net Purchases tile beside it. Returns
     // stay at their list value, exactly as those two pages take them. Both on the COST basis since
     // S792 (D32): `lineCost`, and each return at its line's basis, so a PAN-bill outlet's supplier
-    // VAT is spend here as on Monthly Summary.
+    // VAT is spend here as on Monthly Summary. Since S849 the tile and the ratios add stock received
+    // from other outlets and take off stock sent (netSpendOf), and the ratios count finished days.
     const allocatedPurchases = allocateBillDiscounts(purchases || [])
-    const netPurchaseValue = allocatedPurchases.reduce((s, p) => s + p.lineCost, 0)
-    const returnTotal = (returns || []).reduce((s, r) => s + returnCostValue(r), 0)
-    const purchaseTotal = netPurchaseValue - returnTotal
+    const spend = netSpendOf({ purchases, returns, transfers: transfersData, clock })
+    const purchaseTotal = spend.all
 
     const currentPriceMap = {}
     ;(recipes || []).forEach(r => { currentPriceMap[r.id] = parseFloat(r.selling_price) || 0 })
@@ -730,6 +752,9 @@ export default function ClientDashboard({ scope = 'home' }) {
       revenueMap[s.recipe_id] = (revenueMap[s.recipe_id] || 0) + qty * price - (parseFloat(s.discount) || 0)
     })
     const revenueTotal = Object.values(revenueMap).reduce((s, v) => s + v, 0)
+    // The same revenue over the counted days (finished days only, a Bulk row counted): what every
+    // ratio divides by (OWNER-DASHBOARD-8). The Revenue tile keeps showing everything so far.
+    const revenueCounted = revenueOf(salesData, currentPriceMap, clock).counted
 
     // theoreticalMap: item-level usage this period, through the ONE depletion rule every stock
     // page applies (S696) — POS supersedes a manual row for the same recipe and day, a credit note
@@ -794,6 +819,13 @@ export default function ClientDashboard({ scope = 'home' }) {
       purchMap[r.item_id] = (purchMap[r.item_id] || 0) - parseFloat(r.qty || 0)
       purchValueMap[r.item_id] = (purchValueMap[r.item_id] || 0) - returnCostValue(r)
     })
+    // Stock moved between the group's outlets (S849, PNL-8) moves the shelf like a purchase and a
+    // return, so Top Variance agrees with the Variance page, and received stock is this outlet's
+    // spend in Spend by Category and Top Items (sent stock is not).
+    Object.entries(transferNetQtyMap(transfersData)).forEach(([id, q]) => { purchMap[id] = (purchMap[id] || 0) + q })
+    const tVal = transferValueByItem(transfersData)
+    Object.entries(tVal.in).forEach(([id, v]) => { purchValueMap[id] = (purchValueMap[id] || 0) + v })
+    Object.entries(tVal.out).forEach(([id, v]) => { purchValueMap[id] = (purchValueMap[id] || 0) - v })
 
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) })
     const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) })
@@ -808,9 +840,9 @@ export default function ClientDashboard({ scope = 'home' }) {
         const value = variance * parseFloat(item.per_uom_rate || 0)
         return { name: item.name, variance, value, uom: item.uom, category: item.categories?.name }
       }).filter(r => r.value > 0).sort((a, b) => b.value - a.value).slice(0, 5)
-      setAndCache(setTopVariance, 'topVariance', varRows)
+      put(setTopVariance, 'topVariance', varRows)
     } else {
-      setAndCache(setTopVariance, 'topVariance', [])
+      put(setTopVariance, 'topVariance', [])
     }
 
     // Category spend (net)
@@ -821,7 +853,7 @@ export default function ClientDashboard({ scope = 'home' }) {
       const cat = itemMap[itemId]?.categories?.name || 'Uncategorized'
       catSpendMap[cat] = (catSpendMap[cat] || 0) + val
     })
-    setAndCache(setCategorySpend, 'categorySpend',
+    put(setCategorySpend, 'categorySpend',
       Object.entries(catSpendMap)
         .map(([name, value]) => ({ name, value: Math.round(value) }))
         .filter(r => r.value > 0)
@@ -837,7 +869,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     const daySalesMap = dailySalesMap(salesData, currentPriceMap)
     const salesDayNums = Object.keys(daySalesMap).map(Number).sort((a, b) => a - b)
     const dailySalesOn = salesDayNums.length > 0
-    setAndCache(setHasDailySales, 'hasDailySales', dailySalesOn)
+    put(setHasDailySales, 'hasDailySales', dailySalesOn)
     const purchDayNums = Object.keys(dayPurchMap).map(Number).sort((a, b) => a - b)
 
     // Forecast and Target: the month in progress only. Past months show actuals only. How each
@@ -888,7 +920,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     }
     const isFestival = d => !!festivals[d]
     const salesFactorOf = salesFestivalFactor(festivals)
-    setAndCache(setFestivalsUnread, 'festivalsUnread', historyFailed)
+    put(setFestivalsUnread, 'festivalsUnread', historyFailed)
 
     // The frozen Target: captured once per period, never recalculated, so a later visit can judge
     // the month against what was expected of it. A snapshot of an older model (a pre-S780 slope
@@ -898,7 +930,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     // and a second tab racing this one cannot overwrite the snapshot the first has just written.
     let nextSalesTargetSnap = isCurrentSnapshot('sales', period?.sales_projection_snapshot) ? period.sales_projection_snapshot : null
     let nextPurchTargetSnap = isCurrentSnapshot('purch', period?.purch_projection_snapshot) ? period.purch_projection_snapshot : null
-    if (period && isCurrentMonth && !historyFailed) {
+    if (period && isCurrentMonth && !historyFailed && canCapture) {
       const capture = (kind, column, base) => {
         const snap = makeSnapshot(kind, base, { monthEndDay, weekdayOf, capturedDay: bsToday.day })
         scopedUpdate('monthly_periods', { [column]: snap })
@@ -920,12 +952,12 @@ export default function ClientDashboard({ scope = 'home' }) {
         if (base) nextPurchTargetSnap = capture('purch', 'purch_projection_snapshot', base)
       }
     }
-    setAndCache(setSalesTargetSnap, 'salesTargetSnap', nextSalesTargetSnap)
-    setAndCache(setPurchTargetSnap, 'purchTargetSnap', nextPurchTargetSnap)
-    setAndCache(setForecastHistoryFailed, 'forecastHistoryFailed', historyFailed && (!nextSalesTargetSnap || !nextPurchTargetSnap))
+    put(setSalesTargetSnap, 'salesTargetSnap', nextSalesTargetSnap)
+    put(setPurchTargetSnap, 'purchTargetSnap', nextPurchTargetSnap)
+    put(setForecastHistoryFailed, 'forecastHistoryFailed', historyFailed && (!nextSalesTargetSnap || !nextPurchTargetSnap))
     // The sales Target's month total with each festival at its multiplier (S850); the stored
     // projectedMonthEnd is the usual week's. Purchases are never scaled, so theirs is the stored one.
-    setAndCache(setSalesTargetTotal, 'salesTargetTotal', nextSalesTargetSnap
+    put(setSalesTargetTotal, 'salesTargetTotal', nextSalesTargetSnap
       ? targetTotal(nextSalesTargetSnap.byWeekday, { monthEndDay, weekdayOf, dayFactor: salesFactorOf })
       : null)
 
@@ -941,14 +973,14 @@ export default function ClientDashboard({ scope = 'home' }) {
     // purchases follow restock days, whatever the weather. `festivals` rides along so the re-run
     // keeps each festival's multiplier beside the rain (S850).
     const salesBase = nextSalesTargetSnap || historyBase.sales
-    setAndCache(setSalesForecastInputs, 'salesForecastInputs', salesTrend ? {
+    put(setSalesForecastInputs, 'salesForecastInputs', salesTrend ? {
       base: salesBase ? { byWeekday: salesBase.byWeekday } : null,
       valueMap: daySalesMap, expectDays: salesDone, fromDay: salesFrom,
       monthEndDay, bsYear: period.bs_year, bsMonth: period.bs_month, lastActualSalesDay, festivals,
     } : null)
     // The measured rain effect's samples: finished days only, like the pace, and no festival day,
     // whose sales say nothing about what rain does to a usual one (S850).
-    setAndCache(setSalesDayLog, 'salesDayLog', isCurrentMonth ? [
+    put(setSalesDayLog, 'salesDayLog', isCurrentMonth ? [
       ...historyDays.filter(x => x.sales != null && !x.holiday).map(x => ({ ad: adDateBack(period.bs_year, period.bs_month, x.back), dow: x.dow, sales: x.sales })),
       ...salesDone.filter(d => !isFestival(d)).map(d => ({ ad: adDateOf(period.bs_year, period.bs_month, d), dow: weekdayOf(d), sales: daySalesMap[d] })),
     ] : [])
@@ -960,8 +992,8 @@ export default function ClientDashboard({ scope = 'home' }) {
       : null
     const projDays = salesTrend?.projDays || {}
     const purchProjDays = purchTrend?.projDays || {}
-    setAndCache(setSalesProjection, 'salesProjection', salesTrend ? { projectedMonthEnd: salesTrend.projectedTotal } : null)
-    setAndCache(setPurchProjection, 'purchProjection', purchTrend ? { projectedMonthEnd: purchTrend.projectedTotal } : null)
+    put(setSalesProjection, 'salesProjection', salesTrend ? { projectedMonthEnd: salesTrend.projectedTotal } : null)
+    put(setPurchProjection, 'purchProjection', purchTrend ? { projectedMonthEnd: purchTrend.projectedTotal } : null)
 
     // Build the unified day axis, full month (Day 1 → month end for the current month; full actual
     // range for past months). The compact card slices this down to a 10-day window (6 days back →
@@ -999,7 +1031,7 @@ export default function ClientDashboard({ scope = 'home' }) {
         ...(festivals[d] && { festival: festivals[d] }),
       })
     }
-    setAndCache(setDailyTrend, 'dailyTrend', trend)
+    put(setDailyTrend, 'dailyTrend', trend)
 
     // Top items by net spend — built from allItems (unfiltered by is_active), not the
     // active-only `items` list, so an item deactivated mid-period after being purchased still
@@ -1014,7 +1046,7 @@ export default function ClientDashboard({ scope = 'home' }) {
       }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 10)
-    setAndCache(setTopItemSpend, 'topItemSpend', itemSpendRows)
+    put(setTopItemSpend, 'topItemSpend', itemSpendRows)
 
     // Reorder — the same on-hand and below-par calculation the Reorder Report this panel links
     // to uses (S696; this used to be its own copy that deducted neither wastage nor staff meals,
@@ -1024,8 +1056,9 @@ export default function ClientDashboard({ scope = 'home' }) {
       const stockRows = buildStockRows({
         items, opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData,
         sales: salesData, breakdown: ingredientBreakdown, pars: parLevels, explosion: deltaExplosion,
+        transfers: transfersData,
       })
-      setAndCache(setStockOnHand, 'stockOnHand', Math.round(stockRows.reduce((t, r) => t + r.stockValue, 0)))
+      put(setStockOnHand, 'stockOnHand', Math.round(stockRows.reduce((t, r) => t + r.stockValue, 0)))
       const reorderRows = stockRows
         .filter(r => r.needsReorder)
         .map(r => ({
@@ -1035,25 +1068,21 @@ export default function ClientDashboard({ scope = 'home' }) {
           source: r.stockSource === 'closing' ? 'Physical' : "Calc'd"
         }))
         .sort((a, b) => b.estValue - a.estValue)
-      setAndCache(setReorderCount, 'reorderCount', reorderRows.length)
+      put(setReorderCount, 'reorderCount', reorderRows.length)
       reorderRows.splice(5)
-      setAndCache(setReorderItems, 'reorderItems', reorderRows)
+      put(setReorderItems, 'reorderItems', reorderRows)
     } else {
-      setAndCache(setReorderItems, 'reorderItems', [])
-      setAndCache(setReorderCount, 'reorderCount', null)
-      setAndCache(setStockOnHand, 'stockOnHand', null)
+      put(setReorderItems, 'reorderItems', [])
+      put(setReorderCount, 'reorderCount', null)
+      put(setStockOnHand, 'stockOnHand', null)
     }
 
-    // Two shapes of the same figure, deliberately: `overheadTotal` is every bucket combined (what
-    // the Fixed Costs % and Est. Net Margin % cards have always meant by "overheads"), while
-    // `overheadBuckets` keeps the split so the cost pie can show Labor as its own slice without
-    // inventing a second, overlapping labor number. Rows with a NULL bucket fall back to
-    // 'overhead', matching Overheads.js's own `r.bucket || 'overhead'` grouping.
-    const overheadBuckets = { overhead: 0, labor: 0, tax_fees: 0 }
-    ;(overheadsData || []).forEach(o => {
-      const b = overheadBuckets[o.bucket] !== undefined ? o.bucket : 'overhead'
-      overheadBuckets[b] += parseFloat(o.amount || 0)
-    })
+    // Every bucket, split (splitOverheadBuckets, labourSource.js): Overheads (and a row with no
+    // bucket), the Labor tab and Tax & Fees. `overheadBuckets` keeps the WHOLE-MONTH amounts as typed;
+    // the ratios count them for the finished days (prorate, S849). The Labor tab is labour only for an
+    // outlet without Crest HR; with HR it is named "not counted" (resolveOutletLabour).
+    const split = splitOverheadBuckets(overheadsData)
+    const overheadBuckets = { overhead: split.overhead, labor: split.labor, tax_fees: split.taxFees }
     const overheadTotal = overheadBuckets.overhead + overheadBuckets.labor + overheadBuckets.tax_fees
 
     // The Wastage Report's own total: every item, prep and hidden ones included (S792, FIGURES-5).
@@ -1063,11 +1092,19 @@ export default function ClientDashboard({ scope = 'home' }) {
     const wastageValueTotal = periodWastageValue(wastagesData)
 
     // `overheadTotal` stays the raw all-bucket sum of what was TYPED; the labour actually counted is
-    // resolved at render (resolveLabour) from `overheadBuckets.labor`, `labourPayroll` and the
-    // viewer's fence, so a cached stats object from before S756 still renders (payroll unknown).
-    // `labourOther` (S798 3c) is the month's festival / incentive / settlement pay; absent on an older
-    // cached object, which then reads as payroll alone until the reload lands.
-    setAndCache(setStats, 'stats', { itemCount, vendorCount, recipeCount, subRecipeCount, purchaseTotal, revenueTotal, overheadTotal, overheadBuckets, labourPayroll, labourOther: labourOther || null, labourReadFailed, wastageValueTotal, underpricedCount, costedPricedCount, menuOpportunityTotal })
+    // resolved at render (resolveOutletLabour) from `labourParts` and the Labor tab, so an unsaved
+    // view of either never needs a reload. `statsVersion: 2` (S849): a stats object cached before the
+    // one labour rule renders its labour and ratios as loading, never as the old Labor-tab figure,
+    // until this reload lands.
+    put(setStats, 'stats', {
+      statsVersion: 2, clock,
+      itemCount, vendorCount, recipeCount, subRecipeCount,
+      purchaseTotal, purchaseCounted: spend.counted, transfers: spend.transfers,
+      revenueTotal, revenueCounted, overheadTotal, overheadBuckets, figuresFailed,
+      labourParts: labourResult?.parts ?? null,
+      commission: { status: commission.status, amount: commission.amount, unsettledBills: commission.unsettledBills },
+      wastageValueTotal, underpricedCount, costedPricedCount, menuOpportunityTotal,
+    })
     setLoading(false)
   }
 
@@ -1197,7 +1234,8 @@ export default function ClientDashboard({ scope = 'home' }) {
 
     // S809 3n (REPORTS-8): a failed read is not an empty period. Its tiles keep the last good figures
     // (or show "—" when there are none), and nothing from a failed load is cached.
-    const fresh = { revenueTotal, coversTotal, dineInBills, billCount, avgCheck, tablesOccupied, tablesTotal, bookingsTonight, coversToCome, requestsPending }
+    // Stamped with the outlet (S849, GAPS-3): keepLastGood never carries another outlet's figures.
+    const fresh = { clientId: effectiveClientId, revenueTotal, coversTotal, dineInBills, billCount, avgCheck, tablesOccupied, tablesTotal, bookingsTonight, coversToCome, requestsPending }
     // A failed credit-note read fails the sales tiles too: without the notes, Revenue would read as
     // the bills alone, a figure the page did not compute.
     const failed = { sales: !!((periodErr && periodErr.code !== 'PGRST116') || ordersErr || notesErr), tables: !!tablesErr, bookings: !!(bookingsErr || requestsErr) }
@@ -1248,7 +1286,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     setLoadErrors(prev => ({ ...prev, pos: error ? `${kdsStation === 'BOT' ? 'Bar' : 'Kitchen'} data failed to load — figures below may be incomplete or stale.` : '' }))
     // S809 3n (REPORTS-8): a failed read never says "0 open, 0 late"; it keeps the last good tickets
     // (or shows "—") and is not cached.
-    const fresh = { kitchen: true, station: kdsStation, openNow, lateCount, readyWaiting, avgPrepMin, completedToday }
+    const fresh = { clientId: effectiveClientId, kitchen: true, station: kdsStation, openNow, lateCount, readyWaiting, avgPrepMin, completedToday }
     if (error) setPosStats(prev => keepLastGood(prev, fresh, { tickets: true }, HOME_KITCHEN_READS))
     else setAndCache(setPosStats, 'posStats', fresh)
   }
@@ -1345,7 +1383,7 @@ export default function ClientDashboard({ scope = 'home' }) {
       // equal the Food Cost % Consolidated P&L / Monthly Summary charge for it. `item_id` because
       // a closed month is valued per item (below), over Monthly Summary's item set.
       periodIds.length ? fetchAllRows(() => supabase.from('purchase_entries').select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost').in('period_id', periodIds).order('id')) : { data: [] },
-      periodIds.length ? fetchAllRows(() => supabase.from('vendor_returns').select('period_id, item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').in('period_id', periodIds).order('id')) : { data: [] },
+      periodIds.length ? fetchAllRows(() => supabase.from('vendor_returns').select('period_id, item_id, qty, rate, bs_day, purchase_entries(vat_inclusive, vat_is_cost)').in('period_id', periodIds).order('id')) : { data: [] },
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for — but the
       // filter is applied in JS below, NOT as `.neq('source','pos_comp')`. `sales_entries.source`
       // is nullable (DEFAULT 'manual', no NOT NULL), and in SQL `NULL <> 'pos_comp'` is NULL, so
@@ -1357,7 +1395,7 @@ export default function ClientDashboard({ scope = 'home' }) {
       // bare .select() truncates at PostgREST's 1000-row cap with no error — and because only the
       // denominator was truncated, every Food Cost % on the chart failed HIGH. A believable wrong
       // number, on the figure the product is sold on.
-      periodIds.length ? fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount, source').in('period_id', periodIds).order('id')) : { data: [] },
+      periodIds.length ? fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount, source, bs_day').in('period_id', periodIds).order('id')) : { data: [] },
       // Paged (S734): this map is the price fallback for any sales row with no `unit_price`, so
       // a recipe past the cut prices its sales at 0 — and this chart's whole subject is the
       // RATIO, so a short denominator makes every month's Food Cost % fail HIGH. Exactly the
@@ -1375,10 +1413,14 @@ export default function ClientDashboard({ scope = 'home' }) {
       closedIds.length ? fetchAllRows(() => supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', closedIds).order('id')) : { data: [] },
       closedIds.length ? fetchAllRows(() => supabase.from('wastages').select('period_id, item_id, qty').in('period_id', closedIds).order('id')) : { data: [] },
       closedIds.length ? fetchAllRows(() => supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', closedIds).order('id')) : { data: [] },
+      // Stock moved between the group's outlets (S849, PNL-8): in adds like a purchase, out comes off
+      // like a return, in a closed month's COGS (valuePeriods) and the open month's spend alike.
+      readPeriodTransfers(scopedFrom, periodIds),
     ])
     const [
       { data: allPurch }, { data: allRet }, { data: allSales }, { data: recipeData },
       { data: trendItems }, { data: allOpening }, { data: allClosing }, { data: allWaste }, { data: allStaff },
+      { data: allTransfers },
     ] = trendResults
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
 
@@ -1395,17 +1437,11 @@ export default function ClientDashboard({ scope = 'home' }) {
     // Grouped by period_id in one pass each, instead of re-filtering the full purchases/returns/
     // sales arrays once per period below (O(periods × rows) → O(rows)) — bounded by the .limit(11)
     // above so it never ran away, but scales with purchase/sales volume across those 11 months.
-    const grossMap = {}, retMap = {}, revMap = {}
-    // `grossMap` holds purchases NET of bill discounts. Allocated one period at a time, which
-    // predates S792: the fallback bill key now carries period_id (supplierAttribution.js
-    // allocationBillKey), so a whole-batch pass would no longer fold two months' legacy bills
-    // into one. The per-period grouping stays correct, just no longer necessary.
+    const revMap = {}
+    // The open month's purchases, by period: its spend is allocated over its own bills (netSpendOf).
+    // Closed months are valued through valuePeriods below, which groups by period itself.
     const purchByPeriod = {}
     ;(allPurch || []).forEach(e => { (purchByPeriod[e.period_id] = purchByPeriod[e.period_id] || []).push(e) })
-    Object.entries(purchByPeriod).forEach(([pid, rows]) => {
-      grossMap[pid] = allocateBillDiscounts(rows).reduce((s, e) => s + e.lineCost, 0)
-    })
-    ;(allRet   || []).forEach(e => { retMap[e.period_id]   = (retMap[e.period_id]   || 0) + returnCostValue(e) })
     // unit_price captured on the row when present, else falls back to the recipe's current
     // price — this 11-month trend is exactly where always using today's price hurt most,
     // since a single menu price change would retroactively distort every past month's Food
@@ -1425,7 +1461,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     // it is given.)
     const valued = valuePeriods({
       periodIds: closedIds, items: trendItems, opening: allOpening, closing: allClosing,
-      purchases: allPurch, returns: allRet, wastages: allWaste, staffMeals: allStaff,
+      purchases: allPurch, returns: allRet, wastages: allWaste, staffMeals: allStaff, transfers: allTransfers,
     })
     const points = closed.map(p => {
       const v = valued[p.id]
@@ -1443,9 +1479,13 @@ export default function ClientDashboard({ scope = 'home' }) {
     }).reverse()
 
     if (currentPeriod) {
-      const net = (grossMap[currentPeriod.id] || 0) - (retMap[currentPeriod.id] || 0)
-      const rev = revMap[currentPeriod.id] || 0
-      const fc  = rev > 0 ? parseFloat(((net / rev) * 100).toFixed(1)) : null
+      // The open month's point is the Spend % so far tile's own figure (S849): the same helpers, the
+      // same finished days, stock transfers included.
+      const clock = mtdClock(currentPeriod)
+      const inOpen = rows => (rows || []).filter(r => r.period_id === currentPeriod.id)
+      const net = netSpendOf({ purchases: purchByPeriod[currentPeriod.id] || [], returns: inOpen(allRet), transfers: inOpen(allTransfers), clock }).counted
+      const rev = revenueOf(inOpen(allSales), priceMap, clock).counted
+      const fc  = rev > 0 && !clock.firstDay ? parseFloat(((net / rev) * 100).toFixed(1)) : null
       if (fc != null) {
         // Purchases/revenue were withheld here (null) so the tooltip would omit them, which left
         // the one point most likely to look alarming as the only one you could not interrogate.
@@ -1495,7 +1535,14 @@ export default function ClientDashboard({ scope = 'home' }) {
   // that the ratio is arithmetic, not a signal.
   const SETTLE_DAY = 10
   const periodTooEarly = isCurrentPeriod && dayOfPeriod < SETTLE_DAY
-  const partialNote = isCurrentPeriod ? `Day ${dayOfPeriod} of ${periodDays} · settles at month end` : null
+  // S849 (OWNER-DASHBOARD-1/8): the ratios count the days already finished, and rent, Tax & Fees and
+  // a whole-month labour figure are counted for those days, so Fixed Costs % is no longer lumpy and
+  // keeps its band; Spend % so far and Est. Net Margin % keep the settle guard for stock purchases.
+  // `stats.clock` is the clock the figures were computed on (one load, one clock).
+  const statsCurrent = stats?.statsVersion === 2
+  const sClock = statsCurrent ? stats.clock : null
+  const daysText = countedDaysText(sClock)
+  const firstDayNote = 'Ratios start after today — the first full day'
   // Grey, not green/amber/red, while the ratio is still meaningless. A neutral number that says
   // "not yet meaningful" is more trustworthy than a red one that isn't true.
   //
@@ -1513,50 +1560,57 @@ export default function ClientDashboard({ scope = 'home' }) {
   // `withhold` (S756): the same neutral rendering for a figure that may be MISSING a cost rather than
   // merely unsettled — labour this login cannot read. A ✓ on a margin that might not include the
   // wage bill is the flattering half of the D22 defect in a quieter voice.
-  const verdictFigure = (value, bander, withhold = false) => {
+  // `settle` false (S849): Fixed Costs % is prorated and no longer needs the settle guard.
+  const verdictFigure = (value, bander, withhold = false, settle = true) => {
     const f = bandFigure(value, bander)
     if (value == null) return { color: 'var(--theme-text2)', title: undefined, text: f.text }
-    if (periodTooEarly || withhold) return { color: 'var(--theme-text1)', title: undefined, text: `${value.toFixed(1)}%` }
+    if ((settle && periodTooEarly) || withhold) return { color: 'var(--theme-text1)', title: undefined, text: `${value.toFixed(1)}%` }
     return { color: f.style.color, title: f.title, text: f.text }
   }
 
-  // ── Labour: finalized payroll XOR the typed Labor bucket, never the sum (S756, D22) ─────────────
+  // ── Labour: the one rule (S849, GAPS-4 / SU11 (a)) ───────────────────────────────────────────────
   //
-  // Until S756 Fixed Costs % and Est. Net Margin % counted only what was typed on the Overheads
-  // page's Labor tab, while the Overheads page itself used the finalized payroll run — so a client
-  // paying NPR 4 lakh in wages with an empty Labor tab saw a healthy margin here and a loss there,
-  // for the same month. The precedence lives in labourSource.js so the two pages cannot drift.
-  // `fixedCostTotal` is the figure both tiles and the cost pie use; `stats.overheadTotal` stays the
-  // raw typed sum. A stats object cached before S756 has no `labourPayroll` and degrades to the old
-  // bucket-only reading until the reload underneath it lands.
-  const ohBuckets = stats?.overheadBuckets
-  const labour = resolveLabour({
-    labourBucket: ohBuckets?.labor || 0,
-    payroll: stats?.labourPayroll ?? null,
-    hrOn,
-    fenced: payrollFenced,
-    readFailed: !!stats?.labourReadFailed,
-    otherPay: stats?.labourOther ?? null,
-  })
-  // Named on both ratio tiles when there are two possible sources (HR on), or when there is none at
-  // all; an IMS-only client with a filled Labor tab has one source and nothing to disambiguate.
-  // S798 3c: other labour is named beside it, counted ("includes Dashain allowance NPR …") or not.
-  const labourLabel = hrOn || labour.source === 'none'
-    ? [labourSourceLabel(labour, hrOn), otherLabourLine(labour)].filter(Boolean).join(' · ')
+  // An outlet with Crest HR: the finalized payroll run (scaled to the finished days while the month
+  // runs), else the HR wage estimate accrued to yesterday, plus the month's festival / incentive /
+  // settlement pay. The Overheads Labor tab is NAMED "not counted", never added and never a stand-in;
+  // a login that cannot read payroll gets no labour figure. An outlet without HR: the Labor tab. Until
+  // S849 an HR outlet with no finalized run took the Labor tab here while the Owner Dashboard and the
+  // Owner Report took an estimate, so one month carried two labour figures.
+  const ohBuckets = statsCurrent ? stats.overheadBuckets : null
+  const labour = statsCurrent && stats.labourParts && sClock
+    ? resolveOutletLabour({ ...stats.labourParts, labourBucket: ohBuckets?.labor || 0, scale: sClock.fraction })
+    : null
+  const labourNotes = outletLabourNotes(labour)
+  // A lump (festival, incentive, settlement) paid in the running month sits over part of its sales.
+  const labourWithheld = !!labour?.verdictWithheld || (!!labour?.other && !!sClock?.running)
+  // Named on both ratio tiles when there are two possible sources (HR on), or none at all.
+  const labourLabel = labour && (hrOn || labour.source === 'none')
+    ? labourNotes.short.charAt(0).toUpperCase() + labourNotes.short.slice(1)
     : ''
-  const fixedCostTotal = ohBuckets
-    ? (ohBuckets.overhead || 0) + labour.amount + (ohBuckets.tax_fees || 0)
-    : (stats?.overheadTotal || 0)
+  // Delivery commission: 0 without POS; null when unreadable on this login or failed (no margin).
+  const commission = statsCurrent ? stats.commission : null
+  const commissionAmt = !posOn ? 0 : commission?.status === 'ok' ? commission.amount : null
+  const commissionUnreadable = posOn && commission?.status === 'unreadable'
+  const figs = statsCurrent && !stats.figuresFailed && sClock
+    ? operatingFigures({
+        revenue: stats.revenueCounted, spend: stats.purchaseCounted, labour: labour?.amount ?? null,
+        overhead: ohBuckets?.overhead || 0, taxFees: ohBuckets?.tax_fees || 0, commission: commissionAmt, clock: sClock,
+      })
+    : null
+  const fixedMissing = !!figs?.fixedMissing
+  // Fixed costs counted for the finished days, labour included: the figure both tiles and the pie use.
+  const fixedCostTotal = figs && labour?.amount != null ? figs.fixedCounted + labour.amount : null
 
   // Spend % so far, NOT Food Cost % (S792, D30). This page only ever shows the OPEN month, which has
-  // no closing count, so what it can divide by sales is what was BOUGHT. It was labelled Food Cost %
-  // under a tip saying it "settles once you finish the month-end stock count" — the formula never
-  // reads the count. The name `fcPct` is kept: it still bands on the food-cost thresholds.
-  const fcPct = stats?.revenueTotal > 0 ? (stats.purchaseTotal / stats.revenueTotal) * 100 : null
-  const ohPct = stats?.revenueTotal > 0 && fixedCostTotal > 0 ? (fixedCostTotal / stats.revenueTotal) * 100 : null
-  const netMarginPct = stats?.revenueTotal > 0
-    ? ((stats.revenueTotal - stats.purchaseTotal - fixedCostTotal) / stats.revenueTotal) * 100
-    : null
+  // no closing count, so what it can divide by sales is what was BOUGHT. The name `fcPct` is kept: it
+  // still bands on the food-cost thresholds.
+  const fcPct = figs?.spendPct ?? null
+  const ohPct = fixedCostTotal > 0 ? figs.fixedCostsPct : null
+  const netMarginPct = figs?.marginPct ?? null
+  const marginWithhold = labourWithheld || commissionUnreadable || fixedMissing
+  const transfersLine = statsCurrent && !stats.figuresFailed && (stats.transfers?.inAll || stats.transfers?.outAll)
+    ? `includes transfers in ${npr(stats.transfers.inAll)} · out ${npr(stats.transfers.outAll)}`
+    : ''
   // Computed once per render instead of inside the pie-legend .map() below, where every row was
   // redundantly re-reducing the same, unchanging total.
   const categorySpendTotal = categorySpend.reduce((s, r) => s + r.value, 0)
@@ -1720,8 +1774,11 @@ export default function ClientDashboard({ scope = 'home' }) {
   // the Est. Net Margin % card (revenue minus food cost and overheads), in the standard restaurant
   // P&L order: Food Cost → Labor → Overheads → Tax & Fees → what's left.
   //
-  // Labor is `labour.amount` (S756): the finalized payroll run when one exists, otherwise the
-  // Overheads page's own `labor` bucket — never both. Until S526 this
+  // Labor is `labour.amount` (S849, the one rule): with Crest HR the finalized payroll run or, until it
+  // is finalized, the HR wage estimate; without HR the Overheads page's own `labor` bucket — never
+  // both. Since S849 every slice is over the days already finished: food over the counted days'
+  // purchases, rent and Tax & Fees counted for those days, so the pie is the tiles' own figures.
+  // Until S526 this
   // chart drew `stats.overheadTotal` (which is all three buckets summed, labor included) as one
   // "Overheads" slice AND added `hrStats.payroll` on top as a separate "Labor (basic)" slice — so
   // every rupee of labor was counted twice and the pie's own total came out well above the total
@@ -1761,26 +1818,22 @@ export default function ClientDashboard({ scope = 'home' }) {
   // S796, so Overheads' cost stack and bucket bars draw the same slots.
   // Falls back to one combined slice for a `stats` object restored from a pre-S526 session cache,
   // which has overheadTotal but no overheadBuckets — still correct, just less broken out.
-  const costBreakdown = [
-    { name: 'Food Cost', value: Math.max(0, stats?.purchaseTotal || 0) },
-    ...(ohBuckets
-      ? [
-          { name: 'Labor',      value: Math.max(0, labour.amount) },
-          { name: 'Overheads',  value: Math.max(0, ohBuckets.overhead || 0) },
-          { name: 'Tax & Fees', value: Math.max(0, ohBuckets.tax_fees || 0) },
-        ]
-      : [{ name: 'Overheads', value: Math.max(0, stats?.overheadTotal || 0) }]),
+  const costBreakdown = figs ? [
+    { name: 'Food Cost', value: Math.max(0, stats.purchaseCounted || 0) },
+    { name: 'Labor',      value: Math.max(0, labour?.amount || 0) },
+    { name: 'Overheads',  value: Math.max(0, prorate(ohBuckets?.overhead || 0, sClock) || 0) },
+    { name: 'Tax & Fees', value: Math.max(0, prorate(ohBuckets?.tax_fees || 0, sClock) || 0) },
     ...(netMarginPct != null && netMarginPct > 0
-      ? [{ name: 'Net Margin', value: Math.max(0, (stats.revenueTotal || 0) - (stats.purchaseTotal || 0) - fixedCostTotal) }]
+      ? [{ name: 'Net Margin', value: Math.max(0, stats.revenueCounted * netMarginPct / 100) }]
       : []),
-  ].filter(r => r.value > 0)
+  ].filter(r => r.value > 0) : []
   const costBreakdownTotal = costBreakdown.reduce((s, r) => s + r.value, 0)
   // One colour per slice for the pie AND its legend swatch (S796): a withheld margin draws its slice
   // grey, as the footer below withholds, instead of a green "profit" slice. Withheld for the same two
   // reasons the Est. Net Margin tile withholds (S797): labour that may be missing, and a month not yet
   // SETTLE_DAY days old, where one bulk purchase decides the sign. The pill, slice and footer all read
   // `marginWithheld`, so the card cannot judge a figure the tile beside it does not.
-  const marginWithheld = labour.verdictWithheld || periodTooEarly
+  const marginWithheld = marginWithhold || periodTooEarly
   const costSliceFill = name => costSliceColor(name, { withheld: marginWithheld })
   // The sentence for whichever labour branch the page took (S683's rule: a branch the page knows
   // about is said out loud). Before S756 this only fired for "Labor tab empty but HR has basic
@@ -1788,17 +1841,17 @@ export default function ClientDashboard({ scope = 'home' }) {
   // superseded a typed figure (named, with its amount), there is no labour anywhere yet, or this
   // login could not see payroll. Null when labour came from exactly one source with nothing to add.
   const npr0 = n => `NPR ${Math.round(n).toLocaleString('en-IN')}`
-  const labourNote = !ohBuckets ? null
-    : labour.source === 'payroll' && labour.ignoredBucket > 0
-      ? `Labor is your finalized payroll run (${npr0(labour.amount)}). The ${npr0(labour.ignoredBucket)} on the Overheads Labor tab is not added — the two measure the same cost.`
-    : labour.source === 'none' && hrOn
-      ? 'Labor not included — no finalized payroll run this period, and nothing on the Overheads Labor tab — so the margin is not judged until payroll is finalized.'
+  const labourNote = !labour ? null
+    : labour.ignoredBucket > 0 && labour.amount != null
+      ? `Labor is ${labour.source === 'payroll' ? 'your finalized payroll run' : 'the HR wage estimate (payroll is not finalized yet)'} (${npr0(labour.amount)}). The ${npr0(labour.ignoredBucket)} on the Overheads Labor tab is not added — with Crest HR, payroll is the labour figure.`
+    : labour.source === 'estimate'
+      ? 'Labor is the HR wage estimate — payroll is not finalized yet.'
     : labour.source === 'unreadable'
-      ? 'Payroll cannot be read on this login, so any finalized payroll run is not in these figures and the margin is not judged. The account owner sees the full figure.'
+      ? 'Payroll cannot be read on this login, so labour is not in these figures and the margin is not shown. The account owner sees the full figure.'
     : labour.source === 'failed'
-      ? 'Payroll could not be loaded, so labour may be missing from these figures and the margin is not judged. Retry from the notice at the top of the page.'
+      ? 'Labour could not be loaded, so the margin is not shown. Retry from the notice at the top of the page.'
     : null
-  const labourNoteIsWarning = labour.verdictWithheld || labour.source === 'none'
+  const labourNoteIsWarning = labourWithheld || labour?.source === 'unreadable' || labour?.source === 'failed'
   const costBreakdownSummary = costBreakdown.length === 0
     ? 'No cost data for this period.'
     : `Revenue breakdown this period: ${costBreakdown.map(r => `${r.name} NPR ${Math.round(r.value).toLocaleString('en-IN')}`).join(', ')}. Net margin: ${netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}.${labourNote ? ` ${labourNote}` : ''}`
@@ -1963,9 +2016,11 @@ export default function ClientDashboard({ scope = 'home' }) {
     <div {...kpiCard(() => navigate('/purchases'))}>
       <div style={kpiLabelStyle}>Net Purchases</div>
       <div style={{ ...kpiValueStyle(18), color: 'var(--theme-accent-ink)' }}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.purchaseTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+        {loading || (stats && !statsCurrent) ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : stats?.figuresFailed ? '—' : `NPR ${(stats?.purchaseTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
       </div>
-      <div style={kpiSubtextStyle}>After bill discounts &amp; returns · {periodLabel} →</div>
+      <div style={kpiSubtextStyle}>{stats?.figuresFailed ? "Couldn't load — see the notice above" : <>After bill discounts &amp; returns · {periodLabel} →</>}</div>
+      {/* Stock moved between the group's outlets is in this figure (S849, PNL-8), so it is named. */}
+      {!loading && transfersLine && <div style={kpiSubtextStyle}>{transfersLine}</div>}
     </div>
   )
 
@@ -1985,7 +2040,7 @@ export default function ClientDashboard({ scope = 'home' }) {
         <Tip text="Sales recorded for this period, before VAT and after discounts. For a POS client this already includes every bill the till closed — the POS section's own Revenue tile is the same trade counted WITH VAT, which is why the two figures differ by roughly the VAT rate." width={280}>Revenue</Tip>
       </div>
       <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green-text)' }}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${(stats?.revenueTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+        {loading || (stats && !statsCurrent) ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : stats?.figuresFailed ? '—' : `NPR ${(stats?.revenueTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
       </div>
       <div style={kpiSubtextStyle}>Sales entries, excl. VAT →</div>
     </div>
@@ -2003,11 +2058,13 @@ export default function ClientDashboard({ scope = 'home' }) {
       {/* Client-configured thresholds, not a fourth hardcoded copy of 35/45 — Settings offers
           fc_warning_pct/fc_critical_pct and this card is the headline they were added for. */}
       <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(fcPct, fcCardBand).color }} title={verdictFigure(fcPct, fcCardBand).title}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(fcPct, fcCardBand).text}
+        {loading || (stats && !statsCurrent) ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(fcPct, fcCardBand).text}
       </div>
       <div style={kpiSubtextStyle}>
-        {partialNote
-          ? partialNote
+        {figs?.firstDay ? firstDayNote
+          : stats?.figuresFailed ? "Couldn't load — see the notice above"
+          : daysText
+          ? `${daysText} · stock transfers included`
           : <><Tip text={`Coloured against your food cost target from Settings → Thresholds (watch above ${fcBands.warn}%, too high above ${fcBands.critical}%) as a guide: over a whole month what you buy is close to what you use, unless stock is building up or running down.`} width={260}>Food cost target ≤{fcBands.warn}%</Tip> →</>}
       </div>
     </div>
@@ -2019,26 +2076,25 @@ export default function ClientDashboard({ scope = 'home' }) {
         {/* The tip used to say "Target: under 60% combined" while the colours banded at 50 and
             65 — so a 58% read amber under a sentence calling it on target. The card states the
             ladder it actually paints (S734). */}
-        <Tip text={`All fixed costs (rent, utilities, labor, tax & fees) as a % of revenue. Labor is your finalized HR payroll run for the month when one exists (gross pay + overtime + employer SSF), otherwise what is typed on the Overheads Labor tab — never both added together, the same rule the Overheads page uses. Healthy up to ${FIXED_COST_WARN}%, worth watching to ${FIXED_COST_CRITICAL}%, too high above that. See the Overheads page for the full breakdown.`} width={280}>Fixed Costs % of Revenue</Tip>
+        <Tip text={`All fixed costs (rent, utilities, labor, tax & fees) as a % of revenue, over the days already finished. For the month in progress, rent and other fixed costs are counted for the days that have passed (the month's amount × days passed ÷ days in the month). With Crest HR, labour is the month's finalized payroll run or, until it is finalized, the HR wage estimate from your staff list and attendance sheet; the Overheads Labor tab is then not counted and is named under the figure. Without Crest HR, labour is what is typed on the Labor tab. Healthy up to ${FIXED_COST_WARN}%, worth watching to ${FIXED_COST_CRITICAL}%, too high above that. See the Overheads page for the full breakdown.`} width={300}>Fixed Costs % of Revenue</Tip>
       </div>
-      {/* Carries the same settle guard as Food Cost % and Est. Net Margin % beside it (S734).
-          It had none, and it is the LUMPIEST of the three: a month's rent is entered as one row
-          on whatever day someone gets to it, against revenue that accrues daily — so on day 3 a
-          perfectly healthy outlet read several hundred percent, in red, with nothing on the card
-          saying the month was three days old. Two of the three ratios greyed out and the third
-          did not, which made the two that did look like the exception. */}
-      {/* Withheld (grey, no mark) when labour may be missing — a fenced IMS login or a failed
-          payroll read (S756), or an HR client with no finalized run yet (S796): a low fixed-cost %
-          that leaves out the wage bill is not "Healthy". */}
-      <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(ohPct, ohCardBand, labour.verdictWithheld).color }} title={verdictFigure(ohPct, ohCardBand, labour.verdictWithheld).title}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(ohPct, ohCardBand, labour.verdictWithheld).text}
+      {/* S849: fixed costs are counted for the finished days, so this ratio is no longer lumpy and
+          keeps its band from day 2 (no settle guard). Withheld (grey, no mark) when labour may be
+          missing or is not judged — a fenced login, a failed read, pay not set for some staff. */}
+      <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(ohPct, ohCardBand, labourWithheld, false).color }} title={verdictFigure(ohPct, ohCardBand, labourWithheld, false).title}>
+        {loading || (stats && !statsCurrent) ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : figs?.firstDay ? '—' : verdictFigure(ohPct, ohCardBand, labourWithheld, false).text}
       </div>
       <div style={kpiSubtextStyle}>
-        {partialNote || (fixedCostTotal ? `NPR ${fixedCostTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} total →` : 'No overhead data')}
+        {figs?.firstDay ? firstDayNote
+          : stats?.figuresFailed ? "Couldn't load — see the notice above"
+          : labour && labour.amount == null ? `Not shown — ${labourNotes.short}`
+          : fixedCostTotal ? `${daysText ? `Fixed costs for ${daysText.replace(/^Days?/, m => m.toLowerCase())} · ` : ''}NPR ${fixedCostTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} →`
+          : 'No overhead data'}
       </div>
-      {!loading && stats && labourLabel && (
-        <div style={{ ...kpiSubtextStyle, color: labour.verdictWithheld ? 'var(--theme-amber-text)' : kpiSubtextStyle.color }}>{labourLabel}</div>
+      {!loading && statsCurrent && labourLabel && (
+        <div style={{ ...kpiSubtextStyle, color: labourWithheld ? 'var(--theme-amber-text)' : kpiSubtextStyle.color }}>{labourLabel}</div>
       )}
+      {!loading && statsCurrent && labourNotes.long.map((line, i) => <div key={i} style={kpiSubtextStyle}>{line}</div>)}
     </div>
   ) : (
     // The tier is read from the feature catalog, not typed: this said "Pro" while Overheads has
@@ -2050,17 +2106,32 @@ export default function ClientDashboard({ scope = 'home' }) {
   const netMarginCard = canOverheads ? (
     <div {...kpiCard(null)}>
       <div style={kpiLabelStyle}>
-        <Tip text="Revenue minus what you have SPENT on stock so far this month (net purchases — not food cost, which needs the month-end stock count to know what was used), labor, overheads and tax & fees, as a % of revenue — what the business keeps after stock purchases and fixed costs. Buying a month of stock in one go lowers it; cooking from last month's stock raises it. Labor is your finalized HR payroll run for the month when one exists (gross pay + overtime + employer SSF); otherwise it is what is typed on the Overheads Labor tab. The two are never added together, so this matches the Overheads page for the same month. The line under the figure says which one was used. Healthy Nepal F&B target: ≥20%." width={280}>Est. Net Margin %</Tip>
+        <Tip text={`Revenue minus what you have SPENT on stock so far this month (net purchases — not food cost, which needs the month-end stock count to know what was used — with stock received from your other outlets added and stock sent to them taken off), labor, overheads and tax & fees${posOn ? ', and delivery-partner commission (Foodmandu, Pathao) on bills sold this month' : ''}, as a % of revenue, over the days already finished — what the business keeps. For the month in progress, rent and other fixed costs are counted for the days that have passed. Buying a month of stock in one go lowers it; cooking from last month's stock raises it. With Crest HR, labor is the finalized payroll run or, until it is finalized, the HR wage estimate; without it, the Overheads Labor tab — never both. The line under the figure says which one was used. Healthy Nepal F&B target: ≥20%.`} width={300}>Est. Net Margin %</Tip>
       </div>
-      <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(netMarginPct, nmBand, labour.verdictWithheld).color }} title={verdictFigure(netMarginPct, nmBand, labour.verdictWithheld).title}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(netMarginPct, nmBand, labour.verdictWithheld).text}
+      <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(netMarginPct, nmBand, marginWithhold).color }} title={verdictFigure(netMarginPct, nmBand, marginWithhold).title}>
+        {loading || (stats && !statsCurrent) ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : figs?.firstDay ? '—' : verdictFigure(netMarginPct, nmBand, marginWithhold).text}
       </div>
-      {/* Inherits Food Cost's lumpiness through purchaseTotal, so it carries the same caveat. */}
-      <div style={kpiSubtextStyle}>{partialNote || (labour.verdictWithheld ? `${labourNotJudgedText(labour)} · target ≥20%` : 'After stock bought & overheads · target ≥20%')}</div>
+      {/* Inherits Spend's lumpiness through the purchases, so it keeps the settle guard. */}
+      <div style={kpiSubtextStyle}>
+        {figs?.firstDay ? firstDayNote
+          : stats?.figuresFailed ? "Couldn't load — see the notice above"
+          : labour && labour.amount == null ? `Not shown — ${labourNotes.short}`
+          : commission?.status === 'failed' ? 'Not shown — delivery commission could not be loaded'
+          : fixedMissing ? `Not judged — no fixed costs entered for ${activePeriod ? BS_MONTHS[activePeriod.bs_month - 1] : 'this month'} yet · Overheads →`
+          : labourWithheld && labour?.verdictWithheld ? `${labourNotJudgedText(labour)} · target ≥20%`
+          : daysText ? `Fixed costs for ${daysText.replace(/^Days?/, m => m.toLowerCase())} · target ≥20%`
+          : 'After stock bought & overheads · target ≥20%'}
+      </div>
       {/* The labour source is named ON the tile, not only in a hover (S756, D22) — a screenshot of
           this card loses the Tip, and which wage figure a margin contains is what makes it true. */}
-      {!loading && stats && labourLabel && (
-        <div style={{ ...kpiSubtextStyle, color: labour.verdictWithheld ? 'var(--theme-amber-text)' : kpiSubtextStyle.color }}>{labourLabel}</div>
+      {!loading && statsCurrent && labourLabel && (
+        <div style={{ ...kpiSubtextStyle, color: labourWithheld ? 'var(--theme-amber-text)' : kpiSubtextStyle.color }}>{labourLabel}</div>
+      )}
+      {!loading && statsCurrent && commissionUnreadable && (
+        <div style={{ ...kpiSubtextStyle, color: 'var(--theme-amber-text)' }}>Delivery commission not readable on this login · not judged</div>
+      )}
+      {!loading && statsCurrent && commission?.status === 'ok' && (commission.amount > 0 || commission.unsettledBills > 0) && (
+        <div style={kpiSubtextStyle}>after delivery commission {npr(commission.amount)}{commission.unsettledBills > 0 ? ` · ${commission.unsettledBills} delivery bill${commission.unsettledBills === 1 ? '' : 's'} not settled yet` : ''}</div>
       )}
     </div>
   ) : null
@@ -2879,11 +2950,16 @@ export default function ClientDashboard({ scope = 'home' }) {
                       Day {dayOfPeriod} of {periodDays} · too early in the month to judge; judged from day {SETTLE_DAY}
                     </div>
                   )}
+                  {daysText && (
+                    <div style={{ fontSize: 11, marginTop: 4, color: 'var(--theme-text3)' }}>
+                      {daysText} · fixed costs counted for those days
+                    </div>
+                  )}
                   {/* Percentages below the slices are a share of whatever the pie actually contains,
                       which flips with the sign of the margin — say which, rather than leaving a bare
                       "23.4%" to be read against the wrong denominator. */}
                   <div style={{ fontSize: 11, marginTop: 4, color: 'var(--theme-text3)' }}>
-                    {netMarginPct != null && netMarginPct > 0 ? '% of revenue' : '% of total cost'} · {labour.source === 'payroll' ? 'labor from finalized payroll, the rest from Overheads' : 'from Overheads page buckets'}
+                    {netMarginPct != null && netMarginPct > 0 ? '% of revenue' : '% of total cost'} · {labour?.source === 'payroll' ? 'labor from finalized payroll, the rest from Overheads' : labour?.source === 'estimate' ? 'labor is the HR wage estimate, the rest from Overheads' : 'from Overheads page buckets'}
                   </div>
                   {labourNote && (
                     <div style={{ fontSize: 11, marginTop: 4, color: labourNoteIsWarning ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>
@@ -2929,7 +3005,8 @@ export default function ClientDashboard({ scope = 'home' }) {
                       {panel(<>
                       {big && (
                         <div className="chart-stat-strip" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-                          <StatPill label="Revenue" value={`NPR ${(stats?.revenueTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`} />
+                          {/* The pie is over the finished days (S849), so its revenue is too. */}
+                          <StatPill label={daysText ? 'Revenue, finished days' : 'Revenue'} value={`NPR ${(stats?.revenueCounted ?? stats?.revenueTotal ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`} />
                           {/* Matches the Food Cost slice, not colors.accent — on a preset where accent
                               isn't gold the pill would otherwise disagree with the slice it summarizes. */}
                           {/* The tile's figure, so the tile's name (S792, D30): purchases ÷ sales. */}

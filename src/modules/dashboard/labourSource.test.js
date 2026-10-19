@@ -1,12 +1,14 @@
 import fs from 'fs'
 import path from 'path'
 import {
-  isPayrollFenced, payrollLabourTotal, resolveLabour, labourSourceLabel, labourNotJudgedText,
-  finalizedPayrollCost, resolveOwnerLabour, ownerLabourNote,
-  NON_LABOUR_OVERHEADS, splitNonLabourOverheads, groupOutletLabour, groupLabourRatio,
+  isPayrollFenced, payrollLabourTotal, labourSourceLabel, labourNotJudgedText,
+  NON_LABOUR_OVERHEADS, splitNonLabourOverheads, splitOverheadBuckets, groupOutletLabour, groupLabourRatio,
   PAYSLIP_LABOUR_COLUMNS, settlementLabourCost, otherLabourTotals, otherLabourFromGroupRow, otherLabourParts,
   otherLabourLine, NO_OTHER_LABOUR, estimatedEmployerSsf,
+  LABOUR_SOURCES, resolveOutletLabour, outletLabourNotes, labourFigure,
 } from './labourSource'
+import { estimateLabour } from './labourEstimate'
+import { bsToAd, formatAd } from '../../utils/bsCalendar'
 import { payrollCashCost } from '../hr/payroll/payrollData'
 import { computePayslip } from '../hr/payroll/payrollCompute'
 import { SSF_CAP, SSF_EMPLOYER_PCT } from '../hr/payrollConstants'
@@ -15,53 +17,54 @@ const readSource = (...parts) => fs.readFileSync(path.join(__dirname, '..', '..'
   .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
 
 // S756: Overheads carried the rule inline; one definition is the whole point of the helper.
+// S849 (OVERHEADS-SU11): it reads through loadOutletLabour and resolves the one rule at render.
 describe('Overheads adopts the shared labour rule', () => {
   const src = readSource('modules', 'ims', 'reports', 'Overheads.js')
-  test('imports and calls resolveLabour, isPayrollFenced and payrollLabourTotal', () => {
-    expect(src).toMatch(/import \{[^}]*resolveLabour[^}]*\} from '\.\.\/\.\.\/dashboard\/labourSource'/)
-    expect(src).toMatch(/resolveLabour\(\{/)
+  test('reads through loadOutletLabour and resolves with resolveOutletLabour and isPayrollFenced', () => {
+    expect(src).toMatch(/import \{[^}]*resolveOutletLabour[^}]*\} from '\.\.\/\.\.\/dashboard\/labourSource'/)
+    expect(src).toMatch(/loadOutletLabour\(/)
+    expect(src).toMatch(/resolveOutletLabour\(/)
     expect(src).toMatch(/isPayrollFenced\(\{/)
-    expect(src).toMatch(/payrollLabourTotal\(/)
   })
-  test('no longer carries the inline precedence, fence or payslip sum', () => {
+  test('no longer carries the inline precedence, fence, payslip sum or its own payroll reads', () => {
     expect(src).not.toMatch(/labourPayroll != null \? labourPayroll : totals\.labor/)
     expect(src).not.toMatch(/payrollFenced \? 'unreadable'/)
     expect(src).not.toMatch(/hrOn && !isAdmin && !isOwner && !!profile\?\.ims_role/)
     expect(src).not.toMatch(/parseFloat\(ps\.gross\)/)
+    expect(src).not.toMatch(/'hr_payroll_runs'/)
+    expect(src).not.toMatch(/resolveLabour\(/)
   })
-  test('pages the payslip read with a unique tiebreaker', () => {
-    expect(src).toMatch(/fetchAllRowsChunked\(runIds,[\s\S]{0,120}[Ff]rom\('hr_payslips'[^)]*\)\.in\('run_id', chunk\)\.order\('id'\)/)
+  test('the shared loader pages the payslip read with a unique tiebreaker', () => {
+    const loader = readSource('modules', 'dashboard', 'loadOutletLabour.js')
+    expect(loader).toMatch(/fetchAllRowsChunked\(runIds, chunk =>\s*from\('hr_payslips', PAYSLIP_LABOUR_COLUMNS\)\.in\('run_id', chunk\)\.order\('id'\)\)/)
   })
 })
 
-describe('OwnerDashboard uses finalized payroll when it exists', () => {
+describe('OwnerDashboard reads labour through the one rule (S849)', () => {
   const src = readSource('pages', 'dashboard', 'OwnerDashboard.jsx')
-  test('reads the finalized run and pages its payslips, OT included', () => {
-    expect(src).toMatch(/scopedFrom\('hr_payroll_runs', 'id'\)\.eq\('period_id', period\.id\)\.eq\('status', 'finalized'\)/)
-    expect(src).toMatch(/fetchAllRowsChunked\(runIds,[\s\S]{0,120}PAYSLIP_LABOUR_COLUMNS\)\.in\('run_id', chunk\)\.order\('id'\)/)
-    expect(src).toMatch(/resolveOwnerLabour\(\{/)
+  test('loadOutletLabour, never the old inline estimate', () => {
+    expect(src).toMatch(/loadOutletLabour\(/)
+    expect(src).not.toMatch(/resolveOwnerLabour|estimateLaborCost|finalizedPayrollCost/)
   })
-  // S798 2e (LABOUR-FIGURES-4): every bucket but labor — Tax & Fees and NULL-bucket rows came in.
-  test('keeps the XOR: the overheads read leaves only the labor bucket out', () => {
-    expect(src).toMatch(/from\('overheads'\)\.select\('amount, bucket'\)\.eq\('period_id', period\.id\)\.or\(NON_LABOUR_OVERHEADS\)/)
+  // S849 (GAPS-4): every bucket is read, so the Labor tab can be named "not counted".
+  test('one overheads read of every bucket, split three ways', () => {
+    expect(src).toMatch(/splitOverheadBuckets\(/)
     expect(src).not.toMatch(/'bucket', 'labor'/)
-    expect(src).toMatch(/splitNonLabourOverheads\(overheadsData\)/)
-    expect(src).toMatch(/- laborCostTotal - overheadTotal - taxFeesTotal\)/)
   })
-  test('the labour tile goes through settledFigure, not a bare band colour', () => {
+  test('the labour tile goes through the shared figure, not a bare band colour', () => {
     expect(src).not.toMatch(/lcBand\(laborPct\)\.color/)
-    expect(src).toMatch(/settledFigure\(laborPct, lcBand/)
   })
 })
 
 // D22 is silent when it regresses — a margin a little too healthy — so pin the Dashboard's wiring.
-describe('ClientDashboard counts labour through resolveLabour', () => {
+describe('ClientDashboard counts labour through the one rule', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'pages', 'dashboard', 'ClientDashboard.jsx'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
-  test('reads the finalized run and resolves labour with the shared rule', () => {
-    expect(src).toMatch(/[Ff]rom\('hr_payroll_runs'[^)]*\)\s*\.eq\('period_id'[^)]*\)\s*\.eq\('status', 'finalized'\)/)
-    expect(src).toMatch(/resolveLabour\(/)
+  test('reads labour with loadOutletLabour and resolves with resolveOutletLabour', () => {
+    expect(src).toMatch(/loadOutletLabour\(/)
+    expect(src).toMatch(/resolveOutletLabour\(/)
     expect(src).toMatch(/isPayrollFenced\(/)
+    expect(src).not.toMatch(/resolveLabour\(/)
   })
   test('net margin and fixed costs no longer divide the raw typed overhead total', () => {
     expect(src).not.toMatch(/revenueTotal - stats\.purchaseTotal - \(stats\.overheadTotal/)
@@ -118,104 +121,20 @@ describe('payrollLabourTotal', () => {
   })
 })
 
-describe('resolveLabour — payroll XOR the Labor bucket, never the sum', () => {
-  test('D22: finalized payroll with an empty Labor tab counts the payroll', () => {
-    const r = resolveLabour({ labourBucket: 0, payroll: 400000, hrOn: true, fenced: false })
-    expect(r).toEqual({ source: 'payroll', amount: 400000, ignoredBucket: 0, verdictWithheld: false, other: null, otherNotCounted: null })
-  })
-  test('payroll supersedes a typed bucket, which is named, not added', () => {
-    const r = resolveLabour({ labourBucket: 150000, payroll: 400000, hrOn: true, fenced: false })
-    expect(r.amount).toBe(400000)
-    expect(r.ignoredBucket).toBe(150000)
-  })
-  test('no finalized run falls back to the typed bucket', () => {
-    expect(resolveLabour({ labourBucket: 150000, payroll: null, hrOn: true, fenced: false }))
-      .toEqual({ source: 'overheads', amount: 150000, ignoredBucket: 0, verdictWithheld: false, other: null, otherNotCounted: null })
-  })
-  test('nothing anywhere is "none", not a judged zero-labour month', () => {
-    const r = resolveLabour({ labourBucket: 0, payroll: null, hrOn: true, fenced: false })
-    expect(r.source).toBe('none')
-    // S796: an HR client with no finalized run has no labour in the margin yet, so no ✓ on it.
-    expect(r.verdictWithheld).toBe(true)
-  })
-  test('an IMS-only client with an empty Labor tab is still judged', () => {
-    const r = resolveLabour({ labourBucket: 0, payroll: null, hrOn: false, fenced: false })
-    expect(r.source).toBe('none')
-    expect(r.verdictWithheld).toBe(false)
-  })
-  test('labourNotJudgedText names the reason, and is empty when judged', () => {
+describe('labourNotJudgedText', () => {
+  test('names the reason, and is empty when judged', () => {
     expect(labourNotJudgedText({ source: 'none', verdictWithheld: true })).toBe('Not judged until payroll is finalized')
     expect(labourNotJudgedText({ source: 'unreadable', verdictWithheld: true })).toBe('Not judged on this login')
     expect(labourNotJudgedText({ source: 'failed', verdictWithheld: true })).toMatch(/could not be loaded/)
     expect(labourNotJudgedText({ source: 'payroll', verdictWithheld: false })).toBe('')
-  })
-  test('a fenced login withholds the verdict rather than trusting the bucket', () => {
-    const r = resolveLabour({ labourBucket: 150000, payroll: null, hrOn: true, fenced: true })
-    expect(r.source).toBe('unreadable')
-    expect(r.verdictWithheld).toBe(true)
-    expect(r.amount).toBe(150000)
-  })
-  test('a failed payroll read withholds the verdict too', () => {
-    const r = resolveLabour({ labourBucket: 0, payroll: null, hrOn: true, fenced: false, readFailed: true })
-    expect(r.source).toBe('failed')
-    expect(r.verdictWithheld).toBe(true)
-  })
-
-  // Overheads.js computes this inline today; the helper must give the same answer on every branch
-  // so the page can adopt it without moving a figure.
-  test.each([
-    [0, 400000, false], [150000, 400000, false], [150000, null, false], [0, null, false], [150000, null, true], [0, null, true],
-  ])('agrees with Overheads.js inline rule (bucket %p, payroll %p, fenced %p)', (bucket, payroll, fenced) => {
-    const labourEffective = payroll != null ? payroll : bucket
-    const source = payroll != null ? 'payroll' : fenced ? 'unreadable' : bucket > 0 ? 'overheads' : 'none'
-    const ignored = payroll != null && bucket > 0 ? bucket : 0
-    const r = resolveLabour({ labourBucket: bucket, payroll, hrOn: true, fenced })
-    // hrOn is true here, so 'none' withholds as well as 'unreadable' (S796).
-    expect([r.source, r.amount, r.ignoredBucket, r.verdictWithheld]).toEqual([source, labourEffective, ignored, source === 'unreadable' || source === 'none'])
-  })
-})
-
-describe('finalizedPayrollCost — the Monthly Owner Report\'s finalized-run figure', () => {
-  test('gross + overtime + employer SSF; payslip gross excludes OT', () => {
-    expect(finalizedPayrollCost([{ gross: '30000', ot_amount: '1500', ssf_employer: '2000' }, { gross: 10000, ot_amount: null, ssf_employer: null }])).toBe(43500)
-  })
-  test('null means no run; [] is a real zero', () => {
-    expect(finalizedPayrollCost(null)).toBeNull()
-    expect(finalizedPayrollCost([])).toBe(0)
-  })
-})
-
-describe('resolveOwnerLabour — payroll XOR estimate, never a fallback over a failed read', () => {
-  test('a finalized run supersedes the estimate', () => {
-    expect(resolveOwnerLabour({ payroll: 400000, estimate: 380000 }))
-      .toEqual({ source: 'payroll', amount: 400000, verdictWithheld: false, other: null })
-  })
-  test('no run: the estimate', () => {
-    expect(resolveOwnerLabour({ payroll: null, estimate: 380000 }))
-      .toEqual({ source: 'estimate', amount: 380000, verdictWithheld: false, other: null })
-  })
-  test('a failed payroll read does NOT fall back to the estimate', () => {
-    expect(resolveOwnerLabour({ payroll: null, payrollReadFailed: true, estimate: 380000 }))
-      .toEqual({ source: 'failed', amount: null, verdictWithheld: true, other: null })
-  })
-  test('a run that was read stands even when the estimate inputs failed', () => {
-    expect(resolveOwnerLabour({ payroll: 400000, estimate: null, estimateReadFailed: true }).source).toBe('payroll')
-  })
-  test('no run and a failed estimate read is failed, not a zero-labour month', () => {
-    const r = resolveOwnerLabour({ payroll: null, estimate: 0, estimateReadFailed: true })
-    expect(r.source).toBe('failed')
-    expect(r.amount).toBeNull()
-  })
-  test('each source has a note, matching the Owner Report\'s wording', () => {
-    expect(ownerLabourNote('payroll')).toBe('from finalized payroll')
-    expect(ownerLabourNote('estimate')).toBe('estimate — payroll not finalized')
-    expect(ownerLabourNote('failed')).toBeTruthy()
-    expect(ownerLabourNote(undefined)).toBe('')
+    // S849 (SU17)
+    expect(labourNotJudgedText({ source: 'estimate', verdictWithheld: true, reason: 'nopay' })).toBe('Not judged — pay not set for some staff')
+    expect(labourNotJudgedText({ source: 'estimate', verdictWithheld: true, reason: 'nostaff' })).toBe('Not judged — no staff on payroll')
   })
 })
 
 test('every source has a label', () => {
-  for (const source of ['payroll', 'overheads', 'none', 'unreadable', 'failed']) {
+  for (const source of LABOUR_SOURCES) {
     expect(labourSourceLabel({ source }, true)).toMatch(/^Labour: /)
   }
 })
@@ -234,21 +153,52 @@ describe('overheads apart from labour', () => {
     ])).toEqual({ overhead: 65000, taxFees: 45000 })
     expect(splitNonLabourOverheads(null)).toEqual({ overhead: 0, taxFees: 0 })
   })
+
+  test('S849: splitOverheadBuckets keeps the Labor tab as its own bucket', () => {
+    expect(splitOverheadBuckets([
+      { bucket: 'overhead', amount: '60000' }, { bucket: null, amount: 5000 },
+      { bucket: 'tax_fees', amount: '45000' }, { bucket: 'labor', amount: 250000 }, { bucket: 'other', amount: 7 },
+    ])).toEqual({ overhead: 65000, taxFees: 45000, labor: 250000 })
+    expect(splitOverheadBuckets(undefined)).toEqual({ overhead: 0, taxFees: 0, labor: 0 })
+  })
 })
 
 // S798 stage 2e (LABOUR-FIGURES-2): the group screens took labour from get_group_summary, which
 // returns NPR 0 for "no finalized run", so the running month read "0.0% ✓ Healthy" everywhere.
+// S849 (GAPS-4): an HR outlet without payroll takes the HR wage estimate from get_group_labour_inputs.
 describe('groupOutletLabour and groupLabourRatio', () => {
-  test('payroll wins and names the ignored Labor tab; the Labor tab stands in without payroll', () => {
+  const KARTIK = { bs_year: 2083, bs_month: 7 }
+  const inputs = {
+    employees: [{ id: 'e1', status: 'active', basic_salary: 30000, pay_basis: 'monthly', join_date: '2020-01-01', end_date: null, ssf_enrolled: false, ssf_no: null }],
+    components: [], otEntries: [], attendance: [], settlements: [],
+  }
+
+  test('payroll wins and names the ignored Labor tab; the Labor tab is labour only without HR', () => {
     expect(groupOutletLabour({ labour_payroll: '300000', labour_bucket: '20000' }, true))
-      .toMatchObject({ source: 'payroll', amount: 300000, hasFigure: true, ignoredBucket: 20000, note: '' })
+      .toMatchObject({ source: 'payroll', amount: 300000, hasFigure: true, ignoredBucket: 20000, note: 'payroll' })
     expect(groupOutletLabour({ labour_payroll: null, labour_bucket: '120000' }, false))
       .toMatchObject({ source: 'overheads', amount: 120000, hasFigure: true, note: 'Labor tab' })
   })
 
-  test('no labour at all is no figure: "not finalized" on an HR outlet, "none entered" without HR', () => {
-    expect(groupOutletLabour({ labour_payroll: null, labour_bucket: '0' }, true))
-      .toMatchObject({ source: 'none', amount: null, hasFigure: false, verdictWithheld: true, note: 'not finalized' })
+  test('an HR outlet without payroll takes the estimate, and names the Labor tab', () => {
+    const l = groupOutletLabour({ labour_payroll: null, labour_bucket: '250000' }, true, { inputs, period: KARTIK })
+    expect(l).toMatchObject({ source: 'estimate', hasFigure: true, ignoredBucket: 250000, note: 'estimate' })
+    expect(l.amount).toBeCloseTo(30000, 6)
+  })
+
+  test('the running month passes the clock: accrued to the finished days, the run scaled', () => {
+    const l = groupOutletLabour({ labour_payroll: null, labour_bucket: 0 }, true, { inputs, period: KARTIK, throughDay: 11, scale: 11 / 30 })
+    expect(l.amount).toBeCloseTo(11000, 6)
+    const run = groupOutletLabour({ labour_payroll: 300000, labour_bucket: 0 }, true, { scale: 11 / 30 })
+    expect(run.amount).toBeCloseTo(110000, 6)
+  })
+
+  test('no inputs for an HR outlet without payroll is "not loaded" — never the Labor tab', () => {
+    expect(groupOutletLabour({ labour_payroll: null, labour_bucket: '120000' }, true))
+      .toMatchObject({ source: 'failed', amount: null, hasFigure: false, verdictWithheld: true, note: 'not loaded' })
+  })
+
+  test('no labour entered without HR is no figure: "none entered"', () => {
     expect(groupOutletLabour({ labour_payroll: null, labour_bucket: 0 }, false))
       .toMatchObject({ source: 'none', amount: null, hasFigure: false, note: 'none entered' })
   })
@@ -260,7 +210,7 @@ describe('groupOutletLabour and groupLabourRatio', () => {
   test('the group ratio waits for every outlet, and names the ones missing', () => {
     const thamel = { name: 'Thamel', revenue: 1000000, labour: groupOutletLabour({ labour_payroll: 300000, labour_bucket: 0 }, true) }
     const patan = { name: 'Patan', revenue: 1000000, labour: groupOutletLabour({ labour_payroll: null, labour_bucket: 0 }, true) }
-    // The finding's own month: Thamel finalized 3 L on 10 L, Patan did not. It read 15.0% ✓.
+    // The finding's own month: Thamel finalized 3 L on 10 L, Patan's labour was not read. It read 15.0% ✓.
     expect(groupLabourRatio([thamel, patan])).toEqual({ pct: null, labour: null, missing: ['Patan'] })
     const patanDone = { ...patan, labour: groupOutletLabour({ labour_payroll: 280000, labour_bucket: 0 }, true) }
     const r = groupLabourRatio([thamel, patanDone])
@@ -280,9 +230,8 @@ describe('the group screens read labour through the shared rule (S798 2e)', () =
     expect(group).not.toMatch(/sum\('payroll'\)/)
     expect(group).not.toMatch(/Number\(r\.payroll\)/)
   })
-  test('Consolidated P&L: the group columns carry the rule and Net Profit can lose its colour', () => {
-    expect(pnl).toMatch(/groupOutletLabour\(r, hrById\.get\(r\.client_id\)\)/)
-    expect(pnl).toMatch(/lineColor\(l, consolidated\[l\.key\], labourWithheld\)/)
+  test('Consolidated P&L: the group columns carry the rule', () => {
+    expect(pnl).toMatch(/groupOutletLabour\(/)
   })
 })
 
@@ -329,51 +278,47 @@ describe('other labour paid (H18)', () => {
 
   test('it joins finalized payroll, and is counted', () => {
     const otherPay = otherLabourTotals({ festival: [{ festival_name: 'Dashain', amount: 207600 }] })
-    const r = resolveLabour({ labourBucket: 0, payroll: 290000, hrOn: true, fenced: false, otherPay })
+    const r = resolveOutletLabour({ hrOn: true, labourBucket: 0, payroll: 290000, otherPay })
     // The finding: NPR 2,90,000 (24%) read when the month cost NPR 4,97,600 (41%).
     expect(r).toMatchObject({ source: 'payroll', amount: 497600, verdictWithheld: false, otherNotCounted: null })
     expect(r.other.total).toBe(207600)
     expect(otherLabourLine(r)).toBe('includes Dashain allowance NPR 2,07,600')
   })
 
-  test('beside the Labor tab it is named, never added (the owner may have typed it there)', () => {
+  test('beside the Labor tab of an outlet without HR it is named, never added', () => {
     const otherPay = otherLabourTotals({ festival: [{ festival_name: 'Dashain', amount: 207600 }] })
-    const r = resolveLabour({ labourBucket: 300000, payroll: null, hrOn: true, fenced: false, otherPay })
+    const r = resolveOutletLabour({ hrOn: false, labourBucket: 300000, otherPay })
     expect(r).toMatchObject({ source: 'overheads', amount: 300000, other: null })
     expect(otherLabourLine(r)).toBe('Not included: Dashain allowance NPR 2,07,600 paid through HR')
-    // No labour at all yet: still named, still not counted, still not judged.
-    const none = resolveLabour({ labourBucket: 0, payroll: null, hrOn: true, fenced: false, otherPay })
-    expect(none).toMatchObject({ source: 'none', amount: 0, verdictWithheld: true, other: null })
-    expect(none.otherNotCounted.total).toBe(207600)
   })
 
   test('a fenced or failed read says nothing about it', () => {
     const otherPay = otherLabourTotals({ incentives: [{ amount: 5000 }] })
-    expect(resolveLabour({ labourBucket: 0, payroll: null, hrOn: true, fenced: true, otherPay }))
+    expect(resolveOutletLabour({ hrOn: true, fenced: true, otherPay }))
       .toMatchObject({ source: 'unreadable', other: null, otherNotCounted: null })
-    expect(resolveLabour({ labourBucket: 0, payroll: 1, hrOn: true, fenced: false, readFailed: true, otherPay }))
+    expect(resolveOutletLabour({ hrOn: true, payroll: 1, payrollReadFailed: true, otherPay }))
       .toMatchObject({ source: 'failed', other: null, otherNotCounted: null })
   })
 
-  test('the Owner Dashboard adds it to the run or to the estimate alike', () => {
+  test('the one rule adds it to the run or to the estimate alike, never to a failed read', () => {
     const otherPay = otherLabourTotals({ settlements: [settlement] })
-    expect(resolveOwnerLabour({ payroll: 100000, estimate: 1, otherPay }).amount).toBeCloseTo(131313.88, 2)
-    expect(resolveOwnerLabour({ payroll: null, estimate: 90000, otherPay }).amount).toBeCloseTo(121313.88, 2)
-    expect(resolveOwnerLabour({ payroll: null, payrollReadFailed: true, estimate: 90000, otherPay }).amount).toBeNull()
+    expect(resolveOutletLabour({ hrOn: true, payroll: 100000, estimate: { amount: 1 }, otherPay }).amount).toBeCloseTo(131313.88, 2)
+    expect(resolveOutletLabour({ hrOn: true, payroll: null, estimate: { amount: 90000 }, otherPay }).amount).toBeCloseTo(121313.88, 2)
+    expect(resolveOutletLabour({ hrOn: true, payroll: null, payrollReadFailed: true, estimate: { amount: 90000 }, otherPay }).amount).toBeNull()
   })
 
   test('a group outlet adds get_group_pnl\'s three columns to its payroll, and says so', () => {
     const row = { labour_payroll: '300000', labour_bucket: '0', labour_festival: '50000', labour_incentive: null, labour_settlement: '10000' }
     expect(otherLabourFromGroupRow(row)).toMatchObject({ festival: 50000, incentive: 0, settlement: 10000, total: 60000 })
     const l = groupOutletLabour(row, true)
-    expect(l).toMatchObject({ source: 'payroll', amount: 360000, hasFigure: true, note: 'incl. bonus / final pay' })
+    expect(l).toMatchObject({ source: 'payroll', amount: 360000, hasFigure: true, note: 'payroll' })
     expect(l.otherText).toBe('includes festival allowance NPR 50,000 · final pay of leavers NPR 10,000')
-    // A Labor-tab outlet keeps its own note, and the bonus is not added.
-    const tab = groupOutletLabour({ ...row, labour_payroll: null, labour_bucket: '200000' }, true)
+    // An outlet without HR keeps the Labor tab, and the bonus is named, not added.
+    const tab = groupOutletLabour({ ...row, labour_payroll: null, labour_bucket: '200000' }, false)
     expect(tab).toMatchObject({ source: 'overheads', amount: 200000, note: 'Labor tab' })
     expect(tab.otherText).toMatch(/^Not included: /)
     // A row from before the migration has no such columns and reads as nothing paid.
-    expect(groupOutletLabour({ labour_payroll: '300000', labour_bucket: 0 }, true)).toMatchObject({ amount: 300000, other: null, note: '' })
+    expect(groupOutletLabour({ labour_payroll: '300000', labour_bucket: 0 }, true)).toMatchObject({ amount: 300000, other: null })
   })
 })
 
@@ -390,8 +335,9 @@ describe('every labour reader reads payslips with the absence deduction and the 
   test.each(Object.keys(files))('%s', name => {
     const src = readSource(...files[name])
     expect(src).not.toMatch(/'gross, ot_amount, ssf_employer'/)
-    expect(src).toMatch(/PAYSLIP_LABOUR_COLUMNS|absence_deduction/)
-    expect(src).toMatch(/loadMonthOtherLabour\(|loadOtherLabourPay\(/)
+    // S849: a page reading through loadOutletLabour inherits both (the loader is pinned above).
+    expect(src).toMatch(/PAYSLIP_LABOUR_COLUMNS|absence_deduction|loadOutletLabour\(/)
+    expect(src).toMatch(/loadMonthOtherLabour\(|loadOtherLabourPay\(|loadOutletLabour\(/)
   })
 })
 
@@ -430,5 +376,102 @@ describe('estimatedEmployerSsf', () => {
   test('no days, no month: nothing', () => {
     expect(estimatedEmployerSsf({ basis: 'monthly', basic: 40000, monthlyEquivGross: 40000, daysWorked: 0, monthDays: 30 })).toBe(0)
     expect(estimatedEmployerSsf({ basis: 'monthly', basic: 40000, monthlyEquivGross: 40000, daysWorked: 5, monthDays: 0 })).toBe(0)
+  })
+})
+
+// ── S849 (GAPS-4, owner decision SU11 (a)): the one rule on every page ──────────────────────────────
+describe('resolveOutletLabour — the one labour rule', () => {
+  const est = (amount, over = {}) => ({ amount, noPay: [], onPayroll: 5, unended: [], calendarStaff: 0, sheetOt: { hours: 0, amount: 0 }, ...over })
+
+  test('no HR: the Labor tab, or none (0, still judged)', () => {
+    expect(resolveOutletLabour({ hrOn: false, labourBucket: 160000 })).toMatchObject({ source: 'overheads', amount: 160000, verdictWithheld: false, ignoredBucket: 0 })
+    expect(resolveOutletLabour({ hrOn: false, labourBucket: 0 })).toMatchObject({ source: 'none', amount: 0, verdictWithheld: false, reason: '' })
+  })
+
+  test('HR + a finalized run: payroll, the Labor tab named', () => {
+    expect(resolveOutletLabour({ hrOn: true, payroll: 400000, labourBucket: 150000 }))
+      .toMatchObject({ source: 'payroll', amount: 400000, ignoredBucket: 150000, verdictWithheld: false })
+  })
+
+  test('HR + no run: the estimate, the Labor tab named — never the Labor tab', () => {
+    // The GAPS-4 example: estimate 2,88,000, Labor tab 2,50,000 → 2,88,000 on every page.
+    const r = resolveOutletLabour({ hrOn: true, payroll: null, estimate: est(288000), labourBucket: 250000 })
+    expect(r).toMatchObject({ source: 'estimate', amount: 288000, ignoredBucket: 250000, verdictWithheld: false, reason: '' })
+    expect(outletLabourNotes(r).long[0]).toBe('Labour tab NPR 2,50,000 not counted — Crest HR is the labour figure')
+  })
+
+  test('SU17: pay not set → figure kept, verdict withheld; nobody on payroll the same', () => {
+    const r = resolveOutletLabour({ hrOn: true, estimate: est(120000, { noPay: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }] }), labourBucket: 90000 })
+    expect(r).toMatchObject({ source: 'estimate', amount: 120000, verdictWithheld: true, reason: 'nopay', ignoredBucket: 90000 })
+    expect(outletLabourNotes(r).long).toEqual([
+      'Labour tab NPR 90,000 not counted — Crest HR is the labour figure',
+      'Pay not set for 4 staff — not counted, so labour is not judged · Pay Setup →',
+    ])
+    const n = resolveOutletLabour({ hrOn: true, estimate: est(0, { onPayroll: 0 }) })
+    expect(n).toMatchObject({ verdictWithheld: true, reason: 'nostaff', amount: 0 })
+    expect(outletLabourNotes(n).long).toContain('No staff on payroll in Crest HR — labour is not judged')
+  })
+
+  test('HR + fenced: unreadable, no figure, the Labor tab NOT substituted', () => {
+    expect(resolveOutletLabour({ hrOn: true, fenced: true, labourBucket: 150000, payroll: 1 }))
+      .toMatchObject({ source: 'unreadable', amount: null, verdictWithheld: true, reason: 'unreadable' })
+  })
+
+  test('any failed read: failed, no figure', () => {
+    expect(resolveOutletLabour({ hrOn: true, payrollReadFailed: true, estimate: est(1) })).toMatchObject({ source: 'failed', amount: null })
+    expect(resolveOutletLabour({ hrOn: true, payroll: null, estimateReadFailed: true })).toMatchObject({ source: 'failed', amount: null })
+    expect(resolveOutletLabour({ hrOn: true, payroll: null, estimate: null })).toMatchObject({ source: 'failed', amount: null })
+    // A run that was read stands even when the estimate inputs failed.
+    expect(resolveOutletLabour({ hrOn: true, payroll: 400000, estimateReadFailed: true }).source).toBe('payroll')
+  })
+
+  test('scale applies to the run and the Labor tab, never to the estimate or other labour', () => {
+    const otherPay = otherLabourTotals({ festival: [{ festival_name: 'Dashain', amount: 30000 }] })
+    expect(resolveOutletLabour({ hrOn: true, payroll: 300000, otherPay, scale: 0.5 })).toMatchObject({ amount: 180000, scaled: true })
+    expect(resolveOutletLabour({ hrOn: true, estimate: est(100000), otherPay, scale: 0.5 })).toMatchObject({ amount: 130000, scaled: false })
+    expect(resolveOutletLabour({ hrOn: false, labourBucket: 90000, scale: 1 / 3 }).amount).toBeCloseTo(30000, 9)
+  })
+
+  test('each page gets the same figure from the same inputs (the estimate object from labourEstimate)', () => {
+    const ad = d => formatAd(bsToAd(2083, 7, d))
+    const estimate = estimateLabour({
+      employees: [{ id: 'a', full_name: 'A', status: 'active', basic_salary: 30000, pay_basis: 'monthly', join_date: ad(1), end_date: null }],
+      components: [], otEntries: [], attendance: [], settlements: [], period: { bs_year: 2083, bs_month: 7 }, throughDay: 30,
+    })
+    expect(resolveOutletLabour({ hrOn: true, estimate }).amount).toBeCloseTo(30000, 6)
+  })
+})
+
+describe('outletLabourNotes — every sentence a page owes', () => {
+  test('short notes per source', () => {
+    expect(outletLabourNotes(resolveOutletLabour({ hrOn: true, payroll: 1 })).short).toBe('labour from finalized payroll')
+    expect(outletLabourNotes(resolveOutletLabour({ hrOn: true, estimate: { amount: 1, onPayroll: 1, noPay: [] } })).short).toBe('labour estimate — payroll not finalized')
+    expect(outletLabourNotes(resolveOutletLabour({ hrOn: false, labourBucket: 5 })).short).toBe('labour from Overheads')
+    expect(outletLabourNotes(resolveOutletLabour({ hrOn: true, fenced: true })).short).toBe('labour not readable on this login')
+    expect(outletLabourNotes(resolveOutletLabour({ hrOn: true, payrollReadFailed: true })).short).toBe('labour could not be loaded')
+    expect(outletLabourNotes(null)).toEqual({ short: '', long: [] })
+  })
+  test('the estimate\'s own notes, in order', () => {
+    const otherPay = otherLabourTotals({ festival: [{ festival_name: 'Dashain', amount: 207600 }] })
+    const r = resolveOutletLabour({
+      hrOn: true, otherPay,
+      estimate: { amount: 100, onPayroll: 3, noPay: [], unended: [{ id: 'x' }, { id: 'y' }], calendarStaff: 2, sheetOt: { hours: 3, amount: 42120 } },
+    })
+    expect(outletLabourNotes(r).long).toEqual([
+      'includes Dashain allowance NPR 2,07,600',
+      '2 leavers with no End Date are not counted · Employees →',
+      'Daily and hourly staff: attendance where entered, every day otherwise',
+      'Overtime from the attendance sheet included (NPR 42,120)',
+    ])
+  })
+})
+
+describe('labourFigure', () => {
+  test('a figure exists for payroll, estimate (even withheld) and the Labor tab; never for none or a failure', () => {
+    expect(labourFigure(resolveOutletLabour({ hrOn: true, payroll: 0 }))).toEqual({ hasFigure: true, note: 'payroll' })
+    expect(labourFigure(resolveOutletLabour({ hrOn: true, estimate: { amount: 5, noPay: [{ id: 1 }] } }))).toEqual({ hasFigure: true, note: 'estimate' })
+    expect(labourFigure(resolveOutletLabour({ hrOn: false, labourBucket: 0 }))).toEqual({ hasFigure: false, note: 'none entered' })
+    expect(labourFigure(resolveOutletLabour({ hrOn: true, fenced: true }))).toEqual({ hasFigure: false, note: 'not readable' })
+    expect(labourFigure(null)).toEqual({ hasFigure: false, note: 'not loaded' })
   })
 })

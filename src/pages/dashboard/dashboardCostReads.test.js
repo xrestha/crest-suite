@@ -10,6 +10,9 @@
 // 2. EMPLOYER SSF. Payroll contributes only for staff who are enrolled AND have an SSF number
 //    (isSsfContributor). The Owner Dashboard's labour estimate used the flag alone.
 // 3. TIER LABELS. Overheads is a Growth feature; two upsells said Pro.
+// 4. ONE READ PER TABLE (S849, OWNER-DASHBOARD-9). The Owner Dashboard's figures and its reorder tile
+//    read five tables twice; its purchase read is now one union of columns, and the recipe walk reads
+//    the recipe book from memory (`{ book }`). Its figure arithmetic lives in ownerDashboardData.js.
 import fs from 'fs'
 import path from 'path'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
@@ -30,7 +33,10 @@ function readSites(flat, table) {
 
 const BILL_KEY = ['discount_amount', 'purchase_group_id', 'vendor_id', 'invoice_ref', 'bs_day']
 
-describe.each(['ClientDashboard.jsx', 'OwnerDashboard.jsx'])('%s values purchases net of bill discounts', file => {
+const flattenAt = rel => fs.readFileSync(path.join(__dirname, ...rel), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ').replace(/\s+/g, ' ')
+
+describe.each(['ClientDashboard.jsx'])('%s values purchases net of bill discounts', file => {
   const flat = flatten(file)
 
   test('routes purchases through allocateBillDiscounts and reads lineCost (the S792 D32 cost basis)', () => {
@@ -71,13 +77,44 @@ describe.each(['ClientDashboard.jsx', 'OwnerDashboard.jsx'])('%s values purchase
   })
 })
 
-describe('OwnerDashboard adds employer SSF only for real contributors', () => {
-  const flat = flatten('OwnerDashboard.jsx')
+describe('OwnerDashboard values purchases net of bill discounts, from one read (S849)', () => {
+  const page = flatten('OwnerDashboard.jsx')
+  const data = flattenAt(['..', '..', 'modules', 'dashboard', 'ownerDashboardData.js'])
+  const constOf = name => (page.match(new RegExp(`const ${name} = '([^']*)'`)) || [])[1] || ''
 
-  test('the hr_employees read selects ssf_no', () => {
-    const at = flat.indexOf("scopedFrom('hr_employees'")
-    expect(at).toBeGreaterThan(-1)
-    expect(flat.slice(at, at + 160)).toContain('ssf_no')
+  test('the figures go through allocateBillDiscounts and lineCost (ownerDashboardData.js)', () => {
+    expect(data).toMatch(/allocateBillDiscounts\(/)
+    expect(data).toMatch(/\.lineCost\b/)
+    expect(data).not.toMatch(/\.lineNet\b/)
+    expect(data).toMatch(/returnCostValue\(/)
+    expect(page).toMatch(/netSpendOf\(/)
+  })
+
+  test('ONE purchase_entries read for the month, with the bill keys, the VAT basis and the cash/credit columns', () => {
+    expect(readSites(page, 'purchase_entries')).toHaveLength(1)
+    const cols = constOf('PURCHASE_COLS')
+    for (const col of [...BILL_KEY, 'vat_inclusive', 'vat_is_cost', 'id', 'payment_method', 'item_id', 'qty', 'rate']) expect(cols).toContain(col)
+    expect(page).toMatch(/from\('purchase_entries'\)\.select\(PURCHASE_COLS\)/)
+  })
+
+  test("the returns read embeds its line's VAT basis and carries what billPayables needs", () => {
+    const cols = constOf('RETURN_COLS')
+    expect(cols).toContain('purchase_entries(vat_inclusive, vat_is_cost)')
+    for (const col of ['purchase_entry_id', 'payment_method', 'bs_day']) expect(cols).toContain(col)
+    expect(page).toMatch(/scopedFrom\('vendor_returns', RETURN_COLS\)/)
+  })
+
+  test('the recipe walk reads the recipe book in memory', () => {
+    expect(page).toMatch(/loadRecipeBook\(scopedFrom\)/)
+    expect(page).toMatch(/explodeRecipeIngredients\(supabase, recipeIds, book \? \{ book \} : undefined\)/)
+  })
+})
+
+describe('the HR wage estimate adds employer SSF only for real contributors (labourEstimate.js)', () => {
+  const flat = flattenAt(['..', '..', 'modules', 'dashboard', 'labourEstimate.js'])
+
+  test('the hr_employees columns include ssf_no', () => {
+    expect((flat.match(/ESTIMATE_EMPLOYEE_COLUMNS = '([^']*)'/) || [])[1]).toContain('ssf_no')
   })
 
   test('the estimate gates on isSsfContributor, never the enrolment flag alone', () => {

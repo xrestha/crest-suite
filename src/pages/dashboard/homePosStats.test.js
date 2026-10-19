@@ -102,3 +102,24 @@ describe('keepLastGood — the kitchen or bar team\'s card', () => {
     expect(s.unavailable).toEqual(['tickets'])
   })
 })
+
+// S849 (GAPS-3): an outlet switch must never leave the old outlet's figures on Home.
+describe('keepLastGood — never another outlet\'s figures', () => {
+  test('prev from client A, fresh from client B with a failed read: B\'s fields null, none of A\'s', () => {
+    const a = { ...GOOD, clientId: 'A' }
+    const b = { ...ZEROS, clientId: 'B', tablesOccupied: 1, tablesTotal: 6 }
+    const s = keepLastGood(a, b, { sales: true, bookings: true }, HOME_POS_READS)
+    for (const f of [...HOME_POS_READS.sales, ...HOME_POS_READS.bookings]) expect(s[f]).toBeNull()
+    expect(s.tablesOccupied).toBe(1)
+    expect(s.clientId).toBe('B')
+    expect(s.unavailable).toEqual(['sales', 'bookings'])
+  })
+  test('the same outlet keeps its last good figures', () => {
+    const s = keepLastGood({ ...GOOD, clientId: 'A' }, { ...ZEROS, clientId: 'A' }, { sales: true }, HOME_POS_READS)
+    expect(s.revenueTotal).toBe(GOOD.revenueTotal)
+  })
+  test('a cached card from before the stamp is not carried onto a stamped one', () => {
+    const s = keepLastGood({ ...GOOD }, { ...ZEROS, clientId: 'A' }, { sales: true }, HOME_POS_READS)
+    expect(s.revenueTotal).toBeNull()
+  })
+})

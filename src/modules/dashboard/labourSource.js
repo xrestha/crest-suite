@@ -1,27 +1,34 @@
 /**
- * Which labour figure a one-outlet P&L-style view counts, and what it may say about it (S756, D22).
+ * Which labour figure a page counts for one outlet and one BS month, and what it must say about it.
  *
- * The rule — the same one `ConsolidatedPnl` applies per outlet and `Overheads.js` applies to one:
+ * THE ONE RULE (S849, GAPS-4, owner decision SU11 (a); `resolveOutletLabour` below). Every Suite page
+ * that subtracts labour calls it: the Owner Dashboard, the Inventory Dashboard / Home, Overheads, the
+ * frozen Owner Report, Consolidated P&L and the Group Console.
  *
- *   1. A FINALIZED HR payroll run for the period supersedes whatever was typed on the Overheads
- *      page's Labor tab. The two are never added: they are two measurements of one cost, and summing
- *      them is the S526 double-count.
- *   2. With no finalized run, the typed Labor bucket is the labour figure.
- *   3. A login that cannot READ payroll does not get to fall back to (2) as if it were (1)'s absence.
+ *   1. An outlet WITHOUT Crest HR: labour is the Overheads Labor tab (the whole-month typed amount,
+ *      scaled to the days counted in a running month). An empty tab is `none`: 0, still judged.
+ *   2. An outlet WITH Crest HR, viewer can read payroll: the FINALIZED payroll run, else the HR wage
+ *      estimate (labourEstimate.js), plus the month's other labour (festival, incentive, settlement).
+ *      A typed Labor tab is NEVER added and never stands in: it is named "not counted" (`ignoredBucket`).
+ *      Staff on payroll with no pay set, or nobody on payroll, keep the figure and withhold the verdict
+ *      (SU17). Any failed read is `failed`: no figure.
+ *   3. An outlet WITH Crest HR, viewer fenced from payroll (an IMS login; RLS returns `[]`): `unreadable`,
+ *      no figure. The Labor tab is not substituted: that would be a second labour figure for the month,
+ *      the very disagreement GAPS-4 found (the dashboard's Labor tab against the report's estimate).
  *
- * WHY THIS FILE EXISTS: the Dashboard's Fixed Costs % and Est. Net Margin % counted only the typed
- * bucket while the Overheads page used the finalized run, so a client paying NPR 4 lakh in wages
- * with an empty Labor tab saw a healthy margin on the Dashboard and a loss on Overheads for the same
- * month. The precedence was written inline in Overheads.js; a second inline copy is how the two
- * pages would come to disagree again, so the Dashboard reads it from here and Overheads can adopt
- * it (it computes the identical answer today — see labourSource.test.js).
+ * Before S849 the dashboards used "finalized run, else the Labor tab" (S756, D22) while the Owner
+ * Dashboard and Owner Report used "finalized run, else an estimate", so the same month carried two
+ * labour figures depending on the page.
  *
- * Pure: no Supabase client, no React. The caller does the reads (`loadOtherLabourPay.js` holds the
- * other-labour one, S798 3c).
+ * Pure: no Supabase client, no React. The reads are `loadOutletLabour.js` (one outlet) and the group RPC
+ * `get_group_labour_inputs` (`loadGroupLabourInputs`); the other-labour read is `loadOtherLabourPay.js`.
  */
 
 import { npr } from '../../shared/nepalMoney'
-import { SSF_CAP, SSF_EMPLOYER_PCT } from '../hr/payrollConstants'
+import { estimateLabour, estimatedEmployerSsf } from './labourEstimate'
+
+// Kept under its old name for the readers that import it from here (the Owner Report until CROSS-2).
+export { estimatedEmployerSsf }
 
 /**
  * Whether payroll is fenced from this login.
@@ -77,7 +84,7 @@ export function payrollLabourTotal(slips) {
  * A settlement saved before S752 has no settle month and is counted in no month.
  *
  * It rides WITH payroll (or the Owner Dashboard's / Owner Report's HR estimate), never on top of the
- * Overheads Labor tab: the owner may have typed the same bonus there. `resolveLabour` names it as not
+ * Overheads Labor tab: the owner may have typed the same bonus there. `resolveOutletLabour` names it as not
  * counted when the Labor tab is the source.
  */
 export const FESTIVAL_LABOUR_COLUMNS = 'id, festival_name, amount'
@@ -156,59 +163,129 @@ export function otherLabourLine({ other, otherNotCounted } = {}) {
 }
 
 /**
- * Resolve the labour figure and its source.
+ * The sources `resolveOutletLabour` returns. `payroll` / `estimate` / `overheads` / `none` carry a figure
+ * (`none` is 0 for an outlet without HR); `unreadable` and `failed` carry null.
+ */
+export const LABOUR_SOURCES = ['payroll', 'estimate', 'overheads', 'none', 'unreadable', 'failed']
+
+const finiteOr = (v, d) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : d)
+
+/**
+ * THE labour rule for one outlet and one BS month (S849, SU11 (a)). See the file header.
  *
  * @param {object}  a
- * @param {number}  a.labourBucket  Σ amount of the period's Overheads rows with bucket 'labor'.
- * @param {?number} a.payroll       payrollLabourTotal() of the period's finalized run(s), or null
- *                                  when there is none (or payroll was not asked for).
- * @param {boolean} a.hrOn          The client has Crest HR.
- * @param {boolean} a.fenced        isPayrollFenced() for this viewer.
- * @param {boolean} [a.readFailed]  A payroll read was attempted and returned an error (the
- *                                  other-labour read included).
- * @param {?object} [a.otherPay]    otherLabourTotals() of the month (S798 3c), or null.
- *
- * @returns {{
- *   source: 'payroll'|'overheads'|'none'|'unreadable'|'failed',
- *   amount: number,           // the labour figure to put in fixed costs and net margin
- *   ignoredBucket: number,    // typed Labor rows superseded by payroll — name them, never drop silently
- *   verdictWithheld: boolean, // true when labour may be missing and the figure must not be judged
- *   other: ?object,           // other labour counted in `amount` (with payroll), or null
- *   otherNotCounted: ?object, // other labour paid through HR that `amount` leaves out, or null
- * }}
- *
- * Other labour (festival, incentives, final settlements) joins finalized payroll and nothing else.
- * Beside the Labor tab, or with no labour figure yet, it is carried as `otherNotCounted` so the page
- * names it (`otherLabourLine`) instead of adding a bonus the owner may have typed there already.
- *
- * `unreadable` (fenced) and `failed` both keep the typed bucket in `amount` — it is real money the
- * client entered — but withhold the verdict, because the real wage bill may be absent from it. That
- * is Overheads.js' behaviour exactly: it says "net profit before payroll — not judged on this login"
- * rather than painting a green margin that the Owner, reading the same month, sees as a loss.
- *
- * `none` on an HR client withholds too (S796, owner decision after the IMS critique): payroll is
- * the wage bill there, and until a run is finalized the margin simply has no labour in it — the
- * dashboard was painting "45.8% ✓" beside its own "Labour: none yet". An IMS-only client with an
- * empty Labor tab is still judged: nothing else will ever supply its labour, and the page already
- * names the missing line.
+ * @param {boolean} a.hrOn               clients.hr_enabled for THIS outlet
+ * @param {boolean} [a.fenced]           isPayrollFenced(...) for the viewer (group RPC callers pass false)
+ * @param {?number} [a.payroll]          payrollLabourTotal() of the finalized run(s), or null when none
+ * @param {boolean} [a.payrollReadFailed] the run, payslip or other-labour read errored
+ * @param {?object} [a.estimate]         estimateLabour(...)'s object (a bare number is accepted), or null
+ * @param {boolean} [a.estimateReadFailed] an input to the estimate errored
+ * @param {number}  [a.labourBucket]     Σ overheads.amount where bucket = 'labor' for the period, as typed
+ * @param {?object} [a.otherPay]         otherLabourTotals() of the month, or null
+ * @param {number}  [a.scale]            the share of a WHOLE-MONTH amount counted (mtdClock.fraction for the
+ *                                       running month): applied to the Labor tab and to a finalized run,
+ *                                       never to the estimate (already accrued to its throughDay) nor to
+ *                                       other labour (a lump paid on one day)
+ * @returns {{ source: string, amount: ?number, verdictWithheld: boolean,
+ *             reason: ''|'unreadable'|'failed'|'nopay'|'nostaff', ignoredBucket: number, other: ?object,
+ *             otherNotCounted: ?object, estimate: ?object, scaled: boolean }}
  */
-export function resolveLabour({ labourBucket, payroll, hrOn, fenced, readFailed = false, otherPay = null }) {
-  const bucket = Number.isFinite(labourBucket) ? labourBucket : 0
+export function resolveOutletLabour({
+  hrOn, fenced = false, payroll = null, payrollReadFailed = false, estimate = null, estimateReadFailed = false,
+  labourBucket = 0, otherPay = null, scale = 1,
+} = {}) {
+  const bucket = finiteOr(labourBucket, 0)
+  const s = Math.min(1, Math.max(0, finiteOr(scale, 1)))
   const other = otherPay && otherPay.total ? otherPay : null
-  if (readFailed) {
-    return { source: 'failed', amount: bucket, ignoredBucket: 0, verdictWithheld: true, other: null, otherNotCounted: null }
-  }
-  if (payroll != null && !fenced) {
+  const base = { verdictWithheld: false, reason: '', ignoredBucket: 0, other: null, otherNotCounted: null, estimate: null, scaled: false }
+
+  if (!hrOn) {
+    // An outlet without Crest HR: the Labor tab is the labour figure. Other labour cannot come from HR
+    // here, but a row left from before HR was switched off is named rather than added.
     return {
-      source: 'payroll', amount: payroll + (other ? other.total : 0), ignoredBucket: bucket > 0 ? bucket : 0,
-      verdictWithheld: false, other, otherNotCounted: null,
+      ...base, source: bucket > 0 ? 'overheads' : 'none', amount: bucket * s,
+      otherNotCounted: other, scaled: bucket > 0 && s < 1,
     }
   }
-  if (hrOn && fenced) {
-    return { source: 'unreadable', amount: bucket, ignoredBucket: 0, verdictWithheld: true, other: null, otherNotCounted: null }
+
+  // Crest HR: the Labor tab is named on every branch, never counted.
+  const ignoredBucket = bucket > 0 ? bucket : 0
+  const noFigure = (source, reason) => ({ ...base, source, amount: null, verdictWithheld: true, reason, ignoredBucket })
+  if (fenced) return noFigure('unreadable', 'unreadable')
+  if (payrollReadFailed) return noFigure('failed', 'failed')
+  if (payroll != null && Number.isFinite(Number(payroll))) {
+    return {
+      ...base, source: 'payroll', amount: Number(payroll) * s + (other ? other.total : 0),
+      ignoredBucket, other, scaled: s < 1,
+    }
   }
-  const source = bucket > 0 ? 'overheads' : 'none'
-  return { source, amount: bucket, ignoredBucket: 0, verdictWithheld: source === 'none' && !!hrOn, other: null, otherNotCounted: other }
+  const est = typeof estimate === 'number' ? { amount: estimate } : estimate
+  if (estimateReadFailed || !est || !Number.isFinite(Number(est.amount))) return noFigure('failed', 'failed')
+  const reason = (est.noPay?.length || 0) > 0 ? 'nopay' : est.onPayroll === 0 ? 'nostaff' : ''
+  return {
+    ...base, source: 'estimate', amount: Number(est.amount) + (other ? other.total : 0),
+    verdictWithheld: reason !== '', reason, ignoredBucket, other, estimate: est,
+  }
+}
+
+const plural = (n, one, many) => (n === 1 ? one : many)
+
+/**
+ * Every sentence a page owes the reader about a `resolveOutletLabour` result.
+ *
+ * @returns {{ short: string, long: string[] }}
+ *   short: the tile subtext ('labour from finalized payroll', 'labour estimate — payroll not finalized',
+ *          'labour from Overheads', 'no labour entered on Overheads', 'labour not readable on this login',
+ *          'labour could not be loaded'); '' for a null result.
+ *   long:  the notes in order, never an empty string: the Labor tab not counted; pay not set / nobody on
+ *          payroll; other labour; leavers with no End Date; calendar days for daily and hourly staff;
+ *          sheet overtime.
+ */
+export function outletLabourNotes(labour, { money = npr } = {}) {
+  if (!labour) return { short: '', long: [] }
+  const short = {
+    payroll: 'labour from finalized payroll',
+    estimate: 'labour estimate — payroll not finalized',
+    overheads: 'labour from Overheads',
+    none: 'no labour entered on Overheads',
+    unreadable: 'labour not readable on this login',
+    failed: 'labour could not be loaded',
+  }[labour.source] || ''
+  const long = []
+  if (labour.ignoredBucket > 0) long.push(`Labour tab ${money(labour.ignoredBucket)} not counted — Crest HR is the labour figure`)
+  const est = labour.estimate
+  if (labour.reason === 'nopay') {
+    const n = est?.noPay?.length || 0
+    long.push(`Pay not set for ${n} staff — not counted, so labour is not judged · Pay Setup →`)
+  }
+  if (labour.reason === 'nostaff') long.push('No staff on payroll in Crest HR — labour is not judged')
+  const otherLine = otherLabourLine(labour)
+  if (otherLine) long.push(otherLine)
+  if (est) {
+    const u = est.unended?.length || 0
+    if (u > 0) long.push(`${u} ${plural(u, 'leaver', 'leavers')} with no End Date ${plural(u, 'is', 'are')} not counted · Employees →`)
+    if (est.calendarStaff > 0) long.push('Daily and hourly staff: attendance where entered, every day otherwise')
+    if (est.sheetOt?.amount > 0) long.push(`Overtime from the attendance sheet included (${money(est.sheetOt.amount)})`)
+  }
+  return { short, long }
+}
+
+/**
+ * Whether a result has a labour FIGURE a statement column may print, and its short marker. `none` has
+ * no figure (an HR outlet cannot be `none`; for an outlet without HR an empty Labor tab is "none
+ * entered", and a group column must not print NPR 0 for it: S798 2e's "0.0% ✓" on every outlet).
+ * A withheld estimate (no pay set, nobody on payroll) HAS a figure: print it, without a verdict colour.
+ */
+export function labourFigure(labour) {
+  const hasFigure = !!labour && labour.amount != null && labour.source !== 'none'
+  const note = !labour ? 'not loaded'
+    : labour.source === 'payroll' ? 'payroll'
+    : labour.source === 'estimate' ? 'estimate'
+    : labour.source === 'overheads' ? 'Labor tab'
+    : labour.source === 'none' ? 'none entered'
+    : labour.source === 'unreadable' ? 'not readable'
+    : 'not loaded'
+  return { hasFigure, note }
 }
 
 /**
@@ -216,85 +293,15 @@ export function resolveLabour({ labourBucket, payroll, hrOn, fenced, readFailed 
  * because the three reasons need three different next steps and "not judged on this login" is
  * false for the two that are not about the login. Returns '' when the verdict is not withheld.
  */
-export function labourNotJudgedText({ source, verdictWithheld }) {
+export function labourNotJudgedText({ source, verdictWithheld, reason = '' }) {
   if (!verdictWithheld) return ''
+  if (reason === 'nopay') return 'Not judged — pay not set for some staff'
+  if (reason === 'nostaff') return 'Not judged — no staff on payroll'
   switch (source) {
     case 'unreadable': return 'Not judged on this login'
-    case 'failed':     return 'Not judged — payroll could not be loaded'
+    case 'failed':     return 'Not judged — labour could not be loaded'
     case 'none':       return 'Not judged until payroll is finalized'
     default:           return 'Not judged'
-  }
-}
-
-/**
- * The Owner Dashboard's labour figure (S756, owner decision 2026-09-15).
- *
- * That page never reads the Overheads Labor bucket (it takes bucket='overhead' only, because it
- * subtracts labour separately), so its choice is not payroll XOR bucket but payroll XOR ESTIMATE:
- * a finalized run for the open period supersedes the prorated HR estimate, and the two are never
- * added. The Labor bucket stays out of it entirely, which is what keeps the three-bucket XOR true.
- *
- * `finalizedPayrollCost` is the same total as `payrollLabourTotal` — the Monthly Owner Report's
- * finalized-run figure. It was a separate function while the other pages left overtime out; kept as
- * a name so the Owner Dashboard reads as what it means.
- */
-export const finalizedPayrollCost = payrollLabourTotal
-
-/**
- * Employer SSF in the prorated labour estimate (the Owner Dashboard's, and the frozen Owner Report's
- * when a month closes before payroll is finalized), for an SSF contributor employed `daysWorked` of
- * the month's `monthDays` days. The caller has already checked `isSsfContributor`.
- *
- * SSF is charged on BASIC salary, so a monthly employee's base is basic × days ÷ month days, then
- * capped: the engine's own order (`computePayslip`: min(basic × paid fraction, cap)). Both estimates
- * charged it on basic + allowances (S798 4b, LABOUR-FIGURES-8), so ten enrolled staff with NPR 3,000
- * of allowances each put NPR 6,000 a month of employer SSF in the estimate that payroll never
- * charges. Daily and hourly staff keep the month-equivalent pay, capped, then prorated.
- */
-export function estimatedEmployerSsf({ basis, basic, monthlyEquivGross, daysWorked, monthDays }) {
-  if (!(monthDays > 0) || !(daysWorked > 0)) return 0
-  const fraction = daysWorked / monthDays
-  const base = (basis || 'monthly') === 'monthly'
-    ? Math.min((basic || 0) * fraction, SSF_CAP)
-    : Math.min(monthlyEquivGross || 0, SSF_CAP) * fraction
-  return base * SSF_EMPLOYER_PCT
-}
-
-/**
- * @param {object}  a
- * @param {?number} a.payroll             finalizedPayrollCost() of the period's finalized run(s), or
- *                                        null when none exists.
- * @param {boolean} [a.payrollReadFailed] The run, payslip or other-labour read errored. We then do
- *                                        not know whether a run exists, so the estimate must NOT
- *                                        stand in.
- * @param {?number} a.estimate            The prorated estimate, or null when not computed.
- * @param {boolean} [a.estimateReadFailed] An input to the estimate errored.
- * @param {?object} [a.otherPay]          otherLabourTotals() of the month (S798 3c). Added to the
- *                                        run or to the estimate: festival, incentive and settlement
- *                                        pay is money that has left, whichever measures the wages.
- * @returns {{ source: 'payroll'|'estimate'|'failed', amount: ?number, verdictWithheld: boolean, other: ?object }}
- *
- * `failed` carries amount null, so every ratio built on it is null and `bandFigure` renders a dash
- * with no colour and no mark — a labour cost of 0 painted ✓ green is the most flattering possible
- * reading of "we could not read payroll".
- */
-export function resolveOwnerLabour({ payroll, payrollReadFailed = false, estimate, estimateReadFailed = false, otherPay = null }) {
-  const failed = { source: 'failed', amount: null, verdictWithheld: true, other: null }
-  const other = otherPay && otherPay.total ? otherPay : null
-  const plusOther = v => v + (other ? other.total : 0)
-  if (payrollReadFailed) return failed
-  if (payroll != null) return { source: 'payroll', amount: plusOther(payroll), verdictWithheld: false, other }
-  if (estimateReadFailed || estimate == null || !Number.isFinite(estimate)) return failed
-  return { source: 'estimate', amount: plusOther(estimate), verdictWithheld: false, other }
-}
-
-/** The Owner Dashboard's inline basis note, worded to match the Monthly Owner Report's HR header. */
-export function ownerLabourNote(source) {
-  switch (source) {
-    case 'payroll':  return 'from finalized payroll'
-    case 'estimate': return 'estimate — payroll not finalized'
-    case 'failed':   return 'could not be loaded'
-    default:         return ''
   }
 }
 
@@ -326,31 +333,48 @@ export function splitNonLabourOverheads(rows) {
 }
 
 /**
- * One outlet's labour on the group screens (LABOUR-FIGURES-2), from its `get_group_pnl` row.
- *
- * `resolveLabour` decides it, as for one outlet: finalized payroll, else the Labor tab. Owner and
- * operator only reach the group RPCs, so nothing is fenced. On these screens a figure exists only
- * for `payroll` and `overheads`. A source of `none` has NO figure here, for an HR outlet ("not
- * finalized") and for an IMS-only one ("none entered") alike: `get_group_summary` returned NPR 0 for
- * "no run", and the Group Dashboard banded that 0.0% ✓ on every outlet of the running month.
- *
- * Since S798 3c the row carries the month's other labour (`labour_festival`, `labour_incentive`,
- * `labour_settlement`), which joins payroll exactly as on one outlet.
- *
- * @returns {{ source, amount: ?number, hasFigure: boolean, verdictWithheld: boolean,
- *             ignoredBucket: number, note: string, other: ?object, otherNotCounted: ?object }}
+ * Every bucket of the period's Overheads rows (S849, GAPS-4): Overheads (`overhead` and a row with none),
+ * Tax & Fees, and the Labor tab. A page that takes labour from `resolveOutletLabour` reads all three in one
+ * read, so the Labor tab can be NAMED as not counted on an HR outlet (or counted on an outlet without HR).
  */
-export function groupOutletLabour(pnlRow, hrOn) {
+export function splitOverheadBuckets(rows) {
+  let overhead = 0, taxFees = 0, labor = 0
+  for (const r of rows || []) {
+    const amount = parseFloat(r.amount) || 0
+    if (r.bucket == null || r.bucket === 'overhead') overhead += amount
+    else if (r.bucket === 'tax_fees') taxFees += amount
+    else if (r.bucket === 'labor') labor += amount
+  }
+  return { overhead, taxFees, labor }
+}
+
+/**
+ * One outlet's labour on the group screens, from its `get_group_pnl` row and (S849) its
+ * `get_group_labour_inputs` row (`loadGroupLabourInputs(...).byClient.get(client_id)?.inputs`).
+ *
+ * The one rule (`resolveOutletLabour`): payroll from `labour_payroll` (+ the row's other labour,
+ * migration 20261003120000), else, for an HR outlet, the HR wage estimate from `inputs`; an outlet
+ * without HR takes `labour_bucket`. `inputs === null` for an HR outlet with no payroll means the inputs
+ * read failed or was not made: `failed`, "not loaded" — never the Labor tab. Owner and operator only
+ * reach the group RPCs, so nothing is fenced.
+ *
+ * @param {object} pnlRow   a get_group_pnl row
+ * @param {boolean} hrOn    clients.hr_enabled for the outlet
+ * @param {object} [opts]   { inputs, period: { bs_year, bs_month }, throughDay, scale } — the running month
+ *                          passes mtdClock's countedDays / fraction (GAPS-5); a closed month the defaults
+ * @returns resolveOutletLabour's shape + { hasFigure, note, otherText }; `amount` is null without a figure.
+ */
+export function groupOutletLabour(pnlRow, hrOn, { inputs = null, period = null, throughDay = null, scale = 1 } = {}) {
   const payroll = pnlRow?.labour_payroll != null ? parseFloat(pnlRow.labour_payroll) : null
-  const r = resolveLabour({
-    labourBucket: parseFloat(pnlRow?.labour_bucket) || 0, payroll, hrOn: !!hrOn, fenced: false,
-    otherPay: otherLabourFromGroupRow(pnlRow),
+  let estimate = null
+  if (hrOn && payroll == null && inputs && period) {
+    estimate = estimateLabour({ ...inputs, period, throughDay: throughDay ?? undefined })
+  }
+  const r = resolveOutletLabour({
+    hrOn: !!hrOn, fenced: false, payroll, estimate, estimateReadFailed: !!hrOn && payroll == null && !estimate,
+    labourBucket: parseFloat(pnlRow?.labour_bucket) || 0, otherPay: otherLabourFromGroupRow(pnlRow), scale,
   })
-  const hasFigure = r.source === 'payroll' || r.source === 'overheads'
-  const note = r.source === 'overheads' ? 'Labor tab'
-    : r.source === 'none' ? (hrOn ? 'not finalized' : 'none entered')
-    : r.other ? 'incl. bonus / final pay'
-    : ''
+  const { hasFigure, note } = labourFigure(r)
   // The whole sentence, for a hover or a footnote beside the short note.
   return { ...r, amount: hasFigure ? r.amount : null, hasFigure, note, otherText: otherLabourLine(r) }
 }
@@ -377,9 +401,10 @@ export function groupLabourRatio(outlets) {
 export function labourSourceLabel({ source }, hrOn) {
   switch (source) {
     case 'payroll':    return 'Labour: finalized payroll'
+    case 'estimate':   return 'Labour: HR wage estimate (payroll not finalized)'
     case 'overheads':  return 'Labour: Overheads Labor tab'
     case 'unreadable': return 'Labour: payroll not readable on this login'
-    case 'failed':     return 'Labour: payroll could not be loaded'
+    case 'failed':     return 'Labour: could not be loaded'
     case 'none':       return hrOn ? 'Labour: none yet (no finalized payroll, Labor tab empty)' : 'Labour: Labor tab empty'
     default:           return ''
   }

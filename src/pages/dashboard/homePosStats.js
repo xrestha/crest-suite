@@ -33,14 +33,18 @@ export function anyReadFailed(failed) {
  *   reads   HOME_POS_READS or HOME_KITCHEN_READS
  *
  * A failed read's figures keep the last good ones when the card before was the same card (front of
- * house, or the same kitchen/bar station) and had them. Otherwise they are null, and the read is
+ * house, or the same kitchen/bar station, of the same outlet) and had them. Otherwise they are null, and the read is
  * listed in `unavailable`, which its tiles render as "—" with "Couldn't load". The figures of the
  * reads that succeeded are this load's own. With nothing failed, `fresh` comes back as it is.
  */
 export function keepLastGood(prev, fresh, failed, reads) {
   const failedReads = Object.keys(reads).filter(r => failed?.[r])
   if (failedReads.length === 0) return fresh
+  // The same card OF THE SAME OUTLET (S849, GAPS-3): both POS loaders stamp `clientId`, so a failed
+  // till read after an outlet switch can never keep another outlet's figures, even inside one mount.
+  // A cached card from before the stamp has none and is refused, which is the safe direction.
   const sameCard = prev != null && !!prev.kitchen === !!fresh.kitchen && (prev.station ?? null) === (fresh.station ?? null)
+    && (prev.clientId ?? null) === (fresh.clientId ?? null)
   const stats = { ...fresh }
   delete stats.unavailable
   const unavailable = []

@@ -2,7 +2,7 @@ import {
   dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
   projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue, HISTORY_DAYS,
   splitAtToday, SNAPSHOT_MODEL, monthFestivals, salesFestivalFactor, salesFestivalJudged,
-  purchFestivalJudged, targetTotal, dayRanges,
+  purchFestivalJudged, targetTotal, dayRanges, canCaptureTarget,
 } from './dailyForecast'
 import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
 import { holidayKey, holidaysByKeyOf } from '../../utils/demandForecastMath'
@@ -303,6 +303,36 @@ describe('snapshots', () => {
   test('the write guard reaches an empty column and an older model, never by a bare neq', () => {
     expect(staleSnapshotFilter('purch', 'purch_projection_snapshot'))
       .toBe('purch_projection_snapshot->>model.is.null,purch_projection_snapshot->>model.neq.4')
+  })
+
+  // S849 (DATABASE-8): the database refuses a negative or non-numeric weekday, so the snapshot clamps.
+  test('a weekday below zero (refunds outweighing trade) is stored as 0, and the month total follows', () => {
+    const snap = makeSnapshot('sales', { source: 'history', byWeekday: [100, -40, 0, 50, 50, 50, NaN], sampleDays: 28 }, { monthEndDay, weekdayOf, capturedDay: 1 })
+    expect(snap.byWeekday).toEqual([100, 0, 0, 50, 50, 50, 0])
+    let expected = 0
+    for (let d = 1; d <= monthEndDay; d++) expected += snap.byWeekday[weekdayOf(d)]
+    expect(snap.projectedMonthEnd).toBe(expected)
+    expect(isCurrentSnapshot('sales', snap)).toBe(true)
+    // What the guard checks: the model, seven numbers, none negative.
+    expect(snap.byWeekday).toHaveLength(7)
+    expect(snap.byWeekday.every(v => Number.isFinite(v) && v >= 0)).toBe(true)
+  })
+})
+
+describe('canCaptureTarget — exactly the logins the database guard accepts (DATABASE-8)', () => {
+  const ims = rank => r => ({ staff: 0, supervisor: 1, manager: 2 }[r] <= { staff: 0, supervisor: 1, manager: 2 }[rank])
+  test('the operator, the Owner and an IMS staff login capture', () => {
+    expect(canCaptureTarget({ isAdmin: true })).toBe(true)
+    expect(canCaptureTarget({ isOwner: true, hasImsAccess: () => true, profile: {} })).toBe(true)
+    expect(canCaptureTarget({ hasImsAccess: ims('staff'), profile: { ims_role: 'staff' } })).toBe(true)
+    expect(canCaptureTarget({ hasImsAccess: ims('manager'), profile: { ims_role: 'manager', ims_email: null } })).toBe(true)
+  })
+  test('a count PIN, a till PIN, an HR-only login and a settlement-blocked manager do not', () => {
+    expect(canCaptureTarget({ hasImsAccess: ims('staff'), profile: { ims_role: 'staff', ims_email: 'count@pin' } })).toBe(false)
+    expect(canCaptureTarget({ hasImsAccess: () => false, profile: { pos_role: 'staff' } })).toBe(false)
+    expect(canCaptureTarget({ hasImsAccess: () => false, profile: { hr_role: 'manager' } })).toBe(false)
+    expect(canCaptureTarget({ hasImsAccess: ims('manager'), profile: { ims_role: 'manager', settlement_blocked_by: 'u1' } })).toBe(false)
+    expect(canCaptureTarget()).toBe(false)
   })
 })
 
