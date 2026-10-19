@@ -20,6 +20,14 @@
 // `is_active` now belongs to pickers and "on the shelf now" views only. A period is valued over
 // every item with a row in it (`periodValuationItems`); S720's within-row rule still holds, since an
 // item is in every column of a row or in none.
+//
+// Stock transfers between outlets (S849, PNL-8) ride as one more optional input, `transfers`: this
+// outlet's ims_stock_transfer_lines for the period (transferFlows.readPeriodTransfers). Direction `in`
+// (received at the branch, or returned to the sender) adds like a purchase and `out` (sent) takes off
+// like a supplier return, at the line's `value` (qty × the sender's rate frozen at sending: no bill
+// discount, no VAT factor). They move Net Purchases and COGS, never Gross Purchases or Returns, which
+// stay supplier-only. With `transfers` omitted every output is exactly what it was before S849.
+// get_group_pnl folds the same lines into purchases_val / returns_val by hand.
 import { computeUsed } from '../../../shared/imsFormulas'
 import { findUncountedItems } from '../../../shared/uncountedItems'
 import { allocateBillDiscounts, returnCostValue } from './supplierAttribution'
@@ -45,7 +53,8 @@ export function periodRevenue(salesRows, recipes) {
  * `purchases` go through `allocateBillDiscounts`, so each item's `value` is net of its share of
  * the bill discount while `qty` is untouched (a discount changes what was paid, not what arrived).
  * Returns `{ opening, closing, wastage, staffMeals }` as id → qty, `purchases` as
- * id → `{ qty, gross, value }` and `returns` as id → `{ qty, value }`.
+ * id → `{ qty, gross, value }`, `returns` as id → `{ qty, value }`, and `transfersIn` /
+ * `transfersOut` as id → `{ qty, value }` (empty when `transfers` is omitted).
  *
  * Values are on the COST basis (S792, D32): `gross`/`value` are `lineGrossCost`/`lineCost`, so a
  * VAT-ticked line on a `vat_is_cost` (PAN-bill) bill counts its 13% as food cost, and a return takes
@@ -53,7 +62,7 @@ export function periodRevenue(salesRows, recipes) {
  * purchases with `vat_inclusive, vat_is_cost`, or both silently value at ex-VAT.
  * `get_group_pnl` mirrors this by hand.
  */
-export function periodStockMaps({ opening, closing, purchases, returns, wastages, staffMeals }) {
+export function periodStockMaps({ opening, closing, purchases, returns, wastages, staffMeals, transfers }) {
   const qtyBy = (rows, col) => {
     const m = {}
     ;(rows || []).forEach(r => { m[r.item_id] = (m[r.item_id] || 0) + (parseFloat(r[col]) || 0) })
@@ -72,6 +81,17 @@ export function periodStockMaps({ opening, closing, purchases, returns, wastages
     e.qty += parseFloat(r.qty) || 0
     e.value += returnCostValue(r)
   })
+  const transfersIn = {}
+  const transfersOut = {}
+  ;(transfers || []).forEach(t => {
+    if (!t || t.item_id == null) return
+    const side = t.direction === 'in' ? transfersIn : t.direction === 'out' ? transfersOut : null
+    if (!side) return
+    const e = side[t.item_id] || (side[t.item_id] = { qty: 0, value: 0 })
+    const qty = parseFloat(t.qty) || 0
+    e.qty += qty
+    e.value += t.value != null && t.value !== '' ? (parseFloat(t.value) || 0) : qty * (parseFloat(t.rate) || 0)
+  })
   return {
     opening: qtyBy(opening, 'qty'),
     closing: qtyBy(closing, 'physical_qty'),
@@ -79,6 +99,8 @@ export function periodStockMaps({ opening, closing, purchases, returns, wastages
     staffMeals: qtyBy(staffMeals, 'qty'),
     purchases: purchaseMap,
     returns: returnMap,
+    transfersIn,
+    transfersOut,
   }
 }
 
@@ -88,7 +110,9 @@ export function periodStockMaps({ opening, closing, purchases, returns, wastages
  * count, so a bill discount is credited only for the lines inside the list.
  *
  * `purchaseVal` is gross (before the bill discount), `netPurchaseVal` is after discount and
- * returns, and `cogsVal` is `computeUsed()` over those values.
+ * returns, plus transfers in and minus transfers out, and `cogsVal` is `computeUsed()` over those
+ * values. `purchaseVal` and `returnVal` stay supplier-only; `transferInVal` / `transferOutVal` are
+ * reported beside them.
  *
  * `wastageVal` is COGS's wastage term, over the same `items` (no prep), which is why it is not the
  * figure a Wastage tile shows — that is `periodWastageValue()` below (S792, FIGURES-5).
@@ -96,6 +120,7 @@ export function periodStockMaps({ opening, closing, purchases, returns, wastages
 export function valuePeriodItems(items, maps) {
   let openingVal = 0, purchaseVal = 0, purchaseNetVal = 0, returnVal = 0
   let wastageVal = 0, staffMealsVal = 0, closingVal = 0
+  let transferInVal = 0, transferOutVal = 0
   ;(items || []).forEach(i => {
     const rate = parseFloat(i.per_uom_rate) || 0
     openingVal     += (maps.opening[i.id] || 0) * rate
@@ -105,14 +130,19 @@ export function valuePeriodItems(items, maps) {
     wastageVal     += (maps.wastage[i.id] || 0) * rate
     staffMealsVal  += (maps.staffMeals[i.id] || 0) * rate
     closingVal     += (maps.closing[i.id] || 0) * rate
+    transferInVal  += maps.transfersIn?.[i.id]?.value || 0
+    transferOutVal += maps.transfersOut?.[i.id]?.value || 0
   })
   const discountVal = purchaseVal - purchaseNetVal
-  const netPurchaseVal = purchaseVal - discountVal - returnVal
+  const netPurchaseVal = purchaseVal - discountVal - returnVal + transferInVal - transferOutVal
   const cogsVal = computeUsed({
     opening: openingVal, purchases: netPurchaseVal, returns: 0,
     wastage: wastageVal, staffMeals: staffMealsVal, closing: closingVal,
   })
-  return { openingVal, purchaseVal, discountVal, returnVal, netPurchaseVal, wastageVal, staffMealsVal, closingVal, cogsVal }
+  return {
+    openingVal, purchaseVal, discountVal, returnVal, transferInVal, transferOutVal,
+    netPurchaseVal, wastageVal, staffMealsVal, closingVal, cogsVal,
+  }
 }
 
 /**
@@ -150,13 +180,14 @@ export function periodWastageValue(rows) {
 
 /**
  * Every item id with a row in the period — an opening figure, a purchase line, a return, a closing
- * row (a count of 0 and a blank count both count as a ROW), a wastage or a staff meal. Takes the raw
- * rows, not `periodStockMaps` output, so a page whose purchase read carries no rate (Stock Report)
- * can ask the same question.
+ * row (a count of 0 and a blank count both count as a ROW), a wastage, a staff meal or a stock
+ * transfer line (so a hidden item whose only row is a transfer still shows). Takes the raw rows, not
+ * `periodStockMaps` output, so a page whose purchase read carries no rate (Stock Report) can ask the
+ * same question.
  */
-export function periodRowIds({ opening, closing, purchases, returns, wastages, staffMeals } = {}) {
+export function periodRowIds({ opening, closing, purchases, returns, wastages, staffMeals, transfers } = {}) {
   const ids = new Set()
-  for (const rows of [opening, closing, purchases, returns, wastages, staffMeals]) {
+  for (const rows of [opening, closing, purchases, returns, wastages, staffMeals, transfers]) {
     for (const r of rows || []) if (r && r.item_id != null) ids.add(r.item_id)
   }
   return ids
@@ -181,11 +212,19 @@ export function periodValuationItems(items, rowIds) {
  * The uncounted-items gap (S756, D6) for one period, from the same maps its COGS came from. A
  * closing row whose `physical_qty` is null is not a count; one holding 0 is (closePeriod.js's
  * `physical_qty IS NOT NULL` rule), which is why this reads the raw closing rows and not the map.
+ *
+ * Stock received by transfer is stock presence like a purchase (S849): an item that only arrived by
+ * transfer and was never counted is uncounted. Stock sent away is not subtracted from presence (the
+ * question is "was there stock to count", and the sender may still hold some).
  */
 export function periodGap({ items, maps, closing, cogs }) {
   const countedIds = new Set((closing || []).filter(r => r.physical_qty != null).map(r => r.item_id))
   const purchaseQty = {}; const purchaseValue = {}
   Object.entries(maps.purchases || {}).forEach(([id, v]) => { purchaseQty[id] = v.qty; purchaseValue[id] = v.value })
+  Object.entries(maps.transfersIn || {}).forEach(([id, v]) => {
+    purchaseQty[id] = (purchaseQty[id] || 0) + v.qty
+    purchaseValue[id] = (purchaseValue[id] || 0) + v.value
+  })
   return findUncountedItems({ items, openingQty: maps.opening || {}, purchaseQty, purchaseValue, countedIds, cogs })
 }
 
@@ -196,8 +235,9 @@ export function periodGap({ items, maps, closing, cogs }) {
  * (FIGURES-6); since S792 the fallback bill key carries period_id itself (supplierAttribution.js
  * `allocationBillKey`), so the per-period pass is correct but no longer necessary for that.
  * Returns period id → `valuePeriodItems` output plus that period's `gap` and `itemCount`.
+ * `transfers` (optional) are grouped by `period_id` like every other table.
  */
-export function valuePeriods({ periodIds, items, opening, closing, purchases, returns, wastages, staffMeals }) {
+export function valuePeriods({ periodIds, items, opening, closing, purchases, returns, wastages, staffMeals, transfers }) {
   const byPeriod = rows => {
     const m = new Map()
     for (const r of rows || []) {
@@ -209,6 +249,7 @@ export function valuePeriods({ periodIds, items, opening, closing, purchases, re
   const tables = {
     opening: byPeriod(opening), closing: byPeriod(closing), purchases: byPeriod(purchases),
     returns: byPeriod(returns), wastages: byPeriod(wastages), staffMeals: byPeriod(staffMeals),
+    transfers: byPeriod(transfers),
   }
   const out = {}
   for (const pid of periodIds || []) {

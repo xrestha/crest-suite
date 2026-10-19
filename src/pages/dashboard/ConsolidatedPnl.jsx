@@ -1,688 +1,717 @@
 // Consolidated P&L — the formal statement no page was: Revenue → COGS → Gross Profit → operating
-// costs → Net Profit, for one BS period, with every figure sourced from the module that owns it.
-// "Consolidated" is meant in both senses. Phase 1 consolidates the MODULES — IMS cost, HR labour,
-// overheads, POS/manual revenue — into one statement; phase 2 consolidates OUTLETS: an owner whose
-// client belongs to a group gets one column per Suite Pro outlet plus a consolidated total, via
-// get_group_pnl() (raw aggregates only — the page derives COGS, so the formula stays in one place).
+// costs → Net Profit, for one BS month or a fiscal year, with every figure sourced from the module that
+// owns it. "Consolidated" is meant in both senses: the MODULES (IMS cost, HR labour, overheads, POS/manual
+// revenue, delivery commission) in one statement, and the OUTLETS: an outlet in a group gets one column
+// per Suite outlet plus a consolidated total, via get_group_pnl() (raw aggregates only — the page derives
+// COGS, so the formula stays in one place).
 //
-// It deliberately computes NOTHING of its own. Every line reuses the figure's canonical source:
-//   Revenue  — periodRevenue() (periodCost.js), the function MonthlySummary calls: price-at-sale
-//              (unit_price) falling back to the recipe's current price, minus per-row discounts,
-//              excluding 'pos_comp' rows.
-//   COGS     — valuePeriodItems() (periodCost.js), also MonthlySummary's: stock valued at
-//              items.per_uom_rate over every is_sub_recipe=false item, HIDDEN ONES INCLUDED (S792,
-//              D29 — hiding an item never takes it out of a past month). Stock Count includes
-//              prep, this page does not, and the on-page note names the difference like S575's
-//              disclosures do. get_group_pnl repeats both rules in SQL for the group view.
-//   Labour   — finalized HR payroll (pay earned + overtime + employer SSF, plus the month's festival, incentive and settlement pay, S798 3c) when a
-//              finalized run exists; otherwise the overheads 'labor' bucket. NEVER both — the two
-//              labour sources are never meant to be summed (see .claude/rules/dashboards.md), and
-//              when both exist the ignored one is named on screen rather than silently dropped.
-//              In the group view the rule applies PER OUTLET before consolidating, since one
-//              outlet can run payroll while a sibling enters labour manually. An HR outlet with no
-//              finalized payroll wears a "no finalized payroll" marker, and while any outlet has no
-//              labour at all Net Profit carries no colour (S798 2e, LABOUR-FIGURES-2): green over a
-//              statement missing a wage bill was the S796 reading, on the group path.
+// It computes NOTHING of its own. The pure parts — LINES, buildStatement, sumStatements, the colour rule
+// and every footnote sentence — live in ./pnl/pnlStatement.js; this file keeps the reads and the render.
+//   Revenue  — periodRevenue() (periodCost.js), Monthly Summary's function.
+//   COGS     — valuePeriodItems() (periodCost.js), Monthly Summary's, over every non-prep item, hidden
+//              ones included (S792, D29), stock transfers between outlets folded in (S849, PNL-8).
+//   Delivery commission — loadDeliveryCommission() (shared/deliveryCommission.js), the month the bill was
+//              sold (S849, PNL-1). get_group_pnl repeats it in SQL for the group view.
+//   Labour   — THE labour rule (labourSource.js, S849 SU11): finalized payroll, else the HR estimate for
+//              an HR outlet, else the Labor tab for an outlet without HR; resolved per month and per
+//              outlet before anything is summed. A column with no figure prints a dash and no colour.
 //   Overheads / Tax & Fees — the 'overhead' and 'tax_fees' buckets, each its own line.
+//   Depreciation — a memo under Net Profit, never subtracted (PNL-3).
 //
-// Defaults to the most recent CLOSED period: COGS subtracts closing stock, so an open period
-// (closing = 0 for every item) paints a structurally wrong figure — the same rule Variance and
-// Shrinkage follow. An open period can still be selected; it renders flagged as provisional.
-import { npr } from '../../shared/nepalMoney'
-import { useEffect, useState } from 'react'
+// Defaults to the most recent CLOSED period: COGS subtracts closing stock, so an open month's figure is a
+// whole shelf. An open month can still be picked; it renders unjudged (no colour) and provisional.
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { supabase } from '../../supabaseClient'
-import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
+import { fetchAllRows } from '../../shared/fetchAllRows'
 import { firstError } from '../../shared/queryError'
-import { periodRevenue, periodStockMaps, valuePeriodItems } from '../../modules/ims/reports/periodCost'
+import { npr } from '../../shared/nepalMoney'
+import {
+  periodRevenue, periodStockMaps, valuePeriodItems, periodRowIds, periodValuationItems, periodGap,
+} from '../../modules/ims/reports/periodCost'
+import { loadDepreciationMemo } from '../../modules/ims/reports/depreciationMemo'
+import { readPeriodTransfers } from '../../modules/ims/transfers/transferFlows'
+import { loadDeliveryCommission, bsMonthWindow } from '../../shared/deliveryCommission'
 import { sheetWithLetterhead } from '../../shared/excelLetterhead'
 import { useBizInfo } from '../../shared/hooks/useBizInfo'
 import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
-import SuiteGate from '../../components/SuiteGate'
+import { UncountedItemsBanner } from '../../shared/uncountedItems'
+import SuiteGate, { SUITE_PAGES, useSuiteAccess } from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
 import ReportPage from '../../components/ReportPage'
 import { printWithTitle } from '../../utils/printTitle'
-import { computeUsed, COGS_FORMULA } from '../../shared/imsFormulas'
+import { withTimeout, settleWithin } from '../../utils/withTimeout'
+import { suiteLive } from '../../utils/subscription'
 import { BS_MONTHS } from '../../utils/bsCalendar'
-import { payrollLabourTotal, groupOutletLabour, resolveLabour, otherLabourFromGroupRow, otherLabourLine, PAYSLIP_LABOUR_COLUMNS } from '../../modules/dashboard/labourSource'
-import { loadMonthOtherLabour } from '../../modules/dashboard/loadOtherLabourPay'
+import { fiscalYearOf } from '../../modules/hr/payroll/tds'
+import {
+  groupOutletLabour, isPayrollFenced, labourFigure, resolveOutletLabour,
+} from '../../modules/dashboard/labourSource'
+import { loadOutletLabour, loadGroupLabourInputs } from '../../modules/dashboard/loadOutletLabour'
+import { mtdClock, nepalBsToday } from '../../modules/dashboard/mtdClock'
+import {
+  LINES, buildStatement, columnMarkers, fmtLine, groupColumn, lineColor, lineWithheld, pctOf, pnlNotes,
+  statementRows, sumStatements,
+} from './pnl/pnlStatement'
 
-const pctOf = (part, whole) => (whole > 0 ? `${((part / whole) * 100).toFixed(1)}%` : '—')
+const LOAD_MS = 30000
 
-// One definition of the statement's lines, shared by the single-outlet table, the group matrix
-// and the Excel export — two hand-written copies of labels and tips is how they would drift.
-const LINES = [
-  { key: 'revenue', label: 'Revenue',
-    tip: 'All sales for the period at the price actually charged (manual Sales Entry and POS together, counted once), net of discounts. Complimentary items are excluded — they were never paid for.' },
-  { key: 'cogs', label: 'Cost of Goods Sold', cost: true,
-    tip: `${COGS_FORMULA}. Valued at each item's per-unit rate. Sub-recipes are excluded (their raw ingredients are already counted) — same convention as Monthly Summary, so the two pages tie.` },
-  { key: 'grossProfit', label: 'Gross Profit', strong: true },
-  { key: 'wastageVal', label: 'Wastage', cost: true,
-    tip: 'Recorded wastage valued at cost. Broken out of COGS so spoiled stock is visible instead of hiding inside the food-cost line.' },
-  { key: 'staffMealsVal', label: 'Staff Meals', cost: true,
-    tip: 'Food consumed by staff, valued at cost — spent stock that earned no revenue, shown as its own line.' },
-  { key: 'labour', label: 'Labour', cost: true,
-    tip: "Finalized HR payroll for this period when a run exists — pay earned (salary less unpaid days and days before joining) + overtime + employer SSF, the payroll sheet's Cost to business — plus festival allowance, incentives and leavers' final settlements finalized for the month; otherwise the manually-entered Labour bucket from Overheads. Never both — that would double-count." },
-  { key: 'overheads', label: 'Overheads', cost: true,
-    tip: "The Overheads page's 'overhead' bucket — rent, utilities, and other fixed costs. Labour and Tax & Fees buckets are their own lines." },
-  { key: 'taxFees', label: 'Tax & Fees', cost: true,
-    tip: "The Overheads page's 'tax & fees' bucket." },
-  { key: 'netProfit', label: 'Net Profit', strong: true },
-]
+const monthName = (y, m) => `${BS_MONTHS[m - 1] || `Month ${m}`} ${y}`
+const fyLabel = start => `${start}/${String((start + 1) % 100).padStart(2, '0')}`
+// The fiscal year's months in order, Shrawan (4) of `start` to Ashadh (3) of the next year.
+const fyMonths = start => [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3].map(m => ({ bs_year: m >= 4 ? start : start + 1, bs_month: m }))
+const notFuture = (m, today) => m.bs_year < today.year || (m.bs_year === today.year && m.bs_month <= today.month)
 
-// Raw component aggregates → the statement. The one place the lines are derived, whether the raw
-// figures came from the browser queries (single outlet) or get_group_pnl (per outlet in a group).
-function buildStatement(raw) {
-  const cogs = computeUsed({
-    opening: raw.openingVal, purchases: raw.purchasesVal, returns: raw.returnsVal,
-    wastage: raw.wastageVal, staffMeals: raw.staffMealsVal, closing: raw.closingVal,
-  })
-  // The shared rule (labourSource.js): payroll XOR the Labor tab, and since S798 3c the month's
-  // festival / incentive / settlement pay joins payroll. Was an inline copy of the first half.
-  const lab = resolveLabour({ labourBucket: raw.labourBucket, payroll: raw.labourPayroll, hrOn: false, fenced: false, otherPay: raw.labourOther || null })
-  const labour = lab.amount
-  const grossProfit = raw.revenue - cogs
-  const netProfit = grossProfit - raw.wastageVal - raw.staffMealsVal - labour - raw.overheads - raw.taxFees
-  return {
-    revenue: raw.revenue, cogs, grossProfit,
-    wastageVal: raw.wastageVal, staffMealsVal: raw.staffMealsVal,
-    labour, overheads: raw.overheads, taxFees: raw.taxFees, netProfit,
-    labourSource: lab.source,
-    ignoredLabourBucket: lab.ignoredBucket,
-    labourOther: lab.other, labourOtherNotCounted: lab.otherNotCounted,
-    hasClosing: raw.hasClosing,
-  }
+// Labour for one outlet-month, once its Labor tab is known: the rule's result plus whether it is a
+// figure a statement may print (labourFigure).
+function finishLabour(r) {
+  const { hasFigure, note } = labourFigure(r)
+  return { ...r, amount: hasFigure ? r.amount : null, hasFigure, note }
 }
 
-// `withheld`: Net Profit is missing a wage bill (an HR outlet with no finalized payroll and nothing
-// on its Labor tab — resolveLabour's verdictWithheld), so it is printed without a verdict colour.
-const lineColor = (line, amount, withheld = false) =>
-  withheld && line.key === 'netProfit' ? 'var(--theme-text1)'
-  : line.strong && amount < 0 ? 'var(--theme-red-text)'
-  : line.strong && amount > 0 ? 'var(--theme-green-text)'
-  : line.cost ? 'var(--theme-text2)' : 'var(--theme-text1)'
-
-const fmtLine = (line, amount) => (line.cost && amount !== 0 ? `(${npr(amount)})` : npr(amount))
-
 export default function ConsolidatedPnl() {
-  const { clientId, profile, loading: authLoading, clientModules, outlets, isAdmin, isOwner, groupId } = useAuth()
+  const {
+    clientId, profile, loading: authLoading, clientModules, clientModulesKnown, outlets, isAdmin, isOwner,
+    groupId, viewGroupId, imsRole,
+  } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
-  const { scopedFrom } = useScopedDb()
+  const db = useScopedDb()
+  const { scopedFrom } = db
   const biz = useBizInfo()
-  // Grouped owners get the matrix; everyone else (single outlet, and admin — my_group_id() reads
-  // the caller's own profile row, which an admin JWT doesn't have) gets the single statement.
-  const grouped = (outlets || []).length > 1
+  const periodReq = useLatestRequest()
+
+  // In a group the page is the matrix (PNL-13: the client row's group, never a sibling read that can
+  // fail). For the operator AuthContext's groupId is the VIEWED client's group (ACCESS-8), read through
+  // p_group_id; an operator viewing an ungrouped client gets that outlet's single statement.
+  const grouped = !!groupId
+  const groupArg = isAdmin ? (viewGroupId || null) : null
+  // ACCESS-7: an Owner switched to a branch without Suite still opens the group statement when any outlet
+  // of the group has it; the RPC includes only the outlets that do.
+  const groupSuiteLive = grouped && (outlets || []).some(o => suiteLive(o))
+  const suite = useSuiteAccess(SUITE_PAGES.consolidatedPnl, { entitled: groupSuiteLive })
+  // The module switches decide HR (payroll vs Labor tab) and POS (delivery commission, waiting bills).
+  // For the operator hrEnabled / posEnabled are always true, so the client's own modules are read.
+  const modulesReady = isAdmin ? clientModulesKnown !== false : true
+  const canLoad = suite.allowed && (isAdmin || isOwner) && modulesReady
+  const hrOn = !!clientModules?.hr
+  const posOn = clientModules ? !!clientModules.pos : true
+  const fenced = isPayrollFenced({ hrOn, isAdmin, isOwner, imsRole })
 
   const [periods, setPeriods] = useState([])
-  const [selectedPeriod, setSelectedPeriod] = useState(null)
-  // S601's own motivating example, wired last: arrowing the period select fires overlapping loads,
-  // and the last response to land would win the figures while subtitle, print title, Excel
-  // scopeLine AND filename follow whatever was clicked last.
-  const periodReq = useLatestRequest()
-  const [pnl, setPnl] = useState(null)             // single-outlet statement
-  const [groupCols, setGroupCols] = useState(null) // [{ name, status, hasPeriod, stmt }] for included outlets
-  const [excludedNames, setExcludedNames] = useState([])
-  // ONE error state for both load paths. The group path always had this and said why — "'nothing
-  // to show' and 'could not load' are different facts, and only one of them should send someone to
-  // billing" — while the single-outlet path below it discarded `error` on all eleven of its reads
-  // and would have rendered a complete statement of NPR 0. S594 gave the reasoning the same reach
-  // as the reasoning's own page.
+  const [selectedKey, setSelectedKey] = useState(null)
+  const [result, setResult] = useState(null)      // { builtFor, ... } — figures render only when current
   const [loadError, setLoadError] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // authLoading is a real dependency: a hard load lands here while auth is still resolving, and
-  // with [clientId] alone the guard fails once and nothing ever re-fires — the page sits on
-  // Loading… forever (caught live, first smoke test of this page).
-  // The `effectiveClientId` guard is real — an admin session with no client selected has none —
-  // but returning silently left `loading` true from useState forever, so the page sat on
-  // "Building the statement…" with no error and no way out. Say what is missing instead.
-  useEffect(() => {
-    if (authLoading) return
-    if (!effectiveClientId) { setLoading(false); setLoadError('No client selected. Pick one from the outlet switcher in the sidebar.'); return }
-    init()
-  }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
+  const fyStarts = useMemo(() => {
+    const s = new Set(periods.map(p => fiscalYearOf(p.bs_year, p.bs_month).fyStart))
+    return [...s].sort((a, b) => b - a)
+  }, [periods])
 
-  async function init() {
-    setLoading(true)
-    setLoadError(null)
-    const { data: p, error } = await scopedFrom('monthly_periods')
-      .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-    if (error) { setLoadError(error); setPeriods([]); setLoading(false); return }
-    setPeriods(p || [])
-    // Closed-period default — COGS subtracts a closing count that an open period does not have.
-    const target = (p || []).find(x => x.status === 'closed') || (p || [])[0]
-    if (target) { setSelectedPeriod(target); await loadPeriod(target) }
-    setLoading(false)
-  }
+  // A selection key → what it covers. `period:<id>` is one month; `fy:<start>` a fiscal year.
+  const describe = useCallback((key, list = periods) => {
+    if (!key) return null
+    if (key.startsWith('fy:')) {
+      const start = Number(key.slice(3))
+      const today = nepalBsToday()
+      const months = fyMonths(start).filter(m => notFuture(m, today))
+      const have = list.filter(p => fiscalYearOf(p.bs_year, p.bs_month).fyStart === start)
+        .sort((a, b) => (a.bs_year - b.bs_year) || (a.bs_month - b.bs_month))
+      const last = months[months.length - 1]
+      return {
+        kind: 'fy', key, start, months, periods: have,
+        scope: `Fiscal year ${fyLabel(start)}`,
+        scopeEnd: last ? monthName(last.bs_year, last.bs_month) : '',
+        open: have.some(p => p.status === 'open'),
+      }
+    }
+    const p = list.find(x => x.id === key.slice(7))
+    if (!p) return null
+    return {
+      kind: 'month', key, months: [{ bs_year: p.bs_year, bs_month: p.bs_month }], periods: [p],
+      scope: monthName(p.bs_year, p.bs_month), scopeEnd: monthName(p.bs_year, p.bs_month),
+      open: p.status === 'open',
+    }
+  }, [periods])
 
-  async function handlePeriodChange(periodId) {
-    periodReq.begin(periodId)   // claim the page before any await
-    const p = periods.find(x => x.id === periodId)
-    setSelectedPeriod(p)
-    setLoading(true)
-    await loadPeriod(p)
-    setLoading(false)
-  }
+  /* ── Single outlet: one batch for a month or a fiscal year (PNL-16) ───────────────────────── */
+  const loadOutletStatements = useCallback(async (sel) => {
+    const list = sel.periods
+    const ids = list.map(p => p.id)
+    if (ids.length === 0) return { data: { kind: 'single', months: [], stmt: null }, error: null }
+    const from = (t, c) => scopedFrom(t, c)
+    const clocks = new Map(list.map(p => [p.id, p.status === 'open' ? mtdClock(p) : null]))
 
-  async function loadPeriod(period) {
-    if (grouped) return loadGroup(period)
-    return loadSingle(period.id, period)
-  }
-
-  /* ── Grouped: one RPC, raw aggregates per outlet, derived here ─────────────────────────── */
-  async function loadGroup(period) {
-    setLoadError(null)
-    const [{ data, error: rpcError }, hrFlags] = await Promise.all([
-      supabase.rpc('get_group_pnl', { p_bs_year: period.bs_year, p_bs_month: period.bs_month }),
-      // Which outlets run Crest HR, for the "no finalized payroll" marker (raw: clients_select
-      // allows same-group rows).
-      supabase.from('clients').select('id, hr_enabled').eq('group_id', groupId),
-    ])
-    if (!periodReq.isCurrent(period.id)) return   // superseded by a newer period selection
-    // A failed RPC must not masquerade as the no-Suite-Pro empty state — 'nothing to show' and
-    // 'could not load' are different facts, and only one of them should send someone to billing.
-    const error = rpcError || hrFlags.error
-    if (error) { console.error('get_group_pnl failed:', error); setGroupCols([]); setLoadError(error || 'Could not load the group statement.'); return }
-    const hrById = new Map((hrFlags.data || []).map(c => [c.id, !!c.hr_enabled]))
-    const rows = data || []
-    setExcludedNames(rows.filter(r => !r.is_included).map(r => r.client_name))
-    setGroupCols(rows.filter(r => r.is_included).map(r => ({
-      name: r.client_name,
-      status: r.period_status,
-      hasPeriod: r.has_period,
-      // The same per-outlet rule the Group Dashboard reads (labourSource.js). buildStatement below
-      // applies its amount; this carries what the column may say about it.
-      hrOn: !!hrById.get(r.client_id),
-      labour: groupOutletLabour(r, hrById.get(r.client_id)),
-      stmt: buildStatement({
-        revenue: parseFloat(r.revenue) || 0,
-        openingVal: parseFloat(r.opening_val) || 0,
-        purchasesVal: parseFloat(r.purchases_val) || 0,
-        returnsVal: parseFloat(r.returns_val) || 0,
-        wastageVal: parseFloat(r.wastage_val) || 0,
-        staffMealsVal: parseFloat(r.staff_meals_val) || 0,
-        closingVal: parseFloat(r.closing_val) || 0,
-        labourPayroll: r.labour_payroll != null ? parseFloat(r.labour_payroll) : null,
-        labourBucket: parseFloat(r.labour_bucket) || 0,
-        labourOther: otherLabourFromGroupRow(r),
-        overheads: parseFloat(r.overheads_val) || 0,
-        taxFees: parseFloat(r.tax_fees_val) || 0,
-        hasClosing: !!r.has_closing,
-      }),
-    })))
-  }
-
-  /* ── Single outlet: the same conventions, fetched from the browser ─────────────────────── */
-  async function loadSingle(periodId, period) {
-    setLoadError(null)
-    const results = await Promise.all([
-      // MonthlySummary's exact reads, so this statement's COGS ties to that page: every item,
-      // hidden ones included (S792, D29 — an `is_active` filter here took a hidden item's purchases
-      // out of every past month's COGS), sub-recipes excluded (prep is counted at the raw-item
-      // level), and every per-item-per-period read paged, which this page did not do before S774.
-      fetchAllRows(() => scopedFrom('items', 'id, per_uom_rate').eq('is_sub_recipe', false).order('id')),
-      fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId).order('id')),
-      fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId).order('id')),
-      fetchAllRows(() => supabase.from('purchase_entries')
-        .select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost')
-        .eq('period_id', periodId).order('id')),
-      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').eq('period_id', periodId).order('id')),
-      fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
-      fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
-      // `source` selected and comps filtered in JS below, never `.neq('source','pos_comp')` (S747):
-      // the column is nullable and NULL <> 'pos_comp' is NULL, so the server-side form dropped
-      // every legacy row from REVENUE — the top line of the statement and the denominator of every
-      // margin under it. get_group_pnl (the grouped path) was fixed in the same change.
-      fetchAllRows(() => supabase.from('sales_entries')
-        .select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', periodId)
-        .order('id')),
-      scopedFrom('recipes', 'id, selling_price'),
-      supabase.from('overheads').select('bucket, amount').eq('period_id', periodId),
-      scopedFrom('hr_payroll_runs', 'id, status').eq('period_id', periodId).eq('status', 'finalized'),
-      // The month's festival, incentive and final-settlement pay (S798 3c), which joins payroll.
-      period ? loadMonthOtherLabour((t, c) => scopedFrom(t, c), period.bs_year, period.bs_month) : { other: null },
-    ])
-
-    if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-    // The group path above already refused to let a failed RPC masquerade as an empty state. This
-    // path did not, and every result below flows through `|| []` — so an RLS rejection or a stalled
-    // token produced a complete P&L reading NPR 0 revenue, NPR 0 COGS, NPR 0 net profit.
+    let results
+    try {
+      results = await withTimeout(Promise.all([
+        // Monthly Summary's exact reads, so revenue and COGS tie to that page: every item, hidden ones
+        // included (S792, D29), prep excluded, every per-item-per-period read paged on its id.
+        fetchAllRows(() => scopedFrom('items', 'id, name, per_uom_rate, is_active').eq('is_sub_recipe', false).order('id')),
+        fetchAllRows(() => supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', ids).order('id')),
+        fetchAllRows(() => supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', ids).order('id')),
+        fetchAllRows(() => supabase.from('purchase_entries')
+          .select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost')
+          .in('period_id', ids).order('id')),
+        fetchAllRows(() => scopedFrom('vendor_returns', 'period_id, item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').in('period_id', ids).order('id')),
+        fetchAllRows(() => supabase.from('wastages').select('period_id, item_id, qty').in('period_id', ids).order('id')),
+        fetchAllRows(() => supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', ids).order('id')),
+        // `source` selected and comps filtered in JS, never `.neq('source','pos_comp')` (S747).
+        fetchAllRows(() => supabase.from('sales_entries')
+          .select('period_id, recipe_id, qty_sold, unit_price, discount, source').in('period_id', ids)
+          .order('id')),
+        fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
+        fetchAllRows(() => scopedFrom('overheads', 'id, period_id, bucket, amount').in('period_id', ids).order('id')),
+        // Stock moved between outlets (PNL-8): in like a purchase, out like a supplier return.
+        readPeriodTransfers(scopedFrom, ids),
+        // Delivery commission per month, only for a POS client (an IMS-only one gets 0 without a read).
+        Promise.all(list.map(p => loadDeliveryCommission(db, { ...bsMonthWindow(p.bs_year, p.bs_month), posEnabled: posOn })))
+          .then(rs => ({ data: rs, error: rs.find(r => r.error)?.error || null })),
+        // Till bills and credit notes not in Inventory yet (PNL-11), by month: POS-owned, read only.
+        posOn
+          ? settleWithin(supabase.rpc('pos_ims_waiting_counts', { p_client_id: effectiveClientId }), LOAD_MS, 'Waiting till bills')
+          : Promise.resolve({ data: [], error: null }),
+        // Labour through the one rule, per month: HR reads only on an HR outlet a viewer may read.
+        Promise.all(list.map(p => {
+          const clock = clocks.get(p.id)
+          return loadOutletLabour(from, {
+            period: p, hrOn, fenced,
+            throughDay: clock ? clock.countedDays : undefined,
+            scale: clock ? clock.fraction : 1,
+            timeoutMs: LOAD_MS,
+          })
+        })).then(rs => ({ data: rs, error: null })),
+      ]), LOAD_MS + 5000, 'Building the statement')
+    } catch (e) {
+      return { data: null, error: e }
+    }
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setPnl(null); return }
+    if (failed) return { data: null, error: results.find(r => r.error)?.error || failed }
 
     const [
-      { data: items }, { data: opening }, { data: closing },
-      { data: purchases }, { data: returns }, { data: wastages }, { data: staffMealsData },
-      { data: salesData }, { data: recipes }, { data: overheadRows }, { data: runs },
-      { other: labourOther },
+      { data: items }, { data: opening }, { data: closing }, { data: purchases }, { data: returns },
+      { data: wastages }, { data: staffMealsData }, { data: salesData }, { data: recipes },
+      { data: overheadRows }, { data: transfers }, { data: commissions }, { data: waiting },
+      { data: labourLoads },
     ] = results
 
-    // Revenue and COGS inputs through periodCost.js, the same calls MonthlySummary makes on the
-    // same rows. Comps are excluded there in JS rather than by the query (see the read above).
-    // Purchases are net of bill discounts: `purchase_entries.discount_amount` is a BILL-level
-    // figure repeated on every line, and this statement once ignored it, so a NPR 10,000 discount
-    // made COGS NPR 10,000 too high while the Purchases register showed the discounted total.
-    // allocateBillDiscounts() spreads it across the bill's own lines by line value, so a bill with
-    // a line outside the non-sub-recipe item set is not over-credited.
-    const revenue = periodRevenue(salesData, recipes)
-    const stock = valuePeriodItems(items, periodStockMaps({
-      opening, closing, purchases, returns, wastages, staffMeals: staffMealsData,
-    }))
-    const { openingVal, returnVal: returnsVal, wastageVal, staffMealsVal, closingVal } = stock
-    const purchasesVal = stock.purchaseVal - stock.discountVal
+    // The depreciation memo is its own read (PNL-3): a failed memo never blocks the statement.
+    const memos = await Promise.all(list.map(p => withTimeout(loadDepreciationMemo(scopedFrom, p), LOAD_MS, 'Depreciation memo')
+      .catch(error => ({ error }))))
 
-    // Overheads by bucket. 'overhead' and 'tax_fees' are always their own lines; 'labor' is only
-    // the labour figure when no finalized payroll exists (the two sources are never summed).
-    const buckets = { overhead: 0, labor: 0, tax_fees: 0 }
-    ;(overheadRows || []).forEach(r => {
-      const b = buckets[r.bucket || 'overhead'] !== undefined ? (r.bucket || 'overhead') : 'overhead'
-      buckets[b] += parseFloat(r.amount) || 0
-    })
-
-    // Labour — finalized payroll (pay earned + overtime + employer SSF, payrollLabourTotal, the same
-    // definition get_group_pnl uses) when a finalized run exists for this period. Paged: one row per
-    // employee per run.
-    let labourPayroll = null
-    const runIds = (runs || []).map(r => r.id)
-    if (runIds.length > 0) {
-      const { data: slips, error: slipErr } = await fetchAllRowsChunked(runIds, chunk =>
-        supabase.from('hr_payslips').select(PAYSLIP_LABOUR_COLUMNS).in('run_id', chunk).order('id'))
-      if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-      // A finalized run exists but its payslips could not be read — falling through to the
-      // Overheads bucket here would quietly substitute a DIFFERENT labour source for the one this
-      // statement says it used, so refuse rather than print a plausible number.
-      if (slipErr) { setLoadError(slipErr.message); setPnl(null); return }
-      labourPayroll = payrollLabourTotal(slips || [])
+    const byPeriod = rows => {
+      const m = new Map()
+      for (const r of rows || []) {
+        const l = m.get(r.period_id)
+        if (l) l.push(r); else m.set(r.period_id, [r])
+      }
+      return m
+    }
+    const t = {
+      opening: byPeriod(opening), closing: byPeriod(closing), purchases: byPeriod(purchases),
+      returns: byPeriod(returns), wastages: byPeriod(wastages), staffMeals: byPeriod(staffMealsData),
+      sales: byPeriod(salesData), overheads: byPeriod(overheadRows), transfers: byPeriod(transfers),
     }
 
-    // `empty` is `!pnl`, and this used to set a statement unconditionally — so `pnl` was never
-    // null on a successful read and the empty state was unreachable. A month with nothing recorded
-    // printed a complete statement of NPR 0, which is the S594 rule inverted: a zero the page has
-    // not been given is not a zero it computed. Measured on the ROWS, not on the totals: a real
-    // month whose figures genuinely net to zero still has rows, and must still render.
-    const hasAnyData = (opening || []).length > 0 || (closing || []).length > 0 ||
-      (purchases || []).length > 0 || (returns || []).length > 0 ||
-      (wastages || []).length > 0 || (staffMealsData || []).length > 0 ||
-      (salesData || []).length > 0 || (overheadRows || []).length > 0 ||
-      (runs || []).length > 0
-    if (!hasAnyData) { setPnl(null); return }
+    const months = list.map((p, i) => {
+      const rows = {
+        opening: t.opening.get(p.id) || [], closing: t.closing.get(p.id) || [],
+        purchases: t.purchases.get(p.id) || [], returns: t.returns.get(p.id) || [],
+        wastages: t.wastages.get(p.id) || [], staffMeals: t.staffMeals.get(p.id) || [],
+        transfers: t.transfers.get(p.id) || [],
+      }
+      const sales = t.sales.get(p.id) || []
+      const ohRows = t.overheads.get(p.id) || []
+      const clock = clocks.get(p.id)
+      const buckets = { overhead: 0, labor: 0, tax_fees: 0 }
+      for (const r of ohRows) {
+        const b = buckets[r.bucket || 'overhead'] !== undefined ? (r.bucket || 'overhead') : 'overhead'
+        buckets[b] += parseFloat(r.amount) || 0
+      }
+      const parts = labourLoads[i]?.parts || { hrOn, fenced }
+      const labour = finishLabour(resolveOutletLabour({ ...parts, labourBucket: buckets.labor, scale: clock ? clock.fraction : 1 }))
 
-    setPnl(buildStatement({
-      revenue, openingVal, purchasesVal, returnsVal, wastageVal, staffMealsVal, closingVal,
-      labourPayroll, labourBucket: buckets.labor, labourOther, overheads: buckets.overhead, taxFees: buckets.tax_fees,
-      hasClosing: (closing || []).length > 0,
-    }))
+      // Measured on the ROWS, not the totals: a month with nothing recorded has no statement (S594).
+      const hasAnyData = Object.values(rows).some(r => r.length > 0) || sales.length > 0 || ohRows.length > 0
+        || parts.payroll != null
+      if (!hasAnyData) return { period: p, stmt: null, gapItems: null }
+
+      const maps = periodStockMaps(rows)
+      const valued = periodValuationItems(items, periodRowIds(rows))
+      const stock = valuePeriodItems(valued, maps)
+      const gap = periodGap({ items: valued, maps, closing: rows.closing, cogs: stock.cogsVal })
+      const waitRow = (waiting || []).find(w => w.bs_year === p.bs_year && w.bs_month === p.bs_month)
+      const memo = memos[i]
+      const stmt = buildStatement({
+        revenue: periodRevenue(sales, recipes),
+        openingVal: stock.openingVal,
+        // computeUsed takes purchases net of discount and the returns separately; transfers in add like a
+        // purchase, transfers out take off like a return (periodCost.js keeps both supplier-only figures).
+        purchasesVal: stock.purchaseVal - stock.discountVal + stock.transferInVal,
+        returnsVal: stock.returnVal + stock.transferOutVal,
+        wastageVal: stock.wastageVal, staffMealsVal: stock.staffMealsVal, closingVal: stock.closingVal,
+        transferInVal: stock.transferInVal, transferOutVal: stock.transferOutVal,
+        overheads: buckets.overhead, taxFees: buckets.tax_fees,
+        deliveryCommission: commissions[i]?.amount || 0,
+        deliveryUnsettled: commissions[i]?.unsettledBills || 0,
+        labour,
+        open: p.status === 'open',
+        hasClosing: rows.closing.some(r => r.physical_qty != null),
+        gap,
+        depreciation: memo?.error ? { error: memo.error } : memo,
+        tillWaiting: { bills: waitRow?.bills, notes: waitRow?.notes },
+      })
+      return { period: p, stmt, gap, running: !!clock?.running }
+    })
+
+    const withData = months.filter(m => m.stmt)
+    const stmt = sel.kind === 'fy' ? sumStatements(withData.map(m => m.stmt), { stock: 'last' }) : (withData[0]?.stmt || null)
+    return { data: { kind: 'single', months, stmt, running: months.some(m => m.running) }, error: null }
+  }, [scopedFrom, db, posOn, hrOn, fenced, effectiveClientId])
+
+  /* ── Grouped: one get_group_pnl + one labour-inputs call per month, derived here ───────────── */
+  const loadGroupMonths = useCallback(async (sel) => {
+    const rpc = (name, args) => supabase.rpc(name, args)
+    let perMonth
+    try {
+      perMonth = await withTimeout(Promise.all(sel.months.map(m => Promise.all([
+        settleWithin(supabase.rpc('get_group_pnl', { p_bs_year: m.bs_year, p_bs_month: m.bs_month, p_group_id: groupArg }),
+          LOAD_MS, 'The group statement'),
+        loadGroupLabourInputs(rpc, { bsYear: m.bs_year, bsMonth: m.bs_month, groupId: groupArg, timeoutMs: LOAD_MS }),
+      ]))), LOAD_MS + 5000, 'Building the group statement')
+    } catch (e) {
+      return { data: null, error: e }
+    }
+    // A failed RPC must not masquerade as the no-Suite empty state: "nothing to show" and "could not
+    // load" are different facts, and only one of them should send someone to billing.
+    for (const [pnl, lab] of perMonth) {
+      if (pnl.error) return { data: null, error: pnl.error }
+      if (lab.error) return { data: null, error: lab.error }
+    }
+
+    const outletsById = new Map()   // client_id → { name, included, months: [{ month, col }] }
+    sel.months.forEach((m, i) => {
+      const [{ data: rows }, { byClient }] = perMonth[i]
+      const clock = mtdClock(m)
+      for (const r of rows || []) {
+        const o = outletsById.get(r.client_id) || { clientId: r.client_id, name: r.client_name, included: false, months: [] }
+        o.name = r.client_name
+        o.included = o.included || !!r.is_included
+        if (r.is_included) {
+          const lab = byClient?.get(r.client_id)
+          const open = r.period_status === 'open'
+          const labour = groupOutletLabour(r, !!lab?.hrEnabled, {
+            inputs: lab?.inputs || null,
+            period: { bs_year: m.bs_year, bs_month: m.bs_month },
+            throughDay: open && clock.running ? clock.countedDays : null,
+            scale: open && clock.running ? clock.fraction : 1,
+          })
+          o.months.push({ month: m, col: groupColumn(r, labour) })
+        }
+        outletsById.set(r.client_id, o)
+      }
+    })
+
+    const all = [...outletsById.values()]
+    const excludedNames = all.filter(o => !o.included).map(o => o.name)
+    const cols = all.filter(o => o.included).map(o => {
+      const withPeriod = o.months.filter(x => x.col.hasPeriod)
+      if (sel.kind !== 'fy') {
+        const c = o.months[0]?.col || { name: o.name, hasPeriod: false, stmt: null }
+        return { ...c, clientId: o.clientId, name: o.name }
+      }
+      const stmt = sumStatements(withPeriod.map(x => x.col.stmt), { stock: 'last' })
+      return {
+        clientId: o.clientId, name: o.name, hasPeriod: withPeriod.length > 0,
+        status: withPeriod.some(x => x.col.stmt.open) ? 'open' : 'closed',
+        stmt: stmt || buildStatement({}),
+        monthsWithoutPeriod: o.months.filter(x => !x.col.hasPeriod).map(x => monthName(x.month.bs_year, x.month.bs_month)),
+      }
+    })
+    const consolidated = sumStatements(cols.filter(c => c.hasPeriod).map(c => c.stmt), { stock: 'sum' })
+    const senders = cols.filter(c => c.hasPeriod && c.stmt.onTheWayVal > 0).map(c => ({ name: c.name, value: c.stmt.onTheWayVal }))
+    const running = sel.months.some(m => mtdClock(m).running)
+    return { data: { kind: 'group', cols, consolidated, excludedNames, senders, running }, error: null }
+  }, [groupArg])
+
+  const loadSelection = useCallback(async (key, list) => {
+    const sel = describe(key, list)
+    if (!sel) return
+    setLoadError(null)
+    const { data, error } = grouped ? await loadGroupMonths(sel) : await loadOutletStatements(sel)
+    if (!periodReq.isCurrent(key)) return   // superseded by a newer selection
+    if (error) { console.error('Consolidated P&L failed:', error); setResult(null); setLoadError(error); return }
+    setResult({ ...data, builtFor: key, sel })
+  }, [describe, grouped, loadGroupMonths, loadOutletStatements, periodReq])
+
+  // init() claims the page before its first await (PNL-4); a later selection supersedes it.
+  const init = useCallback(async () => {
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    setLoading(true)
+    setLoadError(null)
+    setResult(null)
+    const { data: p, error } = await settleWithin(
+      scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
+        .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }).order('id'),
+      LOAD_MS, 'Loading the months')
+    if (!periodReq.isCurrent(initKey)) return
+    if (error) { setLoadError(error); setPeriods([]); setLoading(false); return }
+    const list = p || []
+    setPeriods(list)
+    // Closed-period default — COGS subtracts a closing count that an open month does not have.
+    const target = list.find(x => x.status === 'closed') || list[0]
+    if (!target) { setSelectedKey(null); setLoading(false); return }
+    const key = periodReq.begin(`period:${target.id}`)
+    setSelectedKey(key)
+    await loadSelection(key, list)
+    if (periodReq.isCurrent(key)) setLoading(false)
+  }, [effectiveClientId, scopedFrom, loadSelection, periodReq])
+
+  // authLoading is a real dependency: a hard load lands here while auth is still resolving. The load runs
+  // only once the Suite gate and the role allow it (ACCESS-9: nothing is read behind the card).
+  useEffect(() => {
+    if (authLoading || !canLoad) return
+    if (!effectiveClientId) { setLoading(false); setLoadError('No client selected. Pick one from the outlet switcher in the sidebar.'); return }
+    init()
+  }, [authLoading, canLoad, effectiveClientId, grouped, groupArg]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleSelect(key) {
+    periodReq.begin(key)   // claim the page before any await
+    setSelectedKey(key)
+    setLoading(true)
+    await loadSelection(key)
+    if (periodReq.isCurrent(key)) setLoading(false)
   }
 
-  /* ── Derived render state ──────────────────────────────────────────────────────────────── */
-  const periodLabel = selectedPeriod ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}` : ''
-  const hrOn = !!clientModules?.hr
-  const cols = grouped ? (groupCols || []) : []
-  // Consolidated = per-line sums over the outlet statements. The labour rule already applied per
-  // outlet, and every other line is linear, so summing lines equals deriving from summed inputs.
-  const consolidated = cols.length > 0 ? LINES.reduce((acc, l) => {
-    acc[l.key] = cols.reduce((s, c) => s + (c.stmt[l.key] || 0), 0)
-    return acc
-  }, {}) : null
-  const anyOpen = grouped
-    ? cols.some(c => c.status === 'open')
-    : selectedPeriod?.status === 'open'
-  const missingClosing = grouped
-    ? cols.filter(c => c.hasPeriod && c.status === 'closed' && !c.stmt.hasClosing).map(c => c.name)
-    : (pnl && !pnl.hasClosing && selectedPeriod?.status === 'closed' ? ['this period'] : [])
-  const ignoredBuckets = grouped
-    ? cols.filter(c => c.stmt.ignoredLabourBucket > 0).map(c => ({ name: c.name, amount: c.stmt.ignoredLabourBucket }))
-    : (pnl?.ignoredLabourBucket > 0 ? [{ name: null, amount: pnl.ignoredLabourBucket }] : [])
-  // S798 2e (LABOUR-FIGURES-2): an HR outlet whose payroll for the month is not finalized. With its
-  // Labor tab empty too, its Net Profit has no wage bill in it, so Net Profit — the outlet's and the
-  // consolidated one — is printed without a verdict colour (resolveLabour's verdictWithheld, the
-  // S796 rule the Dashboard applies). Named under the statement either way.
-  const noPayrollCols = grouped ? cols.filter(c => c.hasPeriod && c.hrOn && c.stmt.labourSource !== 'payroll') : []
-  // S798 3c (H18): festival, incentive and final-settlement pay is named — counted with payroll, or
-  // "not included" beside a Labor tab. One sentence per outlet in a group.
-  const otherLabourNotes = (grouped ? cols.map(c => ({ name: c.name, stmt: c.stmt })) : (pnl ? [{ name: null, stmt: pnl }] : []))
-    .map(({ name, stmt }) => ({ name, counted: !!stmt.labourOther, source: stmt.labourSource, text: otherLabourLine({ other: stmt.labourOther, otherNotCounted: stmt.labourOtherNotCounted }) }))
-    .filter(n => n.text)
-  const labourWithheld = grouped
-    ? cols.some(c => c.hasPeriod && c.labour?.verdictWithheld)
-    : (hrOn && pnl?.labourSource === 'none')
+  /* ── Derived render state ──────────────────────────────────────────────────────────────────── */
+  const sel = describe(selectedKey)
+  const isCurrent = !!result && result.builtFor === selectedKey
+  const scope = sel?.scope || ''
+  const cols = isCurrent && result.kind === 'group' ? result.cols : []
+  const stmt = !isCurrent ? null : result.kind === 'group' ? result.consolidated : result.stmt
+  const isEmpty = !stmt
+  const withPeriod = cols.filter(c => c.hasPeriod)
+
+  const notes = useMemo(() => {
+    if (!isCurrent || !stmt) return []
+    if (result.kind === 'group') {
+      return pnlNotes({
+        scope, scopeEnd: sel?.scopeEnd, grouped: true, fy: sel?.kind === 'fy', stmt,
+        cols: result.cols, excludedNames: result.excludedNames, senders: result.senders, runningMonth: result.running,
+      })
+    }
+    const fyNotes = sel?.kind === 'fy'
+    return pnlNotes({
+      scope, scopeEnd: sel?.scopeEnd, fy: fyNotes, stmt, hrOn, runningMonth: result.running,
+      monthsWithoutPeriod: fyNotes
+        ? sel.months.filter(m => !sel.periods.some(p => p.bs_year === m.bs_year && p.bs_month === m.bs_month)).map(m => monthName(m.bs_year, m.bs_month))
+        : [],
+      openMonths: fyNotes ? sel.periods.filter(p => p.status === 'open').map(p => monthName(p.bs_year, p.bs_month)) : [],
+    })
+  }, [isCurrent, stmt, result, scope, sel, hrOn])
 
   async function exportExcel() {
+    if (!isCurrent || !stmt || !biz.ready) return
     const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
-    let rows
-    if (grouped && cols.length > 0) {
-      // Column headers must be unique: an object key silently overwrites, so two outlets with the
-      // same `clients.name` collapsed into ONE column while Consolidated still counted both — a
-      // sheet that visibly does not add up. Disambiguated once, outside the row loop, so every row
-      // uses the same header.
-      const seen = {}
-      const headerOf = c => {
-        seen[c.name] = (seen[c.name] || 0) + 1
-        return seen[c.name] === 1 ? c.name : `${c.name} (${seen[c.name]})`
-      }
-      const headers = cols.map(headerOf)
-      rows = LINES.map(l => {
-        const row = { 'Line': l.label }
-        cols.forEach((c, ci) => { row[headers[ci]] = Math.round((l.cost ? -1 : 1) * (c.stmt[l.key] || 0)) })
-        row['Consolidated'] = Math.round((l.cost ? -1 : 1) * (consolidated[l.key] || 0))
-        row['% of Revenue'] = l.key === 'revenue' ? '100.0%' : pctOf(consolidated[l.key], consolidated.revenue)
-        return row
+    const rows = result.kind === 'group'
+      ? statementRows({ grouped: true, cols: result.cols, consolidated: result.consolidated })
+      : statementRows({
+        stmt,
+        monthCols: sel?.kind === 'fy'
+          ? result.months.map(m => ({ label: monthName(m.period.bs_year, m.period.bs_month), stmt: m.stmt }))
+          : null,
       })
-    } else if (pnl) {
-      rows = LINES.map(l => ({
-        'Line': l.label,
-        'Amount (NPR)': Math.round((l.cost ? -1 : 1) * (pnl[l.key] || 0)),
-        '% of Revenue': l.key === 'revenue' ? '100.0%' : pctOf(pnl[l.key], pnl.revenue),
-      }))
-    } else return
+    const gap = result.kind === 'single' && sel?.kind === 'month' ? stmt.gap : null
     const ws = sheetWithLetterhead(XLSX, {
       title: 'Profit & Loss',
       biz,
-      scopeLine: `Period : ${periodLabel}${anyOpen ? ' (PROVISIONAL — period still open, closing stock not counted)' : ''}`,
+      scopeLine: `Period : ${scope}${stmt.open ? ' (PROVISIONAL — a month is still open, closing stock not counted)' : ''}`,
       rows,
-      notes: grouped && excludedNames.length > 0
-        ? [`Not included (no Crest Suite Pro): ${excludedNames.join(', ')}`]
-        : [],
+      notes: [
+        ...notes.map(n => n.text),
+        ...(gap?.uncounted?.length ? [`Not counted: ${gap.uncounted.map(u => u.name).join(', ')}.`] : []),
+      ],
     })
     XLSX.utils.book_append_sheet(wb, ws, 'P&L')
-    XLSX.writeFile(wb, `pnl-${periodLabel.replace(/ /g, '-')}.xlsx`)
+    XLSX.writeFile(wb, `pnl-${scope.replace(/[ /]/g, '-')}.xlsx`)
   }
 
   if (authLoading) return null
-  // Owner-or-admin only, matching this page's nav entry in Layout.js — CLAUDE.md's standing rule
-  // that a page's route guard and its nav visibility must be kept in sync, and MonthlyOwnerReport
-  // (the sibling behind the same nav condition) has carried this line all along.
-  //
-  // Without it the page was reachable-but-hidden, and the consequence was worse than a leak. The
-  // staff-isolation policies are RESTRICTIVE SELECT filters, so a fenced table returns
-  // `{ data: [], error: null }` — indistinguishable from an empty period, and invisible to
-  // firstError(). A POS PIN account reached this page with sales_entries readable and items /
-  // opening_stock / closing_stock / purchase_entries / overheads / hr_* all silently empty, which
-  // renders a complete, confident statement with real Revenue, COGS NPR 0, and Net Profit equal to
-  // Revenue at a 100% margin. ProtectedRoute has already resolved `profile` by the time this runs.
+  // Owner-or-admin only, matching this page's nav entry: restrictive staff-isolation policies return an
+  // empty read, not an error, so a staff login would get a confident statement at a 100% margin.
   if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />
 
   // The `micro` step from DESIGN.md's ramp — 10px is only ever legal as micro-caps.
   const colMarkerStyle = { display: 'block', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }
-
+  const markerColor = tone => (tone === 'warn' ? 'var(--theme-amber-text)' : 'var(--theme-text3)')
   const warnStyle = {
     background: 'color-mix(in srgb, var(--theme-amber) 13%, transparent)',
     border: '1px solid var(--theme-amber)', borderRadius: 'var(--radius-md)',
     padding: '10px 14px', marginBottom: 16, fontSize: 13, color: 'var(--theme-amber-text)',
   }
-
-  const stmt = grouped ? consolidated : pnl
-  const isEmpty = grouped ? cols.length === 0 : !pnl
+  const net = LINES.find(l => l.key === 'netProfit')
+  const gross = LINES.find(l => l.key === 'grossProfit')
+  const busy = loading || (!!selectedKey && !isCurrent && !loadError)
 
   const actions = (
     <>
       <button className="btn btn-ghost" style={{ fontSize: 12 }}
-        onClick={() => printWithTitle(`Profit & Loss - ${periodLabel}`)}>🖨 Print</button>
+        disabled={busy || !!loadError || isEmpty || !isCurrent}
+        onClick={() => printWithTitle(`Profit & Loss - ${scope}`)}>🖨 Print</button>
       <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
-        disabled={loading || !!loadError || isEmpty || !biz.ready}
+        disabled={busy || !!loadError || isEmpty || !isCurrent || !biz.ready}
         title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>↓ Export Excel</button>
-      <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''}
-        onChange={e => handlePeriodChange(e.target.value)}>
-        {periods.map(p => (
-          <option key={p.id} value={p.id}>
-            {BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}
-          </option>
-        ))}
+      <select aria-label="Period" className="form-select" value={selectedKey || ''}
+        onChange={e => handleSelect(e.target.value)}>
+        <optgroup label="Months">
+          {periods.map(p => (
+            <option key={p.id} value={`period:${p.id}`}>
+              {monthName(p.bs_year, p.bs_month)} {p.status === 'open' ? '(open)' : '(closed)'}
+            </option>
+          ))}
+        </optgroup>
+        {fyStarts.length > 0 && (
+          <optgroup label="Fiscal years">
+            {fyStarts.map(s => (
+              <option key={s} value={`fy:${s}`}>Fiscal year {fyLabel(s)} (Shrawan–Ashadh)</option>
+            ))}
+          </optgroup>
+        )}
       </select>
     </>
   )
 
   const banners = (
     <>
-      {anyOpen && (
+      {isCurrent && stmt?.open && (
         <div style={warnStyle}>
-          <strong>Provisional — {grouped ? 'at least one outlet’s month is still open.' : 'this period is still open.'}</strong>{' '}
-          Closing stock has not been counted yet, so COGS treats closing stock as zero and
-          overstates the true figure. The statement is reliable once the period is closed.
+          <strong>Provisional — {grouped ? 'at least one outlet’s month is still open.' : sel?.kind === 'fy' ? 'a month of the year is still open.' : 'this month is still open.'}</strong>{' '}
+          Closing stock has not been counted yet, so COGS treats closing stock as zero and overstates the true
+          figure. Gross and Net Profit carry no colour until the month is closed.
         </div>
       )}
-      {/* A statement that silently omits labour overstates Net Profit by exactly that much.
-          With HR off, the only labour this page can see is Overheads' Labour bucket — say so
-          above the figures rather than in an 11px annotation on one row (S683). */}
+      {/* A statement that silently omits labour overstates Net Profit by exactly that much. With HR off,
+          the only labour this page can see is Overheads' Labor tab — say so above the figures (S683). */}
       {!hrOn && !grouped && (
         <div style={warnStyle}>
           <strong>Labour is from Overheads only.</strong>{' '}
-          Crest HR is not enabled, so no payroll feeds this statement — the Labour line is whatever
-          was entered in Overheads' Labour bucket for the month{pnl?.labourSource === 'overheads' ? '' : ', which is currently nothing'}.
+          Crest HR is not enabled, so no payroll feeds this statement — the Labour line is whatever was
+          entered in Overheads&apos; Labor tab for the month{stmt?.labourInfo?.source === 'overheads' || stmt?.labour ? '' : ', which is currently nothing'}.
         </div>
       )}
     </>
   )
 
-  // The headline. WHY it exists (S594): this page dropped the KPI strip its sibling reports carry
-  // -- defensible for a formal statement -- but the consequence was that Net Profit, the reason an
-  // owner opens the page at all, rendered as the ninth row of a 13px table with no more weight
-  // than Staff Meals. The statement below is still the document; this is the answer.
+  // The headline (S594): Net Profit is the reason an owner opens the page. The statement is still the
+  // document; this is the answer. A withheld verdict prints in the text colour with the reason.
+  const verdictSub = (s, line) => {
+    if (s.open) return 'Not judged until the month is closed'
+    if (s.gapMaterial) return 'Not judged: count incomplete'
+    if (line.key === 'netProfit' && (!s.labourHasFigure || s.labourVerdictWithheld)) return 'Not judged: labour incomplete — see notes'
+    return null
+  }
   const headline = stmt ? (
     <div className="stat-grid">
       <div className="stat-card">
         <div className="stat-label">Revenue</div>
-        <div className="stat-value gold">{npr(stmt.revenue)}</div>
-        <div className="stat-sub">{grouped ? `${cols.length} outlet${cols.length === 1 ? '' : 's'}` : periodLabel}</div>
+        <div className="stat-value">{npr(stmt.revenue)}</div>
+        <div className="stat-sub">
+          {grouped ? `${withPeriod.length} of ${cols.length} outlet${cols.length === 1 ? '' : 's'}` : scope}
+        </div>
       </div>
       <div className="stat-card">
         <div className="stat-label">
-          <Tip width={280} text="Revenue less cost of goods sold, before wastage, staff meals, labour, overheads and tax.">Gross Profit</Tip>
+          <Tip width={280} text="Revenue less cost of goods sold, before wastage, staff meals, delivery commission, labour, overheads and tax.">Gross Profit</Tip>
         </div>
-        <div className="stat-value" style={{ color: stmt.grossProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+        <div className="stat-value" style={{ color: lineColor(gross, stmt.grossProfit, lineWithheld(gross, stmt)) }}>
           {npr(stmt.grossProfit)}
         </div>
-        <div className="stat-sub">{pctOf(stmt.grossProfit, stmt.revenue)} of revenue</div>
+        <div className="stat-sub">{verdictSub(stmt, gross) || `${pctOf(stmt.grossProfit, stmt.revenue)} of revenue`}</div>
       </div>
       <div className="stat-card">
         <div className="stat-label">
-          <Tip width={300} text="What is left after every cost on the statement below. This is the bottom line of the same table, not a second calculation.">Net Profit</Tip>
+          <Tip width={300} text={net.tip}>Net Profit</Tip>
         </div>
-        <div className="stat-value" style={{ color: labourWithheld ? 'var(--theme-text1)' : stmt.netProfit >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+        <div className="stat-value" style={{ color: lineColor(net, stmt.netProfit, lineWithheld(net, stmt)) }}>
           {npr(stmt.netProfit)}
         </div>
-        <div className="stat-sub">{labourWithheld ? 'Not judged until payroll is finalized' : `${pctOf(stmt.netProfit, stmt.revenue)} net margin`}</div>
+        <div className="stat-sub">{verdictSub(stmt, net) || `${pctOf(stmt.netProfit, stmt.revenue)} net margin`}</div>
       </div>
     </div>
   ) : null
 
-  // Coverage first, not last. This one sentence establishes what every figure on the page does and
-  // does not include; below the table in --theme-text3 it was the quietest text on the screen.
-  const coverage = grouped && excludedNames.length > 0 ? (
+  // Coverage first, not last: what every figure on the page does and does not include (PNL-5).
+  const coverage = grouped && isCurrent ? (
     <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 16px', maxWidth: 900 }}>
-      Covers <strong>{cols.length}</strong> outlet{cols.length === 1 ? '' : 's'}. Not included
-      (no Crest Suite Pro on that outlet): {excludedNames.join(', ')}. Suite Pro is per outlet — the
-      consolidated column is the total of the outlets shown, not of your whole group.
+      Covers <strong>{withPeriod.length}</strong> of {cols.length} outlet{cols.length === 1 ? '' : 's'}
+      {result.excludedNames.length > 0 && <> · not included (no Crest Suite Pro on that outlet): {result.excludedNames.join(', ')}</>}.
+      {' '}Months listed are {(outlets || []).find(o => o.id === effectiveClientId)?.name || 'this outlet'}&apos;s; a month only another outlet has is reached by switching to that outlet.
     </p>
   ) : null
 
-  const footnote = (
+  const footnote = notes.length > 0 ? (
+    <div style={{ marginTop: 12, maxWidth: 900 }}>
+      {notes.map(n => (
+        <p key={n.key} style={{ fontSize: 12, margin: '8px 0 0', color: n.tone === 'warn' ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>
+          {n.text}
+        </p>
+      ))}
+    </div>
+  ) : null
+
+  const labourNote = s => {
+    if (sel?.kind === 'fy') return s.labourMissing > 0 ? `${s.labourMissing} month${s.labourMissing === 1 ? '' : 's'} without a figure` : 'month by month'
+    const src = s.labourInfo?.source
+    return src === 'payroll' ? `from finalized payroll${s.labourInfo?.other ? ' + bonus/final pay' : ''}`
+      : src === 'estimate' ? 'HR estimate — payroll not finalized'
+      : src === 'overheads' ? 'from the Overheads Labor tab'
+      : src === 'none' ? 'no labour entered — Crest HR is off and the Labor tab is empty'
+      : src === 'unreadable' ? 'not readable on this login'
+      : 'could not be loaded'
+  }
+  const depr = s => (s?.depreciation && !s.depreciation.error ? s.depreciation.amount : null)
+
+  const body = !stmt ? null : grouped ? (
+    <div className="table-wrap">
+      {/* Sticky first column: with five outlets this matrix is eight currency columns wide. */}
+      <table className="data-table data-table--sticky-first">
+        <thead>
+          <tr>
+            <th>Line</th>
+            {/* Keyed by position, not name — two outlets can share a display name (S612). */}
+            {cols.map((c, ci) => (
+              <th key={ci} style={{ textAlign: 'right' }}>
+                {c.name}
+                {columnMarkers(c).map(m => (
+                  <span key={m.text} style={{ ...colMarkerStyle, color: markerColor(m.tone) }}>{m.text}</span>
+                ))}
+              </th>
+            ))}
+            <th style={{ textAlign: 'right' }}>Consolidated</th>
+            <th style={{ textAlign: 'right' }}>
+              <Tip text="Each consolidated line as a share of consolidated revenue." width={260}>% of Rev.</Tip>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {LINES.map(l => (
+            <tr key={l.key} style={l.strong ? { fontWeight: 700, borderTop: '2px solid var(--theme-border)' } : undefined}>
+              <td style={{ fontWeight: l.strong ? 700 : 500, color: 'var(--theme-text1)' }}>
+                {l.tip ? <Tip text={l.tip} width={300}>{l.label}</Tip> : l.label}
+              </td>
+              {cols.map((c, ci) => (
+                <td key={ci} style={{
+                  textAlign: 'right',
+                  color: c.hasPeriod ? lineColor(l, c.stmt[l.key], lineWithheld(l, c.stmt)) : 'var(--theme-text3)',
+                }}>
+                  {/* A no-period column is blank on every line, not 0 (PNL-6). */}
+                  {c.hasPeriod ? fmtLine(l, c.stmt[l.key]) : '—'}
+                </td>
+              ))}
+              {/* NOT `{ ...l, strong: true }`: weight comes from fontWeight (S594). */}
+              <td style={{ textAlign: 'right', fontWeight: 700, color: lineColor(l, stmt[l.key], lineWithheld(l, stmt)) }}>
+                {fmtLine(l, stmt[l.key])}
+              </td>
+              <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
+                {l.key === 'revenue' ? '100.0%' : pctOf(stmt[l.key], stmt.revenue)}
+              </td>
+            </tr>
+          ))}
+          <tr>
+            <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>
+              <Tip text="Posted Fixed Asset depreciation for the month, pro-rated by days from runs longer than the month. Shown, never subtracted: Net Profit above is before depreciation, interest and income tax." width={300}>
+                Depreciation (memo, not subtracted)
+              </Tip>
+            </td>
+            {cols.map((c, ci) => (
+              <td key={ci} style={{ textAlign: 'right', fontSize: 12, color: 'var(--theme-text3)' }}>
+                {c.hasPeriod && depr(c.stmt) != null ? npr(depr(c.stmt)) : '—'}
+              </td>
+            ))}
+            <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--theme-text3)' }}>{depr(stmt) != null ? npr(depr(stmt)) : '—'}</td>
+            <td />
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  ) : (
     <>
-      {ignoredBuckets.map(b => (
-        <p key={b.name || 'single'} style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginTop: 12, maxWidth: 900 }}>
-          {npr(b.amount)} of manually-entered Labour in Overheads{b.name ? ` at ${b.name}` : ''} was{' '}
-          <strong>not</strong> added to this statement — finalized payroll is the labour figure when
-          both exist, and summing the two would count the same people twice. Remove the manual entry
-          if it duplicates payroll.
-        </p>
-      ))}
-      {(noPayrollCols.length > 0 || (!grouped && labourWithheld)) && (
-        <p style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginTop: 12, maxWidth: 900 }}>
-          {grouped
-            ? `No finalized payroll for ${periodLabel}: ${noPayrollCols.map(c => c.stmt.labourSource === 'overheads' ? `${c.name} (Labour is its Overheads Labor tab)` : c.name).join(', ')}.`
-            : `No finalized payroll for ${periodLabel}, and nothing on the Overheads Labor tab.`}
-          {labourWithheld && ' Net Profit has no wage bill in it there, so it is shown without a colour until payroll is finalized.'}
-        </p>
+      {sel?.kind === 'month' && stmt.gap?.uncountedCount > 0 && (
+        <UncountedItemsBanner gap={stmt.gap} scope={scope}
+          fcLine="Gross and Net Profit are shown without a colour until the count is finished" />
       )}
-      {otherLabourNotes.map(n => (
-        <p key={n.name || 'single'} style={{ fontSize: 12, color: n.counted ? 'var(--theme-text2)' : 'var(--theme-amber-text)', marginTop: 12, maxWidth: 900 }}>
-          {n.counted
-            ? `Labour${n.name ? ` at ${n.name}` : ''} ${n.text}, finalized in HR for ${periodLabel} and counted in the month it was paid.`
-            : n.source === 'overheads'
-              ? `${n.text}${n.name ? ` at ${n.name}` : ''}: its Labour is the Overheads Labor tab, which may already hold it.`
-              : `${n.text}${n.name ? ` at ${n.name}` : ''}: it is counted with payroll once ${periodLabel}'s payroll is finalized.`}
-        </p>
-      ))}
-      {missingClosing.length > 0 && !anyOpen && (
-        <p style={{ fontSize: 12, color: 'var(--theme-amber-text)', marginTop: 12, maxWidth: 900 }}>
-          {grouped
-            ? `Closed without a closing stock count: ${missingClosing.join(', ')} — COGS there treats closing stock as zero and is overstated by whatever was actually on hand.`
-            : 'This period was closed without a closing stock count — COGS treats closing stock as zero and is overstated by whatever was actually on hand.'}
-        </p>
-      )}
-      {(pnl || cols.length > 0) && (
-        <p style={{ fontSize: 12, color: 'var(--theme-text3)', marginTop: 12, maxWidth: 900 }}>
-          Figures come from each module&apos;s own canonical source: revenue and COGS tie to Monthly
-          Summary, labour to the finalized Payroll run, overheads to the Overheads page. Stock Count&apos;s
-          Summary includes sub-recipes in its COGS; this statement, like Monthly Summary, counts their
-          raw ingredients instead — the two differ by exactly the prep amount.
-        </p>
-      )}
+      <div className="table-wrap" style={{ maxWidth: 760 }}>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Line</th>
+              <th style={{ textAlign: 'right' }}>Amount</th>
+              <th style={{ textAlign: 'right' }}>
+                <Tip text="Each line as a share of revenue — the standard common-size P&L reading." width={260}>% of Rev.</Tip>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {LINES.map(l => (
+              <tr key={l.key} style={l.strong ? { fontWeight: 700, borderTop: '2px solid var(--theme-border)' } : undefined}>
+                <td style={{ color: 'var(--theme-text1)', fontWeight: l.strong ? 700 : 500 }}>
+                  {l.tip ? <Tip text={l.tip} width={300}>{l.label}</Tip> : l.label}
+                  {l.key === 'labour' && (
+                    <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--theme-text3)' }}>{labourNote(stmt)}</span>
+                  )}
+                </td>
+                <td style={{ textAlign: 'right', fontWeight: l.strong ? 700 : 500, color: lineColor(l, stmt[l.key], lineWithheld(l, stmt)) }}>
+                  {fmtLine(l, stmt[l.key])}
+                </td>
+                <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
+                  {l.key === 'revenue' ? '100.0%' : pctOf(stmt[l.key], stmt.revenue)}
+                </td>
+              </tr>
+            ))}
+            <tr>
+              <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>
+                <Tip text="Posted Fixed Asset depreciation for the period, pro-rated by days from runs longer than the month, the way Overheads shows it. Shown, never subtracted: Net Profit above is before depreciation, interest and income tax." width={300}>
+                  Depreciation (memo, not subtracted)
+                </Tip>
+              </td>
+              <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--theme-text3)' }}>
+                {stmt.depreciation?.error ? 'could not be read' : depr(stmt) != null ? npr(depr(stmt)) : '—'}
+              </td>
+              <td />
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </>
   )
 
   return (
-    <SuiteGate featureKey="consolidated_pnl" featureLabel="Consolidated P&L" requireModules={['ims']}>
+    <SuiteGate page={SUITE_PAGES.consolidatedPnl} entitled={groupSuiteLive}>
       <ReportPage
         title="Profit &amp; Loss"
-        subtitle={grouped ? `Every outlet side by side, one statement — ${periodLabel}` : `One statement across every module — ${periodLabel}`}
+        subtitle={grouped ? `Every outlet side by side, one statement — ${scope}` : `One statement across every module — ${scope}`}
         actions={actions}
-        noPeriod={!loading && !loadError && periods.length === 0}
+        noPeriod={!busy && !loadError && periods.length === 0}
         noPeriodWhat="the P&L statement"
-        loading={loading}
+        loading={busy}
         loadingText="Building the statement…"
         error={loadError}
         empty={isEmpty}
         emptyIcon="📄"
         emptyText={grouped
-          ? `No outlet in your group has Crest Suite Pro for ${periodLabel}.`
-          : `No figures recorded for ${periodLabel} yet.`}
+          ? `No outlet in your group has Crest Suite Pro for ${scope}.`
+          : `No figures recorded for ${scope} yet.`}
         banners={banners}
         stats={headline}
         note={coverage}
         footnote={footnote}
       >
-        {/* `!stmt ? null :` is load-bearing, not defensive noise. JSX children are an ARGUMENT:
-            this whole expression is evaluated by ConsolidatedPnl and handed to ReportPage as a
-            finished element tree, so ReportPage's loading/error/empty gate — which only decides
-            what to RENDER — cannot protect it. `pnl` and `consolidated` are both null until a load
-            completes, and LINES.map() below dereferences them unconditionally, so the first render
-            of every visit threw "Cannot read properties of null (reading 'revenue')" before
-            ReportPage got a chance to show the spinner. A gating wrapper can never guard an eager
-            children expression; only an early return, a guard here, or a render prop can. */}
-        {!stmt ? null : grouped ? (
-          <div className="table-wrap">
-            {/* Sticky first column: with five outlets this matrix is eight currency columns wide,
-                so scrolling right to reach Consolidated used to scroll the line labels off screen
-                and leave the reader matching numbers to remembered row order. */}
-            <table className="data-table data-table--sticky-first">
-              <thead>
-                <tr>
-                  <th>Line</th>
-                  {/* Keyed by position, not name — two outlets can legitimately share a display
-                      name (Excel dedupes them; React keys must not collide, S612). */}
-                  {cols.map((c, ci) => (
-                    <th key={ci} style={{ textAlign: 'right' }}>
-                      {c.name}
-                      {/* On its own line, at the `micro` step. Trailing the name inline, these two
-                          markers pushed each column's name left by their own width, so no two
-                          outlet names started at the same place; and at 10px plain-case lowercase
-                          they were the quietest text on the page while saying the single most
-                          load-bearing thing about a column — that its money is provisional. */}
-                      {!c.hasPeriod ? <span style={{ ...colMarkerStyle, color: 'var(--theme-text3)' }}>no period</span>
-                        : c.status === 'open' ? <span style={{ ...colMarkerStyle, color: 'var(--theme-amber-text)' }}>open</span> : null}
-                      {c.hasPeriod && c.hrOn && c.stmt.labourSource !== 'payroll' && (
-                        <span style={{ ...colMarkerStyle, color: 'var(--theme-amber-text)' }}>no finalized payroll</span>
-                      )}
-                    </th>
-                  ))}
-                  <th style={{ textAlign: 'right' }}>Consolidated</th>
-                  <th style={{ textAlign: 'right' }}>
-                    <Tip text="Each consolidated line as a share of consolidated revenue." width={260}>% of Rev.</Tip>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {LINES.map(l => (
-                  <tr key={l.key} style={l.strong ? { fontWeight: 700, borderTop: '2px solid var(--theme-border)' } : undefined}>
-                    <td style={{ fontWeight: l.strong ? 700 : 500, color: 'var(--theme-text1)' }}>
-                      {l.tip ? <Tip text={l.tip} width={300}>{l.label}</Tip> : l.label}
-                    </td>
-                    {cols.map((c, ci) => (
-                      <td key={ci} style={{
-                        textAlign: 'right',
-                        color: c.hasPeriod ? lineColor(l, c.stmt[l.key], c.labour?.verdictWithheld) : 'var(--theme-text3)',
-                      }}>
-                        {c.hasPeriod ? fmtLine(l, c.stmt[l.key]) : '—'}
-                      </td>
-                    ))}
-                    <td style={{
-                      // NOT `{ ...l, strong: true }`. lineColor tests `strong && amount > 0` BEFORE
-                      // `line.cost`, so forcing strong painted every positive consolidated figure
-                      // success-green -- COGS, Wastage, Labour, Overheads and Tax & Fees included,
-                      // rendered as `(NPR 1,240,000)` in green while the identical line sat grey in
-                      // the single-outlet table. To an accountant, parenthesised-and-green reads as
-                      // a credit. Weight is what was wanted here, and it is set on the next line.
-                      textAlign: 'right', fontWeight: 700,
-                      color: lineColor(l, consolidated[l.key], labourWithheld),
-                    }}>
-                      {fmtLine(l, consolidated[l.key])}
-                    </td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
-                      {l.key === 'revenue' ? '100.0%' : pctOf(consolidated[l.key], consolidated.revenue)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="table-wrap" style={{ maxWidth: 760 }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Line</th>
-                  <th style={{ textAlign: 'right' }}>Amount</th>
-                  <th style={{ textAlign: 'right' }}>
-                    <Tip text="Each line as a share of revenue — the standard common-size P&L reading." width={260}>% of Rev.</Tip>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {LINES.map(l => (
-                  <tr key={l.key} style={l.strong ? { fontWeight: 700, borderTop: '2px solid var(--theme-border)' } : undefined}>
-                    <td style={{ color: 'var(--theme-text1)', fontWeight: l.strong ? 700 : 500 }}>
-                      {l.tip ? <Tip text={l.tip} width={300}>{l.label}</Tip> : l.label}
-                      {l.key === 'labour' && (
-                        <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--theme-text3)' }}>
-                          {pnl.labourSource === 'payroll' ? `from finalized payroll${pnl.labourOther ? ' + bonus/final pay' : ''}`
-                            : pnl.labourSource === 'overheads' ? 'from Overheads entry'
-                            : hrOn ? 'no finalized payroll run'
-                            // HR off and no Labour bucket in Overheads: the figure is NPR 0
-                            // because nothing was entered, not because nobody was paid. Say so —
-                            // an empty annotation here read as a real zero (S683).
-                            : 'no labour entered — Crest HR is off and Overheads has no Labour line'}
-                        </span>
-                      )}
-                    </td>
-                    <td style={{
-                      textAlign: 'right',
-                      fontWeight: l.strong ? 700 : 500, color: lineColor(l, pnl[l.key], labourWithheld),
-                    }}>
-                      {fmtLine(l, pnl[l.key])}
-                    </td>
-                    <td style={{ textAlign: 'right', color: 'var(--theme-text3)', fontSize: 12 }}>
-                      {l.key === 'revenue' ? '100.0%' : pctOf(pnl[l.key], pnl.revenue)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {/* `!stmt ? null :` is load-bearing: JSX children are evaluated before ReportPage's gate runs
+            (S601), so `body` is built only from a statement that exists and is current. */}
+        {body}
       </ReportPage>
     </SuiteGate>
   )

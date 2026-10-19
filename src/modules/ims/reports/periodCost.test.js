@@ -297,3 +297,110 @@ describe('the cost basis: supplier VAT on a PAN-bill outlet (D32)', () => {
     expect(v.cogsVal).toBeCloseTo(v.netPurchaseVal, 6)
   })
 })
+
+// S849 (PNL-8): stock transfers between outlets. A line counts only where it lands: `in` adds like a
+// purchase, `out` takes off like a supplier return, at its frozen value. Supplier figures never move.
+describe('stock transfers (S849, PNL-8)', () => {
+  const RICE = { id: 'rice', name: 'Rice', per_uom_rate: '100', is_active: true }
+  const OIL = { id: 'oil', name: 'Oil', per_uom_rate: '200', is_active: true }
+  const base = {
+    opening: [{ item_id: 'rice', qty: '10' }, { item_id: 'oil', qty: '5' }],
+    closing: [{ item_id: 'rice', physical_qty: '6' }, { item_id: 'oil', physical_qty: '5' }],
+    purchases: [{ item_id: 'rice', qty: '4', rate: '100', purchase_group_id: 'g1', discount_amount: '0' }],
+    returns: [{ item_id: 'rice', qty: '1', rate: '100' }],
+    wastages: [], staffMeals: [],
+  }
+
+  it('moves Net Purchases and COGS, never Gross Purchases or Returns', () => {
+    const transfers = [
+      { item_id: 'oil', direction: 'in', qty: '2', rate: '190', value: '380' },
+      { item_id: 'rice', direction: 'out', qty: '3', rate: '95', value: '285' },
+    ]
+    const without = valuePeriodItems([RICE, OIL], periodStockMaps(base))
+    const v = valuePeriodItems([RICE, OIL], periodStockMaps({ ...base, transfers }))
+    expect(v.purchaseVal).toBeCloseTo(without.purchaseVal)
+    expect(v.returnVal).toBeCloseTo(without.returnVal)
+    expect(v.transferInVal).toBeCloseTo(380)
+    expect(v.transferOutVal).toBeCloseTo(285)
+    expect(v.netPurchaseVal).toBeCloseTo(without.netPurchaseVal + 380 - 285)
+    expect(v.cogsVal).toBeCloseTo(without.cogsVal + 380 - 285)
+  })
+
+  it('values a line at its own value (the frozen rate), not the item\'s rate today, and falls back to qty × rate', () => {
+    const m = periodStockMaps({ transfers: [{ item_id: 'oil', direction: 'in', qty: '2', rate: '190' }] })
+    expect(m.transfersIn.oil).toEqual({ qty: 2, value: 380 })
+  })
+
+  it('omitted, every output is what it was (transfer terms 0)', () => {
+    const maps = periodStockMaps(base)
+    expect(maps.transfersIn).toEqual({})
+    expect(maps.transfersOut).toEqual({})
+    const v = valuePeriodItems([RICE, OIL], maps)
+    expect(v.transferInVal).toBe(0)
+    expect(v.transferOutVal).toBe(0)
+    expect(v.netPurchaseVal).toBeCloseTo(400 - 100)
+    // maps built before S849 (no transfer keys) still value
+    const legacy = { ...maps }; delete legacy.transfersIn; delete legacy.transfersOut
+    expect(valuePeriodItems([RICE, OIL], legacy).cogsVal).toBeCloseTo(v.cogsVal)
+  })
+
+  it('leaves two outlets\' summed COGS unchanged by a transfer received between them', () => {
+    // Before: A holds 10 rice and uses 4, B holds 0. After: A sends 3 to B (sender 7 on the shelf less
+    // what it used), B receives the 3 and counts them all.
+    const A0 = valuePeriodItems([RICE], periodStockMaps({ opening: [{ item_id: 'rice', qty: '10' }], closing: [{ item_id: 'rice', physical_qty: '6' }] }))
+    const B0 = valuePeriodItems([RICE], periodStockMaps({ opening: [], closing: [] }))
+    const A1 = valuePeriodItems([RICE], periodStockMaps({
+      opening: [{ item_id: 'rice', qty: '10' }], closing: [{ item_id: 'rice', physical_qty: '3' }],
+      transfers: [{ item_id: 'rice', direction: 'out', qty: '3', rate: '100', value: '300' }],
+    }))
+    const B1 = valuePeriodItems([RICE], periodStockMaps({
+      opening: [], closing: [{ item_id: 'rice', physical_qty: '3' }],
+      transfers: [{ item_id: 'rice', direction: 'in', qty: '3', rate: '100', value: '300' }],
+    }))
+    expect(A1.cogsVal).toBeCloseTo(A0.cogsVal)          // the sender's COGS is unchanged
+    expect(B1.cogsVal).toBeCloseTo(0)                    // received and still on the shelf
+    expect(A1.cogsVal + B1.cogsVal).toBeCloseTo(A0.cogsVal + B0.cogsVal)
+  })
+
+  it('nets a cancelled transfer to zero at the sender', () => {
+    const v = valuePeriodItems([RICE], periodStockMaps({
+      transfers: [
+        { item_id: 'rice', direction: 'out', qty: '3', value: '300' },
+        { item_id: 'rice', direction: 'in', qty: '3', value: '300' },
+      ],
+    }))
+    expect(v.netPurchaseVal).toBeCloseTo(0)
+  })
+
+  it('admits a hidden item whose only row in the month is a transfer', () => {
+    const HIDDEN = { id: 'flour', name: 'Flour', per_uom_rate: '50', is_active: false }
+    const rows = { transfers: [{ item_id: 'flour', direction: 'in', qty: '2', value: '100' }] }
+    expect(periodRowIds(rows).has('flour')).toBe(true)
+    expect(periodValuationItems([HIDDEN], periodRowIds(rows)).map(i => i.id)).toEqual(['flour'])
+  })
+
+  it('counts received stock as presence: an item that only arrived by transfer and was never counted is uncounted', () => {
+    const SAUCE = { id: 'sauce', name: 'Sauce', per_uom_rate: '80', is_active: true }
+    const rows = { opening: [], closing: [], transfers: [{ item_id: 'sauce', direction: 'in', qty: '5', value: '400' }] }
+    const maps = periodStockMaps(rows)
+    const gap = periodGap({ items: [SAUCE], maps, closing: rows.closing, cogs: 400 })
+    expect(gap.uncounted.map(u => u.id)).toEqual(['sauce'])
+    // stock only sent away is not presence
+    const sent = periodStockMaps({ transfers: [{ item_id: 'sauce', direction: 'out', qty: '5', value: '400' }] })
+    expect(periodGap({ items: [SAUCE], maps: sent, closing: [], cogs: 0 }).uncounted).toEqual([])
+  })
+
+  it('valuePeriods groups transfers by period_id', () => {
+    const out = valuePeriods({
+      periodIds: ['p1', 'p2'], items: [RICE],
+      transfers: [
+        { period_id: 'p1', item_id: 'rice', direction: 'in', qty: '1', value: '100' },
+        { period_id: 'p2', item_id: 'rice', direction: 'out', qty: '2', value: '200' },
+      ],
+    })
+    expect(out.p1.transferInVal).toBeCloseTo(100)
+    expect(out.p1.transferOutVal).toBe(0)
+    expect(out.p2.transferOutVal).toBeCloseTo(200)
+    expect(out.p2.netPurchaseVal).toBeCloseTo(-200)
+  })
+})
