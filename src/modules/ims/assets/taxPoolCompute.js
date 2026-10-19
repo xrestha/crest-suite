@@ -3,8 +3,9 @@
 // depreciation; the two are expected to disagree with each other. See taxPoolConstants.js for
 // the rates/caps and the "verify before filing" caveat.
 import { adToBs, getBsFiscalYear, getBsFiscalYearStart } from '../../../utils/bsCalendar'
-import { POOL_RATES, REPAIR_CAP_RATE } from './taxPoolConstants'
+import { POOL_RATES, REPAIR_CAP_RATE, SMALL_POOL_BALANCE } from './taxPoolConstants'
 import { parseAdDateLocal } from '../../../shared/nepalTime'
+import { assetHeldOn } from './depreciationCompute'
 
 const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100
 // The leading BS year of a short fiscal-year label ("82/83" → 82), or null.
@@ -56,49 +57,101 @@ export function acquisitionProrationTier({ acquisitionDate, fiscalYearStartBs })
 // value added to the pool going forward (closingWdv), but only a fraction of the RATE applied to
 // them in their first year (the acquisition-tier proration) — the discount is on the depreciation
 // allowance, not on the addition's book value itself.
+//
+// S849 (ASSETS-2, ASSETS-18): the pool never closes below zero, and the three outcomes the Act
+// names are worked out instead of being clamped away. With
+//   deferred    = ⅓ of the ⅔-tier additions + ⅔ of the ⅓-tier additions (what §2(5)(b) adds to
+//                 the base only next year),
+//   valueBefore = opening + repair carried in − disposal proceeds + every addition at full value,
+//   base        = valueBefore − deferred (the depreciation base, "A" in Schedule 2 §2(2)):
+//   (a) `dissolved` (Schedule 2 §4(2): every asset of the class is gone at year end): no
+//       depreciation, the pool closes at 0, and what was left is a terminal deduction this year —
+//       or, if the proceeds were more than the pool was worth, the excess is balancing income.
+//       Nothing carries forward, so this year's deferred additions are deducted too: Crest's
+//       reading of the same-year-purchase edge, not a quoted rule. The base is still reported
+//       (floored at 0), because the Section 16 repair cap is measured against it.
+//   (b) base below 0 (the §2(3) proviso and §4(1)): the proceeds exceeded the pool, so the excess
+//       is business income this year, the base floors at 0, nothing is depreciated, and the pool
+//       closes at the deferred part of this year's additions.
+//   (c) otherwise the rate applies to the base; and if what is left of the base is above 0 but
+//       below NPR 2,000 (Schedule 2 §2(6)), it is written off in full this year
+//       (`small_balance_written_off`, an on-screen note only) and the pool closes at `deferred`.
+// Until S849 the closing value went negative instead: the excess silently cut every later year's
+// depreciation, and since S849 the database refuses a negative closing_wdv outright.
+// In every case: opening + carried + additions − disposals − depreciation − terminal + income
+// = closing (poolLineAddsUp).
 export function computePoolMovement({
   pool, openingWdv, additionsFull, additionsTwoThird, additionsOneThird,
-  disposalProceeds, priorYearCapitalizedRepairExcess = 0,
+  disposalProceeds, priorYearCapitalizedRepairExcess = 0, dissolved = false,
 }) {
   const rate = POOL_RATES[pool]
   if (!rate) throw new Error(`computePoolMovement: no flat rate for pool "${pool}" — Pool E uses computeIntangibleAmortization instead.`)
 
+  const n = v => parseFloat(v) || 0
+  const twoThird = n(additionsTwoThird), oneThird = n(additionsOneThird)
   // Prior year's capitalized repair excess joins the base at full weight, same as opening WDV —
   // Section 16(3) capitalizes it into the pool's base "at the beginning of next income year".
-  const baseForRate = (openingWdv + priorYearCapitalizedRepairExcess) - disposalProceeds
-    + additionsFull + additionsTwoThird * (2 / 3) + additionsOneThird * (1 / 3)
+  const valueBefore = n(openingWdv) + n(priorYearCapitalizedRepairExcess) - n(disposalProceeds)
+    + n(additionsFull) + twoThird + oneThird
+  const deferred = twoThird / 3 + oneThird * 2 / 3
+  const base = r2(valueBefore - deferred)
+  const nothingElse = { balancing_income: 0, terminal_deduction: 0, small_balance_written_off: 0 }
 
-  const rawDepreciation = Math.max(0, baseForRate) * rate
+  if (dissolved) {
+    return {
+      ...nothingElse,
+      depreciation_base: Math.max(0, base),
+      depreciation_amount: 0,
+      terminal_deduction: r2(Math.max(0, valueBefore)),
+      balancing_income: r2(Math.max(0, -valueBefore)),
+      closing_wdv: 0,
+    }
+  }
+  if (base < 0) {
+    return { ...nothingElse, depreciation_base: 0, depreciation_amount: 0, balancing_income: r2(-base), closing_wdv: r2(deferred) }
+  }
 
-  // The pool's own running balance, before this year's depreciation — additions enter at full
-  // value regardless of proration tier (proration only discounted this year's charge, above).
-  const closingBeforeDepreciation = (openingWdv + priorYearCapitalizedRepairExcess) - disposalProceeds
-    + additionsFull + additionsTwoThird + additionsOneThird
-
-  // Never let the pool go negative — a disposal exceeding the pool's remaining value is an edge
-  // case (a "balancing charge" under the Act) out of scope for v1; clamp rather than go negative.
-  const depreciationAmount = r2(Math.min(rawDepreciation, Math.max(0, closingBeforeDepreciation)))
-  const closingWdv = r2(closingBeforeDepreciation - depreciationAmount)
-
+  let depreciation = r2(base * rate)
+  let smallBalance = 0
+  const left = r2(base - depreciation)
+  if (left > 0 && left < SMALL_POOL_BALANCE) {
+    smallBalance = left
+    depreciation = base
+  }
   return {
-    depreciation_base: r2(Math.max(0, baseForRate)),
-    depreciation_amount: depreciationAmount,
-    closing_wdv: closingWdv,
+    ...nothingElse,
+    depreciation_base: base,
+    depreciation_amount: depreciation,
+    small_balance_written_off: smallBalance,
+    closing_wdv: r2(Math.max(0, valueBefore - depreciation)),
   }
 }
 
-// Section 16 — deductible repair/maintenance expense on a pool is capped at REPAIR_CAP_RATE of
-// the pool's CLOSING depreciation base for the year (the balance remaining at year-end, i.e.
-// AFTER this year's own depreciation — not the opening or pre-depreciation base). Anything above
-// the cap is not deducted this year; it's returned as `capitalizedExcess` for the CALLER to carry
-// forward into NEXT year's run as that pool's `priorYearCapitalizedRepairExcess` — it must NOT be
-// added into THIS year's own closing_wdv (Section 16(3) capitalizes it "at the beginning of next
-// income year", not this one).
-export function computeRepairCapCheck({ repairExpenseTotal, closingWdv }) {
-  const cap = Math.max(0, closingWdv) * REPAIR_CAP_RATE
-  const deductible = r2(Math.min(repairExpenseTotal, cap))
-  const capitalizedExcess = r2(Math.max(0, repairExpenseTotal - cap))
+// Section 16(2) — deductible repair/maintenance expense on a pool is capped at REPAIR_CAP_RATE (7%)
+// of the pool's DEPRECIATION BASE for the year: the base its rate is applied to, which is
+// computePoolMovement's `depreciation_base` (S849, ASSETS-1). Until S849 the cap was 5% of the
+// value left AFTER depreciation. Anything above the cap is not deducted this year; it's returned as
+// `capitalizedExcess` for the CALLER to carry forward into NEXT year's run as that pool's
+// `priorYearCapitalizedRepairExcess` (stored there as `repair_carried_in`) — it must NOT be added
+// into THIS year's own closing_wdv (Section 16(3) capitalizes it "at the beginning of next income
+// year", not this one).
+export function computeRepairCapCheck({ repairExpenseTotal, depreciationBase }) {
+  const total = parseFloat(repairExpenseTotal) || 0
+  const cap = Math.max(0, parseFloat(depreciationBase) || 0) * REPAIR_CAP_RATE
+  const deductible = r2(Math.min(total, cap))
+  const capitalizedExcess = r2(Math.max(0, total - cap))
   return { deductible, capitalizedExcess }
+}
+
+// The identity a printed schedule row must satisfy (S849, ASSETS-10): opening + repair carried in
+// + additions − disposals − depreciation − write-off + income = closing. Pools A–D only: Pool E
+// takes its disposed assets out at their unclaimed value, not at the proceeds it reports.
+export function poolLineAddsUp(l, tolerance = 0.02) {
+  const n = v => parseFloat(v) || 0
+  const expected = n(l.opening_wdv) + n(l.repair_carried_in) + n(l.additions_full) + n(l.additions_two_third)
+    + n(l.additions_one_third) - n(l.disposal_proceeds) - n(l.depreciation_amount)
+    - n(l.terminal_deduction) + n(l.balancing_income)
+  return Math.abs(expected - n(l.closing_wdv)) <= tolerance
 }
 
 // Pool E (intangibles) — straight-line over useful life, NOT pooled/declining-balance like A-D.
@@ -282,4 +335,193 @@ export function openingLockedBy({ opening, runs }) {
     if (s != null && s >= from && (best == null || s < best.s)) best = { s, label: r.fiscal_year }
   }
   return best ? best.label : null
+}
+
+export const POOLS_AD = ['A', 'B', 'C', 'D']
+const num = v => parseFloat(v) || 0
+
+// The fields post_tax_pool_run stores for each line, and nothing else: a preview line also carries
+// what is only said on screen (dissolved, small_balance_written_off).
+export const POSTED_LINE_FIELDS = [
+  'pool', 'opening_wdv', 'repair_carried_in', 'additions_full', 'additions_two_third', 'additions_one_third',
+  'disposal_proceeds', 'repair_expense_total', 'repair_expense_deductible', 'repair_expense_capitalized',
+  'depreciation_base', 'depreciation_amount', 'balancing_income', 'terminal_deduction', 'closing_wdv',
+]
+export function postedLinePayload(lines) {
+  return (lines || []).map(l => Object.fromEntries(POSTED_LINE_FIELDS.map(k => [k, k === 'pool' ? l.pool : num(l[k])])))
+}
+
+// The whole tax schedule for one fiscal year, from inputs already read (S849, ASSETS-2): the per-pool
+// loop moved here out of TaxPoolTab.preview(), so ticking "this pool was closed" recomputes without
+// a re-read, and every row is unit-tested.
+//   assets             the register as read for this preview (every status)
+//   fyStart            the BS year the fiscal year starts in (2083 for 83/84)
+//   fyStartAd/fyEndAd  its first and last day as "YYYY-MM-DD" (formatAd)
+//   priorLinesByPool   pool → the line of the year before's latest posted run, if there is one
+//   typedOpenings      pool → { openingWdv, repairCarryForward } typed for THIS year (priorPoolRun)
+//   openings           every assets_tax_pool_openings row, to tell where a pool's value came from
+//   repairTotalsByPool pool → this year's repair spend
+//   closedPools        { C: true }: pools the user said were sold or scrapped in full this year
+//
+// Which pools are dissolved (Schedule 2 §4(2)): a pool whose register holds at least one asset
+// disposed of in the year and none still held at its end. It is marked automatically only when the
+// register explains the pool's whole value — no value was ever typed for it from a tax return (for
+// this year or an earlier one), which may include assets bought before Crest. Otherwise the pool is
+// listed in `askDissolve` and dissolved only when `closedPools` says so.
+//
+// `untracked` (ASSETS-5): assets with no tax pool that were held at some point in the year (bought by
+// its end, and still active or gone on or after its first day). The schedule leaves them out.
+export function buildTaxPoolLines({
+  assets, fyStart, fyStartAd, fyEndAd, priorLinesByPool = {}, typedOpenings = {}, openings = [],
+  repairTotalsByPool = {}, closedPools = {},
+}) {
+  const list = assets || []
+  const inYear = d => !!d && String(d).slice(0, 10) >= fyStartAd && String(d).slice(0, 10) <= fyEndAd
+  const gone = a => a.status !== 'active'
+  const askDissolve = []
+  const lines = POOLS_AD.map(pool => {
+    // A real run for the year before always wins; a typed opening (D40) only stands in for one.
+    const prior = priorLinesByPool[pool]
+    const typed = prior ? null : typedOpenings[pool]
+    const openingWdv = prior ? num(prior.closing_wdv) : typed ? num(typed.openingWdv) : 0
+    const carriedIn = prior ? num(prior.repair_expense_capitalized) : typed ? num(typed.repairCarryForward) : 0
+
+    let additionsFull = 0, additionsTwoThird = 0, additionsOneThird = 0, disposalProceeds = 0
+    let disposedInYear = 0, heldAtEnd = 0
+    for (const a of list) {
+      if (a.tax_pool !== pool) continue
+      if (inYear(a.acquisition_date)) {
+        const tier = acquisitionProrationTier({ acquisitionDate: a.acquisition_date, fiscalYearStartBs: fyStart })
+        if (tier === 'full') additionsFull += num(a.total_cost)
+        else if (tier === 'two_third') additionsTwoThird += num(a.total_cost)
+        else if (tier === 'one_third') additionsOneThird += num(a.total_cost)
+      }
+      if (gone(a) && inYear(a.disposal_date)) { disposalProceeds += num(a.disposal_proceeds); disposedInYear++ }
+      if (assetHeldOn(a, fyEndAd)) heldAtEnd++
+    }
+
+    const emptied = disposedInYear > 0 && heldAtEnd === 0
+    const typedEver = (openings || []).some(o => o.pool === pool
+      && startOf(o.fiscal_year) != null && startOf(o.fiscal_year) <= fyStart % 100
+      && (num(o.opening_wdv) > 0 || num(o.repair_carry_forward) > 0))
+    const autoDissolved = emptied && !typedEver
+    if (emptied && typedEver) askDissolve.push(pool)
+    const dissolved = autoDissolved || (emptied && typedEver && !!closedPools[pool])
+
+    const movement = computePoolMovement({
+      pool, openingWdv, additionsFull, additionsTwoThird, additionsOneThird, disposalProceeds,
+      priorYearCapitalizedRepairExcess: carriedIn, dissolved,
+    })
+    const repairExpenseTotal = r2(num(repairTotalsByPool[pool]))
+    const repairCap = computeRepairCapCheck({ repairExpenseTotal, depreciationBase: movement.depreciation_base })
+
+    return {
+      pool, opening_wdv: r2(openingWdv), repair_carried_in: r2(carriedIn),
+      additions_full: r2(additionsFull), additions_two_third: r2(additionsTwoThird), additions_one_third: r2(additionsOneThird),
+      disposal_proceeds: r2(disposalProceeds),
+      repair_expense_total: repairExpenseTotal, repair_expense_deductible: repairCap.deductible,
+      repair_expense_capitalized: repairCap.capitalizedExcess,
+      depreciation_base: movement.depreciation_base, depreciation_amount: movement.depreciation_amount,
+      balancing_income: movement.balancing_income, terminal_deduction: movement.terminal_deduction,
+      closing_wdv: movement.closing_wdv,
+      small_balance_written_off: movement.small_balance_written_off,
+      dissolved, autoDissolved,
+    }
+  })
+
+  // Pool E — intangibles, straight-line per asset, not a shared-rate declining balance pool. Each
+  // asset on its own schedule, stopping at the end of its useful life, never more than the pool
+  // holds (S792, COSTS-6); one sold this year leaves at its unclaimed value and its price is
+  // reported under Disposals without being netted in. With no run for the year before, Pool E opens
+  // at what its assets' own schedules leave unclaimed (D40, Q5), instead of at 0.
+  const priorE = priorLinesByPool.E
+  const poolE = computeIntangiblePool({ assets: list, openingWdv: priorE ? num(priorE.closing_wdv) : null, fiscalYearStartBs: fyStart })
+  lines.push({
+    pool: 'E', opening_wdv: poolE.opening_wdv, repair_carried_in: 0,
+    additions_full: poolE.additions, additions_two_third: 0, additions_one_third: 0,
+    disposal_proceeds: poolE.disposal_proceeds, repair_expense_total: 0, repair_expense_deductible: 0, repair_expense_capitalized: 0,
+    depreciation_base: poolE.depreciation_base, depreciation_amount: poolE.depreciation_amount,
+    balancing_income: 0, terminal_deduction: 0, closing_wdv: poolE.closing_wdv,
+    small_balance_written_off: 0, dissolved: false, autoDissolved: false,
+  })
+
+  const untracked = list
+    .filter(a => !a.tax_pool
+      && !!a.acquisition_date && String(a.acquisition_date).slice(0, 10) <= fyEndAd
+      && (a.status === 'active' || (!!a.disposal_date && String(a.disposal_date).slice(0, 10) >= fyStartAd)))
+    .map(a => ({ id: a.id, asset_code: a.asset_code, name: a.name, total_cost: num(a.total_cost) }))
+
+  return { lines, untracked, askDissolve, poolE }
+}
+
+// Which posted fiscal years need posting again, oldest first (S849, ASSETS-9 / SU7 b).
+//
+// For every posted year Y, its latest run (the one the next year opens from, as priorPoolRun picks
+// it) is compared pool by pool with what Y would open from TODAY: the latest run of Y−1 (its
+// closing_wdv and repair_expense_capitalized), else the opening typed for Y, else 0. Pool E takes no
+// typed opening, so it is compared only against Y−1's closing. Y is listed when any opening_wdv or
+// repair_carried_in differs by more than half a paisa. Working from the figures catches a corrected
+// typed opening AND the older gap where an earlier year was posted again after a later one.
+//
+// `runs` are posted assets_tax_pool_runs ({ id, fiscal_year, created_at, posted_at }); `lines` every
+// posted line ({ run_id, pool, opening_wdv, repair_carried_in, closing_wdv,
+// repair_expense_capitalized }); `openings` the typed openings; `corrections` the
+// assets_tax_pool_opening_corrections rows. Each listed year carries `why`: the corrections of its
+// typed opening made after its latest post (one RPC call shares one corrected_at, so they are
+// grouped), else the year before posted again since, else a plain mismatch.
+export function schedulesToPostAgain({ runs, lines, openings = [], corrections = [] }) {
+  const latest = new Map() // startOf(label) → run
+  for (const r of runs || []) {
+    const s = startOf(r.fiscal_year)
+    if (s == null) continue
+    const cur = latest.get(s)
+    if (!cur || String(r.created_at || '') > String(cur.created_at || '')) latest.set(s, r)
+  }
+  const linesByRun = new Map()
+  for (const l of lines || []) {
+    if (!linesByRun.has(l.run_id)) linesByRun.set(l.run_id, {})
+    linesByRun.get(l.run_id)[l.pool] = l
+  }
+  const postedAt = r => String(r?.posted_at || r?.created_at || '')
+  const out = []
+  for (const s of [...latest.keys()].sort((a, b) => a - b)) {
+    const run = latest.get(s)
+    const label = run.fiscal_year
+    const mine = linesByRun.get(run.id) || {}
+    const priorRun = latest.get(s - 1) || null
+    const priorLines = priorRun ? (linesByRun.get(priorRun.id) || {}) : null
+    const pools = []
+    for (const pool of [...POOLS_AD, 'E']) {
+      const line = mine[pool]
+      let wantOpening, wantCarried
+      if (priorLines) {
+        wantOpening = num(priorLines[pool]?.closing_wdv)
+        wantCarried = pool === 'E' ? null : num(priorLines[pool]?.repair_expense_capitalized)
+      } else {
+        if (pool === 'E') continue
+        const typed = (openings || []).find(o => o.pool === pool && o.fiscal_year === label)
+        wantOpening = typed ? num(typed.opening_wdv) : 0
+        wantCarried = typed ? num(typed.repair_carry_forward) : 0
+      }
+      const off = Math.abs(num(line?.opening_wdv) - wantOpening) > 0.005
+        || (wantCarried != null && Math.abs(num(line?.repair_carried_in) - wantCarried) > 0.005)
+      if (off) pools.push(pool)
+    }
+    if (pools.length === 0) continue
+
+    const after = (corrections || [])
+      .filter(c => c.fiscal_year === label && String(c.corrected_at || '') > postedAt(run))
+      .sort((a, b) => String(b.corrected_at || '').localeCompare(String(a.corrected_at || '')))
+    let why
+    if (after.length) {
+      const at = after[0].corrected_at
+      why = { kind: 'correction', corrections: after.filter(c => c.corrected_at === at) }
+    } else if (priorRun && postedAt(priorRun) > postedAt(run)) {
+      why = { kind: 'reposted', priorLabel: priorRun.fiscal_year, at: postedAt(priorRun) }
+    } else {
+      why = { kind: 'mismatch' }
+    }
+    out.push({ fiscalYear: label, fyShort: s, run, pools, why })
+  }
+  return out
 }

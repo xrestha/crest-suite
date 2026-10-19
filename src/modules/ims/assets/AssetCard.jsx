@@ -8,8 +8,10 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
-import { computeDisposalGainLoss, computeDisposalDepreciation, bookPositionsByAsset, bookValue } from './depreciationCompute'
+import { computeDisposalGainLoss, computeDisposalDepreciation, bookPositionsByAsset, bookValue, chargeGaps, bsSpanLabel } from './depreciationCompute'
 import { formatAdAsBs } from '../../../utils/bsCalendar'
+import { settleWithin } from '../../../utils/withTimeout'
+import { answerLost, refusedWith, notActiveCodes, ASSET_CALL_MS } from './assetReads'
 
 const fmt = nprInt
 // A stored AD date as the BS date it was picked as (S792, COSTS-11). `new Date('2026-01-15')` is UTC
@@ -39,9 +41,9 @@ export default function AssetCard({ asset, onClose, onChanged }) {
 
   async function load() {
     setLoading(true)
-    const { data, error: readErr } = await scopedFrom('assets_depreciation_schedule')
+    const { data, error: readErr } = await settleWithin(scopedFrom('assets_depreciation_schedule')
       .eq('asset_id', asset.id).eq('is_posted', true)
-      .order('period_end', { ascending: true }).order('created_at', { ascending: true }).order('id')
+      .order('period_end', { ascending: true }).order('created_at', { ascending: true }).order('id'), ASSET_CALL_MS, "Reading the asset's depreciation history")
     if (readErr) { setLoadError(readErr); setLoading(false); return false }
     setLoadError(null)
     setSchedule(data || [])
@@ -67,6 +69,14 @@ export default function AssetCard({ asset, onClose, onChanged }) {
     : null
   const proceedsNum = parseFloat(disposalForm.disposal_proceeds) || 0
   const previewGainLoss = disposalCalc ? computeDisposalGainLoss({ closingNbvAtDisposal: disposalCalc.nbvAtDisposal, disposalProceeds: proceedsNum }) : null
+  // S849 (ASSETS-8): days before the last charged day that no run charged (a month skipped). The
+  // disposal charges only from its own start, so those days stay uncharged and the book value at
+  // disposal reads that much high. Warned about, not refused.
+  const gapUpTo = disposalCalc?.chargedThrough
+    ? (disposalCalc.chargedThrough < disposalForm.disposal_date ? disposalCalc.chargedThrough : disposalForm.disposal_date)
+    : null
+  const disposalGaps = gapUpTo ? chargeGaps({ asset, position, upTo: gapUpTo }) : []
+  const gapTotal = disposalGaps.reduce((s, g) => s + g.amount, 0)
 
   async function submitDisposal() {
     if (loadError || loading) {
@@ -85,31 +95,56 @@ export default function AssetCard({ asset, onClose, onChanged }) {
     // update below then fails, a second Confirm is safe: this card re-reads the schedule, the new
     // run now charges through the disposal date, and there are no uncharged days left to post twice.
     if (calc.line) {
-      const { error: postErr } = await supabase.rpc('post_asset_depreciation_run', {
+      const { error: postErr } = await settleWithin(supabase.rpc('post_asset_depreciation_run', {
         p_client_id: clientId, p_period_start: calc.periodStart, p_period_end: calc.periodEnd,
         p_lines: [{ ...calc.line, override_amount: null, override_reason: null }],
         p_notes: `Disposal: depreciation to ${calc.periodEnd} for ${asset.asset_code || asset.id}`,
-      })
+      }), ASSET_CALL_MS, 'Posting the disposal-day depreciation')
       if (postErr) {
         const { text, detail } = asActionError(postErr)
+        setSaving(false)
+        // ASSETS-17: no answer is not a refusal — the run may have landed. Re-read the history so
+        // a second Confirm charges only what is still uncharged.
+        if (answerLost(postErr)) {
+          await load()
+          setError({ text: "The connection dropped before the server answered, so the disposal-day depreciation may have been posted. This card re-read the asset's history: check it before pressing Confirm Disposal again.", detail })
+          return
+        }
+        if (refusedWith(postErr, 'dep_run_duplicate')) {
+          await load()
+          setError({ text: "This disposal-day depreciation was posted moments ago (from this card or another), so it was not posted again. This card re-read the asset's history; the disposal itself has not been saved yet, so press Confirm Disposal again to finish it.", detail })
+          return
+        }
+        // ASSETS-12: the asset was disposed of or removed in another tab since this card opened.
+        if (refusedWith(postErr, 'dep_run_asset_not_active')) {
+          setError({ text: `${notActiveCodes(postErr) || asset.asset_code || 'This asset'} was disposed of or removed since this page opened, so nothing was disposed and no depreciation was posted. Close this card and open the asset again from the Register.`, detail })
+          return
+        }
         setError({ text: `Nothing was disposed and no depreciation was posted — the asset is still active at its previous book value.
 
 ${text}`, detail })
-        setSaving(false)
         return
       }
     }
 
     const gainLoss = computeDisposalGainLoss({ closingNbvAtDisposal: calc.nbvAtDisposal, disposalProceeds: proceedsNum })
-    const { error: err } = await scopedUpdate('assets_register', {
+    const { error: err } = await settleWithin(scopedUpdate('assets_register', {
       status: disposalForm.status,
       disposal_date: disposalForm.disposal_date,
       disposal_proceeds: proceedsNum,
       disposal_gain_loss: gainLoss,
       disposal_reason: disposalForm.disposal_reason.trim() || null,
       updated_at: new Date().toISOString(),
-    }).eq('id', asset.id)
+    }).eq('id', asset.id), ASSET_CALL_MS, 'Saving the disposal')
     setSaving(false)
+    if (err && answerLost(err)) {
+      // The update may have landed; the asset row on this card is the one the page loaded, so
+      // the Register is the place that can tell.
+      const { detail } = asActionError(err)
+      if (calc.line) await load()
+      setError({ text: `The connection dropped before the server answered, so the disposal may have been saved${calc.line ? ' (its depreciation to the disposal date was posted)' : ''}. Close this card and check the asset's status on the Register before pressing Confirm Disposal again.`, detail })
+      return
+    }
     if (err) {
       // Disposal is the one write on this card that changes what the asset is worth on the books,
       // so an unsaved one must not be mistaken for a saved one.
@@ -252,6 +287,13 @@ The asset is still on the register as active.`, detail })
                 {previewGainLoss >= 0 ? 'Gain' : 'Loss'} on disposal:{' '}
                 <strong style={{ color: 'var(--theme-text1)' }}>NPR {fmt(Math.abs(previewGainLoss))}</strong>
               </div>
+              {disposalGaps.length > 0 && (
+                <p style={{ margin: '6px 0 0', color: 'var(--theme-amber-text)' }}>
+                  △ These days were never charged: {disposalGaps.map(g => bsSpanLabel(g.start, g.end)).join('; ')}. The book value at disposal
+                  is about NPR {fmt(gapTotal)} too high, so the {previewGainLoss >= 0 ? 'gain' : 'loss'} on disposal will
+                  read {previewGainLoss >= 0 ? 'that much low' : 'that much high'}. Post a run for them first on Depreciation Runs.
+                </p>
+              )}
               {disposalCalc.postedPastDisposal && (
                 <p style={{ margin: '6px 0 0', color: 'var(--theme-amber-text)' }}>
                   △ Posted depreciation already charges this asset through {fmtDate(disposalCalc.chargedThrough)}, after this disposal date, so the book value above includes depreciation for days the asset was no longer held. To take that back out, reverse that run on the Depreciation Runs tab (Adjustment) before disposing — in full, or just what it charged after the disposal date — and the disposal then charges only the days up to its own date.

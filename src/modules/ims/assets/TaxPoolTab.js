@@ -3,63 +3,203 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
-import { getBsFiscalYear, getBsFiscalYearStart, getBsToday, formatAd, formatAdAsBs } from '../../../utils/bsCalendar'
-import { nepalBsLong } from '../../../shared/nepalTime'
+import { settleWithin } from '../../../utils/withTimeout'
+import { getBsFiscalYear, getBsFiscalYearStart, getBsToday, formatAd, formatAdAsBs, daysInBsMonth } from '../../../utils/bsCalendar'
+import { nepalBsLong, nepalTime } from '../../../shared/nepalTime'
+import { loadProfileNames } from '../../../shared/profileNames'
 import { getFiscalYearAdRange } from '../reports/vendorBalanceHelpers'
 import { printWithTitle } from '../../../utils/printTitle'
-import {
-  acquisitionProrationTier, computePoolMovement, computeRepairCapCheck, computeIntangiblePool, priorPoolRun,
-} from './taxPoolCompute'
+import { priorPoolRun, buildTaxPoolLines, schedulesToPostAgain, postedLinePayload, POOLS_AD } from './taxPoolCompute'
 import { POOL_LABELS, POOL_EXAMPLES, POOL_RATES, DISCLAIMER_TEXT } from './taxPoolConstants'
 import TaxPoolOpeningsCard from './TaxPoolOpeningsCard'
+import { readRegister, answerLost, refusedWith, ASSET_CALL_MS } from './assetReads'
 
 const poolTip = pool => pool === 'E'
   ? POOL_EXAMPLES.E
   : `${POOL_EXAMPLES[pool]} — depreciated at ${Math.round(POOL_RATES[pool] * 100)}% a year under Nepal tax rules.`
 
 const fmt = nprInt
-const POOLS_AD = ['A', 'B', 'C', 'D']
+const n = v => parseFloat(v) || 0
 
 // "Every pool opens at 0" / "Pools B, D open at 0" — the COSTS-5 banner names only the pools that do.
 const poolsOpeningAtZero = pools => pools.length === POOLS_AD.length
   ? 'Pools A–D open at 0'
   : `${pools.length === 1 ? 'Pool' : 'Pools'} ${pools.join(', ')} ${pools.length === 1 ? 'opens' : 'open'} at 0`
 
-function fyOptionsAround(currentFyStart) {
-  return [currentFyStart + 1, currentFyStart, currentFyStart - 1, currentFyStart - 2, currentFyStart - 3]
+// "B" / "B and D" / "A, B and D"
+const joinAnd = items => (items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`)
+
+// The BS year a short fiscal-year label starts in: "83/84" → 2083.
+const fyStartOfLabel = label => { const m = /^(\d{1,2})\//.exec(label || ''); return m ? 2000 + Number(m[1]) : null }
+
+// S849 (ASSETS-11): the year being worked out and the three before it. Next year was offered too,
+// and a schedule posted for it locked that year's typed openings months before it began; it can
+// never be posted meaningfully, so it is gone. A year opened from "Schedules to post again" that is
+// older than these is added, so the select can show it.
+function fyOptionsAround(currentFyStart, shown) {
+  const years = [currentFyStart, currentFyStart - 1, currentFyStart - 2, currentFyStart - 3]
+  if (shown != null && !years.includes(shown)) years.push(shown)
+  return years.sort((a, b) => b - a)
 }
 
-export default function TaxPoolTab({ assets }) {
+const amberBox = {
+  marginBottom: 12, padding: '10px 14px', fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)',
+  border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
+  background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', borderRadius: 'var(--radius-sm)',
+}
+const fine = { margin: '10px 0 0', fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)' }
+
+// Why a posted year is listed under "Schedules to post again" (S849, ASSETS-9), as one sentence.
+// It is also the reason a re-post carries in its notes ("Posted again: …"), which keeps that post
+// apart from the two-minute duplicate refusal and puts the reason on the run.
+function repostReason(item, names) {
+  const w = item.why
+  if (w.kind === 'correction') {
+    const cs = w.corrections
+    const first = cs[0]
+    const who = names?.[first.corrected_by] || 'a login that has since been removed'
+    const when = nepalBsLong(first.corrected_at) || 'an unknown date'
+    const figure = c => {
+      const wdv = `${c.old_opening_wdv == null ? 'none' : fmt(c.old_opening_wdv)} → ${fmt(c.new_opening_wdv)}`
+      const oldRep = c.old_repair_carry_forward == null ? 0 : n(c.old_repair_carry_forward)
+      const rep = Math.abs(oldRep - n(c.new_repair_carry_forward)) > 0.005
+        ? ` (repair carried forward ${c.old_repair_carry_forward == null ? 'none' : fmt(oldRep)} → ${fmt(c.new_repair_carry_forward)})`
+        : ''
+      return wdv + rep
+    }
+    const what = cs.length === 1
+      ? `Pool ${first.pool}'s opening for FY ${item.fiscalYear} was corrected on ${when} by ${who}: ${figure(first)}.`
+      : `The openings of Pools ${joinAnd(cs.map(c => c.pool))} for FY ${item.fiscalYear} were corrected on ${when} by ${who}: ${cs.map(c => `${c.pool} ${figure(c)}`).join('; ')}.`
+    return `${what} Reason: ${first.reason}`
+  }
+  if (w.kind === 'reposted') {
+    return `FY ${w.priorLabel} was posted again on ${nepalBsLong(w.at) || 'a later date'}, so FY ${item.fiscalYear} would now open from different figures.`
+  }
+  return `FY ${item.fiscalYear}'s posted opening values no longer match what it would open from today.`
+}
+
+// The schedule as a table. The screen keeps one Additions column (a Tip gives a figure's split);
+// paper splits it into its three rates, so the printed row can be checked by hand (ASSETS-10).
+// `.print-only` is display:block in print, which a table cell cannot take, so paper gets its own
+// table rather than print-only cells.
+function PoolTable({ lines, print }) {
+  const showWriteOff = lines.some(l => n(l.terminal_deduction) > 0.005 || n(l.balancing_income) > 0.005)
+  const sum = key => lines.reduce((s, l) => s + n(l[key]), 0)
+  const additions = l => n(l.additions_full) + n(l.additions_two_third) + n(l.additions_one_third)
+  const right = { textAlign: 'right' }
+  const th = (label, tip, width = 280) => <th style={right}>{print ? label : <Tip text={tip} width={width}>{label}</Tip>}</th>
+  return (
+    <table className="data-table">
+      <thead>
+        <tr>
+          <th>{print ? 'Pool' : <Tip text="All figures in NPR." width={180}>Pool</Tip>}</th>
+          {th('Opening WDV', "What this pool was worth at the start of the fiscal year — last year's posted Closing WDV carried forward. If last year has no posted schedule, it is the value typed in from last year's tax return (Pools A–D), or what Pool E's assets have not yet claimed; a pool with neither opens at 0, and a note above the table says so.", 300)}
+          {th('Repair carried in', "Last year's repair spend above its 7% cap (or the figure typed from last year's tax return), which joins this year's pool at full value (Section 16(3)).")}
+          {print ? (
+            <>
+              <th style={right}>Additions (full rate)</th>
+              <th style={right}>Additions (⅔ rate)</th>
+              <th style={right}>Additions (⅓ rate)</th>
+            </>
+          ) : th('Additions', 'Cost of anything new bought into this pool during the fiscal year. Bought by the end of Poush it counts in full this year; from Magh to Chaitra two-thirds, from Baisakh to Ashadh one-third, and the rest of it joins next year. Hover a figure for its split.', 300)}
+          {th('Disposals', 'Money received from selling or scrapping equipment in this pool during the fiscal year.', 260)}
+          {th('Depreciation base', "What the pool's rate is applied to this year: Opening + Repair carried in + Additions at their counted share − Disposals. Never below 0.")}
+          {th('Repair (Deductible / Capitalized)', "Repair/maintenance spend on this pool — the first number is what you can deduct this year (capped at 7% of the pool's depreciation base); the second, if shown, is the extra that joins next year's pool instead.", 300)}
+          {th('Depreciation', "The tax-deductible depreciation for this pool this year, at Nepal's statutory rate for that pool. A pool left with less than NPR 2,000 is written off in full.", 260)}
+          {showWriteOff && th('Write-off', 'What was left of a pool whose every asset was sold or scrapped this year: deductible this year instead of being depreciated later (Schedule 2 §4(2)).')}
+          {showWriteOff && th('Income', "Disposal proceeds above what the pool was worth: business income this year (Schedule 2 §4(1)). A pool's value never goes below 0.")}
+          {th('Closing WDV', "What this pool is worth at the end of the fiscal year (WDV = Written-Down Value), and next year's Opening WDV: Opening + Repair carried in + Additions − Disposals − Depreciation − Write-off + Income.", 300)}
+        </tr>
+      </thead>
+      <tbody>
+        {lines.map(l => {
+          const split = n(l.additions_two_third) + n(l.additions_one_third) > 0.005
+          return (
+            <tr key={l.pool}>
+              <td>{print ? POOL_LABELS[l.pool] : <Tip text={poolTip(l.pool)} width={300}>{POOL_LABELS[l.pool]}</Tip>}</td>
+              <td style={right}>{fmt(l.opening_wdv)}</td>
+              <td style={right}>{fmt(l.repair_carried_in)}</td>
+              {print ? (
+                <>
+                  <td style={right}>{fmt(l.additions_full)}</td>
+                  <td style={right}>{fmt(l.additions_two_third)}</td>
+                  <td style={right}>{fmt(l.additions_one_third)}</td>
+                </>
+              ) : (
+                <td style={right}>
+                  {split
+                    ? <Tip text={`Full rate: NPR ${fmt(l.additions_full)} · ⅔ rate: NPR ${fmt(l.additions_two_third)} · ⅓ rate: NPR ${fmt(l.additions_one_third)}`} width={260}>{fmt(additions(l))}</Tip>
+                    : fmt(additions(l))}
+                </td>
+              )}
+              <td style={right}>{fmt(l.disposal_proceeds)}</td>
+              <td style={right}>{fmt(l.depreciation_base)}</td>
+              <td style={right}>
+                {fmt(l.repair_expense_deductible)}{n(l.repair_expense_capitalized) > 0 && ` / ${fmt(l.repair_expense_capitalized)}`}
+              </td>
+              <td style={right}>{fmt(l.depreciation_amount)}</td>
+              {showWriteOff && <td style={right}>{n(l.terminal_deduction) > 0.005 ? fmt(l.terminal_deduction) : '—'}</td>}
+              {showWriteOff && <td style={right}>{n(l.balancing_income) > 0.005 ? fmt(l.balancing_income) : '—'}</td>}
+              <td style={{ ...right, fontWeight: 600 }}>{fmt(l.closing_wdv)}</td>
+            </tr>
+          )
+        })}
+      </tbody>
+      <tfoot>
+        <tr style={{ borderTop: '2px solid var(--theme-border)', fontWeight: 700 }}>
+          <td>Total</td>
+          <td style={right}>{fmt(sum('opening_wdv'))}</td>
+          <td style={right}>{fmt(sum('repair_carried_in'))}</td>
+          {print ? (
+            <>
+              <td style={right}>{fmt(sum('additions_full'))}</td>
+              <td style={right}>{fmt(sum('additions_two_third'))}</td>
+              <td style={right}>{fmt(sum('additions_one_third'))}</td>
+            </>
+          ) : <td style={right}>{fmt(lines.reduce((s, l) => s + additions(l), 0))}</td>}
+          <td style={right}>{fmt(sum('disposal_proceeds'))}</td>
+          <td></td>
+          <td></td>
+          <td style={right}>{fmt(sum('depreciation_amount'))}</td>
+          {showWriteOff && <td style={right}>{fmt(sum('terminal_deduction'))}</td>}
+          {showWriteOff && <td style={right}>{fmt(sum('balancing_income'))}</td>}
+          <td style={right}>{fmt(sum('closing_wdv'))}</td>
+        </tr>
+      </tfoot>
+    </table>
+  )
+}
+
+export default function TaxPoolTab() {
   const { clientId, hasImsAccess } = useAuth()
   const { scopedFrom, scopedInsert, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
+  const biz = useBizInfo()
 
   const todayBs = getBsToday()
   const currentFyStart = getBsFiscalYearStart(todayBs.year, todayBs.month)
   const [fyStart, setFyStart] = useState(currentFyStart)
   const [repairExpenses, setRepairExpenses] = useState([])
   const [newExpense, setNewExpense] = useState({ pool: 'A', expense_date: '', amount: '', description: '' })
-  const [lines, setLines] = useState(null)
+  // S849 (ASSETS-2): the inputs the preview on screen was built from, kept so ticking "every asset
+  // of this pool was sold or scrapped" recomputes the schedule without a re-read. The lines
+  // themselves are derived (buildTaxPoolLines), so the figures on screen are always the ones these
+  // inputs and ticks give — and the ones Post sends. null = no preview on screen.
+  const [previewInputs, setPreviewInputs] = useState(null)
+  const [closedPools, setClosedPools] = useState({})
   const [loading, setLoading] = useState(false)
   const [posting, setPosting] = useState(false)
   const [msg, setMsg] = useState('')
   // Errors live apart from `msg` (S658) — see the same split in DepreciationRunTab. `msg` is now
   // only ever the one-line success confirmation beside the Post button.
   const [err, setErr] = useState(null)
-  // S792 (COSTS-5): set by preview() when the year before has no posted schedule, so every pool
-  // opened at 0 — `{ priorLabel, earlierLabel }`, the latter set when an even earlier year WAS
-  // posted (a skipped year, not a first one). And Pool E's amortization that did not fit the pool
-  // (COSTS-6), so a smaller figure than the assets' schedules add up to is explained, not silent.
-  const [openingGap, setOpeningGap] = useState(null)
-  // D40: which pools opened from values typed in from last year's return, and Pool E's opening
-  // derived from its assets' own schedules — both only while the year before has no posted run.
-  const [openingTyped, setOpeningTyped] = useState(null)
-  const [poolEDisposed, setPoolEDisposed] = useState(null)
-  const [poolECapped, setPoolECapped] = useState(null)
+  // ASSETS-17: after a post whose answer never arrived, what a fresh read found posted for that year.
+  const [recheck, setRecheck] = useState(null)
   // The repair list is an input to the Section 16 cap, so a preview may only be computed from a list
   // that loaded, for the year on screen (S792, COSTS-7). `repairsLoaded` is false while it loads and
   // after a failed read; `repairErr` says why. The read used to keep the PREVIOUS year's list on a
@@ -74,29 +214,56 @@ export default function TaxPoolTab({ assets }) {
   // or re-read). A preview computed from an older version is discarded rather than shown, so Post
   // can never lock figures built from other inputs than the ones on screen (COSTS-7).
   const inputsVersion = useRef(0)
+  // S849 (ASSETS-9): the posted years whose schedule no longer matches what they would open from
+  // today, oldest first — after a corrected typed opening, or a year posted again out of order.
+  const [repost, setRepost] = useState({ list: [], names: {}, error: null })
+  const repostSeq = useRef(0)
+  // Bumped after a post, so the openings card re-reads which values the new schedule has locked.
+  const [cardRefresh, setCardRefresh] = useState(0)
 
   const fyLabel = getBsFiscalYear(fyStart, 4)
   const canPost = hasImsAccess('manager')
 
   useEffect(() => { loadRepairExpenses(fyLabel) }, [fyLabel]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadRepost() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const built = useMemo(() => (previewInputs ? buildTaxPoolLines({ ...previewInputs, closedPools }) : null), [previewInputs, closedPools])
+  const lines = built ? built.lines : null
+
+  // What the notes over the table say, from the same inputs (S792 COSTS-5/6, D40).
+  const notes = useMemo(() => {
+    if (!previewInputs || !built) return {}
+    const { priorRun, earlierLabel, typedOpenings, priorLabel } = previewInputs
+    const zeroPools = priorRun ? [] : POOLS_AD.filter(p => !typedOpenings[p])
+    const typedPools = POOLS_AD.filter(p => typedOpenings[p])
+    const e = built.poolE
+    return {
+      openingGap: zeroPools.length ? { priorLabel, earlierLabel, pools: zeroPools } : null,
+      openingTyped: !priorRun && (typedPools.length || e.opening_wdv > 0.005) ? { priorLabel, pools: typedPools, eOpening: e.opening_wdv } : null,
+      poolEDisposed: e.disposed_value > 0.005 || e.disposal_proceeds > 0.005 ? { value: e.disposed_value, proceeds: e.disposal_proceeds } : null,
+      poolECapped: e.scheduled - e.depreciation_amount > 0.005 ? { scheduled: e.scheduled, held: e.depreciation_base } : null,
+    }
+  }, [previewInputs, built])
+  const { openingGap, openingTyped, poolEDisposed, poolECapped } = notes
 
   // Any change to what a preview is built from throws the preview away.
   function inputsChanged() {
     inputsVersion.current += 1
-    setLines(null)
+    setPreviewInputs(null)
   }
 
   function changeYear(nextStart) {
     repairReq.begin(getBsFiscalYear(nextStart, 4))   // synchronous: the old year's read now loses
     setRepairExpenses([]); setRepairsLoaded(false); setRepairErr(null)
     inputsChanged()
+    setClosedPools({}); setRecheck(null); setMsg(''); setErr(null)
     setFyStart(nextStart)
   }
 
   async function loadRepairExpenses(label) {
     repairReq.begin(label)
     setRepairsLoaded(false); setRepairErr(null)
-    const { data, error } = await scopedFrom('assets_repair_expenses').eq('fiscal_year', label).order('expense_date').order('id')
+    const { data, error } = await settleWithin(scopedFrom('assets_repair_expenses').eq('fiscal_year', label).order('expense_date').order('id'), ASSET_CALL_MS, 'Reading the repair expenses')
     if (!repairReq.isCurrent(label)) return
     inputsChanged()
     // A failed read is not "no repairs this year": the Section 16 cap below is measured against
@@ -105,6 +272,28 @@ export default function TaxPoolTab({ assets }) {
     if (error) { setRepairExpenses([]); setRepairErr(asActionError(error, 'operator')); return }
     setRepairExpenses(data || [])
     setRepairsLoaded(true)
+  }
+
+  // ASSETS-9: every posted run and line, the typed openings and their corrections, worked out into
+  // the years to post again. A few rows per year, so plain reads. The newest call wins.
+  async function loadRepost() {
+    const seq = ++repostSeq.current
+    const results = await Promise.all([
+      settleWithin(scopedFrom('assets_tax_pool_runs', 'id, fiscal_year, created_at, posted_at').eq('status', 'posted').order('created_at').order('id'), ASSET_CALL_MS, 'Reading the posted tax schedules'),
+      settleWithin(scopedFrom('assets_tax_pool_lines', 'id, run_id, pool, opening_wdv, repair_carried_in, closing_wdv, repair_expense_capitalized').order('id'), ASSET_CALL_MS, 'Reading the posted pool lines'),
+      settleWithin(scopedFrom('assets_tax_pool_openings', 'pool, fiscal_year, opening_wdv, repair_carry_forward').order('pool').order('id'), ASSET_CALL_MS, 'Reading the typed opening values'),
+      settleWithin(scopedFrom('assets_tax_pool_opening_corrections', 'id, pool, fiscal_year, old_opening_wdv, old_repair_carry_forward, new_opening_wdv, new_repair_carry_forward, reason, corrected_by, corrected_at').order('corrected_at').order('id'), ASSET_CALL_MS, 'Reading the opening corrections'),
+    ])
+    if (seq !== repostSeq.current) return
+    const failed = results.find(r => r.error)
+    if (failed) { setRepost({ list: [], names: {}, error: asActionError(failed.error, 'operator') }); return }
+    const [runsRes, linesRes, openingsRes, corrRes] = results
+    const list = schedulesToPostAgain({ runs: runsRes.data, lines: linesRes.data, openings: openingsRes.data, corrections: corrRes.data })
+    const ids = list.flatMap(x => (x.why.kind === 'correction' ? x.why.corrections.map(c => c.corrected_by) : []))
+    // A failed names read never hides the list: an unnamed login is worded as such.
+    const { map } = ids.length ? await loadProfileNames(supabase, clientId, ids) : { map: {} }
+    if (seq !== repostSeq.current) return
+    setRepost({ list, names: map, error: null })
   }
 
   const repairTotalsByPool = useMemo(() => {
@@ -174,16 +363,19 @@ export default function TaxPoolTab({ assets }) {
       setLoading(false)
       return true
     }
-    setLoading(true); setMsg(''); setErr(null); setOpeningGap(null); setOpeningTyped(null); setPoolEDisposed(null); setPoolECapped(null)
+    setLoading(true); setMsg(''); setErr(null); setRecheck(null)
     const priorFyLabel = getBsFiscalYear(fyStart - 1, 4)
     // Every posted year, not only the prior one (S792, COSTS-5): one row per posted schedule, so a
     // handful. Knowing whether an EARLIER year was posted is what tells a skipped year — every
     // pool silently opening at 0 — from a business's first year. Read with the typed openings
-    // (D40, at most four rows), which the pools open from when the year before has no run.
-    const [{ data: postedRuns, error: priorRunErr }, { data: openingRows, error: openingsErr }] = await Promise.all([
-      scopedFrom('assets_tax_pool_runs', 'id, fiscal_year, created_at')
-        .eq('status', 'posted').order('created_at', { ascending: false }).order('id'),
-      scopedFrom('assets_tax_pool_openings', 'pool, fiscal_year, opening_wdv, repair_carry_forward').order('pool').order('id'),
+    // (D40, at most four rows), which the pools open from when the year before has no run. And the
+    // register as it is NOW (S849, ASSETS-12): the list loaded when the page opened can be hours
+    // old, missing an asset added or sold in another tab since.
+    const [runsRes, openingsRes, registerRes] = await Promise.all([
+      settleWithin(scopedFrom('assets_tax_pool_runs', 'id, fiscal_year, created_at')
+        .eq('status', 'posted').order('created_at', { ascending: false }).order('id'), ASSET_CALL_MS, 'Reading the posted tax schedules'),
+      settleWithin(scopedFrom('assets_tax_pool_openings', 'pool, fiscal_year, opening_wdv, repair_carry_forward').order('pool').order('id'), ASSET_CALL_MS, 'Reading the typed opening values'),
+      settleWithin(readRegister(scopedFrom), ASSET_CALL_MS, 'Reading the asset register'),
     ])
     if (stale()) return
     // A failed read used to compute every pool's opening WDV as 0 — a preview that read as a
@@ -193,169 +385,208 @@ export default function TaxPoolTab({ assets }) {
       setErr({ text: `Could not read the ${priorFyLabel} tax-pool run, so no preview was computed — every opening WDV would have been wrong. Try again. ` + a.text, detail: a.detail })
       setLoading(false)
     }
-    if (priorRunErr) { refuse(priorRunErr); return }
+    if (runsRes.error) { refuse(runsRes.error); return }
     // A failed read of the typed openings is not "none typed": the pools would open at 0 over values
     // the client entered (D40).
-    if (openingsErr) {
-      const a = asActionError(openingsErr)
+    if (openingsRes.error) {
+      const a = asActionError(openingsRes.error)
       setErr({ text: 'Could not read the opening values typed in from last year\'s tax return, so no preview was computed — the pools would have opened at 0. Try again. ' + a.text, detail: a.detail })
       setLoading(false)
       return
     }
-    const { priorRun, earlierLabel, typedOpenings } = priorPoolRun({ runs: postedRuns, fiscalYearStartBs: fyStart, openings: openingRows })
-    let priorLinesByPool = {}
+    if (registerRes.error) {
+      const a = asActionError(registerRes.error)
+      setErr({ text: 'Could not read the asset register, so no preview was computed — this year\'s additions and disposals come from it. Try again. ' + a.text, detail: a.detail })
+      setLoading(false)
+      return
+    }
+    const openingRows = openingsRes.data || []
+    const { priorRun, earlierLabel, typedOpenings } = priorPoolRun({ runs: runsRes.data, fiscalYearStartBs: fyStart, openings: openingRows })
+    const priorLinesByPool = {}
     if (priorRun) {
-      const { data: priorLines, error: priorLinesErr } = await scopedFrom('assets_tax_pool_lines').eq('run_id', priorRun.id)
+      const { data: priorLines, error: priorLinesErr } = await settleWithin(scopedFrom('assets_tax_pool_lines').eq('run_id', priorRun.id).order('id'), ASSET_CALL_MS, "Reading last year's schedule")
       if (stale()) return
       if (priorLinesErr) { refuse(priorLinesErr); return }
       ;(priorLines || []).forEach(l => { priorLinesByPool[l.pool] = l })
     }
 
-    const { start: fyStartAd, end: fyEndAd } = getFiscalYearAdRange(fyStart)
-    const fyStartAdStr = formatAd(fyStartAd), fyEndAdStr = formatAd(fyEndAd)
-
-    const poolLines = POOLS_AD.map(pool => {
-      // A real run for the year before always wins; a typed opening (D40) only stands in for one.
-      const prior = priorLinesByPool[pool]
-      const typed = prior ? null : typedOpenings[pool]
-      const openingWdv = prior ? prior.closing_wdv : typed ? typed.openingWdv : 0
-      const priorYearCapitalizedRepairExcess = prior ? prior.repair_expense_capitalized : typed ? typed.repairCarryForward : 0
-
-      let additionsFull = 0, additionsTwoThird = 0, additionsOneThird = 0
-      assets.forEach(a => {
-        if (a.tax_pool !== pool) return
-        if (a.acquisition_date < fyStartAdStr || a.acquisition_date > fyEndAdStr) return
-        const tier = acquisitionProrationTier({ acquisitionDate: a.acquisition_date, fiscalYearStartBs: fyStart })
-        if (tier === 'full') additionsFull += a.total_cost
-        else if (tier === 'two_third') additionsTwoThird += a.total_cost
-        else if (tier === 'one_third') additionsOneThird += a.total_cost
-      })
-
-      const disposalProceeds = assets
-        .filter(a => a.tax_pool === pool && a.status !== 'active' && a.disposal_date >= fyStartAdStr && a.disposal_date <= fyEndAdStr)
-        .reduce((s, a) => s + (a.disposal_proceeds || 0), 0)
-
-      const movement = computePoolMovement({
-        pool, openingWdv, additionsFull, additionsTwoThird, additionsOneThird, disposalProceeds, priorYearCapitalizedRepairExcess,
-      })
-      const repairExpenseTotal = repairTotalsByPool[pool] || 0
-      const repairCap = computeRepairCapCheck({ repairExpenseTotal, closingWdv: movement.closing_wdv })
-
-      return {
-        pool, opening_wdv: openingWdv, additions_full: additionsFull, additions_two_third: additionsTwoThird,
-        additions_one_third: additionsOneThird, disposal_proceeds: disposalProceeds,
-        repair_expense_total: repairExpenseTotal, repair_expense_deductible: repairCap.deductible,
-        repair_expense_capitalized: repairCap.capitalizedExcess,
-        depreciation_base: movement.depreciation_base, depreciation_amount: movement.depreciation_amount,
-        closing_wdv: movement.closing_wdv,
-      }
+    const { start, end } = getFiscalYearAdRange(fyStart)
+    setClosedPools({})
+    setPreviewInputs({
+      assets: registerRes.data || [], fyStart, fyStartAd: formatAd(start), fyEndAd: formatAd(end),
+      priorLinesByPool, typedOpenings, openings: openingRows, repairTotalsByPool,
+      // Not inputs to the lines; what the notes over the table say.
+      priorRun, earlierLabel, priorLabel: priorFyLabel,
     })
-
-    // Pool E — intangibles, straight-line per asset, not a shared-rate declining balance pool.
-    // Aggregate: prior year's closing carried forward + this year's additions (at cost) minus
-    // this year's amortization across the Pool E assets held in the year — each on its own
-    // schedule, stopping at the end of its useful life, and never more than the pool holds (S792,
-    // COSTS-6). One sold or written off this year leaves at its unclaimed value (stage 3), and its
-    // sale price is reported under Disposals without being netted in — see computeIntangiblePool().
-    // With no run for the year before, Pool E opens at what its assets' own schedules leave unclaimed
-    // (D40, Q5 — it takes no typed opening), "already taken" figures included, instead of at 0.
-    const priorE = priorLinesByPool.E
-    const e = computeIntangiblePool({ assets, openingWdv: priorE ? parseFloat(priorE.closing_wdv) || 0 : null, fiscalYearStartBs: fyStart })
-    const eOpening = e.opening_wdv
-    poolLines.push({
-      pool: 'E', opening_wdv: eOpening, additions_full: e.additions, additions_two_third: 0, additions_one_third: 0,
-      disposal_proceeds: e.disposal_proceeds, repair_expense_total: 0, repair_expense_deductible: 0, repair_expense_capitalized: 0,
-      depreciation_base: e.depreciation_base, depreciation_amount: e.depreciation_amount, closing_wdv: e.closing_wdv,
-    })
-
-    // COSTS-5's "opens at 0" names only the pools that really do: a typed opening fills its pool.
-    const zeroPools = priorRun ? [] : POOLS_AD.filter(p => !typedOpenings[p])
-    setOpeningGap(zeroPools.length ? { priorLabel: priorFyLabel, earlierLabel, pools: zeroPools } : null)
-    const typedPools = POOLS_AD.filter(p => typedOpenings[p])
-    setOpeningTyped(!priorRun && (typedPools.length || eOpening > 0.005) ? { priorLabel: priorFyLabel, pools: typedPools, eOpening } : null)
-    setPoolEDisposed(e.disposed_value > 0.005 || e.disposal_proceeds > 0.005 ? { value: e.disposed_value, proceeds: e.disposal_proceeds } : null)
-    setPoolECapped(e.scheduled - e.depreciation_amount > 0.005 ? { scheduled: e.scheduled, held: e.depreciation_base } : null)
-    setLines(poolLines)
     setLoading(false)
+  }
+
+  // Ask each question in turn; the last "yes" goes on to `then`. Each run asks the next one, and
+  // useConfirm clears only the dialog that just ran, so the follow-up survives.
+  function askInTurn(questions, then) {
+    if (questions.length === 0) return then()
+    const [q, ...rest] = questions
+    askConfirm({ danger: true, ...q, run: () => askInTurn(rest, then) })
   }
 
   // S792 (COSTS-5): a skipped year locks every pool at an opening of 0, and the posted schedule
   // then carries that into every year after it. A first year opens at 0 legitimately, so only the
-  // skipped-year case is asked about; the banner over the table speaks for both.
+  // skipped-year case is asked about; the banner over the table speaks for both. S849 asks three
+  // more things first: a year that has not ended (ASSETS-11), assets in no pool (ASSETS-5), and an
+  // earlier year whose posted schedule no longer matches its openings (ASSETS-9).
   async function post() {
-    if (!lines) return
-    setMsg(''); setErr(null)
+    if (!lines || !built) return
+    setMsg(''); setErr(null); setRecheck(null)
     // The inputs these lines were built from (COSTS-7). Checked again just before the write, since
-    // the checks and confirms below leave time for a repair to be added or the year changed.
+    // the checks and confirms below leave time for a repair to be added or the year changed. The
+    // payload is fixed here: what the confirms describe is what is sent.
     const version = inputsVersion.current
+    const label = fyLabel
+    const payload = postedLinePayload(lines)
+    const listed = repost.list.find(x => x.fiscalYear === label)
+    const postNotes = listed ? `Posted again: ${repostReason(listed, repost.names)}` : null
+    const questions = []
+
     if (openingGap?.earlierLabel) {
-      askConfirm({
+      questions.push({
         title: `FY ${openingGap.priorLabel} has no posted schedule`,
-        danger: true,
         body: (
           <p style={{ margin: 0 }}>
-            {poolsOpeningAtZero(openingGap.pools)} for FY {fyLabel}, because {openingGap.pools.length === 1 ? 'its opening value comes' : 'their opening values come'} from FY {openingGap.priorLabel}, which was never
+            {poolsOpeningAtZero(openingGap.pools)} for FY {label}, because {openingGap.pools.length === 1 ? 'its opening value comes' : 'their opening values come'} from FY {openingGap.priorLabel}, which was never
             posted (FY {openingGap.earlierLabel} was). Posting locks these figures, and next year opens from them. To carry the real
-            values forward, post FY {openingGap.priorLabel} first, then preview FY {fyLabel} again.
+            values forward, post FY {openingGap.priorLabel} first, then preview FY {label} again.
           </p>
         ),
         confirmLabel: openingGap.pools.length === POOLS_AD.length ? 'Post with every pool at 0' : 'Post with those pools at 0',
-        run: () => checkAndPost(version),
       })
-      return
     }
-    await checkAndPost(version)
+    if (fyStart >= currentFyStart) {
+      questions.push({
+        title: `FY ${label} has not ended`,
+        body: (
+          <p style={{ margin: 0 }}>
+            FY {label} has not ended (it runs to {daysInBsMonth(fyStart + 1, 3)} Ashadh {fyStart + 1}). A schedule posted now leaves out
+            anything bought, sold or repaired after today, and locks the opening values typed for this year. Post it anyway?
+          </p>
+        ),
+        confirmLabel: 'Post anyway',
+      })
+    }
+    if (built.untracked.length > 0) {
+      const count = built.untracked.length
+      const cost = built.untracked.reduce((s, a) => s + a.total_cost, 0)
+      questions.push({
+        title: `${count} ${count === 1 ? 'asset has' : 'assets have'} no tax pool`,
+        body: (
+          <p style={{ margin: 0 }}>
+            {count === 1 ? 'One asset' : `${count} assets`} held during FY {label} (NPR {fmt(cost)} at cost) {count === 1 ? 'is' : 'are'} in no tax pool, so this
+            schedule leaves {count === 1 ? 'it' : 'them'} out and locks without {count === 1 ? 'it' : 'them'}. To include {count === 1 ? 'it' : 'them'}, give each a pool on the Register
+            (Edit → Tax Pool) and preview again.
+          </p>
+        ),
+        confirmLabel: 'Post without them',
+      })
+    }
+    const earlier = repost.list.filter(x => x.fyShort < fyStart % 100)
+    if (earlier.length > 0) {
+      const names = earlier.map(x => x.fiscalYear)
+      questions.push({
+        title: `FY ${names[0]} needs posting again first`,
+        body: (
+          <p style={{ margin: 0 }}>
+            FY {joinAnd(names)}{earlier.length === 1 ? "'s posted schedule no longer matches its" : "'s posted schedules no longer match their"} opening values,
+            so FY {label} would open from out-of-date figures. Post FY {names[0]} again first.
+          </p>
+        ),
+        confirmLabel: 'Post anyway',
+      })
+    } else if (repost.error) {
+      // A check that could not run has not passed.
+      questions.push({
+        title: 'Earlier years could not be checked',
+        body: (
+          <p style={{ margin: 0 }}>
+            Crest could not check whether an earlier year's posted schedule still matches its opening values, so FY {label} might
+            open from out-of-date figures. Reload the page to check first, or post anyway.
+          </p>
+        ),
+        confirmLabel: 'Post anyway',
+      })
+    }
+    askInTurn(questions, () => checkAndPost(version, label, payload, postNotes))
   }
 
   // A fiscal year can be posted twice — there is deliberately no unique constraint, since a
   // correction is a new run — and the next year's opening WDV then reads whichever posted last.
   // Look first, and make a second schedule for the same year a decision naming the first (S756).
-  async function checkAndPost(version) {
+  async function checkAndPost(version, label, payload, postNotes) {
     setPosting(true)
-    const { data: existing, error: existingErr } = await scopedFrom('assets_tax_pool_runs', 'id, posted_at, created_at')
-      .eq('fiscal_year', fyLabel).eq('status', 'posted').order('created_at').order('id')
+    const { data: existing, error: existingErr } = await settleWithin(scopedFrom('assets_tax_pool_runs', 'id, posted_at, created_at')
+      .eq('fiscal_year', label).eq('status', 'posted').order('created_at').order('id'), ASSET_CALL_MS, 'Checking for a posted schedule')
     setPosting(false)
     if (existingErr) {
       // A check that could not run has not passed.
       const a = asActionError(existingErr)
-      setErr({ text: `Could not check whether FY ${fyLabel} already has a posted schedule, so nothing was posted. Try again. ` + a.text, detail: a.detail })
+      setErr({ text: `Could not check whether FY ${label} already has a posted schedule, so nothing was posted. Try again. ` + a.text, detail: a.detail })
       return
     }
-    if (!existing || existing.length === 0) { await submitPost(version); return }
+    if (!existing || existing.length === 0) { await submitPost(version, label, payload, postNotes); return }
     askConfirm({
-      title: `FY ${fyLabel} already has a posted schedule`,
+      title: `FY ${label} already has a posted schedule`,
       danger: true,
       body: (
         <p style={{ margin: 0 }}>
-          A tax pool schedule for FY {fyLabel} was posted on {existing.map(r => nepalBsLong(r.posted_at || r.created_at) || 'an unknown date').join(', ')}.
+          A tax pool schedule for FY {label} was posted on {existing.map(r => nepalBsLong(r.posted_at || r.created_at) || 'an unknown date').join(', ')}.
           {' '}Posting again adds a second locked schedule for the same year beside it; next year's opening values will be taken from this new one. Neither can be edited afterwards.
         </p>
       ),
       confirmLabel: 'Post a second schedule',
-      run: () => submitPost(version),
+      run: () => submitPost(version, label, payload, postNotes),
     })
   }
 
-  async function submitPost(version) {
+  async function submitPost(version, label, payload, postNotes) {
     if (inputsVersion.current !== version) {
       setErr('The fiscal year or its repair expenses changed after this preview was made, so nothing was posted. Press Preview again, then Post.')
       return
     }
     setPosting(true); setMsg(''); setErr(null)
-    const { error } = await supabase.rpc('post_tax_pool_run', {
-      p_client_id: clientId, p_fiscal_year: fyLabel, p_lines: lines, p_notes: null,
-    })
+    const { error } = await settleWithin(supabase.rpc('post_tax_pool_run', {
+      p_client_id: clientId, p_fiscal_year: label, p_lines: payload, p_notes: postNotes,
+    }), ASSET_CALL_MS, 'Posting the tax pool schedule')
     setPosting(false)
     if (error) {
       const { text, detail } = asActionError(error)
-      setErr({ text: `The pool schedule was not posted, so FY ${fyLabel} is still unlocked and nothing has been written.
+      // ASSETS-17: no answer is not a refusal. The server may have posted it after the connection
+      // dropped, so say so and show what is posted now, instead of "nothing was written".
+      if (answerLost(error)) {
+        setErr({ text: 'The connection dropped before the server answered, so this schedule may have been posted. The posted schedules for this year were re-read below: check them before posting again.', detail })
+        recheckPosted(label); loadRepost(); setCardRefresh(c => c + 1)
+        return
+      }
+      if (refusedWith(error, 'tax_run_duplicate')) {
+        setErr({ text: `This schedule for FY ${label} was posted moments ago (from this page or another), so it was not posted again.`, detail })
+        recheckPosted(label); loadRepost(); setCardRefresh(c => c + 1)
+        return
+      }
+      // Any other refusal is raised inside the one transaction that would write the schedule.
+      setErr({ text: `The pool schedule was not posted, so nothing was written for FY ${label}.
 
 ${text}`, detail })
       return
     }
-    setMsg('ok:Posted — tax pool schedule locked for FY ' + fyLabel)
-    setLines(null)
+    setMsg('ok:Posted — tax pool schedule locked for FY ' + label)
+    setPreviewInputs(null)
+    loadRepost(); setCardRefresh(c => c + 1)
   }
+
+  async function recheckPosted(label) {
+    const { data, error } = await settleWithin(scopedFrom('assets_tax_pool_runs', 'id, posted_at, created_at')
+      .eq('fiscal_year', label).eq('status', 'posted').order('created_at').order('id'), ASSET_CALL_MS, 'Re-reading the posted schedules')
+    setRecheck({ label, runs: data || [], error: error ? asActionError(error, 'operator') : null })
+  }
+
+  const yearOptions = fyOptionsAround(currentFyStart, fyStart)
 
   return (
     <div>
@@ -376,26 +607,79 @@ ${text}`, detail })
           <div className="form-field">
             <label htmlFor="taxpoo-f1"><Tip text="Nepal's tax year runs mid-July to mid-July (Shrawan to Ashadh) — it doesn't line up with the Jan-Dec calendar year most people think in." width={280}>Fiscal Year</Tip></label>
             <select id="taxpoo-f1" className="form-select" value={fyStart} onChange={e => changeYear(parseInt(e.target.value))}>
-              {fyOptionsAround(currentFyStart).map(y => <option key={y} value={y}>FY {getBsFiscalYear(y, 4)}</option>)}
+              {yearOptions.map(y => <option key={y} value={y}>FY {getBsFiscalYear(y, 4)}</option>)}
             </select>
           </div>
           {/* Pressable while the repair list is not loaded, so the press can say why (COSTS-7). */}
           <button className="btn btn-primary" onClick={preview} disabled={loading} aria-disabled={!repairsLoaded || undefined}>{loading ? 'Computing…' : 'Preview'}</button>
           {lines && (
-            <Tip text={canPost ? 'Writes the pool schedule and locks it for this fiscal year — corrections need a new adjustment run.' : 'Only a Manager or Owner login can post.'} width={280}>
+            <Tip text={canPost ? "Writes this year's pool schedule and locks it. To correct it, fix the register or repairs and post a second schedule for the same year; next year opens from the latest one." : 'Only a Manager or Owner login can post.'} width={300}>
               <button className="btn btn-primary" onClick={post} disabled={!canPost || posting}>{posting ? 'Posting…' : 'Post'}</button>
             </Tip>
           )}
           {lines && (
-            <button className="btn btn-ghost" onClick={() => printWithTitle(`Tax Depreciation Schedule - FY ${fyLabel}`)}>Print</button>
+            // The printed heading names the business, so Print waits for its name (S845).
+            <button className="btn btn-ghost" disabled={!biz.ready} onClick={() => printWithTitle(`Tax Depreciation Schedule - FY ${fyLabel}`)}>Print</button>
           )}
           {msg && <span style={{ fontSize: 12, color: 'var(--theme-green-text)' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>
+        {lines && biz.error && (
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>The business name for the printed heading could not be read, so Print is held. Reload the page to try again.</p>
+        )}
         <ActionError error={err} />
+        {recheck && (
+          <p role="status" className="note-banner" style={{ margin: '10px 0 0' }}>
+            {recheck.error
+              ? <>The posted schedules for FY {recheck.label} could not be re-read either, so whether it was posted is not known. Reload the page before posting again. ({recheck.error.text})</>
+              : recheck.runs.length === 0
+                ? <><strong>None is posted for FY {recheck.label}</strong> as of this re-read.</>
+                : <><strong>Posted for FY {recheck.label}</strong> as of this re-read: {recheck.runs.map(r => `${nepalBsLong(r.posted_at || r.created_at) || 'unknown date'}, ${nepalTime(r.posted_at || r.created_at)}`).join('; ')}.</>}
+          </p>
+        )}
       </div>
 
-      {/* D40: last year's closing values, typed once; locked once a posted schedule uses them. */}
-      <TaxPoolOpeningsCard fyLabel={fyLabel} priorLabel={getBsFiscalYear(fyStart - 1, 4)} canEdit={canPost} onChanged={inputsChanged} />
+      {/* S849 (ASSETS-9): the posted years whose opening values have moved since they were posted. */}
+      {(repost.list.length > 0 || repost.error) && (
+        <div className="card no-print" style={{ marginBottom: 20 }}>
+          <h3 style={{ fontSize: 13, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
+            <Tip text="A posted schedule stays as filed. When an opening value it used was corrected, or the year before was posted again, it no longer matches what that year would open from today, so it is listed here until it is posted again." width={320}>Schedules to post again</Tip>
+          </h3>
+          {repost.error ? (
+            <div>
+              <ActionError error={{ text: `Could not check whether any posted schedule needs posting again. ${repost.error.text}`, detail: repost.error.detail }} />
+              <button className="btn btn-ghost" style={{ marginTop: 8, fontSize: 12 }} onClick={loadRepost}>Try again</button>
+            </div>
+          ) : (
+            <>
+              <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 10px', lineHeight: 1.5, maxWidth: 760 }}>
+                Post each one again, oldest first: the new schedule is the one the next year opens from. If a tax return was already
+                filed from the old figures, ask your accountant whether to amend it.
+              </p>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>
+                {repost.list.map(x => (
+                  <li key={x.fiscalYear} style={{ marginBottom: 6 }}>
+                    <strong>FY {x.fiscalYear}</strong> — {repostReason(x, repost.names)}{' '}
+                    {fyLabel === x.fiscalYear
+                      ? <span style={{ color: 'var(--theme-text2)' }}>(on screen now)</span>
+                      : <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => changeYear(fyStartOfLabel(x.fiscalYear))}>Open FY {x.fiscalYear}</button>}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* D40: last year's closing values, typed once; locked once a posted schedule uses them, and
+          correctable after that with a reason (S849, SU7 b). */}
+      <TaxPoolOpeningsCard
+        fyLabel={fyLabel}
+        priorLabel={getBsFiscalYear(fyStart - 1, 4)}
+        canEdit={canPost}
+        onChanged={inputsChanged}
+        onCorrected={loadRepost}
+        refreshKey={cardRefresh}
+      />
 
       {/* Repair/maintenance expense ledger — feeds the Section 16 cap check */}
       <div className="card no-print" style={{ marginBottom: 20 }}>
@@ -403,8 +687,8 @@ ${text}`, detail })
           <Tip text="Fixing or maintaining something you already own — e.g. servicing an oven, repainting, fixing a fridge compressor. Buying a brand new item is NOT a repair expense; that's a new asset in the Register tab instead." width={300}>Repair &amp; Maintenance Expenses</Tip> — FY {fyLabel}
         </h3>
         <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 12px', lineHeight: 1.5 }}>
-          Nepal tax law only lets you deduct repair costs up to 5% of what a pool is worth — spend more than that on
-          repairs for one pool in a year, and the extra rolls into next year instead of counting this year.
+          Nepal tax law only lets you deduct repair costs up to 7% of a pool's depreciation base for the year — spend more than
+          that on repairs for one pool, and the extra joins next year's pool instead of counting this year.
         </p>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 4 }}>
           <div className="form-field" style={{ gap: 4 }}>
@@ -449,9 +733,13 @@ ${text}`, detail })
 
       {lines && (
         <div id="tax-pool-print-area">
+          {/* ASSETS-10: paper names the year and the business. */}
+          <h2 className="print-only" style={{ fontSize: 16, margin: '0 0 12px', color: 'var(--theme-text1)' }}>
+            Tax Depreciation Schedule — FY {fyLabel}{biz.name ? ` — ${biz.name}` : ''}
+          </h2>
           {/* S792 (COSTS-5): inside the print area, so a printed schedule carries it too. */}
           {openingGap && (
-            <div role="status" style={{ marginBottom: 12, padding: '10px 14px', fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', borderRadius: 'var(--radius-sm)' }}>
+            <div role="status" style={amberBox}>
               <strong style={{ color: 'var(--theme-amber-text)' }}>△ {poolsOpeningAtZero(openingGap.pools)}.</strong>{' '}
               {openingGap.earlierLabel
                 ? <>FY {openingGap.priorLabel} has no posted schedule, so FY {fyLabel} has no closing values to open from — FY {openingGap.earlierLabel} was posted, but its values only reach this year through FY {openingGap.priorLabel}. Switch the Fiscal Year above to {openingGap.priorLabel}, post it, then preview FY {fyLabel} again.</>
@@ -465,49 +753,55 @@ ${text}`, detail })
               {openingTyped.eOpening > 0.005 && <> Pool E opens at NPR {fmt(openingTyped.eOpening)}: what its assets' own schedules had not yet claimed, counting any depreciation already taken before Crest.</>}
             </p>
           )}
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Pool</th>
-                  <th style={{ textAlign: 'right' }}><Tip text="What this pool was worth at the start of the fiscal year — last year's posted Closing WDV carried forward. If last year has no posted schedule, it is the value typed in from last year's tax return (Pools A–D), or what Pool E's assets have not yet claimed; a pool with neither opens at 0, and a note above the table says so." width={300}>Opening WDV</Tip></th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Cost of anything new bought into this pool during the fiscal year (new equipment, furniture, vehicles, etc.)." width={260}>Additions</Tip></th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Money received from selling or scrapping equipment in this pool during the fiscal year." width={260}>Disposals</Tip></th>
-                  <th style={{ textAlign: 'right' }}><Tip text="Repair/maintenance spend on this pool — the first number is what you can deduct this year (capped at 5% of Closing WDV); the second, if shown, is the extra that rolls into next year instead." width={300}>Repair (Deductible / Capitalized)</Tip></th>
-                  <th style={{ textAlign: 'right' }}><Tip text="The tax-deductible depreciation for this pool this year, at Nepal's statutory rate for that pool." width={260}>Depreciation</Tip></th>
-                  <th style={{ textAlign: 'right' }}><Tip text="What this pool is worth at the end of the fiscal year (WDV = Written-Down Value). Becomes next year's Opening WDV." width={280}>Closing WDV</Tip></th>
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map(l => (
-                  <tr key={l.pool}>
-                    <td><Tip text={poolTip(l.pool)} width={300}>{POOL_LABELS[l.pool]}</Tip></td>
-                    <td style={{ textAlign: 'right' }}>{fmt(l.opening_wdv)}</td>
-                    <td style={{ textAlign: 'right' }}>{fmt(l.additions_full + l.additions_two_third + l.additions_one_third)}</td>
-                    <td style={{ textAlign: 'right' }}>{fmt(l.disposal_proceeds)}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      {fmt(l.repair_expense_deductible)}{l.repair_expense_capitalized > 0 && ` / ${fmt(l.repair_expense_capitalized)}`}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>{fmt(l.depreciation_amount)}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(l.closing_wdv)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr style={{ borderTop: '2px solid var(--theme-border)', fontWeight: 700 }}>
-                  <td>Total</td>
-                  <td style={{ textAlign: 'right' }}>{fmt(lines.reduce((s, l) => s + l.opening_wdv, 0))}</td>
-                  <td style={{ textAlign: 'right' }}>{fmt(lines.reduce((s, l) => s + l.additions_full + l.additions_two_third + l.additions_one_third, 0))}</td>
-                  <td style={{ textAlign: 'right' }}>{fmt(lines.reduce((s, l) => s + l.disposal_proceeds, 0))}</td>
-                  <td></td>
-                  <td style={{ textAlign: 'right' }}>{fmt(lines.reduce((s, l) => s + l.depreciation_amount, 0))}</td>
-                  <td style={{ textAlign: 'right' }}>{fmt(lines.reduce((s, l) => s + l.closing_wdv, 0))}</td>
-                </tr>
-              </tfoot>
-            </table>
+          {/* S849 (ASSETS-2): an emptied pool whose value goes back to a typed figure is closed only
+              when the business says every asset of it went; the default is no. */}
+          {built.askDissolve.map(p => (
+            <div key={p} className="note-banner no-print" style={{ marginBottom: 12 }}>
+              <p style={{ margin: '0 0 6px' }}>
+                <strong>Pool {p} has no asset left in the register at the end of FY {fyLabel}</strong>, but its value goes back to a figure
+                typed from your tax return, which may include assets bought before Crest. Did the business sell or scrap every Pool {p} asset this year?
+              </p>
+              <label className="form-check">
+                <input type="checkbox" checked={!!closedPools[p]} onChange={e => setClosedPools(c => ({ ...c, [p]: e.target.checked }))} />
+                <span>Yes — every Pool {p} asset was sold or scrapped this year: close the pool and deduct what is left.</span>
+              </label>
+            </div>
+          ))}
+          <div className="table-wrap no-print">
+            <PoolTable lines={lines} />
           </div>
+          <div className="print-only">
+            <PoolTable lines={lines} print />
+          </div>
+          {lines.filter(l => n(l.balancing_income) > 0.005).map(l => (
+            <p key={`inc-${l.pool}`} style={fine}>
+              <strong style={{ color: 'var(--theme-text1)' }}>Pool {l.pool}:</strong> the NPR {fmt(l.disposal_proceeds)} received is NPR {fmt(l.balancing_income)} more
+              than the pool was worth. Include NPR {fmt(l.balancing_income)} in business income for FY {fyLabel} (Income Tax Act Schedule 2 §4(1));
+              {n(l.closing_wdv) > 0.005
+                ? <> the pool closes at NPR {fmt(l.closing_wdv)}, the part of this year's additions that counts from next year.</>
+                : <> the pool closes at 0.</>}
+            </p>
+          ))}
+          {lines.filter(l => n(l.terminal_deduction) > 0.005).map(l => (
+            <p key={`ter-${l.pool}`} style={fine}>
+              <strong style={{ color: 'var(--theme-text1)' }}>Pool {l.pool} closed:</strong> every asset in it was sold or scrapped. The NPR {fmt(l.terminal_deduction)} left
+              is deductible in FY {fyLabel} (Schedule 2 §4(2)) instead of being depreciated in later years.
+            </p>
+          ))}
+          {lines.filter(l => n(l.small_balance_written_off) > 0.005).map(l => (
+            <p key={`small-${l.pool}`} style={fine}>
+              <strong style={{ color: 'var(--theme-text1)' }}>Pool {l.pool}:</strong> the NPR {fmt(l.small_balance_written_off)} left after this year's depreciation
+              is under NPR 2,000, so it is written off in full this year (Schedule 2 §2(6)).
+            </p>
+          ))}
+          {built.askDissolve.filter(p => !closedPools[p]).map(p => (
+            <p key={`open-${p}`} className="print-only" style={fine}>
+              Pool {p}: no asset of this pool is left in Crest's register at the end of FY {fyLabel}, but its value goes back to a figure
+              typed from the tax return, so it is kept open (not dissolved).
+            </p>
+          ))}
           {poolECapped && (
-            <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)' }}>
+            <p style={fine}>
               Pool E: its assets' own schedules add up to NPR {fmt(poolECapped.scheduled)} this year, but the pool only
               holds NPR {fmt(poolECapped.held)}, so only that much is claimed.
             </p>
@@ -515,12 +809,20 @@ ${text}`, detail })
           {/* S792 stage 3: Pool E's Disposals figure is money received, but what leaves that pool is
               the value not yet claimed — say so, or its row cannot be added up. */}
           {poolEDisposed && (
-            <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)' }}>
+            <p style={fine}>
               Pool E: software or licences sold or written off this year leave the pool at the value not yet
               claimed on them (NPR {fmt(poolEDisposed.value)}) and are not amortized this year. The NPR {fmt(poolEDisposed.proceeds)} received
               for them is shown under Disposals but not taken off the pool, because each Pool E item is claimed on its own schedule;
               ask your accountant how to treat the gain or loss.
             </p>
+          )}
+          {/* S849 (ASSETS-5): an asset with no pool used to drop out of the schedule without a word. */}
+          {built.untracked.length > 0 && (
+            <div style={{ ...amberBox, marginTop: 12 }}>
+              <strong style={{ color: 'var(--theme-amber-text)' }}>△ Not in any tax pool, so left out of this schedule:</strong>{' '}
+              {built.untracked.map(a => `${a.asset_code || '—'} ${a.name} NPR ${fmt(a.total_cost)}`).join('; ')}.
+              <span className="no-print"> Give each a pool on the Register (Edit → Tax Pool), then preview again.</span>
+            </div>
           )}
           <div className="print-only" style={{ marginTop: 32, fontSize: 10, color: '#aaa', borderTop: '1px solid #eee', paddingTop: 12, textAlign: 'center' }}>
             {DISCLAIMER_TEXT} · Generated by Crest Suite · {nepalBsLong(new Date())}

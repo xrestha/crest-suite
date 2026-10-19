@@ -5,8 +5,9 @@ import {
   addDaysIso, effectiveDepreciation, bookPositionsByAsset, bookValue, computeDisposalDepreciation,
   regularOverrideError, adjustmentOverrideError, depreciationInWindow,
   assetHeldOn, computeValuationAsOf, depreciationInputChanges,
-  openingAccumulated, chargeStartDate,
+  openingAccumulated, chargeStartDate, chargeGaps, fiscalYearSpanDays, bsSpanLabel,
 } from './depreciationCompute'
+import { bsToAd, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 
 describe('annualStraightLineAmount', () => {
   test('(cost - salvage) / life', () => {
@@ -224,7 +225,7 @@ describe('bookPositionsByAsset / bookValue', () => {
       { ...fy2, id: 'r3', depreciation_amount: 0, override_amount: -4000 },
     ]
     // 6,000 of 10,000 left over a 365-day period: its first 219 days.
-    expect(bookPositionsByAsset(partly).a).toEqual({ charged: 6000, rows: 2, chargedThrough: '2026-02-19' })
+    expect(bookPositionsByAsset(partly).a).toEqual({ charged: 6000, rows: 2, chargedThrough: '2026-02-19', covered: [{ start: '2025-07-16', end: '2026-02-19' }] })
   })
 
   test('a zero charge with no reversal still counts for the whole period', () => {
@@ -241,7 +242,7 @@ describe('bookPositionsByAsset / bookValue', () => {
       { ...fy2, id: 'r4', annual_depreciation: 10000, depreciation_amount: 10000 },
     ]
     for (const order of [rows, [...rows].reverse()]) {
-      expect(bookPositionsByAsset(order).a).toEqual({ charged: 10000, rows: 3, chargedThrough: '2026-07-15' })
+      expect(bookPositionsByAsset(order).a).toEqual({ charged: 10000, rows: 3, chargedThrough: '2026-07-15', covered: [{ start: '2025-07-16', end: '2026-07-15' }] })
     }
   })
 
@@ -403,18 +404,27 @@ describe('assetHeldOn / computeValuationAsOf', () => {
     expect(assetHeldOn({ status: 'disposed', disposal_date: null, acquisition_date: '2024-01-01' }, '2025-07-15')).toBe(false)
   })
 
+  // S849 (ASSETS-6, SU6 a): E's 20% personal use no longer drops it — it counts in full.
   test('FY-end valuation keeps the asset sold after it, at its book value on that date', () => {
     const v = computeValuationAsOf({ assets, postedRows: rows, asOf: '2025-07-15' })
-    expect(v.totalCost).toBe(150000)
-    expect(v.nbv).toBe(135000)
+    expect(v.totalCost).toBe(190000)
+    expect(v.nbv).toBe(175000)
     expect(v.accumulatedDepreciation).toBe(15000)
-    expect(v.byCategory).toEqual([{ categoryName: 'Kitchen', totalCost: 150000, nbv: 135000, accumulatedDepreciation: 15000 }])
+    expect(v.byCategory).toEqual([
+      { categoryName: 'Kitchen', totalCost: 150000, nbv: 135000, accumulatedDepreciation: 15000 },
+      { categoryName: 'Furniture', totalCost: 40000, nbv: 40000, accumulatedDepreciation: 0 },
+    ])
   })
 
   test('a year later the sold asset is gone and the newer purchase is in', () => {
     const v = computeValuationAsOf({ assets, postedRows: rows, asOf: '2026-07-15' })
-    expect(v.totalCost).toBe(130000)
-    expect(v.nbv).toBe(110000)
+    expect(v.totalCost).toBe(170000)
+    expect(v.nbv).toBe(150000)
+  })
+
+  test('an asset with a personal-use share counts in full', () => {
+    const v = computeValuationAsOf({ assets: [assets[4]], postedRows: [], asOf: '2025-07-15' })
+    expect(v.totalCost).toBe(40000)
   })
 })
 
@@ -559,5 +569,88 @@ describe('depreciation already taken before Crest (D40)', () => {
     expect(c.openingAsOf).toEqual({ from: '2025-07-16', to: '2024-07-16' })
     // A payload that does not carry the fields changes neither.
     expect(depreciationInputChanges(asset, next)).toBeNull()
+  })
+})
+
+// S849 (ASSETS-14): a day is charged at the yearly figure ÷ the length of the BS fiscal year it is in.
+describe('per-day charge by the BS fiscal year\'s own length', () => {
+  const stored = (y, m, d) => formatAd(bsToAd(y, m, d))
+  const fyFirst = fy => stored(fy, 4, 1)
+  const fyLast = fy => stored(fy + 1, 3, daysInBsMonth(fy + 1, 3))
+
+  test('FY 81/82 has 366 days and FY 82/83 365', () => {
+    expect(fiscalYearSpanDays(fyFirst(2081))).toEqual({ fy: 2081, start: fyFirst(2081), end: fyLast(2081), days: 366 })
+    expect(fiscalYearSpanDays(fyLast(2082)).days).toBe(365)
+  })
+
+  test('a whole 366-day fiscal year charges exactly the yearly figure', () => {
+    const amt = proRatedAmount({ annualAmount: 36600, periodStart: fyFirst(2081), periodEnd: fyLast(2081), acquisitionDate: '2020-01-01' })
+    expect(amt).toBeCloseTo(36600, 6)
+  })
+
+  test('a whole 365-day fiscal year does too', () => {
+    const amt = proRatedAmount({ annualAmount: 36500, periodStart: fyFirst(2082), periodEnd: fyLast(2082), acquisitionDate: '2020-01-01' })
+    expect(amt).toBeCloseTo(36500, 6)
+  })
+
+  test('a period across the 81/82 → 82/83 boundary sums the two per-day rates', () => {
+    const start = addDaysIso(fyLast(2081), -15) // the last 16 days of 81/82
+    const end = addDaysIso(fyFirst(2082), 14)   // the first 15 days of 82/83
+    const amt = proRatedAmount({ annualAmount: 36500, periodStart: start, periodEnd: end, acquisitionDate: '2020-01-01' })
+    expect(amt).toBeCloseTo(36500 * 16 / 366 + 36500 * 15 / 365, 6)
+  })
+
+  test('a held part of the period counts from the acquisition date, across the boundary', () => {
+    const acquired = addDaysIso(fyLast(2081), -1) // two days of 81/82, then the period runs on
+    const amt = proRatedAmount({ annualAmount: 36600, periodStart: addDaysIso(fyLast(2081), -30), periodEnd: addDaysIso(fyFirst(2082), 9), acquisitionDate: acquired })
+    expect(amt).toBeCloseTo(36600 * 2 / 366 + 36600 * 10 / 365, 6)
+  })
+})
+
+// S849 (ASSETS-8): days no posted run stands charged for.
+describe('chargeGaps', () => {
+  const stored = (y, m, d) => formatAd(bsToAd(y, m, d))
+  const first = m => stored(2082, m, 1)
+  const last = m => stored(2082, m, daysInBsMonth(2082, m))
+  // 36,500 a year in FY 82/83 (365 days): exactly 100 a day.
+  const asset = { id: 'g', total_cost: 36500, salvage_value: 0, useful_life_years: 1, acquisition_date: first(4) }
+  const month = (m, extra = {}) => ({ asset_id: 'g', period_start: first(m), period_end: last(m), depreciation_amount: 100 * daysInBsMonth(2082, m), override_amount: null, ...extra })
+  const gapsOf = (rows, upTo, a = asset) => chargeGaps({ asset: a, position: bookPositionsByAsset(rows).g, upTo })
+
+  test('monthly runs Shrawan to Ashwin plus Mangsir: exactly Kartik is uncharged', () => {
+    const gaps = gapsOf([month(4), month(5), month(6), month(8)], last(8))
+    const days = daysInBsMonth(2082, 7)
+    expect(gaps).toEqual([{ start: first(7), end: last(7), days, amount: 100 * days }])
+  })
+
+  test('a full reversal re-opens its days', () => {
+    const reversal = month(5, { depreciation_amount: 0, override_amount: -100 * daysInBsMonth(2082, 5) })
+    expect(gapsOf([month(4), month(5), reversal, month(6)], last(6)).map(g => [g.start, g.end])).toEqual([[first(5), last(5)]])
+  })
+
+  test('a part reversal opens only its last days', () => {
+    // Bhadra 2082 has 31 days (3,100); reversing 1,000 leaves its first 21 days charged.
+    const reversal = month(5, { depreciation_amount: 0, override_amount: -1000 })
+    expect(daysInBsMonth(2082, 5)).toBe(31)
+    expect(gapsOf([month(4), month(5), reversal, month(6)], last(6)).map(g => [g.start, g.end, g.days])).toEqual([[stored(2082, 5, 22), last(5), 10]])
+  })
+
+  test('days inside depreciation already taken before Crest count as covered', () => {
+    const owned = { ...asset, acquisition_date: stored(2081, 4, 1), opening_accumulated_depreciation: 5000, opening_as_of: stored(2082, 3, daysInBsMonth(2082, 3)) }
+    expect(gapsOf([month(5)], last(5), owned).map(g => [g.start, g.end])).toEqual([[first(4), last(4)]])
+  })
+
+  test('nothing posted: one gap from the first chargeable day', () => {
+    expect(chargeGaps({ asset, position: undefined, upTo: last(5) }).map(g => [g.start, g.end, g.days])).toEqual([[first(4), last(5), daysInBsMonth(2082, 4) + daysInBsMonth(2082, 5)]])
+  })
+
+  test('nothing to report before the asset was bought, or when every day is charged', () => {
+    expect(chargeGaps({ asset, position: undefined, upTo: stored(2082, 3, 1) })).toEqual([])
+    expect(gapsOf([month(4), month(5)], last(5))).toEqual([])
+  })
+
+  test('a span is named in BS, the year once when both ends share it', () => {
+    expect(bsSpanLabel(stored(2083, 7, 15), stored(2083, 8, 14))).toBe('15 Kartik – 14 Mangsir 2083')
+    expect(bsSpanLabel(stored(2083, 12, 20), stored(2084, 1, 5))).toBe('20 Chaitra 2083 – 5 Baisakh 2084')
   })
 })

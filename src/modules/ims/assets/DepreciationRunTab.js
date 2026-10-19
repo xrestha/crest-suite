@@ -1,5 +1,5 @@
 import { nprInt } from '../../../shared/nepalMoney'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -11,11 +11,13 @@ import FieldError, { fieldAria } from '../../../components/FieldError'
 import QtyInput from '../../../components/QtyInput'
 import {
   computeDepreciationPreview, bookPositionsByAsset, bookValue, effectiveDepreciation,
-  regularOverrideError, adjustmentOverrideError,
+  regularOverrideError, adjustmentOverrideError, chargeGaps, addDaysIso, bsSpanLabel,
 } from './depreciationCompute'
 import { chipKeys } from '../../../shared/rovingFocus'
-import { formatAdAsBs } from '../../../utils/bsCalendar'
-import { nepalBsLong } from '../../../shared/nepalTime'
+import { formatAdAsBs, bsToAd, daysInBsMonth, formatAd, getBsToday, getBsFiscalYear, getBsFiscalYearStart, BS_MONTHS } from '../../../utils/bsCalendar'
+import { nepalBsLong, nepalTime } from '../../../shared/nepalTime'
+import { settleWithin } from '../../../utils/withTimeout'
+import { readRegister, answerLost, refusedWith, notActiveCodes, ASSET_CALL_MS } from './assetReads'
 
 const fmt = nprInt
 // Period dates are stored AD dates: shown as the BS date they fall on (S792, COSTS-11). `posted_at`
@@ -32,6 +34,27 @@ const reversedIdOf = run => {
   return m ? m[1] : null
 }
 const runLabel = r => `${fmtDate(r.period_start)} – ${fmtDate(r.period_end)}`
+
+// S849 (ASSETS-8): the period can be filled from a BS month (its 1st to its last day) or a whole
+// fiscal year (1 Shrawan to the last day of Ashadh), instead of hunting both ends in the AD boxes.
+// Months of this fiscal year so far and all of last year's, newest first; this year and the two
+// before it. Built through formatAd, never toISOString on a bsToAd Date.
+function periodPresets() {
+  const today = getBsToday()
+  const fy = getBsFiscalYearStart(today.year, today.month)
+  const months = []
+  let y = today.year, m = today.month
+  while (getBsFiscalYearStart(y, m) >= fy - 1) {
+    months.push({ value: `m:${y}:${m}`, label: `${BS_MONTHS[m - 1]} ${y}`, start: formatAd(bsToAd(y, m, 1)), end: formatAd(bsToAd(y, m, daysInBsMonth(y, m))) })
+    m -= 1
+    if (m === 0) { m = 12; y -= 1 }
+  }
+  const years = [fy, fy - 1, fy - 2].map(f => ({
+    value: `fy:${f}`, label: `FY ${getBsFiscalYear(f, 4)} (whole year)`,
+    start: formatAd(bsToAd(f, 4, 1)), end: formatAd(bsToAd(f + 1, 3, daysInBsMonth(f + 1, 3))),
+  }))
+  return { years, months }
+}
 
 // The posted schedule, paged: one row per asset per run, so a client with 100 assets and monthly
 // runs crosses the silent 1000-row cap inside a year — and a truncated read here would open every
@@ -70,22 +93,28 @@ export default function DepreciationRunTab({ assets, onReload }) {
   const [runId, setRunId] = useState('')
   const [adjReason, setAdjReason] = useState('')
   const [adjSkipped, setAdjSkipped] = useState([])
+  // S849 (ASSETS-12): the register as each preview read it. The list the page loaded at open can be
+  // hours old; a run built from it could charge an asset disposed of in another tab since.
+  const [register, setRegister] = useState(null)
+  // ASSETS-17: after a post whose answer never arrived, what a fresh read found posted.
+  const [recheck, setRecheck] = useState(null)
+  const presets = useMemo(() => periodPresets(), [])
 
   const canPost = hasImsAccess('manager')
-  const assetsById = Object.fromEntries(assets.map(a => [a.id, a]))
+  const assetsById = Object.fromEntries((register || assets).map(a => [a.id, a]))
   const reversedIds = new Set((runs || []).map(reversedIdOf).filter(Boolean))
   const chosenRun = (runs || []).find(r => r.id === runId) || null
 
   function switchMode(next) {
     if (next === mode) return
-    setMode(next); setLines(null); setMsg(''); setErr(null); setAdjSkipped([])
+    setMode(next); setLines(null); setMsg(''); setErr(null); setAdjSkipped([]); setRecheck(null)
     if (next === 'adjust' && runs === null) loadRuns()
   }
 
   async function loadRuns() {
-    const { data, error } = await fetchAllRows(() => scopedFrom('assets_depreciation_runs', 'id, period_start, period_end, posted_at, notes, created_at')
+    const { data, error } = await settleWithin(fetchAllRows(() => scopedFrom('assets_depreciation_runs', 'id, period_start, period_end, posted_at, notes, created_at')
       .eq('status', 'posted')
-      .order('period_end', { ascending: false }).order('created_at', { ascending: false }).order('id'))
+      .order('period_end', { ascending: false }).order('created_at', { ascending: false }).order('id')), ASSET_CALL_MS, 'Reading the posted runs')
     if (error) {
       const a = asActionError(error)
       setErr({ text: 'Could not read the posted depreciation runs, so there is nothing to choose a reversal from. Try again. ' + a.text, detail: a.detail })
@@ -94,12 +123,24 @@ export default function DepreciationRunTab({ assets, onReload }) {
     setRuns(data || [])
   }
 
+  // Fills both boxes from a BS month or fiscal year (ASSETS-8), and drops a preview built for others.
+  function fillPeriod(value) {
+    const pick = [...presets.years, ...presets.months].find(x => x.value === value)
+    if (!pick) return
+    setPeriodStart(pick.start); setPeriodEnd(pick.end); setLines(null); setErr(null); setMsg('')
+  }
+
   async function preview() {
     if (!periodStart || !periodEnd) { setErr('Pick both a period start and end date before previewing the run.'); return }
     if (periodEnd < periodStart) { setErr('The period end is before its start. Swap the two dates.'); return }
-    setLoading(true); setMsg(''); setErr(null)
+    setLoading(true); setMsg(''); setErr(null); setRecheck(null)
 
-    const { data: postedRows, error: postedErr } = await readPostedSchedule(scopedFrom)
+    // ASSETS-12: the register is read again with the posted schedule, so the run is built from the
+    // assets that are active NOW. Both bounded (ASSETS-15).
+    const [{ data: postedRows, error: postedErr }, { data: freshAssets, error: registerErr }] = await Promise.all([
+      settleWithin(readPostedSchedule(scopedFrom), ASSET_CALL_MS, 'Reading the posted depreciation'),
+      settleWithin(readRegister(scopedFrom), ASSET_CALL_MS, 'Reading the asset register'),
+    ])
     // A failed read used to compute every asset's opening NBV from cost — a preview that read as
     // a first-ever run and could be POSTED as one (S682). Refuse to compute instead.
     if (postedErr) {
@@ -108,15 +149,34 @@ export default function DepreciationRunTab({ assets, onReload }) {
       setLoading(false)
       return
     }
+    if (registerErr) {
+      const a = asActionError(registerErr)
+      setErr({ text: 'Could not read the asset register, so no preview was computed — the run would not know which assets are still active. Try again. ' + a.text, detail: a.detail })
+      setLoading(false)
+      return
+    }
+    setRegister(freshAssets || [])
     // Each asset opens at cost less everything posted against it, in whatever order it was posted
     // (S792, COSTS-2) — a back-dated run or a reversal for an earlier period included.
     const positions = bookPositionsByAsset(postedRows)
 
-    const activeAssets = assets.filter(a => a.status === 'active')
+    const activeAssets = (freshAssets || []).filter(a => a.status === 'active')
+    const byId = Object.fromEntries(activeAssets.map(a => [a.id, a]))
     const preview = computeDepreciationPreview({
       assets: activeAssets, positions, periodStart, periodEnd,
     })
-    setLines(preview.map(l => ({ ...l, override_amount: '', override_reason: '' })))
+    // ASSETS-8: the days before this period no run stands charged for, per asset. A gap ending the
+    // day before the period is a month skipped (`lead`); one further back sits behind a later run
+    // (`hole`), so only a run posted for those dates can charge it.
+    const dayBefore = addDaysIso(periodStart, -1)
+    setLines(preview.map(l => {
+      const gaps = chargeGaps({ asset: byId[l.asset_id], position: positions[l.asset_id], upTo: dayBefore })
+      return {
+        ...l, override_amount: '', override_reason: '',
+        lead: gaps.find(g => g.end === dayBefore) || null,
+        holes: gaps.filter(g => g.end !== dayBefore),
+      }
+    }))
     setLoading(false)
   }
 
@@ -124,25 +184,29 @@ export default function DepreciationRunTab({ assets, onReload }) {
   // that line charged, opening from the asset's CURRENT NBV (which may already include later runs).
   async function previewReversal() {
     if (!chosenRun) { setErr('Choose the posted run to reverse.'); return }
-    setLoading(true); setMsg(''); setErr(null); setAdjSkipped([])
-    const [runRes, postedRes] = await Promise.all([
-      fetchAllRows(() => scopedFrom('assets_depreciation_schedule').eq('run_id', chosenRun.id).order('id')),
-      readPostedSchedule(scopedFrom),
+    setLoading(true); setMsg(''); setErr(null); setAdjSkipped([]); setRecheck(null)
+    const [runRes, postedRes, registerRes] = await Promise.all([
+      settleWithin(fetchAllRows(() => scopedFrom('assets_depreciation_schedule').eq('run_id', chosenRun.id).order('id')), ASSET_CALL_MS, 'Reading that run'),
+      settleWithin(readPostedSchedule(scopedFrom), ASSET_CALL_MS, 'Reading the posted depreciation'),
+      // ASSETS-12: which assets are still active is judged on the register as it is now.
+      settleWithin(readRegister(scopedFrom), ASSET_CALL_MS, 'Reading the asset register'),
     ])
-    const failed = runRes.error || postedRes.error
+    const failed = runRes.error || postedRes.error || registerRes.error
     if (failed) {
       const a = asActionError(failed)
-      setErr({ text: 'Could not read that run or the current book values, so no reversal was computed. Try again. ' + a.text, detail: a.detail })
+      setErr({ text: 'Could not read that run, the current book values or the register, so no reversal was computed. Try again. ' + a.text, detail: a.detail })
       setLoading(false)
       return
     }
+    setRegister(registerRes.data || [])
+    const freshById = Object.fromEntries((registerRes.data || []).map(a => [a.id, a]))
     const positions = bookPositionsByAsset(postedRes.data)
     const skipped = []
     const next = []
     for (const row of runRes.data || []) {
       const charged = effectiveDepreciation(row)
       if (Math.abs(charged) < 0.005) continue
-      const asset = assetsById[row.asset_id]
+      const asset = freshById[row.asset_id]
       // A disposed asset's gain or loss was struck against the NBV it had then. Writing its
       // depreciation back afterwards would move a book value the disposal already froze.
       if (!asset || asset.status !== 'active') { skipped.push(asset ? `${asset.asset_code} — ${asset.name}` : row.asset_id); continue }
@@ -222,9 +286,9 @@ export default function DepreciationRunTab({ assets, onReload }) {
     // the schedule is immutable and there is deliberately no unique period constraint, because a
     // correction is a new run. So look before posting and make a second charge a decision (S756).
     setPosting(true)
-    const { data: overlapping, error: overlapErr } = await scopedFrom('assets_depreciation_runs', 'id, period_start, period_end, posted_at, notes')
+    const { data: overlapping, error: overlapErr } = await settleWithin(scopedFrom('assets_depreciation_runs', 'id, period_start, period_end, posted_at, notes')
       .eq('status', 'posted').lte('period_start', periodEnd).gte('period_end', periodStart)
-      .order('period_start').order('id')
+      .order('period_start').order('id'), ASSET_CALL_MS, 'Checking for runs over these dates')
     setPosting(false)
     if (overlapErr) {
       // A check that could not run has not passed.
@@ -260,16 +324,41 @@ export default function DepreciationRunTab({ assets, onReload }) {
   }
 
   async function submit(start, end, payload, notes) {
-    setPosting(true); setErr(null)
-    const { error } = await supabase.rpc('post_asset_depreciation_run', {
+    setPosting(true); setErr(null); setRecheck(null)
+    const { error } = await settleWithin(supabase.rpc('post_asset_depreciation_run', {
       p_client_id: clientId, p_period_start: start, p_period_end: end,
       p_lines: payload, p_notes: notes,
-    })
+    }), ASSET_CALL_MS, 'Posting the depreciation run')
     setPosting(false)
     if (error) {
+      const { text, detail } = asActionError(error)
+      // ASSETS-17: no answer is not a refusal — the server may have posted the run after the
+      // connection dropped. Say so, and re-read what is posted, instead of "nothing was locked".
+      if (answerLost(error)) {
+        setErr({ text: 'The connection dropped before the server answered, so this run may have been posted. The runs below were re-read: check them before posting again.', detail })
+        if (mode === 'adjust') loadRuns()
+        else setLines(null)
+        recheckRuns(start, end)
+        onReload()
+        return
+      }
+      if (refusedWith(error, 'dep_run_duplicate')) {
+        setErr({ text: 'This run was posted moments ago (from this page or another), so it was not posted again.', detail })
+        if (mode === 'adjust') loadRuns()
+        recheckRuns(start, end)
+        return
+      }
+      // ASSETS-12: an asset disposed of (or removed) in another tab since this page opened.
+      if (refusedWith(error, 'dep_run_asset_not_active')) {
+        const codes = notActiveCodes(error)
+        const many = codes.includes(',')
+        setErr({ text: `${codes || 'An asset in this run'} ${many ? 'were' : 'was'} disposed of or removed since this page opened, so nothing was posted. Press Preview again.`, detail })
+        setLines(null)
+        onReload()
+        return
+      }
       // An ims_rank refusal (S756: posting needs an IMS manager or the owner) is worded by the
       // error table; the consequence line stays true because the RPC is one transaction.
-      const { text, detail } = asActionError(error)
       setErr({ text: `The ${notes ? 'adjustment' : 'depreciation'} run was not posted, so nothing has been locked.
 
 ${text}`, detail })
@@ -281,7 +370,20 @@ ${text}`, detail })
     onReload()
   }
 
+  // ASSETS-17: the posted runs covering these dates, re-read after a lost answer, shown under the error.
+  async function recheckRuns(start, end) {
+    const { data, error } = await settleWithin(scopedFrom('assets_depreciation_runs', 'id, period_start, period_end, posted_at, notes')
+      .eq('status', 'posted').lte('period_start', end).gte('period_end', start)
+      .order('posted_at').order('id'), ASSET_CALL_MS, 'Re-reading the posted runs')
+    setRecheck({ start, end, runs: data || [], error: error ? asActionError(error, 'operator') : null })
+  }
+
   const selectableRuns = (runs || []).filter(r => !reversedIdOf(r))
+  // ASSETS-8: the earliest skipped day just before the period, over every line.
+  const leadStart = mode === 'regular' && lines
+    ? lines.reduce((min, l) => (l.lead && (!min || l.lead.start < min) ? l.lead.start : min), null)
+    : null
+  const leadCount = leadStart ? lines.filter(l => l.lead).length : 0
 
   return (
     <div>
@@ -297,12 +399,26 @@ ${text}`, detail })
           {mode === 'regular' ? (
             <>
               <div className="form-field">
+                <label htmlFor="deprec-fill"><Tip text="Fills Period Start and End with a whole BS month (its 1st to its last day) or a whole fiscal year (1 Shrawan to the last day of Ashadh)." width={280}>Fill from BS</Tip></label>
+                <select id="deprec-fill" className="form-select" value="" onChange={e => fillPeriod(e.target.value)}>
+                  <option value="">Choose a month or year…</option>
+                  <optgroup label="Fiscal year">
+                    {presets.years.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
+                  </optgroup>
+                  <optgroup label="Month">
+                    {presets.months.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
+                  </optgroup>
+                </select>
+              </div>
+              <div className="form-field">
                 <label htmlFor="deprec-f1">Period Start</label>
                 <input id="deprec-f1" type="date" className="form-input" value={periodStart} onChange={e => { setPeriodStart(e.target.value); setLines(null) }} />
+                {periodStart && <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{fmtDate(periodStart)}</span>}
               </div>
               <div className="form-field">
                 <label htmlFor="deprec-f2">Period End</label>
                 <input id="deprec-f2" type="date" className="form-input" value={periodEnd} onChange={e => { setPeriodEnd(e.target.value); setLines(null) }} />
+                {periodEnd && <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{fmtDate(periodEnd)}</span>}
               </div>
               <button className="btn btn-primary" onClick={preview} disabled={loading}>{loading ? 'Computing…' : 'Preview'}</button>
             </>
@@ -341,7 +457,33 @@ ${text}`, detail })
           </p>
         )}
         <ActionError error={err} />
+        {recheck && (
+          <div role="status" className="note-banner" style={{ margin: '10px 0 0' }}>
+            {recheck.error
+              ? <>The posted runs could not be re-read either, so whether it was posted is not known. Reload the page before posting again. ({recheck.error.text})</>
+              : recheck.runs.length === 0
+                ? <><strong>No run is posted over {fmtDate(recheck.start)} – {fmtDate(recheck.end)}</strong> as of this re-read.</>
+                : <>
+                    <strong>Posted over {fmtDate(recheck.start)} – {fmtDate(recheck.end)}</strong>, as of this re-read:
+                    <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                      {recheck.runs.map(r => (
+                        <li key={r.id}>{runLabel(r)}, posted {fmtPosted(r.posted_at)} {r.posted_at ? nepalTime(r.posted_at) : ''}{reversedIdOf(r) ? ' (an adjustment)' : ''}</li>
+                      ))}
+                    </ul>
+                  </>}
+          </div>
+        )}
       </div>
+
+      {/* S849 (ASSETS-8): days just before the period that no run charged, e.g. a month skipped. */}
+      {leadStart && (
+        <div className="note-banner" role="status">
+          <strong>{leadCount === 1 ? 'One asset was' : `${leadCount} assets were`} not charged for some days just before this period.</strong>{' '}
+          Starting the period on {fmtDate(leadStart)} charges those days in this run; Post then warns about any run already covering
+          some of them.{' '}
+          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => { setPeriodStart(leadStart); setLines(null) }}>Start the period on {fmtDate(leadStart)}</button>
+        </div>
+      )}
 
       {lines && (
         lines.length === 0 ? (
@@ -374,7 +516,19 @@ ${text}`, detail })
                   const message = lineError(l)
                   return (
                     <tr key={l.asset_id}>
-                      <td>{asset?.asset_code} — {asset?.name}</td>
+                      <td>
+                        {asset?.asset_code} — {asset?.name}
+                        {l.lead && (
+                          <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 2 }}>
+                            △ Not charged {bsSpanLabel(l.lead.start, l.lead.end)} (≈ NPR {fmt(l.lead.amount)})
+                          </div>
+                        )}
+                        {(l.holes || []).map(g => (
+                          <div key={g.start} style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 2 }}>
+                            △ Not charged {bsSpanLabel(g.start, g.end)} (≈ NPR {fmt(g.amount)}): post a run for those dates.
+                          </div>
+                        ))}
+                      </td>
                       <td style={{ textAlign: 'right' }}>{fmt(l.opening_nbv)}</td>
                       <td style={{ textAlign: 'right' }}>{fmt(mode === 'adjust' ? l.charged : l.depreciation_amount)}</td>
                       <td style={{ textAlign: 'right' }}>

@@ -2,15 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import SuiteGate from '../../../components/SuiteGate'
+import SuiteGate, { useSuiteAccess, SUITE_PAGES } from '../../../components/SuiteGate'
 import AssetRegisterTab from './AssetRegisterTab'
 import DepreciationRunTab from './DepreciationRunTab'
 import ValuationReportTab from './ValuationReportTab'
 import DisposalReportTab from './DisposalReportTab'
 import TaxPoolTab from './TaxPoolTab'
 import ReportLoadError from '../../../components/ReportLoadError'
-import { firstError } from '../../../shared/queryError'
+import { settleWithin } from '../../../utils/withTimeout'
 import Tabs, { TabPanel } from '../../../components/Tabs'
+import { readRegister, ASSET_CALL_MS } from './assetReads'
 
 const TABS = [
   { key: 'register',   label: 'Register' },
@@ -26,6 +27,12 @@ const TABS = [
 export default function FixedAssets() {
   const { hasImsAccess } = useAuth()
   const { scopedFrom } = useScopedDb()
+  // S849 (ASSETS-13): nothing is read until both gates pass — the IMS supervisor rank the page and
+  // the database both require, and Crest Suite Pro for this outlet. The same SUITE_PAGES entry
+  // drives the gate below, so the card and the loads cannot disagree (ACCESS's shared pattern).
+  const suite = useSuiteAccess(SUITE_PAGES.fixedAssets)
+  const canView = hasImsAccess('supervisor')
+  const canLoad = suite.allowed && canView
   const [activeTab, setActiveTab] = useState('register')
   const [categories, setCategories] = useState([])
   const [assets, setAssets] = useState([])
@@ -43,16 +50,24 @@ export default function FixedAssets() {
   // hid the "Posted" confirmation before it could ever be read, even though the post itself had
   // already succeeded.
   const hasLoadedOnce = useRef(false)
+  // Two reloads in a row (a save, then a close) must not let the slower, older one win.
+  const loadSeq = useRef(0)
 
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (canLoad) load() }, [canLoad]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function load() {
+    if (!canLoad) return
+    const seq = ++loadSeq.current
     if (!hasLoadedOnce.current) setLoading(true)
+    // Bounded (ASSETS-15): a hung read used to hold the page on "Loading…" for good. The register
+    // is paged, so a client past 1,000 assets is read whole.
     const results = await Promise.all([
-      scopedFrom('assets_categories').order('sort_order').order('name'),
-      scopedFrom('assets_register', '*, assets_categories(name, tax_pool_hint)').order('created_at', { ascending: false }),
+      settleWithin(scopedFrom('assets_categories').order('sort_order').order('name').order('id'), ASSET_CALL_MS, 'Reading the asset categories'),
+      settleWithin(readRegister(scopedFrom), ASSET_CALL_MS, 'Reading the asset register'),
     ])
-    const failed = firstError(results)
+    if (seq !== loadSeq.current) return
+    // The error OBJECT, so ReportLoadError keeps its code in the fine print.
+    const failed = results.find(r => r.error)?.error || null
     if (failed) {
       setLoadError(failed)
       setLoading(false)
@@ -68,7 +83,7 @@ export default function FixedAssets() {
 
   // Defensive route guard even though the nav item already hides for sub-supervisor accounts
   // (mirrors PayrollRun.jsx's convention of guarding the route itself, not just its nav entry).
-  if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
+  if (!canView) return <Navigate to="/dashboard" replace />
 
   return (
     <div>
@@ -79,7 +94,7 @@ export default function FixedAssets() {
         </div>
       </div>
 
-      <SuiteGate featureKey="fixed_asset_register" featureLabel="Fixed Assets" requireModules={['ims']}>
+      <SuiteGate page={SUITE_PAGES.fixedAssets}>
       {/* S765: five real sub-views with no tab semantics at all — no tablist, no tabpanel, and
           five separate Tab stops. */}
       <Tabs
@@ -116,7 +131,7 @@ export default function FixedAssets() {
             <DisposalReportTab assets={assets} />
           )}
           {activeTab === 'tax' && (
-            <TaxPoolTab assets={assets} categories={categories} />
+            <TaxPoolTab />
           )}
         </>
       )}

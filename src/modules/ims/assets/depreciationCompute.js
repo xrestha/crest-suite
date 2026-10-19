@@ -3,6 +3,8 @@
 //
 // This is deliberately a SEPARATE system from taxPoolCompute.js (Nepal's statutory pooled-WDV
 // tax depreciation) — the two are expected to disagree with each other, that's normal, not a bug.
+import { adToBs, adToBsSafe, bsToAd, daysInBsMonth, formatAd, getBsFiscalYearStart, BS_MONTHS } from '../../../utils/bsCalendar'
+import { parseAdDateLocal } from '../../../shared/nepalTime'
 
 const MS_PER_DAY = 86400000
 
@@ -24,25 +26,60 @@ export function annualStraightLineAmount({ totalCost, salvageValue, usefulLifeYe
   return Math.max(0, (totalCost - salvageValue) / usefulLifeYears)
 }
 
-// Scales annualAmount down to (a) this period's own length (so a shorter-than-a-year period,
-// if this ever supports monthly periods, gets a proportionally smaller charge) and (b) the
-// fraction of the period actually held, if acquisitionDate falls after periodStart. Returns 0 if
-// the asset wasn't yet acquired by periodEnd.
+// The BS fiscal year a day falls in (S849, ASSETS-14): its first and last day and its length.
+// Built from the BS table (bsToAd(fy, 4, 1) to the last day of Ashadh fy+1), through formatAd, so
+// no bsToAd Date is ever read in UTC. A year whose length is not 365 or 366 lies outside the BS
+// table, where the conversion falls back to flat month lengths; it is charged as 365 days, which is
+// what every year was charged as before. Cached per fiscal year.
+const fySpanCache = new Map()
+// A UTC day count back to "YYYY-MM-DD" (a UTC-built Date, so toISOString is the right reading).
+const isoOfDay = d => new Date(d * MS_PER_DAY).toISOString().slice(0, 10)
+function fiscalYearSpanOfDay(utcDay) {
+  const bs = adToBs(parseAdDateLocal(isoOfDay(utcDay)))
+  const fy = getBsFiscalYearStart(bs.year, bs.month)
+  let span = fySpanCache.get(fy)
+  if (!span) {
+    const startDay = toUtcDay(formatAd(bsToAd(fy, 4, 1)))
+    const endDay = toUtcDay(formatAd(bsToAd(fy + 1, 3, daysInBsMonth(fy + 1, 3))))
+    const len = endDay - startDay + 1
+    span = { fy, startDay, endDay, days: len === 365 || len === 366 ? len : 365 }
+    fySpanCache.set(fy, span)
+  }
+  return span
+}
+
+// `{ start, end, days }` of the BS fiscal year a "YYYY-MM-DD" day falls in.
+export function fiscalYearSpanDays(isoDay) {
+  const s = fiscalYearSpanOfDay(toUtcDay(isoDay))
+  return { fy: s.fy, start: isoOfDay(s.startDay), end: isoOfDay(s.endDay), days: s.days }
+}
+
+// The straight-line charge for the days of [periodStart, periodEnd] the asset was held (from
+// acquisitionDate, if that is later). Returns 0 if the asset wasn't yet acquired by periodEnd.
+//
+// S849 (ASSETS-14): each day is charged at the annual figure ÷ the length of the BS fiscal year it
+// falls in, so the span is split at fiscal-year boundaries. A whole fiscal year therefore charges
+// exactly the annual figure — a 366-day year used to charge 366/365 of it — and a 365-day year is
+// unchanged.
 export function proRatedAmount({ annualAmount, periodStart, periodEnd, acquisitionDate }) {
   const startDay = toUtcDay(periodStart)
   const endDay = toUtcDay(periodEnd)
   const acqDay = toUtcDay(acquisitionDate)
   if (acqDay > endDay) return 0
+  if (!(endDay - startDay + 1 > 0)) return 0
 
-  const periodDays = endDay - startDay + 1
-  if (periodDays <= 0) return 0
-  const periodFullCharge = annualAmount * (periodDays / 365)
-
-  const heldStartDay = Math.max(startDay, acqDay)
-  const heldDays = endDay - heldStartDay + 1
-  if (heldDays <= 0) return 0
-
-  return periodFullCharge * (heldDays / periodDays)
+  let day = Math.max(startDay, acqDay)
+  let total = 0
+  while (day <= endDay) {
+    const fy = fiscalYearSpanOfDay(day)
+    // The day always lies inside its own fiscal year; the fallback only keeps a malformed span
+    // from looping, by charging the rest of the period at that year's rate.
+    let segEnd = Math.min(endDay, fy.endDay)
+    if (!(segEnd >= day)) segEnd = endDay
+    total += annualAmount * ((segEnd - day + 1) / fy.days)
+    day = segEnd + 1
+  }
+  return total
 }
 
 // Never depreciate below salvage_value, and never a negative charge.
@@ -160,6 +197,10 @@ export function effectiveDepreciation(row) {
 //
 // `chargedThrough` is the last day depreciation still stands charged for — the latest such day over
 // every period (periodChargedThrough below). A disposal (D24) charges from the day after it.
+//
+// `covered` (S849, ASSETS-8) is the same days as merged [start, end] spans, oldest first: each
+// period from its first day to the last day it still stands charged for. chargeGaps() reads the
+// holes between them — a month no run was posted for, or a run reversed after the fact.
 export function bookPositionsByAsset(rows, asOf = null) {
   const cut = asOf ? dayOf(asOf) : null
   const acc = {}
@@ -180,13 +221,71 @@ export function bookPositionsByAsset(rows, asOf = null) {
   const out = {}
   for (const [assetId, a] of Object.entries(acc)) {
     let through = null
+    const spans = []
     for (const g of Object.values(a.periods)) {
       const last = periodChargedThrough(g)
-      if (last && (!through || last > through)) through = last
+      if (!last) continue
+      if (!through || last > through) through = last
+      spans.push({ start: g.start, end: last })
     }
-    out[assetId] = { charged: r2(a.charged), rows: a.rows, chargedThrough: through }
+    spans.sort((x, y) => (x.start < y.start ? -1 : x.start > y.start ? 1 : 0))
+    const covered = []
+    for (const s of spans) {
+      const prev = covered[covered.length - 1]
+      if (prev && s.start <= addDaysIso(prev.end, 1)) { if (s.end > prev.end) prev.end = s.end }
+      else covered.push({ ...s })
+    }
+    out[assetId] = { charged: r2(a.charged), rows: a.rows, chargedThrough: through, covered }
   }
   return out
+}
+
+// The days from the asset's first chargeable day (chargeStartDate: acquisition, or the day after
+// depreciation already taken before Crest) to `upTo` that no posted run stands charged for (S849,
+// ASSETS-8). `position` is the asset's bookPositionsByAsset() entry. Each gap is
+// { start, end, days, amount }, `amount` being roughly what a run would charge for it (the
+// straight-line figure, before the salvage floor). A skipped month between runs used to be
+// charged by nobody and named by nothing, not even at a disposal.
+export function chargeGaps({ asset, position, upTo }) {
+  const from = chargeStartDate(asset)
+  const to = dayOf(upTo)
+  if (!from || !to || from > to) return []
+  const annual = annualStraightLineAmount({
+    totalCost: parseFloat(asset.total_cost) || 0,
+    salvageValue: parseFloat(asset.salvage_value) || 0,
+    usefulLifeYears: parseFloat(asset.useful_life_years) || 0,
+  })
+  const gapOf = (start, end) => ({
+    start, end,
+    days: toUtcDay(end) - toUtcDay(start) + 1,
+    amount: r2(proRatedAmount({ annualAmount: annual, periodStart: start, periodEnd: end, acquisitionDate: start })),
+  })
+  const gaps = []
+  let cur = from
+  for (const s of position?.covered || []) {
+    if (s.end < cur) continue
+    if (s.start > to) break
+    if (s.start > cur) {
+      const before = addDaysIso(s.start, -1)
+      gaps.push(gapOf(cur, before < to ? before : to))
+    }
+    cur = addDaysIso(s.end, 1)
+    if (cur > to) return gaps
+  }
+  if (cur <= to) gaps.push(gapOf(cur, to))
+  return gaps
+}
+
+// Two stored days as one BS span for a sentence: "15 Kartik – 14 Mangsir 2083", the year written
+// once when both ends share it. A day outside the BS table is shown as its AD date.
+export function bsSpanLabel(start, end) {
+  const bsOf = d => adToBsSafe(parseAdDateLocal(dayOf(d)))
+  const a = bsOf(start), b = bsOf(end)
+  const full = (bs, d) => (bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : `${dayOf(d)} (AD)`)
+  if (!a || !b) return `${full(a, start)} – ${full(b, end)}`
+  if (dayOf(start) === dayOf(end)) return full(a, start)
+  if (a.year === b.year) return `${a.day} ${BS_MONTHS[a.month - 1]} – ${full(b, end)}`
+  return `${full(a, start)} – ${full(b, end)}`
 }
 
 // The last day of ONE period that still stands charged, or null when none of it does.
@@ -359,9 +458,8 @@ export function depreciationInWindow(rows, windowStart, windowEnd) {
   return { amount: r2(amount), count, prorated }
 }
 
-// rows: [{ categoryName, totalCost, nbv }] — one row per asset held on the valuation date with
-// personal_use_percent === 0, `nbv` already resolved by the caller (computeValuationAsOf). Computed
-// on read — no stored aggregate.
+// rows: [{ categoryName, totalCost, nbv }] — one row per asset held on the valuation date, `nbv`
+// already resolved by the caller (computeValuationAsOf). Computed on read — no stored aggregate.
 export function computePortfolioValuation(rows) {
   const totalCost = rows.reduce((s, r) => s + r.totalCost, 0)
   const nbv = rows.reduce((s, r) => s + r.nbv, 0)
@@ -395,14 +493,18 @@ export function assetHeldOn(asset, asOf) {
   return !!gone && gone > day
 }
 
-// The portfolio valuation as of a date (S792, COSTS-2/COSTS-4): every asset held on that date with
-// no personal use, each at cost less the charges posted for periods ending on or before it, and less
-// any depreciation taken before Crest once the date reaches its `opening_as_of` (D40). Not a
-// chosen "latest row" — see bookPositionsByAsset() for why a row cannot carry the book value.
+// The portfolio valuation as of a date (S792, COSTS-2/COSTS-4): every asset held on that date, each
+// at cost less the charges posted for periods ending on or before it, and less any depreciation
+// taken before Crest once the date reaches its `opening_as_of` (D40). Not a chosen "latest row" —
+// see bookPositionsByAsset() for why a row cannot carry the book value.
+//
+// S849 (ASSETS-6, owner decision SU6 a): an asset with a personal-use share counts in full, as it
+// does in the runs, the Overheads memo and the tax pools. It used to drop out of the valuation
+// entirely at any share above 0, so the one report that left it out disagreed with all the others.
 export function computeValuationAsOf({ assets, postedRows, asOf }) {
   const positions = bookPositionsByAsset(postedRows, asOf)
   const rows = (assets || [])
-    .filter(a => (a.personal_use_percent ?? 0) === 0 && assetHeldOn(a, asOf))
+    .filter(a => assetHeldOn(a, asOf))
     .map(a => ({
       categoryName: a.assets_categories?.name || 'Uncategorized',
       totalCost: parseFloat(a.total_cost) || 0,

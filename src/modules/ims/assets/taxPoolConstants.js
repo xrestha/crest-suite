@@ -53,12 +53,18 @@ export const POOL_EXAMPLES = {
   E: 'Software licenses (e.g. your POS software, accounting software), franchise or trademark rights. Rare for an independent café — mainly relevant if you\'re a franchise.',
 }
 
-// Section 16 — deductible repair/maintenance expense on a pool is capped at this % of the pool's
-// CLOSING depreciation base for the year. Anything above the cap is not lost; it's added to the
-// pool's depreciation base for next year instead of being expensed this year. Confirmed 5%, not
-// 7%, via two independent readings of the statutory text — some secondary accounting-blog sources
-// state 7%, which this plan's own research found does not match the Act's own wording.
-export const REPAIR_CAP_RATE = 0.05
+// Section 16(2) — deductible repair/maintenance expense on a pool is capped at this share of the
+// pool's DEPRECIATION BASE for the year: the base its rate is applied to (Schedule 2 §2(2), "A"),
+// not the value left after depreciation. Anything above the cap is not lost; it joins the pool's
+// base next year (Section 16(3)) instead of being expensed this year. 7% is §16(2) as substituted
+// by the Financial Ordinance 2060 and the Financial Act 2064 (Law Commission text through the
+// Financial Act 2067); the original 2058 text said 5%, which is what Crest used until S849
+// (ASSETS-1), and against the post-depreciation value. Verify with your accountant, as above.
+export const REPAIR_CAP_RATE = 0.07
+
+// Schedule 2 §2(6): a Pool A–D balance left below this after the year's depreciation is written
+// off in full that year instead of being carried forward (S849, ASSETS-18).
+export const SMALL_POOL_BALANCE = 2000
 
 export const DISCLAIMER_TEXT =
   'These figures are computed per the Income Tax Act 2058’s pooled depreciation method for ' +

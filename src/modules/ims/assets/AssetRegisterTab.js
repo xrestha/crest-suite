@@ -20,6 +20,17 @@ const fmt = nprInt
 // A stored AD date as the BS date it was picked as, never the runtime's AD rendering (S792, COSTS-11).
 const fmtDate = d => formatAdAsBs(d)
 
+// GAPS-12: what the operator's Delete asset does, from the posted lines this tab read.
+function deleteConsequence(asset, linesByAssetId, chargedByAssetId) {
+  const tail = 'Posted tax schedules are not changed, but the next tax preview no longer counts this asset.'
+  if (linesByAssetId == null) {
+    return `— Crest could not count its posted depreciation lines on this visit. Deleting it removes every one of them, and each closed month's Overheads depreciation memo that counted them drops by its share. ${tail} Each removed line is kept in the Audit Log.`
+  }
+  const count = linesByAssetId[asset.id] || 0
+  if (count === 0) return `has no posted depreciation lines. Deleting it removes it from the register. ${tail}`
+  return `carries ${count} posted depreciation ${count === 1 ? 'line' : 'lines'} (NPR ${fmt(chargedByAssetId[asset.id] || 0)}). Deleting it removes them, and every closed month's Overheads depreciation memo that counted them drops by its share. ${tail} Each removed line is kept in the Audit Log.`
+}
+
 export default function AssetRegisterTab({ categories, assets, onReload }) {
   const { clientId, isAdmin } = useAuth()
   const { scopedFrom } = useScopedDb()
@@ -30,6 +41,10 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
   // A failed NBV read must not render every asset at full cost / 0% depreciated — and must never
   // be written into the cache (S682).
   const [nbvError, setNbvError] = useState(null)
+  // S849 (GAPS-12): how many posted lines each asset carries, from the same read — not cached, so
+  // the operator's delete confirm counts only from a read that succeeded on this visit. null = not
+  // counted (the read failed, or has not landed yet).
+  const [linesByAssetId, setLinesByAssetId] = useState(null)
   const [filterCategory, setFilterCategory] = useState('all')
   const [filterStatus, setFilterStatus] = useState('active')
   const [filterLocation, setFilterLocation] = useState('all')
@@ -51,7 +66,7 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
   // view allowed sessionDataCache's read-revisit cache (a pure display read, never a batch-save
   // baseline like Stock.js's "Save All").
   async function loadNbv() {
-    if (assets.length === 0) { setChargedByAssetId({}); return }
+    if (assets.length === 0) { setChargedByAssetId({}); setLinesByAssetId({}); return }
     // Paged (one row per asset per run crosses the 1000-row cap inside a year of monthly runs, and
     // a truncated read shows the assets past the cut at full cost), and summed through
     // bookPositionsByAsset, so every run and reversal counts whatever period it covers (S792).
@@ -60,12 +75,14 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
     if (error) {
       const a = asActionError(error)
       setNbvError({ text: 'Could not load the posted depreciation, so the Net Book Value column is not real — it shows the last figures this browser saw, or cost. Reload before relying on it. ' + a.text, detail: a.detail })
+      setLinesByAssetId(null)
       return
     }
     setNbvError(null)
-    const map = {}
-    Object.entries(bookPositionsByAsset(data)).forEach(([assetId, p]) => { map[assetId] = p.charged })
+    const map = {}, counts = {}
+    Object.entries(bookPositionsByAsset(data)).forEach(([assetId, p]) => { map[assetId] = p.charged; counts[assetId] = p.rows })
     setChargedByAssetId(map)
+    setLinesByAssetId(counts)
     writePageCache('fixed-assets', 'charged', clientId, map)
   }
 
@@ -209,10 +226,11 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
           onCancel={() => { setConfirmDelete(null); setDeleteError('') }}
           onConfirm={() => handleDelete(confirmDelete)}
         >
+          {/* GAPS-12: the facts, from the posted lines this tab already read. Posted tax schedules
+              are their own rows and are not touched; the old sentence said they changed. */}
           <p style={{ margin: '0 0 10px' }}>
-            <strong>{confirmDelete.asset_code} — {confirmDelete.name}</strong> is removed from the
-            register, along with every depreciation entry already posted against it. Both the book
-            and the tax-pool figures for the periods it appeared in change as a result.
+            <strong>{confirmDelete.asset_code} — {confirmDelete.name}</strong>{' '}
+            {deleteConsequence(confirmDelete, linesByAssetId, chargedByAssetId)}
           </p>
           <p style={{ margin: 0 }}>This cannot be undone.</p>
           {deleteError && (

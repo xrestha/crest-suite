@@ -7,12 +7,13 @@ import FieldError, { fieldAria } from '../../../components/FieldError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
-import { withTimeout } from '../../../utils/withTimeout'
+import { withTimeout, settleWithin } from '../../../utils/withTimeout'
 import { formatAdAsBs } from '../../../utils/bsCalendar'
 import { nprInt } from '../../../shared/nepalMoney'
 import { POOL_LABELS, POOL_EXAMPLES } from './taxPoolConstants'
 import { bookPositionsByAsset, depreciationInputChanges } from './depreciationCompute'
 import { fiscalYearOfAdDate } from './taxPoolCompute'
+import { answerLost, ASSET_CALL_MS } from './assetReads'
 
 // S792 (COSTS-8, the D5 precedent): what an edit to the figures depreciation is worked out from
 // does to an asset that already has depreciation posted, as the paragraphs of a confirm dialog.
@@ -186,11 +187,24 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
 
   async function write(payload) {
     setSaving(true); setError('')
-    const { error: err } = asset
-      ? await scopedUpdate('assets_register', { ...payload, updated_at: new Date().toISOString() }).eq('id', asset.id)
-      : await scopedInsert('assets_register', payload)
+    // Bounded (S849, ASSETS-15): a hung save used to leave the button on "Saving…" for good.
+    const { error: err } = await settleWithin(asset
+      ? scopedUpdate('assets_register', { ...payload, updated_at: new Date().toISOString() }).eq('id', asset.id)
+      : scopedInsert('assets_register', payload), ASSET_CALL_MS, 'Saving the asset')
 
     setSaving(false)
+    if (err && answerLost(err)) {
+      // No answer is not "not saved" (ASSETS-17). A new asset has no unique key to stop a second
+      // copy, so pressing Save again could add it twice: check the Register first.
+      const { detail } = asActionError(err)
+      setError({
+        text: asset
+          ? 'The connection dropped before the server answered, so these changes may have been saved. Close this form and check the asset on the Register before saving again.'
+          : 'The connection dropped before the server answered, so this asset may have been added. Close this form and check the Register before saving again, or it may be added twice.',
+        detail,
+      })
+      return
+    }
     if (err) { setError(asActionError(err)); return }
     onSaved()
   }
@@ -246,7 +260,7 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
         </div>
 
         <div className="form-field">
-          <label htmlFor="assetf-f10"><Tip text="For the annual tax filing on the Tax Depreciation (IRD) tab — not used for the Depreciation Runs tab. Nepal groups assets into 5 pools by type rather than depreciating each item separately. Auto-fills from the category, still editable per asset. Not sure which one? Pick '— Not tracked —' and ask your accountant later; nothing else on this page is affected." width={320}>Tax Pool</Tip></label>
+          <label htmlFor="assetf-f10"><Tip text="For the Tax Depreciation (IRD) tab only. Nepal groups assets into 5 pools by type. It fills from the category and can be changed per asset. Not sure yet? '— Not tracked —' leaves the asset out of the tax schedule until you choose; that tab lists such assets before you post." width={320}>Tax Pool</Tip></label>
           <select id="assetf-f10" className="form-select" value={form.tax_pool} onChange={e => set('tax_pool', e.target.value)}>
             <option value="">— Not tracked —</option>
             {['A', 'B', 'C', 'D', 'E'].map(p => <option key={p} value={p}>{POOL_LABELS[p]}</option>)}
@@ -258,7 +272,7 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
           )}
         </div>
         <div className="form-field">
-          <label htmlFor="assetf-f11"><Tip text="Percentage of this asset's use that's personal rather than business. Reports default to filtering this to 0% — apportioned depreciation for a non-zero value isn't calculated in v1." width={300}>Personal Use %</Tip></label>
+          <label htmlFor="assetf-f11"><Tip text="Recorded for your accountant. Crest does not split anything by it: depreciation runs, the Valuation Report and the tax pools all count this asset in full." width={300}>Personal Use %</Tip></label>
           <QtyInput id="assetf-f11" value={form.personal_use_percent} onChange={v => set('personal_use_percent', v)} className="form-input" style={{ width: '100%' }} />
         </div>
         <div className="form-field">
