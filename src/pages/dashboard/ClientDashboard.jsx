@@ -144,7 +144,7 @@ const PROJ_ACTUAL_KEY = { salesProj: 'sales', purchProj: 'purchases' }
 // line is the GOOD one (+1 = above is good, -1 = below is good). Selling more than the pace you
 // locked in is a win; spending more than it is not. Keyed by dataKey so a third metric pair is one
 // entry here, the same way PROJ_ACTUAL_KEY above works.
-const TARGET_KEY = { sales: 'salesTarget', purchases: 'purchTarget' }
+const TARGET_KEY = { sales: 'salesTarget', purchases: 'purchTarget', salesToday: 'salesTarget', purchToday: 'purchTarget' }
 const GOOD_DIRECTION = { sales: 1, purchases: -1 }
 
 // How far off target still counts as ON target. Without a dead zone every single day earns a
@@ -236,7 +236,7 @@ function TrendTooltipContent({ active, payload, label, big }) {
           : { glyph: gap > 0 ? '▲' : '▼', color: good ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }
         return (
           <p key={en.dataKey} style={{ margin: '4px 0 0' }}>
-            <span style={{ color: en.color }}>●</span> {en.name}{soFar && ' so far'} : NPR {Math.round(value).toLocaleString('en-IN')}
+            <span style={{ color: en.color }}>{soFar ? '○' : '●'}</span> {en.name}{soFar && ' so far'} : NPR {Math.round(value).toLocaleString('en-IN')}
             {mark && (
               <span style={{ color: mark.color }}>
                 {' '}{mark.glyph}{gapPct != null && ` ${gapPct < 1 ? gapPct.toFixed(1) : Math.round(gapPct)}%`}
@@ -1011,13 +1011,20 @@ export default function ClientDashboard({ scope = 'home' }) {
     for (let d = startDay; d <= lastDay; d++) {
       const isProj = projDays[d] != null
       const isPurchProj = purchProjDays[d] != null
+      const today = d === todayDay
       trend.push({
         day: `Day ${d}`,
-        purchases: dayPurchMap[d] != null ? dayPurchMap[d] : null,
-        sales: dailySalesOn && daySalesMap[d] != null ? daySalesMap[d] : null,
         // Today, still trading (S792 PLANNING-2): its actual is sold-so-far, drawn beside its
-        // forecast rather than replacing it. The tooltip and the projection's dot key off this.
-        inProgress: d === todayDay,
+        // forecast rather than replacing it. Since S851 it is its own key, drawn as a hollow dot
+        // apart from the actual line, so a part-day never reads as the line falling. The tooltip
+        // and the projection's dot key off inProgress.
+        purchases: !today && dayPurchMap[d] != null ? dayPurchMap[d] : null,
+        sales: !today && dailySalesOn && daySalesMap[d] != null ? daySalesMap[d] : null,
+        ...(today && {
+          purchToday: dayPurchMap[d] ?? null,
+          salesToday: dailySalesOn ? daySalesMap[d] ?? null : null,
+        }),
+        inProgress: today,
         // dashed line: anchor at the last finished day with an entry so it connects, then the
         // forecast days (today's included)
         salesProj: isProj ? projDays[d]
@@ -1709,8 +1716,19 @@ export default function ClientDashboard({ scope = 'home' }) {
     if (todayIdx === -1) return dailyTrendView.slice(-10)
     return dailyTrendView.slice(Math.max(0, todayIdx - 6), todayIdx + 4)
   })()
-  const dailyTrendPurchTotal = dailyTrend.reduce((s, d) => s + (d.purchases || 0), 0)
-  const dailyTrendSalesTotal = dailyTrend.reduce((s, d) => s + (d.sales || 0), 0)
+  // Today's sold-so-far rides on its own key (S851), and is part of "so far".
+  const dailyTrendPurchTotal = dailyTrend.reduce((s, d) => s + (d.purchases ?? d.purchToday ?? 0), 0)
+  const dailyTrendSalesTotal = dailyTrend.reduce((s, d) => s + (d.sales ?? d.salesToday ?? 0), 0)
+  // The dashed forecast exactly on the dotted Target on every day it forecasts: the footer says so
+  // (S851), since one line then sits on the other. Anchor days (an actual beside the dashed point,
+  // not today) are not forecasts. Before S851 a cached row held today in `sales`, which only
+  // skips today here until the next load.
+  const forecastOnTarget = (projKey, targetKey) => {
+    const days = dailyTrendView.filter(r => r[projKey] != null && r[PROJ_ACTUAL_KEY[projKey]] == null)
+    return days.length > 0 && days.every(r => r[projKey] === r[targetKey])
+  }
+  const salesOnTarget = !!salesProjectionView && forecastOnTarget('salesProj', 'salesTarget')
+  const purchOnTarget = !!purchProjection && forecastOnTarget('purchProj', 'purchTarget')
   // Only a current-model Target is drawn: a pre-S780 one can still be sitting in dashboardCache
   // for the moment before loadStats replaces it, and its slope fit is exactly what S780 removed.
   const salesTarget = isCurrentSnapshot('sales', salesTargetSnap) ? salesTargetSnap : null
@@ -2600,24 +2618,32 @@ export default function ClientDashboard({ scope = 'home' }) {
           footer={<>
             {(salesProjection || purchProjection || salesTarget || purchTarget || forecastHistoryFailed || festivalsUnread) && (
               <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)', display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
+                {/* S851: each figure is led by its line's own glyph and hue, as in the legend, and
+                    the figure itself is plain text1. It was purple for sales and red for purchases:
+                    neither is a line on this chart, and red reads as a warning (DESIGN.md, The One
+                    Signal Meaning Rule). */}
                 {salesProjection && (
                   <span>
-                    Projected month-end revenue: <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesProjectionView.projectedMonthEnd.toLocaleString('en-IN')}</strong>
+                    <span style={{ color: DAILY_TREND_COLORS.sales, letterSpacing: '-2px' }}>┄</span>{' '}
+                    Projected month-end revenue: <strong style={{ color: 'var(--theme-text1)' }}>NPR {salesProjectionView.projectedMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
                 {purchProjection && (
                   <span>
-                    Projected month-end purchases: <strong style={{ color: 'var(--theme-red-text)' }}>NPR {purchProjection.projectedMonthEnd.toLocaleString('en-IN')}</strong>
+                    <span style={{ color: DAILY_TREND_COLORS.purchases, letterSpacing: '-2px' }}>┄</span>{' '}
+                    Projected month-end purchases: <strong style={{ color: 'var(--theme-text1)' }}>NPR {purchProjection.projectedMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
                 {salesTarget && (
                   <span>
-                    Sales target ({targetBasis(salesTarget)}): <strong style={{ color: 'var(--theme-purple-text)' }}>NPR {salesTargetMonthEnd.toLocaleString('en-IN')}</strong>
+                    <span style={{ color: DAILY_TREND_COLORS.salesTarget, letterSpacing: '-2px' }}>⋯</span>{' '}
+                    Sales target ({targetBasis(salesTarget)}): <strong style={{ color: 'var(--theme-text1)' }}>NPR {salesTargetMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
                 {purchTarget && (
                   <span>
-                    Purchase target ({targetBasis(purchTarget)}): <strong style={{ color: 'var(--theme-red-text)' }}>NPR {purchTarget.projectedMonthEnd.toLocaleString('en-IN')}</strong>
+                    <span style={{ color: DAILY_TREND_COLORS.purchTarget, letterSpacing: '-2px' }}>⋯</span>{' '}
+                    Purchase target ({targetBasis(purchTarget)}): <strong style={{ color: 'var(--theme-text1)' }}>NPR {purchTarget.projectedMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
                 {/* S850: printed, not only hovered, so a screenshot keeps which days are festivals. */}
@@ -2639,6 +2665,14 @@ export default function ClientDashboard({ scope = 'home' }) {
                     Sales forecast for Day {dayRanges(l.days)}: {l.pct}% of a usual day, from how Day {dayRanges(l.from)} sold
                   </span>
                 ))}
+                {/* S851: said in words because the two lines are one line here, dotted over dashed. */}
+                {(salesOnTarget || purchOnTarget) && (
+                  <span style={{ color: 'var(--theme-text3)' }}>
+                    <Tip text="The dashed forecast and the dotted target are the same line so far. The forecast starts from your usual week and moves away from it once a usual day this month (not a festival) is over and shows whether trade is running above or below usual.">
+                      {salesOnTarget && purchOnTarget ? 'Both forecasts are' : salesOnTarget ? 'The sales forecast is' : 'The purchase forecast is'}
+                    </Tip>{' '}on the target line so far
+                  </span>
+                )}
                 {forecastHistoryFailed ? (
                   <span style={{ color: 'var(--theme-amber-text)' }}>
                     Past months or the holiday calendar could not be read, so the forecast uses this month only. A target will be set once they load.
@@ -2651,8 +2685,8 @@ export default function ClientDashboard({ scope = 'home' }) {
                   <span style={{ color: 'var(--theme-text3)' }}>
                     · {salesTarget || purchTarget ? "forecast = your usual weekday pattern, adjusted to this month's pace" : "forecast = this month's daily average"}
                     {/* S792 PLANNING-2: said in the footer, not only the tooltip, so a screenshot
-                        keeps why today's point sits below its dashed line. */}
-                    {' '}(today counts once the day is over)
+                        keeps why today's point sits below its dashed line. S851: and which point it is. */}
+                    {' '}(today so far is the hollow dot, and counts once the day is over)
                   </span>
                 )}
               </div>
@@ -2785,12 +2819,18 @@ export default function ClientDashboard({ scope = 'home' }) {
                   {/* See TrendTooltipContent at module scope for why this chart needs custom
                       content (anchor-day suppression, value-sorted rows, the target arrows). */}
                   <Tooltip content={<TrendTooltipContent big={big} />} />
-                  {/* Frozen full-month reference lines, drawn first (so they sit BEHIND the more
-                      prominent actual/adaptive-projection lines below) — thin, dotted, and each in
-                      its own hue (DAILY_TREND_COLORS.salesTarget/purchTarget) rather than reusing
-                      Purchases/Sales' gold/green, so it doesn't collapse into a same-colour dash
-                      variant of the line already sharing this metric's hue. Never moves once
-                      captured; see dailyForecast.js for why that's the point. */}
+                  {/* Paint order, bottom to top: the dashed forecasts, the dotted Targets, the actuals,
+                      today's hollow dots. The Targets used to go first, under everything, and on a
+                      month where the forecast equals the Target (no usual day over yet) the dashed
+                      line covered the dotted one completely, so the Target looked like it stopped
+                      (S851). Above the forecast both stay visible; the actuals stay on top. */}
+                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Sales Projection" stroke={DAILY_TREND_COLORS.sales} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={projActiveDot('salesProj')} {...chartMotion()} />}
+                  {purchProjection && <Line type="monotone" dataKey="purchProj" name="Purchases Projection" stroke={DAILY_TREND_COLORS.purchases} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={projActiveDot('purchProj')} {...chartMotion()} />}
+                  {/* Frozen full-month reference lines — thin, dotted, and each in its own hue
+                      (DAILY_TREND_COLORS.salesTarget/purchTarget) rather than reusing Purchases/Sales'
+                      gold/green, so it doesn't collapse into a same-colour dash variant of the line
+                      already sharing this metric's hue. Never moves once captured; see
+                      dailyForecast.js for why that's the point. */}
                   {salesTarget && <Line type="monotone" dataKey="salesTarget" name="Sales Target" stroke={DAILY_TREND_COLORS.salesTarget} strokeWidth={1.5} strokeDasharray="2 3" strokeOpacity={0.75} connectNulls dot={false} {...chartMotion()} />}
                   {purchTarget && <Line type="monotone" dataKey="purchTarget" name="Purchases Target" stroke={DAILY_TREND_COLORS.purchTarget} strokeWidth={1.5} strokeDasharray="2 3" strokeOpacity={0.75} connectNulls dot={false} {...chartMotion()} />}
                   {big ? (
@@ -2803,8 +2843,11 @@ export default function ClientDashboard({ scope = 'home' }) {
                   ) : (
                     <Line type="monotone" dataKey="sales" name="Sales" stroke={DAILY_TREND_COLORS.sales} strokeWidth={2} connectNulls dot={{ r: 2, fill: DAILY_TREND_COLORS.sales, strokeWidth: 0 }} activeDot={{ r: 4, fill: DAILY_TREND_COLORS.sales }} {...chartMotion()} />
                   ))}
-                  {salesProjection && <Line type="monotone" dataKey="salesProj" name="Sales Projection" stroke={DAILY_TREND_COLORS.sales} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={projActiveDot('salesProj')} {...chartMotion()} />}
-                  {purchProjection && <Line type="monotone" dataKey="purchProj" name="Purchases Projection" stroke={DAILY_TREND_COLORS.purchases} strokeWidth={2} strokeDasharray="5 4" strokeOpacity={0.85} connectNulls dot={false} activeDot={projActiveDot('purchProj')} {...chartMotion()} />}
+                  {/* Today's sold-so-far (S851): a hollow dot in the metric's hue, filled with the card
+                      so a line behind it does not show through, and joined to nothing. One point, so
+                      the stroke draws no segment; it is the hue the tooltip's swatch reads. */}
+                  <Line dataKey="purchToday" name="Purchases" stroke={DAILY_TREND_COLORS.purchases} legendType="none" dot={{ r: big ? 4 : 3, fill: colors.card, stroke: DAILY_TREND_COLORS.purchases, strokeWidth: 2 }} activeDot={{ r: big ? 5 : 4, fill: colors.card, stroke: DAILY_TREND_COLORS.purchases, strokeWidth: 2 }} {...chartMotion()} />
+                  {hasDailySales && <Line dataKey="salesToday" name="Sales" stroke={DAILY_TREND_COLORS.sales} legendType="none" dot={{ r: big ? 4 : 3, fill: colors.card, stroke: DAILY_TREND_COLORS.sales, strokeWidth: 2 }} activeDot={{ r: big ? 5 : 4, fill: colors.card, stroke: DAILY_TREND_COLORS.sales, strokeWidth: 2 }} {...chartMotion()} />}
                 </ComposedChart>
               </ResponsiveContainer>
             )
