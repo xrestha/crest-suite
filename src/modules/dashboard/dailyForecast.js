@@ -28,6 +28,10 @@
 //     and the forecast alike, and judges the pace against that lowered (or raised) expectation; one
 //     with no multiplier is drawn as a usual day and does not judge the pace, so a quiet Dashain
 //     week does not pull the forecast down for the rest of Kartik.
+//     S851 (owner decision): on the FORECAST, one with no multiplier learns its own rate. Back-to-back
+//     festival days are one festival (festivalLearnRuns); once one of its days is over, the rest of
+//     that festival is forecast at exactly what its finished days sold against a usual day, in full
+//     from the first day, not eased in. The Target stays a usual day, and ordinary days never move.
 //   - PURCHASES: never scaled (a kitchen stocks up before a festival as often as it buys less on
 //     it), and no festival day judges their pace either.
 // The snapshot keeps the usual week; festivals are applied when the line is drawn, so a multiplier
@@ -197,6 +201,19 @@ export const salesFestivalFactor = festivals => d => festivals?.[d]?.multiplier 
 export const salesFestivalJudged = festivals => d => !(festivals?.[d] && festivals[d].multiplier == null)
 export const purchFestivalJudged = festivals => d => !festivals?.[d]
 
+// The sales forecast's festivals that learn their own rate (S851), as runs of day numbers: back-to-back
+// festival days are one festival, and only its days with no Demand Multiplier learn. A day with one
+// keeps it and does not split the festival, so { 1, 2: ×0.3, 3 } is one festival learning on 1 and 3.
+export function festivalLearnRuns(festivals) {
+  const days = Object.keys(festivals || {}).map(Number).sort((a, b) => a - b)
+  const runs = []
+  days.forEach((d, i) => {
+    if (i === 0 || d !== days[i - 1] + 1) runs.push([])
+    if (festivals[d].multiplier == null) runs[runs.length - 1].push(d)
+  })
+  return runs.filter(r => r.length)
+}
+
 // The day in progress is never a sample (S792 PLANNING-2/3; the rule Demand Forecast has kept since
 // S694). POS stamps sales_entries.bs_day with today at every bill close, so from the morning's first
 // bill today used to read as a finished day: at 10 a.m. a 30,000-a-day outlet's 2,000 was judged as
@@ -240,7 +257,12 @@ export function splitAtToday({ salesDayNums, elapsedDay, today }) {
 // may not, for sales; no festival may, for purchases). A day not judged still counts in the
 // month-end total at what it actually took. With every day judged the arithmetic is unchanged; with
 // none judged yet, a base is taken at face value.
-export function projectMonth({ base, valueMap, expectDays, fromDay, monthEndDay, weekdayOf, dayFactor = () => 1, judged = () => true }) {
+//
+// `learnRuns` (S851, sales only): festivalLearnRuns() output. A festival's finished days set the rate
+// for its days still ahead: what they sold ÷ what a usual day would have sold at this month's pace
+// (and rain), so the pace is not counted twice. Taken in full from the first finished day; today is
+// never evidence, and no day outside the festival moves. `learned` names each one for the footer.
+export function projectMonth({ base, valueMap, expectDays, fromDay, monthEndDay, weekdayOf, dayFactor = () => 1, judged = () => true, learnRuns = [] }) {
   if (expectDays.length === 0) return null
   const paceDays = expectDays.filter(d => judged(d))
   const n = paceDays.length
@@ -258,15 +280,27 @@ export function projectMonth({ base, valueMap, expectDays, fromDay, monthEndDay,
     const perNormalDay = weight > 0 ? actual / weight : actual / n
     perDay = d => perNormalDay * dayFactor(d)
   }
+  const done = new Set(expectDays)
+  const learnedOf = {}
+  const learned = []
+  learnRuns.forEach(run => {
+    const from = run.filter(d => d < fromDay && done.has(d))
+    const days = run.filter(d => d >= fromDay && d <= monthEndDay)
+    const usual = sum(from.map(perDay))
+    if (!from.length || !days.length || !(usual > 0)) return
+    const factor = Math.max(0, sum(from.map(d => Number(valueMap[d]) || 0)) / usual)
+    days.forEach(d => { learnedOf[d] = factor })
+    learned.push({ from, days, pct: Math.round(factor * 100) })
+  })
   const projDays = {}
   let projSum = 0
   for (let d = fromDay; d <= monthEndDay; d++) {
-    const v = Math.round(perDay(d))
+    const v = Math.round(perDay(d) * (learnedOf[d] ?? 1))
     projDays[d] = v
     projSum += valueMap[d] == null ? v : Math.max(v, Number(valueMap[d]))
   }
   const actualBefore = sum(Object.entries(valueMap).filter(([d]) => Number(d) < fromDay).map(([, v]) => Number(v)))
-  return { projDays, projectedTotal: Math.round(actualBefore + projSum), paceFactor }
+  return { projDays, projectedTotal: Math.round(actualBefore + projSum), paceFactor, learned }
 }
 
 // A usual week laid over the month, each day × `dayFactor(d)`: the Target's month total. With no

@@ -12,6 +12,7 @@ import {
   dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
   projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue, splitAtToday,
   monthFestivals, salesFestivalFactor, salesFestivalJudged, purchFestivalJudged, targetTotal, dayRanges, canCaptureTarget,
+  festivalLearnRuns,
 } from '../../modules/dashboard/dailyForecast'
 import { holidaysByKeyOf } from '../../utils/demandForecastMath'
 import {
@@ -195,7 +196,9 @@ function TrendTooltipContent({ active, payload, label, big }) {
         <p style={{ margin: '2px 0 0', color: 'var(--theme-text3)', fontSize: big ? 11 : 10 }}>
           {row.festival.name} · {row.festival.multiplier != null
             ? `Demand Multiplier ×${row.festival.multiplier} on sales`
-            : 'no Demand Multiplier set in Holiday Calendar'}
+            : row.festLearned
+              ? `sales forecast ${row.festLearned.pct}% of a usual day, from Day ${dayRanges(row.festLearned.from)}`
+              : 'no Demand Multiplier set in Holiday Calendar'}
         </p>
       )}
       {shown.map(en => {
@@ -966,7 +969,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     const salesTrend = (dailySalesOn && isCurrentMonth)
       ? projectMonth({
           base: nextSalesTargetSnap || historyBase.sales, valueMap: daySalesMap, expectDays: salesDone, fromDay: salesFrom, monthEndDay, weekdayOf,
-          dayFactor: salesFactorOf, judged: salesFestivalJudged(festivals),
+          dayFactor: salesFactorOf, judged: salesFestivalJudged(festivals), learnRuns: festivalLearnRuns(festivals),
         })
       : null
     // The same call's inputs, kept for the rain adjustment to re-run at render (S784). Sales only:
@@ -992,7 +995,7 @@ export default function ClientDashboard({ scope = 'home' }) {
       : null
     const projDays = salesTrend?.projDays || {}
     const purchProjDays = purchTrend?.projDays || {}
-    put(setSalesProjection, 'salesProjection', salesTrend ? { projectedMonthEnd: salesTrend.projectedTotal } : null)
+    put(setSalesProjection, 'salesProjection', salesTrend ? { projectedMonthEnd: salesTrend.projectedTotal, learned: salesTrend.learned } : null)
     put(setPurchProjection, 'purchProjection', purchTrend ? { projectedMonthEnd: purchTrend.projectedTotal } : null)
 
     // Build the unified day axis, full month (Day 1 → month end for the current month; full actual
@@ -1658,21 +1661,27 @@ export default function ClientDashboard({ scope = 'home' }) {
         weekdayOf: d => bsToAd(salesForecastInputs.bsYear, salesForecastInputs.bsMonth, d).getDay(),
         dayFactor: d => rainAdj.factorOf(d) * salesFestivalFactor(inputFestivals)(d),
         judged: salesFestivalJudged(inputFestivals),
+        learnRuns: festivalLearnRuns(inputFestivals),
       })
     : null
   // The days AHEAD the rain moved, for the footer. A rainy day already gone only corrected the pace.
   const rainForecastDays = rainTrend
     ? Object.keys(rainAdj.byDay).map(Number).filter(d => rainTrend.projDays[d] != null).sort((a, b) => a - b)
     : []
-  const dailyTrendView = rainTrend
+  const salesProjectionView = rainTrend ? { projectedMonthEnd: rainTrend.projectedTotal, learned: rainTrend.learned } : salesProjection
+  // S851: festivals whose sales forecast follows their own finished days, for the footer and the
+  // tooltip. A projection cached before S851 has no `learned`, which reads as none.
+  const festivalLearned = salesProjectionView?.learned || []
+  const learnedByDay = Object.fromEntries(festivalLearned.flatMap(l => l.days.map(d => [d, l])))
+  const dailyTrendView = rainTrend || festivalLearned.length
     ? dailyTrend.map(row => {
         const d = parseInt(String(row.day).replace('Day ', ''), 10)
-        if (rainTrend.projDays[d] == null) return row
+        const withLearned = learnedByDay[d] ? { ...row, festLearned: learnedByDay[d] } : row
+        if (rainTrend?.projDays[d] == null) return withLearned
         const rain = rainAdj.byDay[d]
-        return { ...row, salesProj: rainTrend.projDays[d], ...(rain && { rainMm: rain.mm, rainPct: rainAdj.pct }) }
+        return { ...withLearned, salesProj: rainTrend.projDays[d], ...(rain && { rainMm: rain.mm, rainPct: rainAdj.pct }) }
       })
     : dailyTrend
-  const salesProjectionView = rainTrend ? { projectedMonthEnd: rainTrend.projectedTotal } : salesProjection
   const measuredRain = weatherByAd && salesForecastInputs?.base
     ? measuredRainEffect({ dayLog: salesDayLog, byWeekday: salesForecastInputs.base.byWeekday, weatherByAd })
     : null
@@ -1710,7 +1719,7 @@ export default function ClientDashboard({ scope = 'home' }) {
   // is the usual week's, and stands in only until loadStats has worked the month out.
   const salesTargetMonthEnd = salesTarget ? (salesTargetTotal ?? salesTarget.projectedMonthEnd) : null
   // This month's festivals, off the chart's own rows, for the footer: which days, and how many of
-  // them carry no Demand Multiplier and are therefore drawn as usual days.
+  // them carry no Demand Multiplier: usual days on the Target, learning on the forecast (S851).
   const festivalRows = dailyTrend.filter(r => r.festival)
   const festivalDayNums = festivalRows.map(r => parseInt(String(r.day).replace('Day ', ''), 10))
   const festivalsUnset = festivalRows.filter(r => r.festival.multiplier == null).length
@@ -1720,7 +1729,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     : `set on Day ${snap.capturedDay} from this month's first ${snap.sampleDays} days`)
   const dailyTrendSummary = dailyTrend.length === 0
     ? 'No purchase or sales data for this period.'
-    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}.` : ''}${salesProjectionView ? ` Projected month-end revenue: NPR ${salesProjectionView.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${rainForecastDays.length ? ` The sales forecast allows for rain on day ${rainForecastDays.join(', ')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${salesTarget ? ` Sales target (${targetBasis(salesTarget)}): NPR ${salesTargetMonthEnd.toLocaleString('en-IN')}.` : ''}${purchTarget ? ` Purchase target (${targetBasis(purchTarget)}): NPR ${purchTarget.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${festivalDayNums.length ? ` Festival days from Holiday Calendar: day ${dayRanges(festivalDayNums)}.` : ''}`
+    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}.` : ''}${salesProjectionView ? ` Projected month-end revenue: NPR ${salesProjectionView.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${rainForecastDays.length ? ` The sales forecast allows for rain on day ${rainForecastDays.join(', ')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${salesTarget ? ` Sales target (${targetBasis(salesTarget)}): NPR ${salesTargetMonthEnd.toLocaleString('en-IN')}.` : ''}${purchTarget ? ` Purchase target (${targetBasis(purchTarget)}): NPR ${purchTarget.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${festivalDayNums.length ? ` Festival days from Holiday Calendar: day ${dayRanges(festivalDayNums)}.` : ''}${festivalLearned.map(l => ` The sales forecast for day ${dayRanges(l.days)} is ${l.pct}% of a usual day, from how day ${dayRanges(l.from)} sold.`).join('')}`
   const topItemSpendSummary = topItemSpend.length === 0
     ? 'No purchase data for this period.'
     : `Top items by spend: ${topItemSpend.slice(0, 3).map(i => `${i.fullName} at NPR ${i.value.toLocaleString('en-IN')}`).join(', ')}.`
@@ -2614,16 +2623,22 @@ export default function ClientDashboard({ scope = 'home' }) {
                 {/* S850: printed, not only hovered, so a screenshot keeps which days are festivals. */}
                 {festivalDayNums.length > 0 && (
                   <span>
-                    <Tip text={`Festival days come from Holiday Calendar. They are left out when working out a usual weekday, so a festival last month does not raise or lower this month's target. On a festival with a Demand Multiplier set, the sales target and sales forecast for that day are a usual day × that multiplier. A festival with none set is drawn as a usual day, and how it sells does not change the forecast for the rest of the month. Purchases are never scaled on festivals: a kitchen often stocks up before one rather than buying less on it.`}>
+                    <Tip text={`Festival days come from Holiday Calendar. They are left out when working out a usual weekday, so a festival last month does not raise or lower this month's target. On a festival with a Demand Multiplier set, the sales target and sales forecast for that day are a usual day × that multiplier. A festival with none set is a usual day on the sales target. On the sales forecast it is a usual day until one of its days is over; from then on, the rest of that festival is forecast at the rate its finished days sold against a usual day (festival days back to back count as one festival). How a festival sells never changes the forecast for ordinary days. Purchases are never scaled on festivals: a kitchen often stocks up before one rather than buying less on it.`}>
                       Festival days
                     </Tip>: Day {dayRanges(festivalDayNums)}
                     {festivalsUnset > 0 && (
                       <span style={{ color: 'var(--theme-text3)' }}>
-                        {' '}· {festivalsUnset} with no Demand Multiplier, drawn as usual days
+                        {' '}· {festivalsUnset} with no Demand Multiplier: usual days on the target, and the forecast follows how the days of each festival sell
                       </span>
                     )}
                   </span>
                 )}
+                {/* S851: printed, so a screenshot keeps why a festival's dashed line sits off the target. */}
+                {festivalLearned.map(l => (
+                  <span key={l.days[0]}>
+                    Sales forecast for Day {dayRanges(l.days)}: {l.pct}% of a usual day, from how Day {dayRanges(l.from)} sold
+                  </span>
+                ))}
                 {forecastHistoryFailed ? (
                   <span style={{ color: 'var(--theme-amber-text)' }}>
                     Past months or the holiday calendar could not be read, so the forecast uses this month only. A target will be set once they load.

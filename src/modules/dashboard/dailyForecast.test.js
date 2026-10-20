@@ -2,7 +2,7 @@ import {
   dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
   projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue, HISTORY_DAYS,
   splitAtToday, SNAPSHOT_MODEL, monthFestivals, salesFestivalFactor, salesFestivalJudged,
-  purchFestivalJudged, targetTotal, dayRanges, canCaptureTarget,
+  purchFestivalJudged, targetTotal, dayRanges, canCaptureTarget, festivalLearnRuns,
 } from './dailyForecast'
 import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
 import { holidayKey, holidaysByKeyOf } from '../../utils/demandForecastMath'
@@ -459,5 +459,94 @@ describe('festivals (S850)', () => {
     expect(dayRanges([1, 2, 3, 4, 5, 6, 22, 23, 24, 25, 26, 29])).toBe('1–6, 22–26, 29')
     expect(dayRanges([5])).toBe('5')
     expect(dayRanges([])).toBe('')
+  })
+})
+
+// S851 (owner decision): a festival with no Demand Multiplier learns its own sales rate from its
+// finished days, in full, for its own days still ahead. The Target, ordinary days and purchases never
+// move with it.
+describe('a festival learns its own rate (S851)', () => {
+  const base = { byWeekday: Array(7).fill(10000) }
+  const span = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i)
+  const dashain = Object.fromEntries(span(1, 6).map(d => [d, { name: 'Dashain', multiplier: null }]))
+  const tihar = Object.fromEntries(span(22, 26).map(d => [d, { name: 'Tihar', multiplier: null }]))
+  const sales = (festivals, extra) => ({
+    base, weekdayOf, monthEndDay, dayFactor: salesFestivalFactor(festivals), judged: salesFestivalJudged(festivals),
+    learnRuns: festivalLearnRuns(festivals), ...extra,
+  })
+
+  test('back-to-back festival days are one festival; a day with a multiplier keeps it and does not split it', () => {
+    expect(festivalLearnRuns({ ...dashain, ...tihar, 29: { name: 'Chhath', multiplier: null } })).toEqual([span(1, 6), span(22, 26), [29]])
+    expect(festivalLearnRuns({ 1: { multiplier: null }, 2: { multiplier: 0.3 }, 3: { multiplier: null } })).toEqual([[1, 3]])
+    expect(festivalLearnRuns({ 12: { multiplier: 1.5 } })).toEqual([])
+    expect(festivalLearnRuns({})).toEqual([])
+  })
+
+  test('Kartik 2083: two Dashain days at 40% of usual put the rest of Dashain at 40%, and nothing after it', () => {
+    // Day 3 is today, 900 so far: not evidence, and the total counts its forecast.
+    const r = projectMonth(sales(dashain, { valueMap: { 1: 1700, 2: 6300, 3: 900 }, expectDays: [1, 2], fromDay: 3 }))
+    expect(r.learned).toEqual([{ from: [1, 2], days: [3, 4, 5, 6], pct: 40 }])
+    expect(span(3, 6).map(d => r.projDays[d])).toEqual([4000, 4000, 4000, 4000])
+    expect(r.projDays[7]).toBe(10000)
+    expect(r.paceFactor).toBe(1)
+    expect(r.projectedTotal).toBe(1700 + 6300 + 4 * 4000 + (monthEndDay - 6) * 10000)
+  })
+
+  test('taken in full from the first finished day, with no easing', () => {
+    const r = projectMonth(sales(dashain, { valueMap: { 1: 1700 }, expectDays: [1], fromDay: 2 }))
+    expect(r.learned[0].pct).toBe(17)
+    expect(r.projDays[2]).toBe(1700)
+  })
+
+  test('measured against a usual day at the pace this month runs at, so the pace is not counted twice', () => {
+    // Days 1–7 ordinary at 12,000 against a 10,000 base: pace 1 + 7/10 × 0.2 = 1.14, a usual day 11,400.
+    const festivals = Object.fromEntries(span(8, 10).map(d => [d, { name: 'Tihar', multiplier: null }]))
+    const valueMap = { ...Object.fromEntries(span(1, 7).map(d => [d, 12000])), 8: 5700 }
+    const r = projectMonth(sales(festivals, { valueMap, expectDays: span(1, 8), fromDay: 9 }))
+    expect(r.paceFactor).toBeCloseTo(1.14)
+    expect(r.learned[0].pct).toBe(50)
+    expect(r.projDays[9]).toBe(5700)
+    expect(r.projDays[11]).toBe(11400)
+  })
+
+  test('a busy festival lifts its own days the same way', () => {
+    const r = projectMonth(sales(dashain, { valueMap: { 1: 15000 }, expectDays: [1], fromDay: 2 }))
+    expect(r.projDays[2]).toBe(15000)
+    expect(r.projDays[7]).toBe(10000)
+  })
+
+  test('each festival learns from its own days only, and one already over changes nothing', () => {
+    const valueMap = Object.fromEntries(span(1, 9).map(d => [d, d <= 6 ? 2000 : 10000]))
+    const r = projectMonth(sales({ ...dashain, ...tihar }, { valueMap, expectDays: span(1, 9), fromDay: 10 }))
+    expect(r.learned).toEqual([])
+    expect(r.projDays[22]).toBe(10000)
+  })
+
+  test('a day with a multiplier keeps it inside a learning festival', () => {
+    const festivals = { 1: { name: 'Navami', multiplier: null }, 2: { name: 'Tika', multiplier: 0.3 }, 3: { name: 'Ekadashi', multiplier: null } }
+    const r = projectMonth(sales(festivals, { valueMap: { 1: 5000 }, expectDays: [1], fromDay: 2 }))
+    expect(r.projDays[2]).toBe(3000)
+    expect(r.projDays[3]).toBe(5000)
+  })
+
+  test('rain on a finished festival day is allowed for, so a wet day is not read as a quiet one', () => {
+    const rainy = d => (d === 1 ? 0.5 : 1)
+    const r = projectMonth(sales(dashain, { valueMap: { 1: 2500 }, expectDays: [1], fromDay: 2, dayFactor: rainy }))
+    expect(r.learned[0].pct).toBe(50)
+    expect(r.projDays[2]).toBe(5000)
+  })
+
+  test('with no base, a festival is measured against the plain average of this month', () => {
+    const festivals = Object.fromEntries(span(6, 8).map(d => [d, { name: 'Tihar', multiplier: null }]))
+    const valueMap = { ...Object.fromEntries(span(1, 5).map(d => [d, 8000])), 6: 4000 }
+    const r = projectMonth(sales(festivals, { base: null, valueMap, expectDays: span(1, 6), fromDay: 7 }))
+    expect(r.projDays[7]).toBe(4000)
+    expect(r.projDays[9]).toBe(8000)
+  })
+
+  test('purchases pass no learnRuns: their festival days ahead stay at a usual day', () => {
+    const r = projectMonth({ base, valueMap: {}, expectDays: [1, 2], fromDay: 3, monthEndDay, weekdayOf, judged: purchFestivalJudged(dashain) })
+    expect(r.projDays[3]).toBe(10000)
+    expect(r.learned).toEqual([])
   })
 })
