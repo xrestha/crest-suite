@@ -56,7 +56,7 @@ History: docs/rules-archive/dashboards.md#s734-nullable-source-undercount
 
 Why: the dotted line is a target precisely because it does not follow the data, and a print or screenshot loses the hover.
 
-History: docs/rules-archive/dashboards.md#s556-frozen-target-line, docs/rules-archive/dashboards.md#s634-three-series and docs/rules-archive/dashboards.md#s780-weekday-target
+History: docs/rules-archive/dashboards.md#s556-frozen-target-line, docs/rules-archive/dashboards.md#s634-three-series, docs/rules-archive/dashboards.md#s780-weekday-target and docs/rules-archive/dashboards.md#s851-festival-learning
 
 ## "Food Cost %" is a closed month's figure; the running month is "Spend % so far" (S792, D30)
 

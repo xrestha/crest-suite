@@ -548,3 +548,28 @@ asked what to set up first; Owner plus email-login managers see it; new clients 
 trial); every new client is offered a setup call with Viber, and Crest enters their item list for them;
 a bill-details check before the first real customer; English only for now, no videos yet; a visible
 Help button and a "Setup step N of M" strip on the page a step opens.
+
+## S851 Festival learning
+
+**Reported from a Dashboard screenshot on Kartik 3, 2083 (Tue 20 Oct 2026): "something looks off".**
+Days 1–6 were Dashain in Holiday Calendar, none with a Demand Multiplier. S850 drew such a festival as
+a usual day that never judges the pace, so with both finished days being Dashain nothing judged it:
+the pace factor was 1 and the forecast equalled the Target to the rupee on every day ahead. The footer
+proved it: sales target 3,43,686 minus projection 3,33,274 is 10,412, which is Sunday and Monday's
+target minus what they sold; the purchase gap 14,688 is Sunday and Monday's whole purchase target (no
+bills entered). So the dashed lines covered the dotted Targets, which looked like they stopped on
+Monday; the forecast said 15.5k for a Dashain Tuesday that had sold 0.9k by then; and today's 0.9k,
+joined to the actual line, read as sales collapsing.
+
+Owner decisions (2026-10-20): a festival with no multiplier learns its own rate on the forecast, taken
+in full from its first finished day (offered: halfway per day, or the ordinary pace's n/(n+3)); the
+three drawing fixes all go in. Properties to keep:
+
+- **The learned rate is measured against a usual day at this month's pace and rain**, so neither is
+  counted twice; ordinary days, the Target and purchases never move with it.
+- **Back-to-back festival days are one festival.** Dashain's days carry different names (Fulpati,
+  Asthami, Navami, Tika), so grouping by name would learn nothing.
+- **Today is never evidence**, and is now drawn as its own hollow dot, never the end of the line.
+- **The Target paints above the forecast**, because the case where they coincide is exactly the start
+  of a month or a festival, when a reader most needs to see the Target.
+

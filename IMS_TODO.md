@@ -368,12 +368,19 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 - ✅ S785 — the header strip's high/low, cloud and thunder, unobserved at push, confirmed live
   2026-09-24: every Kathmandu and Pokhara row carries them, `last_error` NULL on both, and CASA's
   strip matched the stored rows (S786 moved the strip to POS and HR too).
-- ⚪ **The Target's weekday averages still count past public holidays.** Demand Forecast
-  (`DemandForecast.js`, D21) leaves them out and applies Holiday Calendar multipliers. Here, a
-  Dashain Saturday in the 4-week window lifts the Saturday target for the next month, and a big
-  pre-festival restock lifts that weekday's purchase target the same way. A holiday in the open
-  month is not marked either. Candidate: read the same Holiday Calendar and exclude
-  those days in `historyWindowDays()`.
+- ✅ S850 — The Target's weekday averages counted past public holidays. Festival days in Holiday
+  Calendar are now left out of the usual week for both lines, and a festival in the open month
+  with a Demand Multiplier scales its sales day on the Target and the forecast.
+- ✅ S851 — A festival with no Demand Multiplier forecast as a usual day for its whole run. Kartik
+  2083: Dashain days 3–6 forecast at 12–15.5k after days 1–2 sold about 40% of usual, and the
+  forecast equalled the Target to the rupee, hiding it. Back-to-back festival days are now one
+  festival, and once one of its days is over the rest of it is forecast at exactly what its
+  finished days sold (owner decision: trust it fully). Same pass: today is a hollow dot apart from
+  the actual line, the Targets paint above the forecasts (the footer says when they coincide), and
+  the footer figures carry their line colour instead of purple and red.
+- ⚪ **A festival can still only get a Demand Multiplier from Holiday Calendar, an HR page.** An
+  outlet without Crest HR cannot set one; since S851 its forecast learns from the festival itself,
+  but its Target stays a usual day.
 - ✅ S756 — `Stock.js:709-727` Save All writes/deletes every visible row (parallel tablets wipe each other; restamps counted_by; recount guard refuses) → send changed cells only.
 - ✅ S756 — `Stock.js:549-586` offline replay into closed period (with D1).
 - ✅ S756 — `Stock.js:810,242` bare selects (pull-from-last-month, items).
