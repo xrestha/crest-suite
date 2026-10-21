@@ -4,7 +4,9 @@ import Modal from '../../components/Modal'
 import Tip from '../../components/Tip'
 import SearchableSelect from '../../components/SearchableSelect'
 import FieldError, { fieldAria } from '../../components/FieldError'
-import ActionError, { asActionError } from '../../components/ActionError'
+import ActionError from '../../components/ActionError'
+import { settleWithin } from '../../utils/withTimeout'
+import { CUSTOMIZATION_WRITE_MS, writeFailure } from './customizationData'
 
 // Crest Customization (S760) — the build-your-own template.
 //
@@ -50,11 +52,11 @@ export default function BuildYourOwnTemplateModal({ dishes, buildYourOwn = [], g
     if (Object.keys(e).length) return
     setSaving(true)
     setActionError(null)
-    const { data, error } = await supabase.rpc('create_build_your_own_template', {
+    const { data, error } = await settleWithin(supabase.rpc('create_build_your_own_template', {
       p_recipe_id: dishId, p_prefix: prefix.trim() || null,
-    })
+    }), CUSTOMIZATION_WRITE_MS, 'Creating the groups')
     setSaving(false)
-    if (error) { setActionError(asActionError(error)); return }
+    if (error) { setActionError(writeFailure(error)); return }
     onSaved({ dish, result: data })
   }
 

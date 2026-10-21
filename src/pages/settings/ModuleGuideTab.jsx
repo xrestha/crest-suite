@@ -1,5 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { escapeHtml } from '../../utils/escapeHtml'
+
+// The two columns' widths (S852). The content pane used to be `flex: 1`, a basis of zero, so the row
+// never wrapped: at 390px the sidebar kept its 240px and the guide text got about 48px. With a real
+// basis the pane drops below the sidebar once both cannot fit, and STACK_BELOW is that width.
+const SIDEBAR_W = 240
+const COLUMN_GAP = 20
+const CONTENT_MIN = 320
+const STACK_BELOW = SIDEBAR_W + COLUMN_GAP + CONTENT_MIN
 
 // Admin Settings → Guides. Static reference content (imsGuideData.js / hrGuideData.js /
 // posGuideData.js, selected by GuidesTab.jsx) driving a sidebar + content-pane layout — same
@@ -40,6 +48,23 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
     return groups[0].sections[0]
   }, [activeId, groups])
 
+  // Whether the columns are stacked, measured on the row itself rather than guessed from the window,
+  // because the app sidebar takes a different share of it at each width. Stacked, the sidebar must
+  // not stay sticky: in one column it would ride down the page over the guide text it sits above.
+  const rowRef = useRef(null)
+  const contentRef = useRef(null)
+  const [stacked, setStacked] = useState(false)
+  useEffect(() => {
+    const el = rowRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return undefined
+    const ro = new ResizeObserver(entries => {
+      const w = entries[0]?.contentRect?.width
+      if (w) setStacked(w < STACK_BELOW)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   const [printErr, setPrintErr] = useState('')
   const printGuide = () => {
     setPrintErr('')
@@ -54,12 +79,13 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
   }
 
   return (
-    // wrap + flex-basis, so the two columns stack instead of crushing the content pane to ~100px
-    // at 390px — the width S684 fixed this page's tab bar for. `position: sticky` is harmless once
-    // wrapped (there is nothing to stick beside).
-    <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-      {/* Sidebar */}
-      <div style={{ flex: '1 1 240px', maxWidth: 240, position: 'sticky', top: 12 }}>
+    // wrap + a basis on BOTH columns, so they stack on a phone instead of crushing the content
+    // pane (S852; the S684 version gave only the sidebar a basis, so the row never wrapped).
+    <div ref={rowRef} style={{ display: 'flex', gap: COLUMN_GAP, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+      {/* Sidebar: full width and in the flow when stacked, a sticky 240px column beside the text otherwise */}
+      <div style={stacked
+        ? { flex: '1 1 100%', minWidth: 0 }
+        : { flex: `0 0 ${SIDEBAR_W}px`, maxWidth: SIDEBAR_W, position: 'sticky', top: 12 }}>
         <input
           className="form-input"
           value={query}
@@ -76,7 +102,8 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
           🖨 Print full guide
         </button>
         {printErr && <p role="alert" style={{ fontSize: 11, color: 'var(--theme-red-text)', margin: '0 0 12px' }}>{printErr}</p>}
-        <div style={{ maxHeight: 620, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {/* Shorter when stacked, so the guide text is not a full screen below the page list */}
+        <div style={{ maxHeight: stacked ? 280 : 620, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
           {filteredGroups.map(g => (
             <div key={g.key}>
               <h2 style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--theme-text3)', margin: '0 0 6px 4px' }}>
@@ -91,7 +118,14 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
                       type="button"
                       className="guide-nav-btn"
                       aria-current={isActive ? 'true' : undefined}
-                      onClick={() => setActiveId(s.id)}
+                      onClick={() => {
+                        setActiveId(s.id)
+                        // Stacked, the page opens below the list, so take the reader to it.
+                        if (stacked) {
+                          const still = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches
+                          contentRef.current?.scrollIntoView?.({ block: 'start', behavior: still ? 'auto' : 'smooth' })
+                        }
+                      }}
                       style={{
                         textAlign: 'left', background: isActive ? 'var(--theme-accent)' : 'transparent',
                         color: isActive ? 'var(--theme-accent-text)' : 'var(--theme-text2)', border: 'none', borderRadius: 'var(--radius-sm)',
@@ -112,7 +146,7 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
       </div>
 
       {/* Content */}
-      <div className="card" style={{ flex: 1, minWidth: 0 }}>
+      <div ref={contentRef} className="card" style={{ flex: `1 1 ${CONTENT_MIN}px`, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
           <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>{active.title}</h3>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>

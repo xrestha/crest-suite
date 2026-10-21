@@ -1,5 +1,49 @@
 import { fetchAllRows } from '../../shared/fetchAllRows'
+import { andList } from '../../shared/offeredPicks'
 import { firstError } from '../../shared/queryError'
+import { errorInfo } from '../../shared/errorText'
+import { isTimeout } from '../../utils/withTimeout'
+
+// S852: every read and save on the Option Groups page and its dialogs has a time limit, as Combos
+// already had. Without one a hung request left the page on Loading… with no Retry, or a dialog on
+// Saving… whose `if (saving) return` refused every press after it. A save that ran out of time may
+// still land after the clock stopped, and an insert repeated over one that landed is a second row,
+// so its message says where to look and never that nothing was saved.
+export const CUSTOMIZATION_READ_MS = 20000
+export const CUSTOMIZATION_WRITE_MS = 20000
+export const DIALOG_CHECK = 'Close this and reload the page to see whether it saved before you save it again.'
+export const PAGE_CHECK = 'Reload the page to see whether it went through before you try again.'
+
+/** asActionError's { text, detail } for a failed Customization write. A timeout names where to
+ *  check (`check`), because the write may still have landed. */
+export function writeFailure(error, check = DIALOG_CHECK) {
+  const { text, detail } = errorInfo(error, 'operator')
+  if (!isTimeout(error)) return { text, detail }
+  return { text: `The server took too long to answer, so this may have saved or may not. ${check}`, detail }
+}
+
+const DISH_NAMES_SHOWN = 5
+const dishNames = names => andList(names.length > DISH_NAMES_SHOWN
+  ? [...names.slice(0, DISH_NAMES_SHOWN), `${names.length - DISH_NAMES_SHOWN} more`]
+  : names)
+
+/**
+ * The message for an "Offer on…" save whose removals stopped part-way (S852). Removals run in
+ * chunks, so some dishes can be off the group while others still offer it; the message names
+ * both, never a blanket failure. `off` and `still` are dish names; `error` is the failed chunk.
+ * A timed-out chunk may still land, so those dishes "may still" offer it. `retry` is said after a
+ * timeout: every write here is keyed, so saving again is safe.
+ */
+export function detachFailure({ groupName, added, off, still, error, retry }) {
+  const { text, detail } = writeFailure(error)
+  const lead = added ? `The dishes you ticked now offer “${groupName}”. ` : ''
+  const done = off.length ? `It is off ${dishNames(off)}, but ` : ''
+  const one = still.length === 1
+  const rest = isTimeout(error)
+    ? `${done ? 'the' : 'The'} server took too long to answer about ${dishNames(still)}, so ${one ? 'that dish' : 'those dishes'} may still offer it. ${retry}`
+    : `${dishNames(still)} still ${one ? 'offers' : 'offer'} it. ${text}`
+  return { text: `${lead}${done}${rest}`, detail }
+}
 
 // Crest Customization (S758): the reads the Option Groups page and the Menu Pricing "Customize"
 // dialog share. One loader so the two cannot select different columns and then disagree about what

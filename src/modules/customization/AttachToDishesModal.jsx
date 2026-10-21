@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react'
 import Modal from '../../components/Modal'
-import ActionError, { asActionError } from '../../components/ActionError'
+import ActionError from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
+import { settleWithin } from '../../utils/withTimeout'
+import { runChunkedByIds } from '../../shared/fetchAllRows'
+import { CUSTOMIZATION_WRITE_MS, writeFailure, detachFailure } from './customizationData'
 import { npr, nprInt } from '../../shared/nepalMoney'
 import { dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
 
@@ -15,7 +18,10 @@ import { dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
 // Saving is the same DIFF AttachGroupsModal does — ticked dishes upserted first, unticked deleted
 // after — so a failure part-way leaves more attached rather than less. A new attachment takes the
 // next sort slot on ITS dish, so it lands after whatever that dish already offers; per-dish
-// overrides (min/max/default) are left to the dish dialog and untouched here.
+// overrides (min/max/default) are left to the dish dialog and untouched here. Both halves are keyed
+// writes, so pressing Save again after a timeout makes the same change again (S852).
+
+const RETRY_IS_SAFE = 'Saving again is safe, because it makes the same change again.'
 
 // `catalog` (S835): the page's { groups, options, attachments }, so each dish is priced over every
 // group it offers, not this group alone.
@@ -25,6 +31,7 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
     () => new Set(attachments.filter(a => a.group_id === group.id).map(a => a.recipe_id)),
     [attachments, group.id],
   )
+  const dishById = useMemo(() => new Map(dishes.map(d => [d.id, d])), [dishes])
   const [picked, setPicked] = useState(() => new Set(initial))
   const [search, setSearch] = useState('')
   const [saving, setSaving] = useState(false)
@@ -90,16 +97,34 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
       recipe_id: d.id, group_id: group.id, sort: (nextSortByDish[d.id] ?? -1) + 1,
     }))
     if (adds.length) {
-      const { error } = await scopedUpsert('pos_recipe_option_groups', adds, { onConflict: 'recipe_id,group_id' })
-      if (error) { setSaving(false); setActionError(asActionError(error)); return }
+      const { error } = await settleWithin(scopedUpsert('pos_recipe_option_groups', adds, { onConflict: 'recipe_id,group_id' }),
+        CUSTOMIZATION_WRITE_MS, 'Saving the dishes')
+      if (error) { setSaving(false); setActionError(writeFailure(error, RETRY_IS_SAFE)); return }
     }
-    const removeIds = attachments.filter(a => a.group_id === group.id && !picked.has(a.recipe_id)).map(a => a.id)
+    const removeRows = attachments.filter(a => a.group_id === group.id && !picked.has(a.recipe_id))
+    const removeIds = removeRows.map(a => a.id)
     if (removeIds.length) {
-      const { error } = await scopedDelete('pos_recipe_option_groups').in('id', removeIds)
+      // In chunks (S852): `.in('id', …)` travels in the URL, and unticking a group from a whole menu
+      // made one URL of every id. A chunk that answered is off; the one that failed, and any after
+      // it, are named as still offering the group.
+      const detached = new Set()
+      const { error } = await runChunkedByIds(removeIds, async ids => {
+        const r = await settleWithin(scopedDelete('pos_recipe_option_groups').in('id', ids),
+          CUSTOMIZATION_WRITE_MS, 'Saving the dishes')
+        if (!r.error) ids.forEach(id => detached.add(id))
+        return r
+      })
       if (error) {
         setSaving(false)
-        const a = asActionError(error)
-        setActionError({ text: `The dishes you ticked now offer “${group.name}”, but the ones you unticked still do. ${a.text}`, detail: a.detail })
+        const nameOf = a => dishById.get(a.recipe_id)?.name || 'a dish'
+        setActionError(detachFailure({
+          groupName: group.name,
+          added: adds.length > 0,
+          off: removeRows.filter(a => detached.has(a.id)).map(nameOf),
+          still: removeRows.filter(a => !detached.has(a.id)).map(nameOf),
+          error,
+          retry: RETRY_IS_SAFE,
+        }))
         onSaved?.({ partial: true })
         return
       }

@@ -16,7 +16,7 @@ import ActionError, { asActionError } from '../components/ActionError'
 import FieldError, { fieldAria } from '../components/FieldError'
 import { fcThresholds, varianceFlagPct } from '../shared/imsFormulas'
 import { fetchAllRows } from '../shared/fetchAllRows'
-import { withTimeout, isTimeout } from '../utils/withTimeout'
+import { withTimeout, settleWithin, isTimeout } from '../utils/withTimeout'
 import { DEFAULT_SUPPORT_CONTACT, EMERGENCY_CHANNELS, SUPPORT_HOURS, resolveSupportContact, supportPhone } from '../shared/supportContact'
 import { NEPAL_CITIES } from '../shared/nepalCities'
 import { cityPatch } from '../modules/dashboard/weatherSettings'
@@ -29,6 +29,28 @@ const GuidesTab = lazy(() => import('./settings/GuidesTab'))
 
 // A tab's DOM id, for the roving focus and the tabpanel's aria-labelledby.
 const tabSlug = t => t.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+
+// How long a Save waits before giving its button back (S852). commitPatch, saveCategories,
+// savePlatform and commitPrices had no limit, and each sits behind its own `if (saving) return`, so
+// one hung request left "Saving…" on the button and refused every press after it. A request that
+// timed out may still land after the clock ran out, so the message never says it failed. Each of
+// the four writes the same columns again on a second press, which is why it may say a retry is safe.
+const SAVE_TIMEOUT_MS = 20000
+const SAVE_TIMED_OUT = 'The server took too long to answer, so this may have saved or may not. Saving again is safe, because it writes the same values. Or reload the page to check what was saved.'
+
+// The logo and the code runs have limits too (S852). An upload carries up to 2 MB, so it gets
+// longer than a save. A code run is many requests in a row and can rightly take minutes, so each
+// REQUEST is bounded, never the run: a step that runs out of time stops the run where it is.
+const LOGO_UPLOAD_TIMEOUT_MS = 60000
+const CODE_READ_TIMEOUT_MS = 30000
+// Whether a code run may simply be pressed again after a timeout. Items and vendors are numbered
+// from their sorted order, so a second run gives every row the code the first one was writing.
+// Product codes only fill blanks, and recipe_code is unique per client, so a repeat cannot hand one
+// code to two dishes. Sub-recipes are NOT safe: pass 1 clears codes, and a clear that lands late,
+// after a second run has written that row, leaves it with no code.
+const CODE_RETRY_SAFE = 'Running it again is safe: it gives each row the same code again.'
+const PRODUCT_RETRY_SAFE = 'Running it again is safe: it only fills the codes that are still blank.'
+const SUB_RECIPE_RETRY_WAIT = 'Wait a minute, then reload the page and check the sub-recipe codes before running this again. Running it straight away could leave a sub-recipe with no code.'
 
 const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Product Codes', 'Recipe Categories', 'Weather', 'Support', 'Plan Pricing', 'Data', 'Theme', 'Guides']
 
@@ -517,11 +539,11 @@ export default function Settings() {
     try {
       // One column, never `{ ...settings, … }`: the context's copy of the row is fresher than the
       // page's form, but it is still a snapshot, and the same last-writer-wins applies.
-      await saveSettings({ recipe_categories: cleaned })
+      await withTimeout(saveSettings({ recipe_categories: cleaned }), SAVE_TIMEOUT_MS, 'Saving the categories')
       setCatMsg('ok:Categories saved.')
       setTimeout(() => setCatMsg(''), 2500)
     } catch (e) {
-      setCatMsg('error:' + e.message)
+      setCatMsg('error:' + (isTimeout(e) ? SAVE_TIMED_OUT : e.message))
     }
     setCatSaving(false)
   }
@@ -639,11 +661,12 @@ export default function Settings() {
   async function commitPatch(patch) {
     setSaving(true)
     try {
-      if (Object.keys(patch).length) await saveSettings(patch)
+      if (Object.keys(patch).length) await withTimeout(saveSettings(patch), SAVE_TIMEOUT_MS, 'Saving settings')
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } catch (e) {
-      setError(e.message)
+      // SettingsContext has already worded a refusal (errorLine); a timeout is worded here.
+      setError(isTimeout(e) ? { text: SAVE_TIMED_OUT, detail: e.message } : e.message)
     }
     setSaving(false)
   }
@@ -653,11 +676,11 @@ export default function Settings() {
     setPlatformSaving(true); setPlatformMsg('')
     try {
       const trimmed = Object.fromEntries(Object.entries(platformForm).map(([k, v]) => [k, typeof v === 'string' ? v.trim() : v]))
-      await savePlatformSupport(trimmed)
+      await withTimeout(savePlatformSupport(trimmed), SAVE_TIMEOUT_MS, 'Saving the support contact')
       setPlatformMsg('ok:Support contact saved — every client sees it on their next load.')
       setTimeout(() => setPlatformMsg(''), 4000)
     } catch (e) {
-      setPlatformMsg('error:' + e.message)
+      setPlatformMsg('error:' + (isTimeout(e) ? SAVE_TIMED_OUT : e.message))
     }
     setPlatformSaving(false)
   }
@@ -698,11 +721,11 @@ export default function Settings() {
   async function commitPrices() {
     setPriceSaving(true); setPriceMsg('')
     try {
-      await savePlatformPlanPrices(canonicalPrices(priceForm))
+      await withTimeout(savePlatformPlanPrices(canonicalPrices(priceForm)), SAVE_TIMEOUT_MS, 'Saving the plan prices')
       setPriceMsg('ok:Prices saved — the public pricing page, Help > Plan & Pricing and every MRR figure now quote them.')
       setTimeout(() => setPriceMsg(''), 5000)
     } catch (e) {
-      setPriceMsg('error:' + e.message)
+      setPriceMsg('error:' + (isTimeout(e) ? SAVE_TIMED_OUT : e.message))
     }
     setPriceSaving(false)
   }
@@ -721,15 +744,23 @@ export default function Settings() {
     const ext = LOGO_EXT[file.type] || (file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : 'png')
     setLogoUploading(true); setLogoMsg('')
     const path = `${clientId || 'admin'}/logo.${ext}`
-    const { error: uploadErr } = await supabase.storage.from('Logos')
-      .upload(path, file, { upsert: true, contentType: file.type, cacheControl: '31536000' })
-    if (uploadErr) { setLogoMsg('error:' + uploadErr.message); setLogoUploading(false); return }
+    const { error: uploadErr } = await settleWithin(supabase.storage.from('Logos')
+      .upload(path, file, { upsert: true, contentType: file.type, cacheControl: '31536000' }),
+    LOGO_UPLOAD_TIMEOUT_MS, 'Uploading the logo')
+    if (uploadErr) {
+      // upsert writes the same path, so a second upload replaces whatever the first one left.
+      setLogoMsg('error:' + (isTimeout(uploadErr)
+        ? 'The server took too long to answer, so the logo may or may not have uploaded. Uploading it again is safe, because it replaces the same file.'
+        : uploadErr.message))
+      setLogoUploading(false)
+      return
+    }
     const { data: { publicUrl } } = supabase.storage.from('Logos').getPublicUrl(path)
     const versioned = `${publicUrl}?v=${Date.now()}`
     const previous = form.logo_url
     setForm(f => ({ ...f, logo_url: versioned }))
     try {
-      await saveSettings({ logo_url: versioned })
+      await withTimeout(saveSettings({ logo_url: versioned }), SAVE_TIMEOUT_MS, 'Saving the logo')
       setLogoMsg('ok:Logo saved.')
       setTimeout(() => setLogoMsg(''), 3000)
       // A replacement of a different TYPE lands at a different path (logo.png → logo.svg), so the
@@ -737,12 +768,14 @@ export default function Settings() {
       // Best effort and quiet, exactly as Remove below: the row already points at the new file.
       const oldPath = logoObjectPath(previous)
       if (oldPath && oldPath !== path) {
-        const { error: rmErr } = await supabase.storage.from('Logos').remove([oldPath])
+        const { error: rmErr } = await settleWithin(supabase.storage.from('Logos').remove([oldPath]), SAVE_TIMEOUT_MS, 'Removing the old logo file')
         if (rmErr) console.error('Previous logo file not deleted from Storage:', rmErr.message)
       }
     } catch (e) {
       setForm(f => ({ ...f, logo_url: previous }))
-      setLogoMsg('error:The file uploaded, but the row still points at the old logo. ' + e.message)
+      setLogoMsg('error:' + (isTimeout(e)
+        ? 'The file uploaded, but the server took too long to answer about the logo setting, so it may still point at the old logo. Uploading again is safe, or reload the page to check.'
+        : 'The file uploaded, but the row still points at the old logo. ' + e.message))
     }
     setLogoUploading(false)
   }
@@ -759,11 +792,14 @@ export default function Settings() {
         setForm(f => ({ ...f, logo_url: null }))
         setLogoMsg('')
         try {
-          await saveSettings({ logo_url: null })
+          await withTimeout(saveSettings({ logo_url: null }), SAVE_TIMEOUT_MS, 'Removing the logo')
         } catch (e) {
-          // Put the preview back: it showed no logo while the row still held one.
+          // Put the preview back: it showed no logo while the row still held one. A timeout keeps
+          // the file too, since the row may still point at it (S852).
           setForm(f => ({ ...f, logo_url: previous }))
-          setLogoMsg('error:The logo is still in place — the change did not save. ' + e.message)
+          setLogoMsg('error:' + (isTimeout(e)
+            ? 'The server took too long to answer, so the logo may or may not have been removed. Removing it again is safe, or reload the page to check.'
+            : 'The logo is still in place — the change did not save. ' + e.message))
           return
         }
         // Best effort, and deliberately quiet: the column is cleared, so the logo is gone from
@@ -771,7 +807,7 @@ export default function Settings() {
         // failure here. Without it the file stayed publicly readable at its own URL after Remove.
         const objectPath = logoObjectPath(previous)
         if (objectPath) {
-          const { error: rmErr } = await supabase.storage.from('Logos').remove([objectPath])
+          const { error: rmErr } = await settleWithin(supabase.storage.from('Logos').remove([objectPath]), SAVE_TIMEOUT_MS, 'Removing the logo file')
           if (rmErr) console.error('Logo file not deleted from Storage:', rmErr.message)
         }
       },
@@ -781,10 +817,18 @@ export default function Settings() {
   // One write per row, stopping at the first failure and saying how far it got. Every row's
   // result used to be dropped (`await scopedUpdate(...)` with nothing read back), so a refused
   // write — and on sub-recipes a unique-index collision, see below — reported "✓ Renumbered".
+  // Each row's request is bounded (S852). A row that runs out of time stops the run with a
+  // TimeoutError naming that row, because its write may still land; the caller says whether
+  // running it again is safe.
   async function writeCodes(rows, write) {
     let done = 0
     for (const row of rows) {
-      const { error: err } = await write(row)
+      const { error: err } = await settleWithin(write(row), SAVE_TIMEOUT_MS, 'Writing a code')
+      if (isTimeout(err)) {
+        const t = new Error(`Stopped at "${row.name}" after ${done} of ${rows.length}: the server took too long to answer, so that one may or may not have changed.`)
+        t.name = 'TimeoutError'
+        throw t
+      }
       if (err) {
         const a = asActionError(err)
         throw new Error(`Stopped at "${row.name}" after ${done} of ${rows.length}: ${a.text}${a.detail ? ` (${a.detail})` : ''}`)
@@ -820,7 +864,7 @@ export default function Settings() {
     try {
       // The prefix alone — never `{ ...form, … }`, which committed every other tab's unsaved
       // edits as a side effect of pressing Renumber, and wrote the whole stale row (PAGE_FIELDS).
-      if (prefix !== (settings.item_code_prefix || '')) await saveSettings({ item_code_prefix: prefix })
+      if (prefix !== (settings.item_code_prefix || '')) await withTimeout(saveSettings({ item_code_prefix: prefix }), SAVE_TIMEOUT_MS, 'Saving the item code prefix')
 
       // Real items only. A sub-recipe's mirror row in `items` carries the sub-recipe's OWN code
       // (SRC-nnn, written by Recipes.js) and is hidden from Item Master — so renumbering it here
@@ -831,16 +875,16 @@ export default function Settings() {
       // renumbered its first 1000 as ITM-001… while every item past the cap kept its old code — and
       // the new sequence re-issued codes those items already held, under "✓ Renumbered 1000 items".
       // Duplicate codes matter since MASTER-5: Recipe Import resolves an ingredient by code first.
-      const { data: items, error: fetchErr } = await fetchAllRows(() => scopedFrom('items', 'id, name')
+      const { data: items, error: fetchErr } = await settleWithin(fetchAllRows(() => scopedFrom('items', 'id, name')
         .eq('is_sub_recipe', false)
-        .order('name').order('id'))
-      if (fetchErr) throw new Error(asActionError(fetchErr).text)
+        .order('name').order('id')), CODE_READ_TIMEOUT_MS, 'Reading the items')
+      if (fetchErr) throw isTimeout(fetchErr) ? fetchErr : new Error(asActionError(fetchErr).text)
 
       const rows = (items || []).map((it, i) => ({ ...it, code: `${prefix}-${pad3(i + 1)}` }))
       const done = await writeCodes(rows, r => scopedUpdate('items', { item_code: r.code }).eq('id', r.id))
       setRegenerateMsg(`✓ Renumbered ${done} item${done === 1 ? '' : 's'} as ${prefix}-001 through ${prefix}-${pad3(done)}. Sub-recipes keep their own codes.`)
     } catch (e) {
-      setRegenerateMsg(`Error: ${e.message}`)
+      setRegenerateMsg(`Error: ${e.message}${isTimeout(e) ? ` ${CODE_RETRY_SAFE}` : ''}`)
     }
     setRegenerating(false)
   }
@@ -869,21 +913,21 @@ export default function Settings() {
     setRegeneratingVnd(true)
     setRegenerateMsgVnd('')
     try {
-      if (prefix !== (settings.vendor_code_prefix || '')) await saveSettings({ vendor_code_prefix: prefix })
+      if (prefix !== (settings.vendor_code_prefix || '')) await withTimeout(saveSettings({ vendor_code_prefix: prefix }), SAVE_TIMEOUT_MS, 'Saving the vendor code prefix')
 
       // Archived vendors are included on purpose: `vendor_code` has no unique index, so leaving an
       // archived vendor on VND-003 while an active one is renumbered onto VND-003 would give two
       // suppliers one code the moment the archived one is restored.
       // Paged for the same reason as the items renumber above (S792, MASTER-8).
-      const { data: vendors, error: fetchErr } = await fetchAllRows(() => scopedFrom('vendors', 'id, name')
-        .order('name').order('id'))
-      if (fetchErr) throw new Error(asActionError(fetchErr).text)
+      const { data: vendors, error: fetchErr } = await settleWithin(fetchAllRows(() => scopedFrom('vendors', 'id, name')
+        .order('name').order('id')), CODE_READ_TIMEOUT_MS, 'Reading the vendors')
+      if (fetchErr) throw isTimeout(fetchErr) ? fetchErr : new Error(asActionError(fetchErr).text)
 
       const rows = (vendors || []).map((v, i) => ({ ...v, code: `${prefix}-${pad3(i + 1)}` }))
       const done = await writeCodes(rows, r => scopedUpdate('vendors', { vendor_code: r.code }).eq('id', r.id))
       setRegenerateMsgVnd(`✓ Renumbered ${done} vendor${done === 1 ? '' : 's'} as ${prefix}-001 through ${prefix}-${pad3(done)} (archived vendors included, so no two suppliers share a code).`)
     } catch (e) {
-      setRegenerateMsgVnd(`Error: ${e.message}`)
+      setRegenerateMsgVnd(`Error: ${e.message}${isTimeout(e) ? ` ${CODE_RETRY_SAFE}` : ''}`)
     }
     setRegeneratingVnd(false)
   }
@@ -912,14 +956,14 @@ export default function Settings() {
     setRegeneratingSrc(true)
     setRegenerateMsgSrc('')
     try {
-      if (prefix !== (settings.sub_recipe_code_prefix || '')) await saveSettings({ sub_recipe_code_prefix: prefix })
+      if (prefix !== (settings.sub_recipe_code_prefix || '')) await withTimeout(saveSettings({ sub_recipe_code_prefix: prefix }), SAVE_TIMEOUT_MS, 'Saving the sub-recipe code prefix')
 
       // Paged (S792, MASTER-8): past 1000 rows the rest kept their old codes while the new
       // sequence re-issued SRC-001… over them, under a message counting only the first page.
-      const { data: subRecipes, error: fetchErr } = await fetchAllRows(() => scopedFrom('recipes', 'id, name, recipe_code, linked_item_id')
+      const { data: subRecipes, error: fetchErr } = await settleWithin(fetchAllRows(() => scopedFrom('recipes', 'id, name, recipe_code, linked_item_id')
         .eq('category', SUB_RECIPE_CATEGORY)
-        .order('name').order('id'))
-      if (fetchErr) throw new Error(asActionError(fetchErr).text)
+        .order('name').order('id')), CODE_READ_TIMEOUT_MS, 'Reading the sub-recipes')
+      if (fetchErr) throw isTimeout(fetchErr) ? fetchErr : new Error(asActionError(fetchErr).text)
 
       const targets = (subRecipes || []).map((r, i) => ({ ...r, code: `${prefix}-${pad3(i + 1)}` }))
       const changing = targets.filter(r => (r.recipe_code || '') !== r.code)
@@ -946,7 +990,9 @@ export default function Settings() {
         ? 'No sub-recipes to renumber.'
         : `✓ ${total} sub-recipe${total === 1 ? '' : 's'} now run ${prefix}-001 through ${prefix}-${pad3(total)} (${done} changed, ${total - done} already correct). Their stock-count items carry the same codes.`)
     } catch (e) {
-      setRegenerateMsgSrc(`Error: ${e.message} Any sub-recipe left without a code gets one when this is run again.`)
+      setRegenerateMsgSrc(isTimeout(e)
+        ? `Error: ${e.message} ${SUB_RECIPE_RETRY_WAIT}`
+        : `Error: ${e.message} Any sub-recipe left without a code gets one when this is run again.`)
     }
     setRegeneratingSrc(false)
   }
@@ -964,8 +1010,9 @@ export default function Settings() {
     try {
       // Paged (S792, MASTER-8): assignMissingProductCodes picks the next free number from every
       // code it is shown, so a book past 1000 rows could re-issue a code the unread page holds.
-      const { data: recipes, error: fetchErr } = await fetchAllRows(() => scopedFrom('recipes', 'id, name, category, recipe_code').order('id'))
-      if (fetchErr) throw new Error(asActionError(fetchErr).text)
+      const { data: recipes, error: fetchErr } = await settleWithin(fetchAllRows(() => scopedFrom('recipes', 'id, name, category, recipe_code').order('id')),
+        CODE_READ_TIMEOUT_MS, 'Reading the recipes')
+      if (fetchErr) throw isTimeout(fetchErr) ? fetchErr : new Error(asActionError(fetchErr).text)
 
       const pending = assignMissingProductCodes(recipes || [])
       if (pending.length === 0) {
@@ -994,7 +1041,9 @@ export default function Settings() {
               r => scopedUpdate('recipes', { recipe_code: r.recipe_code }).eq('id', r.id))
             setGenerateMsgPrd(`✓ Assigned ${done} Product Code${done === 1 ? '' : 's'}. Existing codes were left as they were.`)
           } catch (e) {
-            setGenerateMsgPrd(`Error: ${e.message} The codes already assigned stay; run this again for the rest.`)
+            setGenerateMsgPrd(isTimeout(e)
+              ? `Error: ${e.message} ${PRODUCT_RETRY_SAFE}`
+              : `Error: ${e.message} The codes already assigned stay; run this again for the rest.`)
           }
         },
       })
@@ -1118,9 +1167,9 @@ export default function Settings() {
       {/* BRANDING */}
       {shownTab === 'Branding' && (
         <div className="card">
-          <h3 style={{ margin: '0 0 20px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          <h2 style={{ margin: '0 0 20px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
             {editingClient ? 'Property Branding' : 'App Branding'}
-          </h3>
+          </h2>
           {isAdmin && (
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>
               {editingClient
@@ -1222,7 +1271,7 @@ export default function Settings() {
           lower card already handled the same case by saying so instead of offering the fields. */}
       {shownTab === 'Property' && (
         <div className="card">
-          <h3 style={{ margin: '0 0 20px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Property Details</h3>
+          <h2 style={{ margin: '0 0 20px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Property Details</h2>
           {!editingClient ? (
             <p style={{ fontSize: 13, color: 'var(--theme-text3)', margin: 0 }}>
               These are per-client — every page that reads them asks for one client's row. Choose a client
@@ -1265,7 +1314,7 @@ export default function Settings() {
           weather anything reads, so the tab says so instead of offering the fields. */}
       {shownTab === 'Weather' && (
         <div className="card">
-          <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Weather</h3>
+          <h2 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Weather</h2>
           {!editingClient ? (
             <p style={{ fontSize: 13, color: 'var(--theme-text3)', margin: 0 }}>
               The weather is set per outlet. Choose a client from the top bar's client switcher to set theirs.
@@ -1313,7 +1362,7 @@ export default function Settings() {
       {/* THRESHOLDS */}
       {shownTab === 'Thresholds' && (
         <div className="card">
-          <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Operational Thresholds</h3>
+          <h2 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Operational Thresholds</h2>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>These decide when a figure is coloured amber or red across every report and dashboard. Leave a box blank to use the default shown in it.</p>
           <div className="form-grid form-grid-2">
             {[
@@ -1360,7 +1409,7 @@ export default function Settings() {
       {/* ITEM CODES */}
       {shownTab === 'Item Codes' && (
         <div className="card">
-          <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Item Codes</h3>
+          <h2 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Item Codes</h2>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
             Auto-generated codes for stock sheets, purchase orders, and audit trails. New items are assigned the next number in sequence automatically.
           </p>
@@ -1381,7 +1430,7 @@ export default function Settings() {
           </div>
 
           <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 0, border: '1px solid var(--theme-border)' }}>
-            <h4 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Regenerate All Codes</h4>
+            <h3 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Regenerate All Codes</h3>
             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
               If items have been deleted, codes may have gaps. This renumbers every item sequentially
               from {(form.item_code_prefix || 'ITM').toUpperCase()}-001, alphabetically by name, and saves the prefix above
@@ -1402,7 +1451,7 @@ export default function Settings() {
       {/* VENDOR CODES */}
       {shownTab === 'Vendor Codes' && (
         <div className="card">
-          <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Vendor Codes</h3>
+          <h2 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Vendor Codes</h2>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
             Auto-generated codes for suppliers — appear on the Vendors list and purchase entries. New vendors are assigned the next number in sequence automatically.
           </p>
@@ -1423,7 +1472,7 @@ export default function Settings() {
           </div>
 
           <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 0, border: '1px solid var(--theme-border)' }}>
-            <h4 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Regenerate All Codes</h4>
+            <h3 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Regenerate All Codes</h3>
             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
               If vendors have been deleted, codes may have gaps. This renumbers every vendor sequentially
               from {(form.vendor_code_prefix || 'VND').toUpperCase()}-001, alphabetically by name, and saves the prefix above with it.
@@ -1443,7 +1492,7 @@ export default function Settings() {
       {/* SUB-RECIPE CODES */}
       {shownTab === 'Sub-Recipe Codes' && (
         <div className="card">
-          <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Sub-Recipe Codes</h3>
+          <h2 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Sub-Recipe Codes</h2>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
             Auto-generated codes for sub-recipes — appear in recipe ingredient rows and the Sub-Recipes tab. New sub-recipes are assigned the next number automatically.
           </p>
@@ -1464,7 +1513,7 @@ export default function Settings() {
           </div>
 
           <div style={{ marginTop: 24, padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 0, border: '1px solid var(--theme-border)' }}>
-            <h4 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Regenerate All Codes</h4>
+            <h3 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Regenerate All Codes</h3>
             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
               Renumbers every sub-recipe sequentially from {(form.sub_recipe_code_prefix || 'SRC').toUpperCase()}-001, alphabetically by name, and saves the prefix above with it. Use this to assign codes to existing sub-recipes or close gaps after deletions. Each sub-recipe's stock-count item takes the same code.
             </p>
@@ -1482,7 +1531,7 @@ export default function Settings() {
 
       {activeTab === 'Product Codes' && (
         <div className="card">
-          <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Product Codes</h3>
+          <h2 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Product Codes</h2>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>
             Short codes for menu items, taken from the first three letters of the recipe's category —
             Beverage becomes <strong>BEV-001</strong>, <strong>BEV-002</strong> and so on. New recipes
@@ -1491,7 +1540,7 @@ export default function Settings() {
           </p>
 
           <div style={{ padding: '16px 20px', background: 'var(--theme-bg)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--theme-border)' }}>
-            <h4 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Generate Missing Product Codes</h4>
+            <h3 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--theme-text1)' }}>Generate Missing Product Codes</h3>
             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 12px', lineHeight: 1.6 }}>
               Gives a code to every menu item that does not have one yet — use this once for recipes
               created before codes existed. <strong>Codes already in place are never changed</strong>,
@@ -1514,7 +1563,7 @@ export default function Settings() {
       {/* RECIPE CATEGORIES */}
       {shownTab === 'Recipe Categories' && (
         <div className="card">
-          <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Recipe Categories</h3>
+          <h2 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Recipe Categories</h2>
           <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>
             These appear in the recipe form dropdown and as filter tabs in Recipe Costing. <strong>Sub-Recipe / Prep Item</strong> is managed by the app and is always there.
             A category's first three letters also make its Product Codes (Beverage → BEV-001).
@@ -1654,7 +1703,7 @@ export default function Settings() {
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div className="card">
-              <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Crest Support — shown to every client</h3>
+              <h2 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Crest Support — shown to every client</h2>
               <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
                 The line a client reaches when the app itself cannot help: the crash page, the login footer, the
                 offline banners in Stock Count and POS, Help → Support, and the "not on your plan" cards. A blank
@@ -1766,9 +1815,9 @@ export default function Settings() {
             </div>
 
             <div className="card">
-              <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              <h2 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                 This client's consultant
-              </h3>
+              </h2>
               <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 24px' }}>
                 Optional, per client. When set, it replaces the Crest line above for this client only — on the upgrade
                 prompts, the lock screen and Help → Support — so the client reaches the person who looks after them.
@@ -1912,14 +1961,14 @@ export default function Settings() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div className="card">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-                <h3 style={{ margin: 0, fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                <h2 style={{ margin: 0, fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                   <Tip
                     width={340}
                     text="One price list for the whole platform — saved against Crest itself, not against the client you are currently viewing. What you save here is what the public pricing page, the Help page's Plan & Pricing tab, the module picker in Admin → Clients and every MRR/ARR figure all quote. Annual is calculated at 25% off the monthly price, so only Monthly is editable. It applies the next time each page loads; nobody already subscribed is re-billed or notified."
                   >
                     Plan Prices (NPR)
                   </Tip>
-                </h3>
+                </h2>
                 {/* The Save sits with the fields it commits and NOT in the page header, because the
                     header button writes the viewed client's settings row — the one place these must
                     never go (S684's rule, S701's reason). Everything it saves is on screen with it. */}
@@ -1942,7 +1991,7 @@ export default function Settings() {
             </div>
 
             <div className="card">
-              <h4 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 700, color: MODULE_INK.ims }}>Crest IMS — tiered</h4>
+              <h3 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 700, color: MODULE_INK.ims }}>Crest IMS — tiered</h3>
               <div className="form-grid form-grid-3">
                 {['starter', 'growth', 'pro'].map(tier => priceField({
                   id: `set-ims-price-${tier}`,
@@ -1959,7 +2008,7 @@ export default function Settings() {
             <div className="form-grid form-grid-3">
               {flatCards.map(card => (
                 <div className="card" key={card.key}>
-                  <h4 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 700, color: card.color }}>{card.title}</h4>
+                  <h3 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 700, color: card.color }}>{card.title}</h3>
                   {priceField({
                     id: `set-${card.key}-price`,
                     label: card.key === 'suite' ? 'Monthly, per outlet' : 'Monthly price',
@@ -1981,7 +2030,7 @@ export default function Settings() {
 
           {/* Presets */}
           <div className="card">
-            <h3 style={{ margin: '0 0 6px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Preset Themes</h3>
+            <h2 style={{ margin: '0 0 6px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Preset Themes</h2>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>Pick a preset — it sets all colors at once — or let the app follow your device's light/dark setting. You can fine-tune individual colors below.</p>
             {/* The Follow-device option is the provider's SYSTEM_KEY (the default on the Crest Staff
                 app). Until S730 nothing in this app could select it, and a device that already had
@@ -2053,7 +2102,7 @@ export default function Settings() {
 
           {/* Color pickers */}
           <div className="card">
-            <h3 style={{ margin: '0 0 6px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Customize Colors</h3>
+            <h2 style={{ margin: '0 0 6px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Customize Colors</h2>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 10px' }}>Click any swatch to pick a color. Changes apply instantly. Start from a preset, then adjust individual colors here.</p>
             {/* Said out loud because it was not, and the gap was visible: the accent used as TEXT is
                 a separate token from the accent used as a FILL, and it has no swatch here. */}
@@ -2123,7 +2172,7 @@ export default function Settings() {
 
           {/* Live preview */}
           <div className="card">
-            <h3 style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Live Preview</h3>
+            <h2 style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Live Preview</h2>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
               <div style={{ padding: '10px 20px', borderRadius: 0, background: colors.accent, color: colors.accentText, fontSize: 13, fontWeight: 700 }}>
                 Primary Button
@@ -2168,7 +2217,7 @@ export default function Settings() {
       {activeTab === 'Data' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card">
-            <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>Backup &amp; Restore</h3>
+            <h2 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>Backup &amp; Restore</h2>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
               A full export of {editingClient ? <strong>{rowLabel}</strong> : 'a client'} — every period, every
               table — lives in <strong>Admin → Clients → Manage → Backup</strong>. It writes a .xlsx to read and
@@ -2182,7 +2231,7 @@ export default function Settings() {
             {/* S747: this card described a feature that does not exist — an archive action, period
                 dropdowns that hide archived months, and a "Show archived" toggle on every report. The
                 only thing there is the Periods page's own list folding old closed months away. */}
-            <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>Old periods</h3>
+            <h2 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>Old periods</h2>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 12px' }}>
               There is no archive action for periods. The Periods page folds closed periods older than 12 months
               out of its own list to keep it short — "Show Archived" there brings them back. Nothing is deleted
@@ -2192,7 +2241,7 @@ export default function Settings() {
           </div>
 
           <div className="card">
-            <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>Per-report export</h3>
+            <h2 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text1)' }}>Per-report export</h2>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>
               Every report page has its own Export to Excel — Monthly Summary, Variance, FIFO, Payment Summary
               and the rest. Those are single-period extracts for reading; the Backup above is the one that can
@@ -2201,7 +2250,7 @@ export default function Settings() {
           </div>
 
           <div className="card" style={{ borderColor: 'color-mix(in srgb, var(--theme-red) 20%, transparent)' }}>
-            <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-red-text)' }}>Resetting or deleting a client</h3>
+            <h2 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-red-text)' }}>Resetting or deleting a client</h2>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>
               Destructive actions are deliberately not on this page — they belong on the screen that names
               which client they are about, where the confirmation can spell out the row counts it is about to

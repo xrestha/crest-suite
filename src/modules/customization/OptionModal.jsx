@@ -4,9 +4,10 @@ import Tip from '../../components/Tip'
 import SearchableSelect from '../../components/SearchableSelect'
 import QtyInput from '../../components/QtyInput'
 import FieldError, { fieldAria } from '../../components/FieldError'
-import ActionError, { asActionError } from '../../components/ActionError'
+import ActionError from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
-import { OPTION_COLS, DIET_LABEL, parseAllergens } from './customizationData'
+import { settleWithin, isTimeout } from '../../utils/withTimeout'
+import { OPTION_COLS, DIET_LABEL, parseAllergens, CUSTOMIZATION_WRITE_MS, writeFailure } from './customizationData'
 import { exFromIncl, inclFromEx, signedPrice, dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
 import { VAT_MODE_UNKNOWN_TEXT } from '../ims/recipes/menuPriceVat'
 import { npr } from '../../shared/nepalMoney'
@@ -34,9 +35,12 @@ const newKey = () => Math.random().toString(36).slice(2)
 // (settings loading, failed, or another client's row), so `vat` is a guess and nothing is saved.
 // `catalog` (S835): the page's { groups, options, attachments }, so the below-zero check prices each
 // dish over every group it offers, not this option alone.
+// `initialError` (S852): the message a previous instance of this dialog left. Saving a NEW option
+// whose ingredient list then fails reopens the dialog on the saved option, under a new key, so it
+// remounts with the reloaded lines; the parent carries the message across that remount.
 export default function OptionModal({
   group, option, ingredients, attachedDishes, catalog, vat, vatUnknown = false, imsEnabled,
-  itemChoices, onClose, onSaved,
+  itemChoices, onClose, onSaved, initialError = null,
 }) {
   const { scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const isSize = group.kind === 'size'
@@ -74,7 +78,7 @@ export default function OptionModal({
   const [stockOpen, setStockOpen] = useState(() => (ingredients || []).length > 0)
   const [errors, setErrors] = useState({})
   const [saving, setSaving] = useState(false)
-  const [actionError, setActionError] = useState(null)
+  const [actionError, setActionError] = useState(initialError)
   const set = patch => setForm(f => ({ ...f, ...patch }))
 
   const priceNum = form.price === '' ? 0 : Number(form.price)
@@ -169,8 +173,9 @@ export default function OptionModal({
 
     let saved
     if (option) {
-      const { data, error } = await scopedUpdate('pos_options', row).eq('id', option.id).select(OPTION_COLS)
-      if (error) { setSaving(false); setActionError(asActionError(error)); return }
+      const { data, error } = await settleWithin(scopedUpdate('pos_options', row).eq('id', option.id).select(OPTION_COLS),
+        CUSTOMIZATION_WRITE_MS, 'Saving the option')
+      if (error) { setSaving(false); setActionError(writeFailure(error)); return }
       if (!data?.length) {
         setSaving(false)
         setActionError('This option no longer exists — it may have been deleted on another device. Close this and reload the page.')
@@ -178,8 +183,9 @@ export default function OptionModal({
       }
       saved = data[0]
     } else {
-      const { data, error } = await scopedInsert('pos_options', { ...row, group_id: group.id, sort: nextSortOf(group) }, { single: true })
-      if (error) { setSaving(false); setActionError(asActionError(error)); return }
+      const { data, error } = await settleWithin(scopedInsert('pos_options', { ...row, group_id: group.id, sort: nextSortOf(group) }, { single: true }),
+        CUSTOMIZATION_WRITE_MS, 'Saving the option')
+      if (error) { setSaving(false); setActionError(writeFailure(error)); return }
       saved = data
     }
 
@@ -187,13 +193,21 @@ export default function OptionModal({
       const failure = await saveIngredients(saved.id)
       if (failure) {
         setSaving(false)
-        const a = asActionError(failure)
+        const a = writeFailure(failure)
         // The option row DID land; only the ingredient list is uncertain. Say which state it is in.
-        setActionError({
-          text: `“${saved.name}” was saved, but its ingredient list was not fully updated — check it and save again. ${a.text}`,
-          detail: a.detail,
-        })
-        onSaved(saved, { keepOpen: true })
+        // A timed-out line may still land, and saving again would add it twice, so that case says
+        // to reload first (S852).
+        const message = isTimeout(failure)
+          ? {
+            text: `“${saved.name}” was saved, but the server took too long to answer about its ingredient list. Close this and reload the page to check that list before you save again.`,
+            detail: a.detail,
+          }
+          : {
+            text: `“${saved.name}” was saved, but its ingredient list was not fully updated — check it and save again. ${a.text}`,
+            detail: a.detail,
+          }
+        setActionError(message)
+        onSaved(saved, { keepOpen: true, error: message })
         return
       }
     }
@@ -212,17 +226,19 @@ export default function OptionModal({
       return { option_id: optionId, item_id: kind === 'item' ? refId : null, sub_recipe_id: kind === 'sub' ? refId : null, qty_per_portion: qty }
     }
     const inserts = lines.filter(l => !l.id).map(toRow)
+    const within = (q, label) => settleWithin(q, CUSTOMIZATION_WRITE_MS, label)
     if (inserts.length) {
-      const { error } = await scopedInsert('pos_option_ingredients', inserts)
+      const { error } = await within(scopedInsert('pos_option_ingredients', inserts), 'Saving the ingredient list')
       if (error) return error
     }
-    const updates = await Promise.all(lines.filter(l => l.id).map(l =>
-      scopedUpdate('pos_option_ingredients', toRow(l)).eq('id', l.id)))
+    const updates = await within(Promise.all(lines.filter(l => l.id).map(l =>
+      scopedUpdate('pos_option_ingredients', toRow(l)).eq('id', l.id))), 'Saving the ingredient list')
+    if (updates.error) return updates.error
     const upErr = updates.find(r => r.error)
     if (upErr) return upErr.error
     const removed = [...existingIds].filter(id => !keptIds.has(id))
     if (removed.length) {
-      const { error } = await scopedDelete('pos_option_ingredients').in('id', removed)
+      const { error } = await within(scopedDelete('pos_option_ingredients').in('id', removed), 'Saving the ingredient list')
       if (error) return error
     }
     return null

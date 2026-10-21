@@ -17,7 +17,7 @@
  */
 
 import React from 'react'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { DEFAULT_PLAN_PRICES, annualOf } from '../data/pricingPlans'
 
@@ -185,5 +185,29 @@ describe('where it saves', () => {
   it('hides the page-level Save button on this tab', () => {
     renderPlanPricing()
     expect(screen.queryByRole('button', { name: /Save Changes/i })).not.toBeInTheDocument()
+  })
+})
+
+// S852: the save had no time limit, and `if (priceSaving) return` refused every press while it hung,
+// so one stalled request left "Saving…" on the button for good. A request that timed out may still
+// land, so the message must not say it failed.
+describe('a save that never answers', () => {
+  afterEach(() => { jest.useRealTimers() })
+
+  it('gives the button back after the time limit and says the prices may have saved', async () => {
+    jest.useFakeTimers()
+    mockSavePlatformPlanPrices.mockReturnValue(new Promise(() => {}))
+    renderPlanPricing()
+    fireEvent.click(screen.getByRole('button', { name: /Save Plan Prices/i }))
+    expect(await screen.findByRole('button', { name: /Saving/i })).toBeInTheDocument()
+
+    await act(async () => { jest.advanceTimersByTime(20000) })
+
+    const msg = await screen.findByText(/may have saved or may not/i)
+    expect(msg.textContent).not.toMatch(/not saved|did not save|nothing was saved/i)
+    expect(screen.getByRole('button', { name: /Save Plan Prices/i })).toBeInTheDocument()
+    // And the retry the old guard refused now reaches the writer.
+    fireEvent.click(screen.getByRole('button', { name: /Save Plan Prices/i }))
+    expect(mockSavePlatformPlanPrices).toHaveBeenCalledTimes(2)
   })
 })

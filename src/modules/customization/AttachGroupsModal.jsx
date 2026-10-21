@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import Modal from '../../components/Modal'
 import Tip from '../../components/Tip'
-import ActionError, { asActionError } from '../../components/ActionError'
+import ActionError from '../../components/ActionError'
 import ReportLoadError from '../../components/ReportLoadError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
-import { loadOptionCatalog, KIND_LABEL } from './customizationData'
+import { settleWithin, isTimeout } from '../../utils/withTimeout'
+import { loadOptionCatalog, KIND_LABEL, CUSTOMIZATION_READ_MS, CUSTOMIZATION_WRITE_MS, writeFailure } from './customizationData'
 import { effectiveRule, ruleText, dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
 import { nprInt } from '../../shared/nepalMoney'
 
@@ -13,7 +14,10 @@ import { nprInt } from '../../shared/nepalMoney'
 // rather than trusting whichever page opened it to have loaded the same columns.
 //
 // Saving is a DIFF: ticked groups are upserted on (recipe_id, group_id), unticked ones deleted
-// afterwards, so a failure part-way leaves more attached rather than less.
+// afterwards, so a failure part-way leaves more attached rather than less. Both halves are keyed
+// writes, so pressing Save again after a timeout sets the same groups again (S852).
+
+const RETRY_IS_SAFE = 'Saving again is safe, because it sets the same groups again.'
 
 const toInt = v => (v === '' || v == null ? null : Number.parseInt(v, 10))
 
@@ -28,11 +32,13 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
   const [draft, setDraft] = useState({}) // { [groupId]: { on, min, max, def, sort } }
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState(null)
+  const [attempt, setAttempt] = useState(0) // Retry after a failed or timed-out load (S852)
 
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const cat = await loadOptionCatalog(scopedFrom, { recipeId: recipe.id })
+      // settleWithin answers a timeout as `{ error }`, the shape a refused catalog read already has.
+      const cat = await settleWithin(loadOptionCatalog(scopedFrom, { recipeId: recipe.id }), CUSTOMIZATION_READ_MS, 'Loading the choices')
       if (!alive) return
       if (cat.error) { setLoadError(cat.error); setLoading(false); return }
       const byGroup = {}
@@ -58,7 +64,13 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
       setLoading(false)
     })()
     return () => { alive = false }
-  }, [recipe.id, scopedFrom])
+  }, [recipe.id, scopedFrom, attempt])
+
+  function retryLoad() {
+    setLoading(true)
+    setLoadError(null)
+    setAttempt(n => n + 1)
+  }
 
   const visibleGroups = useMemo(
     // A hidden group that is still attached stays listed, so it can be detached.
@@ -147,20 +159,24 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
       }
     })
     if (rows.length) {
-      const { error } = await scopedUpsert('pos_recipe_option_groups', rows, { onConflict: 'recipe_id,group_id' })
+      const { error } = await settleWithin(scopedUpsert('pos_recipe_option_groups', rows, { onConflict: 'recipe_id,group_id' }),
+        CUSTOMIZATION_WRITE_MS, 'Saving the choices')
       if (error) {
         setSaving(false)
-        setActionError(asActionError(error))
+        setActionError(writeFailure(error, RETRY_IS_SAFE))
         return
       }
     }
     const removedIds = existing.filter(a => !draft[a.group_id]?.on).map(a => a.id)
     if (removedIds.length) {
-      const { error } = await scopedDelete('pos_recipe_option_groups').in('id', removedIds)
+      const { error } = await settleWithin(scopedDelete('pos_recipe_option_groups').in('id', removedIds),
+        CUSTOMIZATION_WRITE_MS, 'Saving the choices')
       if (error) {
         setSaving(false)
-        const a = asActionError(error)
-        setActionError({ text: `The groups you ticked were saved, but the ones you unticked are still on ${recipe.name}. ${a.text}`, detail: a.detail })
+        const a = writeFailure(error, RETRY_IS_SAFE)
+        setActionError(isTimeout(error)
+          ? { text: `The groups you ticked were saved, but the server took too long to answer about the ones you unticked, so they may still be on ${recipe.name}. ${RETRY_IS_SAFE}`, detail: a.detail }
+          : { text: `The groups you ticked were saved, but the ones you unticked are still on ${recipe.name}. ${a.text}`, detail: a.detail })
         onSaved?.(rows.length)
         return
       }
@@ -180,7 +196,10 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
         {loading ? (
           <div className="loading-state">Loading…</div>
         ) : loadError ? (
-          <ReportLoadError error={loadError} />
+          <>
+            <ReportLoadError error={loadError} />
+            <button type="button" className="btn btn-ghost" style={{ marginTop: 10 }} onClick={retryLoad}>Try again</button>
+          </>
         ) : visibleGroups.length === 0 ? (
           <div className="empty-state">No option groups yet. Create one on the Option Groups page first — for example “Size” or “Extras”.</div>
         ) : (

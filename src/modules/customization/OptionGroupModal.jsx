@@ -2,9 +2,10 @@ import { useState } from 'react'
 import Modal from '../../components/Modal'
 import Tip from '../../components/Tip'
 import FieldError, { fieldAria } from '../../components/FieldError'
-import ActionError, { asActionError } from '../../components/ActionError'
+import ActionError from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
-import { GROUP_COLS, SIZE_SCALING_HELP } from './customizationData'
+import { settleWithin } from '../../utils/withTimeout'
+import { GROUP_COLS, SIZE_SCALING_HELP, CUSTOMIZATION_WRITE_MS, writeFailure } from './customizationData'
 import { ruleText, SIZE_SCALING_LABEL } from '../../shared/optionPricing'
 import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 
@@ -105,11 +106,12 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, o
     }
     const nextScaling = isSize ? 'none' : scaling
     if (nextScaling !== (group?.size_scaling || 'none')) row.size_scaling = nextScaling
-    const { data, error } = group
-      ? await scopedUpdate('pos_option_groups', row).eq('id', group.id).select(GROUP_COLS)
-      : await scopedInsert('pos_option_groups', { ...row, sort: nextSort || 0 })
+    const { data, error } = await settleWithin(group
+      ? scopedUpdate('pos_option_groups', row).eq('id', group.id).select(GROUP_COLS)
+      : scopedInsert('pos_option_groups', { ...row, sort: nextSort || 0 }),
+    CUSTOMIZATION_WRITE_MS, 'Saving the group')
     setSaving(false)
-    if (error) { setActionError(asActionError(error)); return }
+    if (error) { setActionError(writeFailure(error)); return }
     // A zero-row update is a refusal that says nothing (S738): the group was removed meanwhile.
     if (group && !data?.length) {
       setActionError('This group no longer exists — it may have been deleted on another device. Close this and reload the page.')

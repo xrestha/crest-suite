@@ -11,8 +11,11 @@ import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 import Tip from '../../components/Tip'
 import RowMenu from '../../components/RowMenu'
 import ReportLoadError from '../../components/ReportLoadError'
-import ActionError, { asActionError } from '../../components/ActionError'
-import { loadOptionCatalog, KIND_LABEL, DIET_LABEL } from './customizationData'
+import ActionError from '../../components/ActionError'
+import { withTimeout, settleWithin } from '../../utils/withTimeout'
+import {
+  loadOptionCatalog, KIND_LABEL, DIET_LABEL, CUSTOMIZATION_READ_MS, CUSTOMIZATION_WRITE_MS, PAGE_CHECK, writeFailure,
+} from './customizationData'
 import { STANDARD_VAT, inclFromEx, ruleText, signedPrice, groupShortfalls, dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
 import { andList } from '../../shared/offeredPicks'
 import { vatModeOf, VAT_MODE_UNKNOWN_TEXT } from '../ims/recipes/menuPriceVat'
@@ -47,6 +50,11 @@ import BuildYourOwnTemplateModal from './BuildYourOwnTemplateModal'
 
 const vatOf = r => (r.vat_rate === null || r.vat_rate === undefined) ? 0.13 : Number(r.vat_rate)
 
+// A row write from this page, with its time limit (S852). A timeout answers as the call's own
+// `error`, and the message built from it says to reload and look, never that nothing changed.
+const bounded = (q, label) => settleWithin(q, CUSTOMIZATION_WRITE_MS, label)
+const pageFailure = error => writeFailure(error, PAGE_CHECK)
+
 const TABS = [['groups', 'Groups'], ['dishes', 'Dishes']]
 
 export default function OptionGroups() {
@@ -80,7 +88,7 @@ export default function OptionGroups() {
   const [moving, setMoving] = useState(false)
 
   const [groupModal, setGroupModal] = useState(null)   // { group? }
-  const [optionModal, setOptionModal] = useState(null) // { groupId, optionId? }
+  const [optionModal, setOptionModal] = useState(null) // { groupId, optionId?, error? }
   const [attachFor, setAttachFor] = useState(null)     // dish
   const [attachGroup, setAttachGroup] = useState(null) // group → dishes
   const [templateOpen, setTemplateOpen] = useState(false)
@@ -94,18 +102,28 @@ export default function OptionGroups() {
     const seq = ++loadSeq.current
     if (!quiet) setLoading(true)
     setLoadError(null)
-    const [cat, ...rest] = await Promise.all([
-      loadOptionCatalog(scopedFrom, { withIngredients: imsOn }),
-      // Every active recipe. A NULL category is a dish (S714's .or form), and a sub-recipe is only
-      // offered as an option ingredient, never as something to customize.
-      fetchAllRows(() => scopedFrom('recipes', 'id, name, category, selling_price, vat_rate, pos_enabled, yield_uom')
-        .not('is_active', 'is', false).order('name').order('id')),
-      imsOn
-        ? fetchAllRows(() => scopedFrom('items', 'id, name, uom').eq('is_sub_recipe', false)
-          .not('is_active', 'is', false).order('name').order('id'))
-        : Promise.resolve({ data: [], error: null }),
-    ])
+    let results
+    try {
+      results = await withTimeout(Promise.all([
+        loadOptionCatalog(scopedFrom, { withIngredients: imsOn }),
+        // Every active recipe. A NULL category is a dish (S714's .or form), and a sub-recipe is only
+        // offered as an option ingredient, never as something to customize.
+        fetchAllRows(() => scopedFrom('recipes', 'id, name, category, selling_price, vat_rate, pos_enabled, yield_uom')
+          .not('is_active', 'is', false).order('name').order('id')),
+        imsOn
+          ? fetchAllRows(() => scopedFrom('items', 'id, name, uom').eq('is_sub_recipe', false)
+            .not('is_active', 'is', false).order('name').order('id'))
+          : Promise.resolve({ data: [], error: null }),
+      ]), CUSTOMIZATION_READ_MS, 'Loading option groups')
+    } catch (err) {
+      // A hang used to leave Loading… on screen for good, with nothing to press (S852).
+      if (seq !== loadSeq.current) return
+      setLoadError(err)
+      setLoading(false)
+      return
+    }
     if (seq !== loadSeq.current) return
+    const [cat, ...rest] = results
     const failed = cat.error || firstError(rest)
     if (failed) { setLoadError(failed); setLoading(false); return }
     const [{ data: recipes }, { data: items }] = rest
@@ -179,13 +197,15 @@ export default function OptionGroups() {
     setMoving(true)
     setPageError(null)
     const a = rows[idx], b = rows[other]
-    const [r1, r2] = await Promise.all([
+    const res = await bounded(Promise.all([
       scopedUpdate(table, { sort: other }).eq('id', a.id).select('id'),
       scopedUpdate(table, { sort: idx }).eq('id', b.id).select('id'),
-    ])
+    ]), 'Moving the row')
     setMoving(false)
+    if (res.error) { setPageError(pageFailure(res.error)); return }
+    const [r1, r2] = res
     const err = r1.error || r2.error
-    if (err) { setPageError(asActionError(err)); return }
+    if (err) { setPageError(pageFailure(err)); return }
     if (!r1.data?.length || !r2.data?.length) { setPageError('One of those rows no longer exists — reload the page.'); return }
     load({ quiet: true })
   }
@@ -195,9 +215,9 @@ export default function OptionGroups() {
     if (dense) return swapSort(table, rows, idx, dir)
     setMoving(true)
     setPageError(null)
-    const results = await Promise.all(rows.map((r, i) => scopedUpdate(table, { sort: i }).eq('id', r.id).select('id')))
-    const err = results.find(r => r.error)?.error
-    if (err) { setMoving(false); setPageError(asActionError(err)); return }
+    const results = await bounded(Promise.all(rows.map((r, i) => scopedUpdate(table, { sort: i }).eq('id', r.id).select('id'))), 'Moving the row')
+    const err = results.error || results.find(r => r.error)?.error
+    if (err) { setMoving(false); setPageError(pageFailure(err)); return }
     const renumbered = rows.map((r, i) => ({ ...r, sort: i }))
     setMoving(false)
     return swapSort(table, renumbered, idx, dir)
@@ -220,8 +240,8 @@ export default function OptionGroups() {
       const refusal = showAgainRefusal(g.name, g.id, { ...catalog, groups: catalog.groups.map(x => (x.id === g.id ? { ...x, is_active: true } : x)) })
       if (refusal) { setPageError(refusal); return }
     }
-    const { data, error } = await scopedUpdate('pos_option_groups', { is_active: !g.is_active }).eq('id', g.id).select('id')
-    if (error) { setPageError(asActionError(error)); return }
+    const { data, error } = await bounded(scopedUpdate('pos_option_groups', { is_active: !g.is_active }).eq('id', g.id).select('id'), 'Saving the group')
+    if (error) { setPageError(pageFailure(error)); return }
     if (!data?.length) { setPageError('That group no longer exists — reload the page.'); return }
     flash(g.is_active ? `“${g.name}” is hidden from the till and guest menu.` : `“${g.name}” is shown again.`)
     load({ quiet: true })
@@ -246,8 +266,8 @@ export default function OptionGroups() {
       ),
       run: async () => {
         setPageError(null)
-        const { data, error } = await scopedDelete('pos_option_groups').eq('id', g.id).select('id')
-        if (error) { setPageError(asActionError(error)); return }
+        const { data, error } = await bounded(scopedDelete('pos_option_groups').eq('id', g.id).select('id'), 'Deleting the group')
+        if (error) { setPageError(pageFailure(error)); return }
         if (!data?.length) { setPageError('That group was already gone — reload the page.'); return }
         flash(`“${g.name}” was deleted.`)
         await load({ quiet: true })
@@ -280,8 +300,8 @@ export default function OptionGroups() {
 
   async function setOptionActive(o, active) {
     setPageError(null)
-    const { data, error } = await scopedUpdate('pos_options', { is_active: active }).eq('id', o.id).select('id')
-    if (error) { setPageError(asActionError(error)); return }
+    const { data, error } = await bounded(scopedUpdate('pos_options', { is_active: active }).eq('id', o.id).select('id'), 'Saving the option')
+    if (error) { setPageError(pageFailure(error)); return }
     if (!data?.length) { setPageError('That option no longer exists — reload the page.'); return }
     await load({ quiet: true })
   }
@@ -317,8 +337,8 @@ export default function OptionGroups() {
       ),
       run: async () => {
         setPageError(null)
-        const { data, error } = await scopedDelete('pos_options').eq('id', o.id).select('id')
-        if (error) { setPageError(asActionError(error)); return }
+        const { data, error } = await bounded(scopedDelete('pos_options').eq('id', o.id).select('id'), 'Deleting the option')
+        if (error) { setPageError(pageFailure(error)); return }
         if (!data?.length) { setPageError('That option was already gone — reload the page.'); return }
         await load({ quiet: true })
       },
@@ -343,9 +363,9 @@ export default function OptionGroups() {
     if (markBusy) return
     setMarkBusy(d.id)
     setPageError(null)
-    const { data, error } = await scopedUpdate('recipes', { is_build_your_own: on }).eq('id', d.id).select('id')
+    const { data, error } = await bounded(scopedUpdate('recipes', { is_build_your_own: on }).eq('id', d.id).select('id'), 'Saving the dish')
     setMarkBusy(null)
-    if (error) { setPageError(asActionError(error)); return }
+    if (error) { setPageError(pageFailure(error)); return }
     if (!data?.length) { setPageError(`${d.name} could not be changed — it may have been removed. Reload the page.`); return }
     flash(on
       ? `${d.name} is build-your-own: the till always opens its choices and the guest menu walks them step by step.`
@@ -425,7 +445,10 @@ export default function OptionGroups() {
       {loading ? (
         <div className="loading-state">Loading…</div>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        <>
+          <ReportLoadError error={loadError} />
+          <button type="button" className="btn btn-ghost" style={{ marginTop: 12 }} onClick={() => load()}>Try again</button>
+        </>
       ) : tab === 'groups' ? (
         groupRows.length === 0 ? (
           <div className="empty-state">
@@ -660,10 +683,12 @@ export default function OptionGroups() {
           vatUnknown={vatMode == null}
           imsEnabled={imsOn}
           itemChoices={itemChoices}
+          initialError={optionModal.error || null}
           onClose={() => setOptionModal(null)}
           onSaved={async (saved, opts) => {
             await load({ quiet: true })
-            if (opts?.keepOpen) { setOptionModal({ groupId: openGroup.id, optionId: saved.id }); return }
+            // A new option remounts here (its key becomes its id), so its message rides across.
+            if (opts?.keepOpen) { setOptionModal({ groupId: openGroup.id, optionId: saved.id, error: opts.error || null }); return }
             setOptionModal(null)
             // The step that goes unnoticed: a group with options and no dish offers nothing.
             if (!(attachCountByGroup[openGroup.id] > 0) && dishes.length > 0) {

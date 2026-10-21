@@ -32,7 +32,7 @@ export const IMS_FEATURES = [
   {
     icon: '◎', name: 'Dashboard', featureKey: null,
     guide: 'The home screen. Shows KPI cards for the current open period: total purchases, revenue, Spend % so far (what you have spent on stock ÷ what you have sold this month), net margin, and top wastage. Figures update live as you add purchases, stock counts, and sales. Admin sees a platform overview; clients see their property dashboard. If you use more than one part of Crest, this page is called Home: it shows each part\'s main figures side by side, and each tab along the top (IMS, HR, POS…) opens that part\'s own dashboard — the IMS tab opens the Inventory Dashboard, where the charts and the sales table are. The Home tab, or your logo, brings you back.',
-    tips: ['In your first weeks, "Getting started with Crest" at the top lists the setup steps for the parts of Crest you use. A box ticks by itself once the job is really done — the first item saved, the first bill printed — not when you just open the page. Skip any step your business does not need, and "Hide for now" shrinks the list to one line. Been using Crest a while? Start it any time from Help → Getting Started, or "Setup guide" in the menu under your name (top right) — the steps you have already done are ticked', 'Fixed Costs % and Est. Net Margin: with Crest HR, labour is the month\'s finalized payroll or, until it is finalized, the HR wage estimate from your staff list and attendance sheet, and anything typed on the Overheads Labor tab is shown as "not counted", never added. Without Crest HR, labour is what is typed on the Labor tab. The tile says which it used. An inventory login on an outlet with Crest HR cannot read payroll, so it sees "—" for both', 'For the month you are in, the ratios count the days already finished, and rent and other fixed costs are counted for those days only ("Days 1–11 of 30" under the figure), so Fixed Costs % and Est. Net Margin are the month\'s real rate, not a whole month of rent over a few days of sales', 'Net Purchases adds stock received from your other outlets and takes off stock sent to them (Stock Transfers), and the tile names them. With Crest POS, Est. Net Margin also takes off what delivery partners (Foodmandu, Pathao) kept from bills sold this month', 'The cost tile reads "Spend % so far", not Food Cost %. Food Cost % is what you USED ÷ what you sold, and that needs the month-end stock count; a running month has not been counted, so the tile shows what you have BOUGHT ÷ what you have sold. Buy a month of rice in one go and it jumps; cook from last month\'s stock and it drops. Est. Net Margin works from the same purchases (revenue minus stock bought so far, labour, overheads and tax & fees), not from food cost. Once the month is closed, its Food Cost % takes over — on Monthly Summary and on the trend chart', 'On the 1st the ratios read "Ratios start after today", because no day has finished yet. Fixed Costs % is judged from day 2. For the first 9 days, Spend % so far and Est. Net Margin show their figures in plain grey with no ✓/△/▲, and the Revenue vs Cost Breakdown card draws its Net Margin slice grey too: one bulk purchase can swing them either way that early, so they are judged from day 10','The Food Cost % — Monthly Trend chart shows each closed month\'s Food Cost % (stock used ÷ sales, the same figure Monthly Summary shows). The month you are in is the ⊙ point at the end of a dashed line, drawn as its Spend % so far — a different measure, so it is never compared with the closed months. A grey dot is a closed month whose stock count was incomplete. An item with no closing count counts all its stock as used, so that month reads high: its line is faded, it is not judged, and a bar under the dot reaches as low as its real figure could be (hover it for the range and how much stock went uncounted). Your Good line (35% unless you changed it in Settings → Thresholds) is always on the chart. Click the expand icon for the Average and Best and Highest month, which count fully counted months only (Best and Highest wait until there are two), what those months spent above or under your Good line in rupees, and what one point of food cost is worth in a month of your sales', 'If no month is open, contact Crest support: Crest opens your first month when your account is set up, and after that each new month opens when you close the one before', 'Dashboard figures always reflect the current open period', 'The "Daily Purchases vs Sales" chart overlays daily purchase spend (gold) with daily sales revenue (green), with the BS weekday initial (S/M/T/W/T/F/S) shown below each date. The green sales line only appears when sales are recorded day-by-day (Sales → pick a day); bulk monthly sales entry has no daily breakdown to plot. A dotted "Target" line in a distinct colour (blue for sales, orange for purchases) shows what a usual day looks like, learned from the 4 weeks before the month began, so it is there from Day 1. It is drawn above the dashed forecast, and when the two are the same line (until a usual day this month is over) the footer says so. Each weekday gets its own figure, and each line follows its own week: sales are highest on your busiest trading day, purchases on your usual restock day. A weekday you normally buy nothing on counts as zero, so the purchase target is low there. The Target is set once and never changes for the rest of the period, so the month can be judged against it. A new client without 4 weeks of history gets its Target after its first 7 days, from those days. Festival days in Holiday Calendar (Dashain, Tihar and the rest) are left out when the usual week is worked out, for both lines. On a festival with a Demand Multiplier set in Holiday Calendar, the sales target and sales forecast for that day are a usual day × that multiplier; a festival with none set is a usual day on the sales target, and on the sales forecast until one of its days is over; from then on the rest of that festival is forecast at the rate its finished days sold against a usual day (festival days back to back count as one festival, and the footer names the days and the rate). How a festival sells never moves the forecast for ordinary days. Purchases are never scaled on a festival. The footer lists the month\'s festival days, and hovering one names it. A dashed line in the same colour as each metric forecasts the rest of the month: your usual weekday pattern, adjusted to how this month is running against it. This month\'s own days carry most of the weight within about a week, so a busy or slow patch shows quickly. Today is not over yet, so what it has sold so far is a hollow dot beside its forecast, not joined to the line, and it is only used to judge the month\'s pace once the day ends — a slow morning never drags down the forecast for the rest of the month (the footer says "today so far is the hollow dot, and counts once the day is over"). Click the expand icon for the full view with running totals. Hovering a day shows how far that day ran off its Target: the arrow points where the day actually sits (▲ above the target line, ▼ below), while the colour says whether that was the good direction for that metric — for Sales, above target is green; for Purchases it is the reverse, because spending under your usual pace is the win. A grey ≈ means the day landed close enough to count as on target — within 2% of it, or NPR 100, whichever is more forgiving — so the coloured days are the ones that actually moved. Note: the gap between the lines is buying-vs-selling cash rhythm, not profit, and purchases usually peak on a different day from sales (many kitchens restock ahead of the week, not on the busiest day).', 'Growth plan and above: the dashed sales forecast can allow for rain. The Owner picks the outlet\'s city and says what a rainy day does to trade in Settings → Weather (for example 85 = a rainy day sells about 85% of a normal one). On the next 7 days the weather forecast calls rainy (5 mm or more between 5:45 am and 11:45 pm), that day\'s forecast is scaled by the figure, and the footer names the days. Rainy days already gone this month are allowed for too, so a wet week does not make the rest of the month look slow. Purchases and the dotted Targets never change with the weather. The footer also shows what your own sales say a rainy day does, once enough rainy days have been recorded (it needs 5 rainy and 5 dry days, counted from the day the weather was switched on). Weather data: MET Norway.', 'Growth plan and above, or any restaurant using POS or HR: with a city set, the top of the Dashboard shows today and the next three days: a picture, the high and low temperature during opening hours (5:45 am to 11:45 pm), and the weather in plain words (Light rain from 1 mm, Rain from 5 mm, Heavy rain from 20 mm, Storms when thunder is forecast; a drier day reads Sunny, Partly cloudy or Cloudy). A rainy day the sales forecast allows for carries a small "×N%" tag, and the line under the days says what it means (for example "×60% = rainy-day sales forecast"). Hover or tap a day for its date and the rain in mm. The Owner or any manager sets the city: "Set your city" on the Dashboard ("Change city" under the days once one is set), POS Setup → Weather, or the Owner in Settings → Weather.','The "Spend by Category" card also shows the Top Items by Spend list — switch between the two with the tab at the top of the card.', 'The Wastage Value tile counts everything logged as waste this month — raw items, prep (a tray of momo filling) and items you have since hidden — the same total as the Wastage Report. It is there for information: Food Cost % works from what was used, so wastage is never added on top of it. Monthly Summary\'s Wastage column can be lower for the same month — see Monthly Summary']
+    tips: ['Top Variance Items only judges items you have counted. Until the closing stock count is in, it shows "Needs a stock count" with a link to Stock Count, and an item with no count is never shown as over-used', 'A dash with "Could not load" on a card means that figure could not be read just now, not that it is zero. Press Retry on the notice above the cards, or reload the page', 'Colour on the cards is a warning, not decoration: figures such as Revenue, Wastage and Payroll are in plain text, and red, amber or green appears only when a figure crosses a line, such as food cost above your target', 'In your first weeks, "Getting started with Crest" at the top lists the setup steps for the parts of Crest you use. A box ticks by itself once the job is really done — the first item saved, the first bill printed — not when you just open the page. Skip any step your business does not need, and "Hide for now" shrinks the list to one line. Been using Crest a while? Start it any time from Help → Getting Started, or "Setup guide" in the menu under your name (top right) — the steps you have already done are ticked', 'Fixed Costs % and Est. Net Margin: with Crest HR, labour is the month\'s finalized payroll or, until it is finalized, the HR wage estimate from your staff list and attendance sheet, and anything typed on the Overheads Labor tab is shown as "not counted", never added. Without Crest HR, labour is what is typed on the Labor tab. The tile says which it used. An inventory login on an outlet with Crest HR cannot read payroll, so it sees "—" for both', 'For the month you are in, the ratios count the days already finished, and rent and other fixed costs are counted for those days only ("Days 1–11 of 30" under the figure), so Fixed Costs % and Est. Net Margin are the month\'s real rate, not a whole month of rent over a few days of sales', 'Net Purchases adds stock received from your other outlets and takes off stock sent to them (Stock Transfers), and the tile names them. With Crest POS, Est. Net Margin also takes off what delivery partners (Foodmandu, Pathao) kept from bills sold this month', 'The cost tile reads "Spend % so far", not Food Cost %. Food Cost % is what you USED ÷ what you sold, and that needs the month-end stock count; a running month has not been counted, so the tile shows what you have BOUGHT ÷ what you have sold. Buy a month of rice in one go and it jumps; cook from last month\'s stock and it drops. Est. Net Margin works from the same purchases (revenue minus stock bought so far, labour, overheads and tax & fees), not from food cost. Once the month is closed, its Food Cost % takes over — on Monthly Summary and on the trend chart', 'On the 1st the ratios read "Ratios start after today", because no day has finished yet. Fixed Costs % is judged from day 2. For the first 9 days, Spend % so far and Est. Net Margin show their figures in plain grey with no ✓/△/▲, and the Revenue vs Cost Breakdown card draws its Net Margin slice grey too: one bulk purchase can swing them either way that early, so they are judged from day 10','The Food Cost % — Monthly Trend chart shows each closed month\'s Food Cost % (stock used ÷ sales, the same figure Monthly Summary shows). The month you are in is the ⊙ point at the end of a dashed line, drawn as its Spend % so far — a different measure, so it is never compared with the closed months. A grey dot is a closed month whose stock count was incomplete. An item with no closing count counts all its stock as used, so that month reads high: its line is faded, it is not judged, and a bar under the dot reaches as low as its real figure could be (hover it for the range and how much stock went uncounted). Your Good line (35% unless you changed it in Settings → Thresholds) is always on the chart. Click the expand icon for the Average and Best and Highest month, which count fully counted months only (Best and Highest wait until there are two), what those months spent above or under your Good line in rupees, and what one point of food cost is worth in a month of your sales', 'If no month is open, contact Crest support: Crest opens your first month when your account is set up, and after that each new month opens when you close the one before', 'Dashboard figures always reflect the current open period', 'The "Daily Purchases vs Sales" chart overlays daily purchase spend (gold) with daily sales revenue (green), with the BS weekday initial (S/M/T/W/T/F/S) shown below each date. The green sales line only appears when sales are recorded day-by-day (Sales → pick a day); bulk monthly sales entry has no daily breakdown to plot. A dotted "Target" line in a distinct colour (blue for sales, orange for purchases) shows what a usual day looks like, learned from the 4 weeks before the month began, so it is there from Day 1. It is drawn above the dashed forecast, and when the two are the same line (until a usual day this month is over) the footer says so. Each weekday gets its own figure, and each line follows its own week: sales are highest on your busiest trading day, purchases on your usual restock day. A weekday you normally buy nothing on counts as zero, so the purchase target is low there. The Target is set once and never changes for the rest of the period, so the month can be judged against it. A new client without 4 weeks of history gets its Target after its first 7 days, from those days. Festival days in Holiday Calendar (Dashain, Tihar and the rest) are left out when the usual week is worked out, for both lines. On a festival with a Demand Multiplier set in Holiday Calendar, the sales target and sales forecast for that day are a usual day × that multiplier; a festival with none set is a usual day on the sales target, and on the sales forecast until one of its days is over; from then on the rest of that festival is forecast at the rate its finished days sold against a usual day (festival days back to back count as one festival, and the footer names the days and the rate). How a festival sells never moves the forecast for ordinary days. Purchases are never scaled on a festival. The footer lists the month\'s festival days, and hovering one names it. A dashed line in the same colour as each metric forecasts the rest of the month: your usual weekday pattern, adjusted to how this month is running against it. This month\'s own days carry most of the weight within about a week, so a busy or slow patch shows quickly. Today is not over yet, so what it has sold so far is a hollow dot beside its forecast, not joined to the line, and it is only used to judge the month\'s pace once the day ends — a slow morning never drags down the forecast for the rest of the month (the footer says "today so far is the hollow dot, and counts once the day is over"). Click the expand icon for the full view with running totals. Hovering a day shows how far that day ran off its Target: the arrow points where the day actually sits (▲ above the target line, ▼ below), while the colour says whether that was the good direction for that metric — for Sales, above target is green; for Purchases it is the reverse, because spending under your usual pace is the win. A grey ≈ means the day landed close enough to count as on target — within 2% of it, or NPR 100, whichever is more forgiving — so the coloured days are the ones that actually moved. Note: the gap between the lines is buying-vs-selling cash rhythm, not profit, and purchases usually peak on a different day from sales (many kitchens restock ahead of the week, not on the busiest day).', 'Growth plan and above: the dashed sales forecast can allow for rain. The Owner picks the outlet\'s city and says what a rainy day does to trade in Settings → Weather (for example 85 = a rainy day sells about 85% of a normal one). On the next 7 days the weather forecast calls rainy (5 mm or more between 5:45 am and 11:45 pm), that day\'s forecast is scaled by the figure, and the footer names the days. Rainy days already gone this month are allowed for too, so a wet week does not make the rest of the month look slow. Purchases and the dotted Targets never change with the weather. The footer also shows what your own sales say a rainy day does, once enough rainy days have been recorded (it needs 5 rainy and 5 dry days, counted from the day the weather was switched on). Weather data: MET Norway.', 'Growth plan and above, or any restaurant using POS or HR: with a city set, the top of the Dashboard shows today and the next three days: a picture, the high and low temperature during opening hours (5:45 am to 11:45 pm), and the weather in plain words (Light rain from 1 mm, Rain from 5 mm, Heavy rain from 20 mm, Storms when thunder is forecast; a drier day reads Sunny, Partly cloudy or Cloudy). A rainy day the sales forecast allows for carries a small "×N%" tag, and the line under the days says what it means (for example "×60% = rainy-day sales forecast"). Hover or tap a day for its date and the rain in mm. The Owner or any manager sets the city: "Set your city" on the Dashboard ("Change city" under the days once one is set), POS Setup → Weather, or the Owner in Settings → Weather.','The "Spend by Category" card also shows the Top Items by Spend list — switch between the two with the tab at the top of the card.', 'The Wastage Value tile counts everything logged as waste this month — raw items, prep (a tray of momo filling) and items you have since hidden — the same total as the Wastage Report. It is there for information: Food Cost % works from what was used, so wastage is never added on top of it. Monthly Summary\'s Wastage column can be lower for the same month — see Monthly Summary']
   },
   {
     icon: '◷', name: 'Periods', featureKey: null,
@@ -321,7 +321,7 @@ export const SUITE_FEATURES = [
   {
     icon: '🏛', name: 'Fixed Assets', featureKey: 'fixed_asset_register', path: '/fixed-assets',
     guide: 'Register of tangible fixed assets (equipment, furniture, vehicles, kitchen machinery) — separate from Item Master\'s stock/inventory tracking. Five tabs: Register (add/edit assets, categories set default useful life & Nepal tax pool), Depreciation Runs (straight-line book depreciation — Preview computes nothing, Post writes and locks the schedule), Valuation Report (portfolio cost/NBV as of any posted period, by category), Disposal Report (every disposed or written-off asset in the chosen fiscal year, or all years, with its gain or loss), and Tax Depreciation (IRD) — Nepal\'s statutory pooled written-down-value method (Income Tax Act 2058), a separate system from book depreciation that\'s expected to show a different number.',
-    tips: ['Disposing of an asset charges depreciation up to the disposal date first, so the gain or loss is measured on today\'s value. A wrong depreciation run is undone with an Adjustment run, never by editing; posting a period that already has a run asks first', 'Current NBV is the asset\'s cost less every depreciation charge posted for it, reversals included, whatever period each covers — the same figure the Overheads depreciation memo adds up. An asset with a back-dated run, a reversed earlier run, or a cost edited after posting may show a different NBV from before; the new one matches what was actually charged', 'If a posted run already charges depreciation past the date you are disposing of an asset, the disposal says so: reverse that run on Depreciation Runs (Adjustment) first, and the disposal then charges only up to its own date', 'An Adjustment that reverses only part of a run takes back the LAST days of that run. A fridge sold halfway through a year\'s run: reverse half the charge, then dispose — nothing is charged twice, and the gain or loss comes out right', 'Asset dates show in BS (for example 15 Poush 2082). The date pickers still work in AD','The Valuation Report counts every asset owned on the As Of date, including one sold or written off later, at its cost less the depreciation posted for periods ending on or before that date', 'Changing an asset\'s cost, purchase date, useful life or salvage value after depreciation has been posted asks first — it names the posted runs, the new book value, the old and new yearly charge, and what it does to the tax tab', 'Tax Depreciation: if last fiscal year has no posted schedule, every pool opens at 0 and an amber note says so. If an even earlier year WAS posted (a year was skipped), Post asks before locking those zeros — post the missing year first. Pool E (intangibles) stops amortising each asset at the end of its useful life, and never claims more than the pool holds; a note explains a smaller figure', 'Tax Depreciation: software or a licence (Pool E) that is sold or written off leaves the pool at the value not yet claimed, and gets no amortization that year. Its sale price shows under Disposals for your accountant, and earlier years still include it. Confirm this treatment with your accountant before filing', 'Tax Depreciation: Preview waits until the year\'s repair list has loaded. Adding or deleting a repair clears the preview, so press Preview again before Post', 'Owned an asset before you started using Crest? On its form, under "Already in use before Crest?", enter the depreciation already taken from last year\'s books and the date it runs to. Its book value starts from there, and Crest\'s runs charge only from the next day, so nothing is depreciated twice. Overheads does not count that figure as an expense', 'Tax Depreciation, first year in Crest: type each pool\'s (A–D) Closing WDV from last year\'s tax return, plus any repair excess carried forward, under "Opening values (from last year\'s tax return)". They are used only while last year has no posted schedule here, and lock once a schedule that uses them is posted. If one was typed wrong, a Manager or the Owner presses Correct these values…, gives a reason (kept with their name and the date) and enters the right figures. The schedules already posted stay as filed and are listed under Schedules to post again: post them again, oldest year first. Pool E takes no pool figure: it opens at what its assets have not yet claimed, counting each one\'s depreciation already taken','IMS supervisors can view the register and run a Preview; only an IMS manager or the Owner can Post, the same split as payroll Finalize. An IMS staff login cannot open this page', 'Once a depreciation run or tax schedule is Posted it is permanently locked. Book depreciation: a correction is an Adjustment run, never an edit to the old one. Tax Depreciation: post a second schedule for the same year; next year opens from the latest one', 'Tax Depreciation caps deductible repairs at 7% of the pool\'s depreciation base for the year (Section 16(2), as amended since 2060). The excess is not lost: it joins next year\'s base', 'Tax Depreciation: selling an asset for more than its pool is worth shows the excess as business income on the schedule; selling the last asset of a pool deducts what was left that year. Crest asks first when the pool\'s opening came from your tax return', 'Tax Depreciation: a pool left with less than NPR 2,000 after the year\'s depreciation is written off in full that year', 'Tax Depreciation: an asset with no tax pool is left out of the schedule; the tab lists such assets and asks before Post. Fine if you file no tax depreciation through Crest', 'Tax Depreciation: posting a fiscal year that has not ended yet asks first — the schedule would leave out the rest of the year. The Fiscal Year list no longer offers next year', 'Depreciation Runs: Preview names any asset that was not charged for some days before the period (a month skipped) and offers to start the period earlier; the period can be filled from a BS month or the whole fiscal year. A disposal names uncharged days too, since they leave the book value too high: the gain reads low, or the loss high', 'A partial period is charged per day at the yearly figure ÷ the fiscal year\'s own length (365 or 366 days), so a whole year charges exactly the yearly figure', 'Posted depreciation also appears as a memo line on Overheads and on the Profit & Loss; it is never subtracted from Net Profit', 'The Tax Depreciation tab carries its own on-screen disclaimer — verify current pool rates and the repair-expense cap with your accountant before relying on it for an actual filing', 'Personal Use % is recorded on the asset for your accountant. Crest counts the asset in full everywhere (depreciation runs, the Valuation Report and the tax pools) and does not apportion it; the Valuation Report says so when any asset carries one']
+    tips: ['If the posted depreciation cannot be read, Current NBV and % Depreciated show a dash and the message with a Retry button sits above the table. A dash is not zero: press Retry before reading any book value', 'Disposing of an asset charges depreciation up to the disposal date first, so the gain or loss is measured on today\'s value. A wrong depreciation run is undone with an Adjustment run, never by editing; posting a period that already has a run asks first', 'Current NBV is the asset\'s cost less every depreciation charge posted for it, reversals included, whatever period each covers — the same figure the Overheads depreciation memo adds up. An asset with a back-dated run, a reversed earlier run, or a cost edited after posting may show a different NBV from before; the new one matches what was actually charged', 'If a posted run already charges depreciation past the date you are disposing of an asset, the disposal says so: reverse that run on Depreciation Runs (Adjustment) first, and the disposal then charges only up to its own date', 'An Adjustment that reverses only part of a run takes back the LAST days of that run. A fridge sold halfway through a year\'s run: reverse half the charge, then dispose — nothing is charged twice, and the gain or loss comes out right', 'Asset dates show in BS (for example 15 Poush 2082). The date pickers still work in AD','The Valuation Report counts every asset owned on the As Of date, including one sold or written off later, at its cost less the depreciation posted for periods ending on or before that date', 'Changing an asset\'s cost, purchase date, useful life or salvage value after depreciation has been posted asks first — it names the posted runs, the new book value, the old and new yearly charge, and what it does to the tax tab', 'Tax Depreciation: if last fiscal year has no posted schedule, every pool opens at 0 and an amber note says so. If an even earlier year WAS posted (a year was skipped), Post asks before locking those zeros — post the missing year first. Pool E (intangibles) stops amortising each asset at the end of its useful life, and never claims more than the pool holds; a note explains a smaller figure', 'Tax Depreciation: software or a licence (Pool E) that is sold or written off leaves the pool at the value not yet claimed, and gets no amortization that year. Its sale price shows under Disposals for your accountant, and earlier years still include it. Confirm this treatment with your accountant before filing', 'Tax Depreciation: Preview waits until the year\'s repair list has loaded. Adding or deleting a repair clears the preview, so press Preview again before Post', 'Owned an asset before you started using Crest? On its form, under "Already in use before Crest?", enter the depreciation already taken from last year\'s books and the date it runs to. Its book value starts from there, and Crest\'s runs charge only from the next day, so nothing is depreciated twice. Overheads does not count that figure as an expense', 'Tax Depreciation, first year in Crest: type each pool\'s (A–D) Closing WDV from last year\'s tax return, plus any repair excess carried forward, under "Opening values (from last year\'s tax return)". They are used only while last year has no posted schedule here, and lock once a schedule that uses them is posted. If one was typed wrong, a Manager or the Owner presses Correct these values…, gives a reason (kept with their name and the date) and enters the right figures. The schedules already posted stay as filed and are listed under Schedules to post again: post them again, oldest year first. Pool E takes no pool figure: it opens at what its assets have not yet claimed, counting each one\'s depreciation already taken','IMS supervisors can view the register and run a Preview; only an IMS manager or the Owner can Post, the same split as payroll Finalize. An IMS staff login cannot open this page', 'Once a depreciation run or tax schedule is Posted it is permanently locked. Book depreciation: a correction is an Adjustment run, never an edit to the old one. Tax Depreciation: post a second schedule for the same year; next year opens from the latest one', 'Tax Depreciation caps deductible repairs at 7% of the pool\'s depreciation base for the year (Section 16(2), as amended since 2060). The excess is not lost: it joins next year\'s base', 'Tax Depreciation: selling an asset for more than its pool is worth shows the excess as business income on the schedule; selling the last asset of a pool deducts what was left that year. Crest asks first when the pool\'s opening came from your tax return', 'Tax Depreciation: a pool left with less than NPR 2,000 after the year\'s depreciation is written off in full that year', 'Tax Depreciation: an asset with no tax pool is left out of the schedule; the tab lists such assets and asks before Post. Fine if you file no tax depreciation through Crest', 'Tax Depreciation: posting a fiscal year that has not ended yet asks first — the schedule would leave out the rest of the year. The Fiscal Year list no longer offers next year', 'Depreciation Runs: Preview names any asset that was not charged for some days before the period (a month skipped) and offers to start the period earlier; the period can be filled from a BS month or the whole fiscal year. A disposal names uncharged days too, since they leave the book value too high: the gain reads low, or the loss high', 'A partial period is charged per day at the yearly figure ÷ the fiscal year\'s own length (365 or 366 days), so a whole year charges exactly the yearly figure', 'Posted depreciation also appears as a memo line on Overheads and on the Profit & Loss; it is never subtracted from Net Profit', 'The Tax Depreciation tab carries its own on-screen disclaimer — verify current pool rates and the repair-expense cap with your accountant before relying on it for an actual filing', 'Personal Use % is recorded on the asset for your accountant. Crest counts the asset in full everywhere (depreciation runs, the Valuation Report and the tax pools) and does not apportion it; the Valuation Report says so when any asset carries one']
   },
 ]
 
@@ -1228,7 +1228,7 @@ export default function Help() {
   const [openGS, setOpenGS] = useState(() => {
     try { return JSON.parse(localStorage.getItem('crest_help_gs')) || {} } catch { return {} }
   })
-  // The Getting-Started headers are real disclosure buttons inside their <h3> (the same shape as
+  // The Getting-Started headers are real disclosure buttons inside their <h2> (the same shape as
   // the feature accordion and the FAQ further down). They were <div onClick> until S682, which
   // closed the onboarding walkthrough to every keyboard and screen-reader user.
   const GS_TOGGLE_STYLE = {
@@ -1492,12 +1492,12 @@ export default function Help() {
             <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
               <span aria-hidden="true" style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>⬢</span>
               <div style={{ flex: 1 }}>
-                <h3 style={{ margin: '0 0 8px', fontSize: 15, color: 'var(--theme-text1)' }}>
+                <h2 style={{ margin: '0 0 8px', fontSize: 15, color: 'var(--theme-text1)' }}>
                   <button type="button" aria-expanded={gsOpen('ims')} onClick={() => toggleGS('ims')} style={GS_TOGGLE_STYLE}>
                     <span>Welcome to Crest Suite</span>
                     <span aria-hidden="true" style={{ color: 'var(--theme-text3)', fontSize: 13, fontWeight: 400 }}>{gsOpen('ims') ? '▲' : '▼'}</span>
                   </button>
-                </h3>
+                </h2>
                 {!gsOpen('ims') && (
                   <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>Click to see first-time setup, monthly workflow, and common mistakes to avoid.</p>
                 )}
@@ -1600,12 +1600,12 @@ export default function Help() {
               <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
                 <span aria-hidden="true" style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>👤</span>
                 <div style={{ flex: 1 }}>
-                  <h3 style={{ margin: '0 0 8px', fontSize: 15, color: 'var(--theme-text1)' }}>
+                  <h2 style={{ margin: '0 0 8px', fontSize: 15, color: 'var(--theme-text1)' }}>
                     <button type="button" aria-expanded={gsOpen('hr')} onClick={() => toggleGS('hr')} style={GS_TOGGLE_STYLE}>
                       <span>Welcome to Crest HR</span>
                       <span aria-hidden="true" style={{ color: 'var(--theme-text3)', fontSize: 13, fontWeight: 400 }}>{gsOpen('hr') ? '▲' : '▼'}</span>
                     </button>
-                  </h3>
+                  </h2>
                   {!gsOpen('hr') && (
                     <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>Click to see first-time setup, monthly workflow, and common mistakes to avoid.</p>
                   )}
@@ -1677,12 +1677,12 @@ export default function Help() {
               <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
                 <span aria-hidden="true" style={{ fontSize: 32, lineHeight: 1, flexShrink: 0 }}>⊕</span>
                 <div style={{ flex: 1 }}>
-                  <h3 style={{ margin: gsOpen('pos') ? '0 0 8px' : 0, fontSize: 15, color: 'var(--theme-text1)' }}>
+                  <h2 style={{ margin: gsOpen('pos') ? '0 0 8px' : 0, fontSize: 15, color: 'var(--theme-text1)' }}>
                     <button type="button" aria-expanded={gsOpen('pos')} onClick={() => toggleGS('pos')} style={GS_TOGGLE_STYLE}>
                       <span>Welcome to Crest POS</span>
                       <span aria-hidden="true" style={{ color: 'var(--theme-text3)', fontSize: 13, fontWeight: 400 }}>{gsOpen('pos') ? '▲' : '▼'}</span>
                     </button>
-                  </h3>
+                  </h2>
                   {!gsOpen('pos') && (
                     <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text3)' }}>Click to see first-time setup, daily workflow, and common mistakes to avoid.</p>
                   )}
@@ -1756,33 +1756,40 @@ export default function Help() {
           {/* ── Crest IMS ── */}
           {imsEnabled && (
             <div style={{ marginBottom: 32 }}>
-              {/* Module header — rolled up by default; click to reveal this module's topic list. */}
-              <div
+              {/* Module header — rolled up by default; click to reveal this module's topic list. A real
+                  button since S852, as the Suite header below already was: the IMS, HR and POS
+                  headers were a div with onClick, so a keyboard could not open their guides. */}
+              <button
+                type="button"
+                aria-expanded={moduleOpen('ims')}
                 onClick={() => toggleModule('ims')}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', cursor: 'pointer' }}
+                style={{ ...GS_TOGGLE_STYLE, justifyContent: 'flex-start', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)' }}
               >
-                <span style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>▦</span>
-                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Crest IMS</span>
+                <span aria-hidden="true" style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>▦</span>
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>Crest IMS</span>
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', padding: '2px 8px', borderRadius: 0 }}>Active</span>
                 {!isAdmin && (
                   <span style={{ fontSize: 11, color: 'var(--theme-text2)', marginLeft: 4 }}>
                     {plan === 'pro' ? 'Pro Plan' : plan === 'growth' ? 'Growth Plan' : 'Starter Plan'}
                   </span>
                 )}
-                <span style={{ marginLeft: 'auto', color: 'var(--theme-text3)', fontSize: 13 }}>{moduleOpen('ims') ? '▲' : '▼'}</span>
-              </div>
+                <span aria-hidden="true" style={{ marginLeft: 'auto', color: 'var(--theme-text3)', fontSize: 13 }}>{moduleOpen('ims') ? '▲' : '▼'}</span>
+              </button>
 
               {moduleOpen('ims') && IMS_FEATURE_TIERS.map(tier => {
                 const unlocked = isTierUnlocked(tier.tier, plan, isAdmin)
                 return (
                   <div key={tier.tier} style={{ marginBottom: 20 }}>
-                    {/* Tier label row */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: tier.planColor, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    {/* Tier label row. A plan is a category, so it is named in words in one neutral
+                        treatment (S852): the chips had a hue per plan, which put Growth in the
+                        verdict green, sat Starter's text3 on a tint of itself below AA on Light
+                        (4.1:1), and set the lock count in 9px. */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                         {tier.label}
                       </span>
                       {!unlocked && (
-                        <span style={{ fontSize: 9, fontWeight: 700, color: tier.planColor, background: colorTint(tier.planColor, 8), border: `1px solid ${colorTint(tier.planColor, 19)}`, padding: '1px 7px', borderRadius: 0 }}>
+                        <span className="badge-gray badge-sentence">
                           🔒 {tier.features.length} features locked
                         </span>
                       )}
@@ -1799,16 +1806,13 @@ export default function Help() {
                     {!unlocked && (
                       <div style={{
                         marginTop: 8, padding: '10px 14px',
-                        background: colorTint(tier.planColor, 3), border: `1px dashed ${colorTint(tier.planColor, 19)}`,
-                        borderRadius: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12
+                        border: '1px dashed var(--theme-border)',
+                        borderRadius: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap'
                       }}>
                         <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
-                          Upgrade to <strong style={{ color: tier.planColor }}>{tier.planLabel}</strong> to unlock {tier.features.length} features
+                          Upgrade to <strong style={{ color: 'var(--theme-text1)' }}>{tier.planLabel}</strong> to unlock {tier.features.length} features
                         </span>
-                        <button
-                          onClick={() => navigate('/pricing')}
-                          style={{ fontSize: 11, fontWeight: 700, color: tier.planColor, background: colorTint(tier.planColor, 8), border: `1px solid ${colorTint(tier.planColor, 21)}`, borderRadius: 0, padding: '4px 12px', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                        >
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/pricing')} style={{ whiteSpace: 'nowrap' }}>
                           View plans →
                         </button>
                       </div>
@@ -1822,19 +1826,21 @@ export default function Help() {
           {/* ── Crest HR ── */}
           {hrEnabled && (
             <div style={{ marginBottom: 32 }}>
-              <div
+              <button
+                type="button"
+                aria-expanded={moduleOpen('hr')}
                 onClick={() => toggleModule('hr')}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', cursor: 'pointer' }}
+                style={{ ...GS_TOGGLE_STYLE, justifyContent: 'flex-start', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)' }}
               >
-                <span style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>👤</span>
-                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Crest HR</span>
+                <span aria-hidden="true" style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>👤</span>
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>Crest HR</span>
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', padding: '2px 8px', borderRadius: 0 }}>Active</span>
-                <span style={{ marginLeft: 'auto', color: 'var(--theme-text3)', fontSize: 13 }}>{moduleOpen('hr') ? '▲' : '▼'}</span>
-              </div>
+                <span aria-hidden="true" style={{ marginLeft: 'auto', color: 'var(--theme-text3)', fontSize: 13 }}>{moduleOpen('hr') ? '▲' : '▼'}</span>
+              </button>
               {moduleOpen('hr') && (
                 <>
                   <div style={{ marginBottom: 8 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent-ink)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Human Resources</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Human Resources</span>
                   </div>
                   {HR_FEATURES.map(feat => (
                     <FeatureCard key={feat.name} feat={feat} moduleKey="hr" />
@@ -1847,19 +1853,21 @@ export default function Help() {
           {/* ── Crest POS ── */}
           {posEnabled && (
             <div style={{ marginBottom: 32 }}>
-              <div
+              <button
+                type="button"
+                aria-expanded={moduleOpen('pos')}
                 onClick={() => toggleModule('pos')}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', cursor: 'pointer' }}
+                style={{ ...GS_TOGGLE_STYLE, justifyContent: 'flex-start', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)' }}
               >
-                <span style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>⊕</span>
-                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Crest POS</span>
+                <span aria-hidden="true" style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>⊕</span>
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>Crest POS</span>
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-green-text)', background: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 20%, transparent)', padding: '2px 8px', borderRadius: 0 }}>Active</span>
-                <span style={{ marginLeft: 'auto', color: 'var(--theme-text3)', fontSize: 13 }}>{moduleOpen('pos') ? '▲' : '▼'}</span>
-              </div>
+                <span aria-hidden="true" style={{ marginLeft: 'auto', color: 'var(--theme-text3)', fontSize: 13 }}>{moduleOpen('pos') ? '▲' : '▼'}</span>
+              </button>
               {moduleOpen('pos') && (
                 <>
                   <div style={{ marginBottom: 8 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent-ink)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Point of Sale</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Point of Sale</span>
                   </div>
                   {POS_FEATURES.map(feat => (
                 <FeatureCard key={feat.name} feat={feat} moduleKey="pos" />
@@ -1880,7 +1888,7 @@ export default function Help() {
                 style={{ ...GS_TOGGLE_STYLE, justifyContent: 'flex-start', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)' }}
               >
                 <span aria-hidden="true" style={{ fontSize: 18, color: 'var(--theme-accent-ink)' }}>★</span>
-                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Crest Suite Pro</span>
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>Crest Suite Pro</span>
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-accent-ink)', background: 'color-mix(in srgb, var(--theme-accent) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 20%, transparent)', padding: '2px 8px', borderRadius: 0 }}>Add-on · per outlet</span>
                 <span aria-hidden="true" style={{ marginLeft: 'auto', color: 'var(--theme-text3)', fontSize: 13 }}>{moduleOpen('suite') ? '▲' : '▼'}</span>
               </button>
@@ -1889,7 +1897,7 @@ export default function Help() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                     <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--theme-accent-ink)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Owner pages across your modules and outlets</span>
                     {suiteLocked > 0 && (
-                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--theme-accent-ink)', background: colorTint('var(--theme-accent)', 8), border: `1px solid ${colorTint('var(--theme-accent)', 19)}`, padding: '1px 7px', borderRadius: 0 }}>
+                      <span className="badge-gray badge-sentence">
                         🔒 {suiteLocked} features locked
                       </span>
                     )}
@@ -1908,10 +1916,7 @@ export default function Help() {
                       <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
                         Add <strong style={{ color: 'var(--theme-accent-ink)' }}>Crest Suite Pro</strong> to unlock {suiteLocked} features. It is an add-on priced per outlet, on top of your modules, not an IMS plan upgrade.
                       </span>
-                      <button
-                        onClick={() => navigate('/pricing')}
-                        style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-accent-ink)', background: colorTint('var(--theme-accent)', 8), border: `1px solid ${colorTint('var(--theme-accent)', 21)}`, borderRadius: 0, padding: '4px 12px', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                      >
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/pricing')} style={{ whiteSpace: 'nowrap' }}>
                         View plans →
                       </button>
                     </div>
@@ -1926,7 +1931,7 @@ export default function Help() {
             <div style={{ marginBottom: 32 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid color-mix(in srgb, var(--theme-red) 20%, transparent)' }}>
                 <span style={{ fontSize: 18, color: 'var(--theme-red-text)' }}>⚙</span>
-                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>Admin Tools</span>
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>Admin Tools</span>
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-red-text)', background: 'color-mix(in srgb, var(--theme-red) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 20%, transparent)', padding: '2px 8px', borderRadius: 0 }}>Crest Admin Only</span>
               </div>
               {ADMIN_FEATURES.map(feat => (
@@ -1984,7 +1989,7 @@ export default function Help() {
             <div style={{ display: 'inline-flex', background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 0, padding: 3, gap: 2 }}>
               <button onClick={() => setPricingAnnual(false)} style={{ background: !pricingAnnual ? 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' : 'none', border: !pricingAnnual ? '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)' : '1px solid transparent', color: !pricingAnnual ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', padding: '6px 18px', borderRadius: 0, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Monthly</button>
               <button onClick={() => setPricingAnnual(true)}  style={{ background:  pricingAnnual ? 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' : 'none', border:  pricingAnnual ? '1px solid color-mix(in srgb, var(--theme-accent) 30%, transparent)' : '1px solid transparent', color:  pricingAnnual ? 'var(--theme-accent-ink)' : 'var(--theme-text2)', padding: '6px 18px', borderRadius: 0, cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                Annual <span style={{ background: 'color-mix(in srgb, var(--theme-green) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', color: 'var(--theme-green-text)', fontSize: 9, padding: '2px 7px', borderRadius: 0, fontWeight: 700 }}>Save 25%</span>
+                Annual <span style={{ background: 'color-mix(in srgb, var(--theme-green) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', color: 'var(--theme-green-text)', fontSize: 11, padding: '2px 7px', borderRadius: 0, fontWeight: 700 }}>Save 25%</span>
               </button>
             </div>
           </div>
@@ -1998,14 +2003,14 @@ export default function Help() {
               return (
                 <div key={plan.key} className="card" style={{ border: highlight ? `1px solid ${colorTint(MODULE_COLORS.ims, 44)}` : '1px solid var(--theme-border)', position: 'relative', display: 'flex', flexDirection: 'column', padding: '32px 22px 22px', boxShadow: highlight ? `0 4px 32px ${colorTint(MODULE_COLORS.ims, 9)}` : 'none' }}>
                   {highlight && (
-                    <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: MODULE_COLORS.ims, color: 'var(--theme-accent-text)', fontSize: 9, fontWeight: 800, padding: '3px 12px', borderRadius: 0, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                    <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', background: MODULE_COLORS.ims, color: 'var(--theme-accent-text)', fontSize: 11, fontWeight: 800, padding: '3px 12px', borderRadius: 0, letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                       Most Popular
                     </div>
                   )}
                   <div style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 16, fontWeight: 700, color: MODULE_INK.ims, fontFamily: 'Georgia, serif' }}>{plan.label}</span>
+                    <span style={{ fontSize: 16, fontWeight: 700, color: MODULE_INK.ims }}>{plan.label}</span>
                     {highlight && (
-                      <span style={{ fontSize: 9, fontStyle: 'italic', fontWeight: 800, color: MODULE_INK.ims, background: colorTint(MODULE_COLORS.ims, 8), border: `1px solid ${colorTint(MODULE_COLORS.ims, 25)}`, padding: '2px 6px', borderRadius: 0, letterSpacing: '0.05em' }}>
+                      <span style={{ fontSize: 11, fontStyle: 'italic', fontWeight: 800, color: MODULE_INK.ims, background: colorTint(MODULE_COLORS.ims, 8), border: `1px solid ${colorTint(MODULE_COLORS.ims, 25)}`, padding: '2px 6px', borderRadius: 0, letterSpacing: '0.05em' }}>
                         TRIALS RUN HERE
                       </span>
                     )}
@@ -2050,7 +2055,7 @@ export default function Help() {
               return (
                 <div key={mod.key} className="card" style={{ display: 'flex', flexDirection: 'column', padding: '32px 22px 22px' }}>
                   <div style={{ marginBottom: 6 }}>
-                    <span style={{ fontSize: 16, fontWeight: 700, color: mod.color, fontFamily: 'Georgia, serif' }}>{mod.name}</span>
+                    <span style={{ fontSize: 16, fontWeight: 700, color: mod.color }}>{mod.name}</span>
                   </div>
                   <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid var(--theme-border)' }}>
                     <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>NPR {price.toLocaleString('en-IN')}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--theme-text2)' }}>/month</span></div>
@@ -2074,7 +2079,7 @@ export default function Help() {
           <div className="card" style={{ marginBottom: 24, borderColor: 'color-mix(in srgb, var(--theme-accent) 20%, transparent)' }}>
             <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
               <div style={{ minWidth: 180 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif', marginBottom: 8 }}>{pricing.suite.label}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 8 }}>{pricing.suite.label}</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--theme-text1)' }}>
                   +NPR {(pricingAnnual ? pricing.suite.annual : pricing.suite.monthly).toLocaleString('en-IN')}
                   <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)' }}>/month per outlet</span>
@@ -2138,7 +2143,7 @@ export default function Help() {
       {activeSection === 'support' && (
         <div style={{ maxWidth: 560 }}>
           <div className="card">
-            <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Get in touch</h3>
+            <h2 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Get in touch</h2>
             <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 20px' }}>
               For anything the guide above doesn't answer — a bug, a question, or your outlet is down.
             </p>
