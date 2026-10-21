@@ -6,7 +6,7 @@ import { fcBand, fcThresholds, recipeCostOf, varianceFlagPct } from '../../share
 import { nmBand, descendingBand, bandFigure } from '../../shared/operatingBands'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
-import { fetchAllRows } from '../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsParallel } from '../../shared/fetchAllRows'
 import { firstError } from '../../shared/queryError'
 import {
   dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
@@ -49,7 +49,7 @@ import { BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd, formatAd, bsDayBound
 import { nepalBs, nepalCivilDate, serviceDayStartIso } from '../../shared/nepalTime'
 import { carryOverFrom, stillInPlay } from '../../modules/pos/reservations/reservationStatus'
 import { getSubStatus } from '../../utils/subscription'
-import { explodeRecipeIngredients, getSuggestedPrice } from '../../utils/recipeCost'
+import { explodeRecipeIngredients, getSuggestedPrice, loadRecipeBook } from '../../utils/recipeCost'
 import { buildStockRows } from '../../modules/ims/stockcount/stockReportCalc'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { allocateBillDiscounts, returnCostValue } from '../../modules/ims/reports/supplierAttribution'
@@ -637,14 +637,28 @@ export default function ClientDashboard({ scope = 'home' }) {
       // still correctly limits Variance/Reorder/the item COUNT to currently-active stock items).
       read(fetchAllRows(() => scopedFrom('items', 'id, name, per_uom_rate').eq('is_sub_recipe', false).order('id')), 'Item rates'),
     ])
+    // The recipe book, read once beside the reference reads and walked in memory below (S793,
+    // PERF-5). The walk used to start only once `recipes` had landed, then fetch one sub-recipe
+    // nesting level per round trip. A failed or hung read is null, the same as a failed walk.
+    const bookPromise = withTimeout(loadRecipeBook(scopedFrom), WALK_TIMEOUT_MS, 'Recipe book')
+      .catch(err => { console.error('Dashboard: recipe book failed', err); return null })
 
     // .single() reports error.code 'PGRST116' when the result set isn't exactly one row — for
     // this query that just means "no open period right now," a normal, common state, not a
     // failure. Only anything else is a genuine fetch failure worth surfacing.
-    const { data: period, error: periodErr } = await read(scopedFrom('monthly_periods')
+    const periodRead = read(scopedFrom('monthly_periods')
       .eq('status', 'open')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
       .limit(1).single(), 'Open month')
+
+    // The Food Cost trend starts beside the open-month read, not after it (PERF-5): its closed-months
+    // read needs nothing from this one, and it waits for the open month only to add that month's
+    // point, which it derives from its own query batch rather than from this function's figures.
+    // Before S558 it ran only after this whole function, so the chart always rendered last.
+    // Not awaited — the same fire-and-forget shape it always had.
+    loadFcTrend(periodRead.then(r => r.data ?? null), myId)
+
+    const { data: period, error: periodErr } = await periodRead
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
 
     const periodFailed = !!(periodErr && periodErr.code !== 'PGRST116')
@@ -654,15 +668,6 @@ export default function ClientDashboard({ scope = 'home' }) {
     // The month-to-date clock (S849): ratios count the days already finished, and whole-month fixed
     // costs are counted for those days. Fixed for this load, and kept in `stats` with its figures.
     const clock = mtdClock(period)
-
-    // Fired here (as soon as `period` is known) rather than after this whole function finishes —
-    // it used to run only once loadStats had computed Food Cost % from its own big batch below,
-    // which meant the FC Trend chart's own (separate, ~11-period) query never even started until
-    // everything else on the page was already done, guaranteeing it was the last thing to render.
-    // It now derives the open period's own point from its own query batch instead of being handed
-    // a precomputed figure, so it has everything it needs up front and can run fully alongside the
-    // Promise.all below instead of after it. Not awaited — same fire-and-forget shape it always had.
-    loadFcTrend(period, myId)
 
     // The 28 days before this month began, for the Daily Purchases vs Sales forecast and Target.
     // Only the month in progress forecasts anything, so only then is it read. Its own error slot:
@@ -691,7 +696,9 @@ export default function ClientDashboard({ scope = 'home' }) {
       // etc. per PosOrders.jsx's own source-taxonomy comment) — a comped dish still used real
       // stock even though it collected no revenue.
       // ingredient_deltas: a customized plate also consumes its options' stock lines (S758).
-      period ? fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, unit_price, discount, source, ingredient_deltas').eq('period_id', period.id).order('id')) : { data: [] },
+      // Every page after the first is asked at once (PERF-5, the Owner Dashboard's S853 read): a busy
+      // till's month is many pages, and each used to wait for the one before it.
+      period ? fetchAllRowsParallel(opts => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, unit_price, discount, source, ingredient_deltas', opts).eq('period_id', period.id).order('id')) : { data: [] },
       // Both paged (S734): one row per item per period, so they cross the cap at the same item
       // count the master-data reads above do. An opening or closing row past the cut reads as
       // ZERO on that item — which flows straight into the Variance top-5 (actual usage comes out
@@ -762,15 +769,17 @@ export default function ClientDashboard({ scope = 'home' }) {
     // previous direct recipe_ingredients read (removed) only picked up rows with a direct item_id,
     // silently dropping any ingredient that was itself a sub-recipe, and the Menu Health cost map
     // didn't apply yield_pct at all. One call now feeds both theoreticalMap (item usage) and
-    // recipeCostMap (recipe cost) below. It only needs `recipes` (just resolved above), nothing
-    // from dependentPromise, so it's kicked off now and runs alongside the period-scoped batch
-    // rather than waiting for that too.
+    // recipeCostMap (recipe cost) below. It needs `recipes` (just resolved above) and the book
+    // (read beside them), nothing from dependentPromise, so it runs alongside the period-scoped
+    // batch rather than waiting for that too.
     const dashRecipeIds = (recipes || []).map(r => r.id)
     // The recipe walk throws on a failed read (S695); null here means "could not be computed"
     // and is folded into hadRealError below, the same way a failed read in either batch is.
-    // A walk that hangs is a walk that failed (S852).
+    // A walk that hangs is a walk that failed (S852); the book read above carries the time limit,
+    // and the walk itself is in memory.
     const ingredientBreakdownPromise = dashRecipeIds.length > 0
-      ? withTimeout(explodeRecipeIngredients(supabase, dashRecipeIds), WALK_TIMEOUT_MS, 'Recipe walk').catch(err => { console.error('Dashboard: recipe walk failed', err); return null })
+      ? bookPromise.then(book => (book ? explodeRecipeIngredients(supabase, dashRecipeIds, { book }) : null))
+          .catch(err => { console.error('Dashboard: recipe walk failed', err); return null })
       : Promise.resolve({})
 
     const [dependentResults, rawBreakdown, forecastHistory, labourResult, commission] = await Promise.all([dependentPromise, ingredientBreakdownPromise, historyPromise, labourPromise, commissionPromise])
@@ -1489,13 +1498,18 @@ export default function ClientDashboard({ scope = 'home' }) {
     }
   }
 
-  async function loadFcTrend(currentPeriod, myId) {
+  // `openMonth` is the open period, or loadStats' promise of it: the closed months are read beside
+  // that read rather than after it (PERF-5). A Retry passes the period itself.
+  async function loadFcTrend(openMonth, myId) {
     // Time-limited like every read here (S852): a hung read is a failed one, which draws nothing.
-    const { data: closedPeriods, error: closedErr } = await read(scopedFrom('monthly_periods', 'id, bs_year, bs_month')
-      .eq('status', 'closed')
-      .order('bs_year', { ascending: false })
-      .order('bs_month', { ascending: false })
-      .limit(11), 'Closed months')
+    const [{ data: closedPeriods, error: closedErr }, currentPeriod] = await Promise.all([
+      read(scopedFrom('monthly_periods', 'id, bs_year, bs_month')
+        .eq('status', 'closed')
+        .order('bs_year', { ascending: false })
+        .order('bs_month', { ascending: false })
+        .limit(11), 'Closed months'),
+      openMonth,
+    ])
 
     const closed = closedPeriods || []
     // The open period's own id is folded into the same query batch (rather than this function
@@ -1507,13 +1521,16 @@ export default function ClientDashboard({ scope = 'home' }) {
     const periodIds = [...closed.map(p => p.id), ...(currentPeriod ? [currentPeriod.id] : [])]
     const closedIds = closed.map(p => p.id)
 
+    // Every read spanning the months is paged with the pages after the first asked at once
+    // (fetchAllRowsParallel, PERF-5): twelve months of sales or stock rows is several pages, and
+    // each used to wait for the one before it. Master data (items, recipes) stays on fetchAllRows.
     const trendResults = await Promise.all([
       // Bill-key columns + `discount_amount` for allocateBillDiscounts(), as in loadStats — this
       // chart's open-period point must equal the Spend % so far tile, and every closed month must
       // equal the Food Cost % Consolidated P&L / Monthly Summary charge for it. `item_id` because
       // a closed month is valued per item (below), over Monthly Summary's item set.
-      periodIds.length ? fetchAllRows(() => supabase.from('purchase_entries').select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost').in('period_id', periodIds).order('id')) : { data: [] },
-      periodIds.length ? fetchAllRows(() => supabase.from('vendor_returns').select('period_id, item_id, qty, rate, bs_day, purchase_entries(vat_inclusive, vat_is_cost)').in('period_id', periodIds).order('id')) : { data: [] },
+      periodIds.length ? fetchAllRowsParallel(opts => supabase.from('purchase_entries').select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost', opts).in('period_id', periodIds).order('id')) : { data: [] },
+      periodIds.length ? fetchAllRowsParallel(opts => supabase.from('vendor_returns').select('period_id, item_id, qty, rate, bs_day, purchase_entries(vat_inclusive, vat_is_cost)', opts).in('period_id', periodIds).order('id')) : { data: [] },
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for — but the
       // filter is applied in JS below, NOT as `.neq('source','pos_comp')`. `sales_entries.source`
       // is nullable (DEFAULT 'manual', no NOT NULL), and in SQL `NULL <> 'pos_comp'` is NULL, so
@@ -1525,7 +1542,7 @@ export default function ClientDashboard({ scope = 'home' }) {
       // bare .select() truncates at PostgREST's 1000-row cap with no error — and because only the
       // denominator was truncated, every Food Cost % on the chart failed HIGH. A believable wrong
       // number, on the figure the product is sold on.
-      periodIds.length ? fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount, source, bs_day').in('period_id', periodIds).order('id')) : { data: [] },
+      periodIds.length ? fetchAllRowsParallel(opts => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount, source, bs_day', opts).in('period_id', periodIds).order('id')) : { data: [] },
       // Paged (S734): this map is the price fallback for any sales row with no `unit_price`, so
       // a recipe past the cut prices its sales at 0 — and this chart's whole subject is the
       // RATIO, so a short denominator makes every month's Food Cost % fail HIGH. Exactly the
@@ -1539,10 +1556,10 @@ export default function ClientDashboard({ scope = 'home' }) {
       // and staff meals) across up to eleven months, so every read is paged (S720's multiplier).
       // Items: every non-sub-recipe item, hidden ones included (D29), Monthly Summary's set.
       closedIds.length ? fetchAllRows(() => scopedFrom('items', 'id, name, per_uom_rate, is_active').eq('is_sub_recipe', false).order('id')) : { data: [] },
-      closedIds.length ? fetchAllRows(() => supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', closedIds).order('id')) : { data: [] },
-      closedIds.length ? fetchAllRows(() => supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', closedIds).order('id')) : { data: [] },
-      closedIds.length ? fetchAllRows(() => supabase.from('wastages').select('period_id, item_id, qty').in('period_id', closedIds).order('id')) : { data: [] },
-      closedIds.length ? fetchAllRows(() => supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', closedIds).order('id')) : { data: [] },
+      closedIds.length ? fetchAllRowsParallel(opts => supabase.from('opening_stock').select('period_id, item_id, qty', opts).in('period_id', closedIds).order('id')) : { data: [] },
+      closedIds.length ? fetchAllRowsParallel(opts => supabase.from('closing_stock').select('period_id, item_id, physical_qty', opts).in('period_id', closedIds).order('id')) : { data: [] },
+      closedIds.length ? fetchAllRowsParallel(opts => supabase.from('wastages').select('period_id, item_id, qty', opts).in('period_id', closedIds).order('id')) : { data: [] },
+      closedIds.length ? fetchAllRowsParallel(opts => supabase.from('staff_meals').select('period_id, item_id, qty', opts).in('period_id', closedIds).order('id')) : { data: [] },
       // Stock moved between the group's outlets (S849, PNL-8): in adds like a purchase, out comes off
       // like a return, in a closed month's COGS (valuePeriods) and the open month's spend alike.
       readPeriodTransfers(scopedFrom, periodIds),

@@ -187,7 +187,8 @@ Both feeds run the same `walkRecipeTree`, and `recipeCost.test.js` asserts deep-
 every fixture. Stock Movements, its Sub-Recipes tab and Variance use the book; since S809 2f so does
 the till (comp costs, slips, the Z-report, a closing bill's stock lines), through the DEFINER read
 `pos_recipe_book` (`posRecipeBook.js`), because a PIN login cannot read `items`. The Periods backfill
-and the other readers still fetch level by level. A new multi-walk page should take the book.
+and the other readers still fetch level by level; Stock Report, Reorder Report and the Dashboard took the
+book in S856 (PERF-5). A new multi-walk page should take the book.
 
 **The server's post has a SQL copy of this walk (S830, Q30 a): `pos_bill_stock_lines`.** A change
 to `walkRecipeTree`, `deltaItems` or `billMovementRows` changes both, pinned by `serverPostTwin.test.js`

@@ -16,6 +16,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { useRecipeBook } from '../../../shared/hooks/useRecipeBook'
 import { initPeriodLoad } from '../../../shared/periodList'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { buildStockRows } from './stockReportCalc'
@@ -33,6 +34,10 @@ export default function StockReport() {
   const { scopedFrom } = useScopedDb()
   const biz = useBizInfo()
 
+  // The whole recipe book, loaded once beside the period list (S793, PERF-5): the walk below then
+  // costs no round trips, where fetching it level by level added one per sub-recipe nesting level
+  // after the period's reads had landed, on every month picked.
+  const recipeBook = useRecipeBook()
   const periodReq = useLatestRequest()
   const periodList = usePeriodList()
   const [periods, setPeriods] = useState([])
@@ -51,6 +56,7 @@ export default function StockReport() {
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
+    recipeBook()   // start it now, so it lands alongside the period list rather than after it
     // The month comes from the shared list, the report starting beside it (S855, periodList.js);
     // the open month, else the latest, claimed like a chosen one (S756).
     const [out, cats] = await Promise.all([
@@ -104,10 +110,11 @@ export default function StockReport() {
       fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
       fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
-      // The recipe walk's seed is the whole book, sub-recipes included, so it is paged like the
-      // rest (S792, PLANNING-9): past 1,000 recipes the dishes beyond the cut consumed nothing,
-      // and their ingredients read as still on the shelf.
-      fetchAllRows(() => scopedFrom('recipes', 'id').order('id')),
+      // The recipe book seeds AND feeds the walk (S793, PERF-5). Its seed is the whole book,
+      // sub-recipes included, and it is paged on its recipes (S792, PLANNING-9): past 1,000 recipes
+      // the dishes beyond the cut consumed nothing, and their ingredients read as still on the shelf.
+      // Settled into the { error } shape so firstError below sees a failed book like any other read.
+      recipeBook().then(book => ({ data: book, error: null }), error => ({ data: null, error })),
       // source + bs_day feed selectDepletingSales' POS-supersedes-manual dedup inside
       // buildStockRows — the same rule Variance, Theoretical Variance and Shrinkage apply. Read
       // raw, a day sold in both POS and manual entry consumed its ingredients twice here, and a
@@ -131,14 +138,14 @@ export default function StockReport() {
     if (failed) { setLoadError(failed); setRows([]); return }
     const [
       { data: allItems }, { data: opening }, { data: closing }, { data: purchases },
-      { data: returns }, { data: wastages }, { data: staffMeals }, { data: clientRecipes },
+      { data: returns }, { data: wastages }, { data: staffMeals }, { data: book },
       { data: sales }, { data: pars }, { data: transfers },
     ] = results
     // Every active item, plus each hidden one with a row this period (D29) — a hidden item nothing
     // happened to is not part of the month and would only pad the list with "No activity" rows.
     const items = periodValuationItems(allItems, periodRowIds({ opening, closing, purchases, returns, wastages, staffMeals, transfers }))
 
-    const recipeIds = (clientRecipes || []).map(r => r.id)
+    const recipeIds = [...book.recipes.keys()]
     // explodeRecipeIngredients recurses through sub-recipe ingredients and applies yield_pct —
     // the previous direct recipe_ingredients read only picked up rows with item_id set (dropping
     // sub-recipe ingredients) and never divided by yield_pct at all, understating usage and
@@ -150,7 +157,7 @@ export default function StockReport() {
     let explosion = null
     try {
       ;[breakdown, explosion] = await Promise.all([
-        recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds) : {},
+        recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds, { book }) : {},
         loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
       ])
     } catch (err) {

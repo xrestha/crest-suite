@@ -150,3 +150,34 @@ describe('Overheads upsells name the plan it is sold on', () => {
     expect(flat).toMatch(/FEATURE_TIER\.overheads/)
   })
 })
+
+// PERF-5: the Dashboard's slowest reads. The recipe walk reads the book from memory (it fetched one
+// sub-recipe level per round trip), the Food Cost trend's closed-months read goes out beside the
+// open-month read (it waited for it), and the reads spanning months ask every page after the first
+// at once (each page waited for the one before it).
+describe('ClientDashboard starts its slow reads early (PERF-5)', () => {
+  const flat = flatten('ClientDashboard.jsx')
+  const trend = flat.slice(flat.indexOf('async function loadFcTrend'))
+
+  test('the recipe walk reads the recipe book in memory', () => {
+    expect(flat).toMatch(/loadRecipeBook\(scopedFrom\)/)
+    expect(flat).toMatch(/explodeRecipeIngredients\(supabase, dashRecipeIds, \{ book \}\)/)
+    expect(flat).not.toMatch(/explodeRecipeIngredients\(supabase, dashRecipeIds\)/)
+  })
+
+  test('the Food Cost trend starts before the open-month read is awaited', () => {
+    const start = flat.indexOf('loadFcTrend(periodRead.then(')
+    expect(start).toBeGreaterThan(-1)
+    expect(flat.indexOf('await periodRead')).toBeGreaterThan(start)
+    expect(trend).toMatch(/await Promise\.all\(\[ read\(scopedFrom\('monthly_periods'/)
+  })
+
+  test.each(['purchase_entries', 'vendor_returns', 'sales_entries', 'opening_stock', 'closing_stock', 'wastages', 'staff_meals'])(
+    "the trend's %s read asks every page after the first at once", table => {
+      expect(trend).toMatch(new RegExp(`fetchAllRowsParallel\\(opts => supabase\\.from\\('${table}'\\)\\.select\\('[^']*', opts\\)\\.in\\('period_id', \\w+\\)\\.order\\('id'\\)\\)`))
+    })
+
+  test("the month's sales read asks every page after the first at once", () => {
+    expect(flat).toMatch(/fetchAllRowsParallel\(opts => supabase\.from\('sales_entries'\)\.select\('[^']*', opts\)\.eq\('period_id', period\.id\)\.order\('id'\)\)/)
+  })
+})

@@ -16,6 +16,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { useRecipeBook } from '../../../shared/hooks/useRecipeBook'
 import { initPeriodLoad } from '../../../shared/periodList'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalBsLong, nepalDateAd } from '../../../shared/nepalTime'
@@ -49,6 +50,10 @@ export default function ReorderReport() {
   const [actionError, setActionError] = useState(null) // a reset or clear that did not land
   const navigate = useNavigate()
 
+  // The whole recipe book, loaded once beside the period list (S793, PERF-5): the walk below then
+  // costs no round trips, where fetching it level by level added one per sub-recipe nesting level
+  // after the period's reads had landed, on every month picked.
+  const recipeBook = useRecipeBook()
   const periodReq = useLatestRequest()
   const periodList = usePeriodList()
   const [periods, setPeriods] = useState([])
@@ -95,6 +100,7 @@ export default function ReorderReport() {
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
+    recipeBook()   // start it now, so it lands alongside the period list rather than after it
     // The month comes from the shared list, the report starting beside it (S855, periodList.js).
     // Falls back to the latest period when none is open (the gap between closing one month and
     // opening the next). Before S696 this page loaded nothing then, and the empty state said
@@ -160,6 +166,9 @@ export default function ReorderReport() {
       // the moment it was sent, and stock received counts once the branch pressed Received, so the
       // purchase list neither re-buys what is on the way out nor ignores what arrived.
       readPeriodTransfers(scopedFrom, periodId),
+      // The recipe book feeds the walk below (S793, PERF-5), so the walk costs no round trip of
+      // its own. Settled into the { error } shape so firstError sees a failed book like any read.
+      recipeBook().then(book => ({ data: book, error: null }), error => ({ data: null, error })),
     ])
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must never flow through the `|| []`s below — Book Stock is a figure people
@@ -178,6 +187,7 @@ export default function ReorderReport() {
       { data: pars },
       { data: movements },
       { data: transfers },
+      { data: book },
     ] = results
 
     // The row id is what savePar's update path filters on, so it must be kept here and after an
@@ -190,7 +200,7 @@ export default function ReorderReport() {
     const movementMap = {}
     ;(movements || []).forEach(m => { movementMap[m.item_id] = (movementMap[m.item_id] || 0) + (parseFloat(m.qty) || 0) })
 
-    // Only the recipes that sold need exploding — the walk is the expensive read on this page.
+    // Only the recipes that sold need exploding. The walk reads them from the book in memory.
     const soldRecipeIds = [...new Set((sales || []).map(s => s.recipe_id).filter(Boolean))]
     // The recipe walk throws on a failed read (S695) — before, it walked an empty tree and every
     // item's current stock read as opening + purchases, so nothing ever needed reordering.
@@ -199,10 +209,12 @@ export default function ReorderReport() {
     let explosion = null
     try {
       ;[breakdown, explosion] = await Promise.all([
-        soldRecipeIds.length > 0 ? explodeRecipeIngredients(supabase, soldRecipeIds) : {},
+        soldRecipeIds.length > 0 ? explodeRecipeIngredients(supabase, soldRecipeIds, { book }) : {},
         loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
       ])
     } catch (err) {
+      // A superseded load's failure must not replace the month the reader moved to (S719).
+      if (!periodReq.isCurrent(periodId)) return
       setLoadError(err); setRows([]); return
     }
 

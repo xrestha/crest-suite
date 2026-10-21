@@ -121,8 +121,8 @@ History: docs/rules-archive/dashboards.md#s558-period-close-and-disclosure
 
 ## Start each dashboard load as soon as its inputs exist
 
-- `loadFcTrend(period, myId)` fires, unawaited, as soon as `period` is known, and folds the open period's id into its own `.in('period_id', ...)` batch instead of waiting for a figure from `loadStats`. A small duplicate read is the price of concurrency.
-- `loadStats` fires `independentPromise` (item/vendor/recipe counts and recipe/item/`par_levels` reference data, 8 of the old 15-query `Promise.all`) alongside the period lookup, and `dependentPromise` (the 7 period-scoped reads) once `period` is known. `explodeRecipeIngredients` (up to 5 sub-recipe rounds) starts as soon as `recipes` resolves.
+- `loadFcTrend(periodRead.then(…), myId)` fires, unawaited, beside the open-month read (S856, PERF-5): its closed-months read goes out with it, and it folds the open period's id into its own `.in('period_id', ...)` batch instead of waiting for a figure from `loadStats`. A small duplicate read is the price of concurrency. Its month-spanning reads, and the month's `sales_entries`, are `fetchAllRowsParallel`.
+- `loadStats` fires `independentPromise` (item/vendor/recipe counts and recipe/item/`par_levels` reference data, 8 of the old 15-query `Promise.all`) and the recipe book (`loadRecipeBook`, S856) alongside the period lookup, and `dependentPromise` (the period-scoped reads) once `period` is known. `explodeRecipeIngredients` walks the book in memory once `recipes` resolves.
 - Never queue a chart's load behind a load it does not need.
 - HR, POS and Sales Mix stay separate pipelines, each with its own `loadIdRef` guard against a client switch. Don't fold them into `loadStats`.
 - The Owner Dashboard does the same through `src/modules/dashboard/ownerDashboardLoad.js` (S853): `startFirstWave` starts the month read, the recipe book and the HR staff reads in one tick, and `startMonthBatch` starts every month read at once, each tile settling on its own reads. `ownerDashboardLoad.test.js` pins the order.

@@ -8,7 +8,11 @@ them sits the S793 load-time backlog (PERF-n), from measuring the module on a sl
 
 **S855 (2026-10-21): every S853 "Build next" item below shipped in one release (crest-v470)**: PERF-2, PERF-3 and
 PERF-4, the stock-count device screen, Budget vs Actual's open-month line, unsaved dish photos, and the Owner Report
-supplier split (the aging half was already fixed in S849). PERF-5 stays open.
+supplier split (the aging half was already fixed in S849). PERF-5 stayed open.
+
+**S856 (2026-10-21, crest-v471): PERF-5 shipped**, so the S793 load-time list is done. What is left in this file is
+not engineering: a count-PIN sign-in on a real storeroom phone (S761, below) and the accountant's question about a
+sales-side VAT view for IMS-only clients.
 
 **S853 owner decisions (2026-10-21, asked in plain words):**
 - ✅ S855 **Build next:** PERF-2, PERF-3 and PERF-4 together (PERF-4 touches the service worker, so it is planned with
@@ -39,7 +43,7 @@ the S793 CHANGELOG entry.
 | PERF-2 | Every period page spends its first round trip finding the open month (~0.6 s on ~35 pages). A shared period list would let their data reads start in the first level. Touches every page's `init()`, so it needs its own plan. | ✅ S855: `src/shared/periodList.js` (`initPeriodLoad`, `usePeriodList`); Layout reads it on mount; 30 pages and 2 widgets start their reads beside it |
 | PERF-3 | Item Master waits for the Used In count (a paged RPC, two levels) before showing the list. Painting first needs a "checking…" state in the delete guard, which must still refuse while the count is unknown. | ✅ S855: list first, scan pending/ok/failed, `deleteGuard` (`itemDeleteGuard.js`) |
 | PERF-4 | The service worker deletes every cached JS chunk on every deploy, so a slow link re-downloads the whole app after each release, even chunks whose hashed name did not change. Keep hashed `/static/` files across deploys and prune to the new asset manifest. Read the production cache headers first; unmeasured. | ✅ S855: measured live (`/static/` is `s-maxage=31536000, immutable`, a missing hash is a 404); fixed `crest-static` cache, new + previous build kept, prune skipped when unsure |
-| PERF-5 | The Dashboard's 12-month trend is the heaviest download (~180 KB, 4 levels on a first visit). It is cached on revisit, so it is lowest priority. The Dashboard, Reorder and Stock Report still walk recipes level by level and could take the book. | ⚪ |
+| PERF-5 | The Dashboard's 12-month trend is the heaviest download (~180 KB, 4 levels on a first visit). It is cached on revisit, so it is lowest priority. The Dashboard, Reorder and Stock Report still walk recipes level by level and could take the book. | ✅ S856: Stock Report, Reorder Report and the Dashboard walk the recipe book in memory (`useRecipeBook` / `loadRecipeBook`); the trend's closed-months read goes out beside the open-month read; its month-spanning reads and the Dashboard's month of sales ask every page after the first at once (`fetchAllRowsParallel`). Bytes unchanged |
 
 ---
 
