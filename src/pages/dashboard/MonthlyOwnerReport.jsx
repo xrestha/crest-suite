@@ -1366,26 +1366,62 @@ function MonthlyOwnerReportBody() {
 
             {snapshot.vendorPurchasing && (() => {
               const vp = snapshot.vendorPurchasing
+              // v19 (S855, owner decision): Cash / Credit / FonePay split the Net Spend itself (after the
+              // bill discount, before VAT), so each row adds up to its Net Spend and the Total row carries
+              // the month's split. An older report split the list price; its note below says so and its
+              // Total row keeps those cells blank, since they would not add up.
+              const splitNet = vp.splitBasis === 'net'
+              const alignRight = { textAlign: 'right' }
               return (
                 <div className="owner-report-section">
                   <h3 style={sectionTitleStyle}>Vendor &amp; Purchasing</h3>
                   <div className="table-wrap" style={{ marginBottom: 8 }}>
                     <table className="data-table owner-report-table">
-                      <thead><tr><th>Vendor</th><th style={{ textAlign: 'right' }}>Net Spend</th><th style={{ textAlign: 'right' }}>Cash</th><th style={{ textAlign: 'right' }}>Credit</th></tr></thead>
+                      <thead><tr>
+                        <th>Vendor</th>
+                        <th style={alignRight}>
+                          <Tip width={280} text={splitNet
+                            ? 'What each supplier cost this month: list price less the bill discount and returns, before VAT, as on the Vendor Report. Cash, Credit and FonePay split it by how each bill and each return was paid, so the three add up to it.'
+                            : 'What each supplier cost this month: list price less the bill discount and returns, before VAT. Cash, Credit and FonePay on this report are before the bill discount, so they can add up to more.'}>
+                            Net Spend
+                          </Tip>
+                        </th>
+                        <th style={alignRight}>Cash</th><th style={alignRight}>Credit</th><th style={alignRight}>FonePay</th>
+                      </tr></thead>
                       <tbody>
                         {vp.vendors.slice(0, 12).map(v => (
-                          <tr key={v.vendorId}><td>{v.name}</td><td style={{ textAlign: 'right' }}>{fmt(v.net)}</td><td style={{ textAlign: 'right' }}>{fmt(v.cash)}</td><td style={{ textAlign: 'right' }}>{fmt(v.credit)}</td></tr>
+                          <tr key={v.vendorId}><td>{v.name}</td><td style={alignRight}>{fmt(v.net)}</td><td style={alignRight}>{fmt(v.cash)}</td><td style={alignRight}>{fmt(v.credit)}</td><td style={alignRight}>{fmt(v.fonepay)}</td></tr>
                         ))}
-                        <tr><td style={{ fontWeight: 700 }}>Total</td><td style={{ textAlign: 'right', fontWeight: 700 }}>{fmt(vp.grandNet)}</td><td /><td /></tr>
+                        <tr>
+                          <td style={{ fontWeight: 700 }}>
+                            <Tip width={260} text="The whole month: every supplier, including any past the twelve listed here, and bills with no supplier recorded.">Total</Tip>
+                          </td>
+                          <td style={{ ...alignRight, fontWeight: 700 }}>{fmt(vp.grandNet)}</td>
+                          {splitNet ? (
+                            <>
+                              <td style={{ ...alignRight, fontWeight: 700 }}>{fmt(vp.grandCash)}</td>
+                              <td style={{ ...alignRight, fontWeight: 700 }}>{fmt(vp.grandCredit)}</td>
+                              <td style={{ ...alignRight, fontWeight: 700 }}>{fmt(vp.grandFonepay)}</td>
+                            </>
+                          ) : <><td /><td /><td /></>}
+                        </tr>
                       </tbody>
                     </table>
                   </div>
+                  {!splitNet && (
+                    <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
+                      Cash, Credit and FonePay on this report are before the bill discount, the rule it was made
+                      under, so for a supplier with a discount they add up to more than its Net Spend. Reports
+                      made since split the Net Spend itself.
+                    </p>
+                  )}
                   <div className="table-wrap">
                     <table className="data-table owner-report-table"><tbody>
-                      {/* v18 (OWNER-REPORT-8): each bill at what is still owed on it. */}
+                      {/* v18 (OWNER-REPORT-8): each bill at what is still owed on it. VAT included, so
+                          it can be more than the Credit column above (S855). */}
                       <Row label="Unpaid Credit — Current (≤30d)" value={fmt(vp.billAging.current)}
                         tip={vp.billAging.basis === 'owed'
-                          ? 'What is still owed on this month\'s credit bills (VAT, discount and returns included, less payments), by how old each bill was when this report was made.'
+                          ? 'What is still owed on the credit bills of this month (VAT added, discount and returns taken off, less payments), by how old each bill was when this report was made. It includes VAT and the Credit column above does not (apart from VAT your outlet cannot claim back), so Unpaid Credit can be more than Credit.'
                           : 'This month\'s credit lines at quantity × rate less payments (before VAT, discounts and returns) — the rule this report was made under — by how old each bill was when it was made.'} />
                       <Row label="Unpaid Credit — 31–60 days" value={fmt(vp.billAging.d31_60)} color={vp.billAging.d31_60 > 0 ? 'var(--theme-amber-text)' : undefined} />
                       <Row label="Unpaid Credit — 61–90 days" value={fmt(vp.billAging.d61_90)} color={vp.billAging.d61_90 > 0 ? 'var(--theme-amber-text)' : undefined} />

@@ -18,26 +18,92 @@ import { useAuth } from '../context/AuthContext'
 import { adminOp } from '../shared/adminOp'
 import { withTimeout } from '../utils/withTimeout'
 import ActionError, { asActionError } from './ActionError'
-import { docsRequiringReacceptance, acceptancePayload, legalPath, PRIOR_VERSIONS } from '../legal'
+import { docsRequiringReacceptance, acceptancePayload, legalPath } from '../legal'
 
-// Whether any pending document has an earlier published version (S852). With none, nobody can
-// have accepted a previous one, so the gate is a first acceptance, and "We've updated our terms"
-// told every Owner held at v1.0 about a change to documents they had never been shown.
-// PRIOR_VERSIONS is keyed `${docType}-${version}` and is empty until a second version ships.
-export function isFirstAcceptance(docs, priorVersions = PRIOR_VERSIONS) {
-  const prior = Object.keys(priorVersions || {})
-  return !docs.some(d => prior.some(k => k.startsWith(`${d.docType}-`)))
+// First acceptance or a changed document, told from this outlet's own ledger (S855). Until then the
+// gate guessed from whether an earlier version had ever been PUBLISHED (S852), which cannot tell an
+// Owner who accepted v1.0 from one who never accepted anything once v1.1 ships.
+//
+// The acceptance record is per business (owner decision S855): a document is a FIRST acceptance when
+// this outlet holds no row of its type in any version, and a row from the trial signup
+// (clickwrap_trial) or a signed paper agreement counts as an earlier acceptance. `accepted` is
+// AuthContext's `legalAccepted` (every version of the gating types, since the read filters by type
+// only). Absent or null counts nothing as accepted, so the copy falls back to the plain ask, which is
+// true either way; the gate is not raised on a failed read in any case.
+export function splitPendingDocs(pending, accepted) {
+  const seen = new Set((accepted || []).map(r => r.doc_type))
+  return {
+    firstTime: pending.filter(d => !seen.has(d.docType)),
+    changed: pending.filter(d => seen.has(d.docType)),
+  }
+}
+
+// The newest version of a document type this outlet accepted, for the "last accepted" line.
+const versionParts = v => String(v).split('.').map(n => parseInt(n, 10) || 0)
+function compareVersions(x, y) {
+  const a = versionParts(x)
+  const b = versionParts(y)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const d = (a[i] || 0) - (b[i] || 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
+export function lastAcceptedVersion(accepted, docType) {
+  return (accepted || [])
+    .filter(r => r.doc_type === docType && r.doc_version != null)
+    .map(r => r.doc_version)
+    .reduce((best, v) => (best === null || compareVersions(v, best) > 0 ? v : best), null)
+}
+
+const titlesOf = docs => {
+  const t = docs.map(d => d.title)
+  return t.length <= 1 ? t.join('') : `${t.slice(0, -1).join(', ')} and ${t[t.length - 1]}`
+}
+
+// The heading and the sentence under it. Every pending document new to this business: a plain ask.
+// Every one accepted before in an earlier version: an update. A mix: an update that names which
+// document changed and which has not been accepted before, so neither half is misstated. "You" is the
+// business, as on the checkbox below ("on behalf of my business").
+export function gateCopy(pending, accepted) {
+  const { firstTime, changed } = splitPendingDocs(pending, accepted)
+  const many = pending.length > 1
+  if (changed.length === 0) {
+    return {
+      heading: 'Please accept our terms',
+      body: many
+        ? 'Please review and accept these documents to continue using Crest Suite.'
+        : 'Please review and accept this document to continue using Crest Suite.',
+    }
+  }
+  if (firstTime.length === 0) {
+    return {
+      heading: 'We have updated our terms',
+      body: many
+        ? 'These documents have changed since you last accepted them. Please review and accept them to continue using Crest Suite.'
+        : 'This document has changed since you last accepted it. Please review and accept it to continue using Crest Suite.',
+    }
+  }
+  const changedSentence = changed.length > 1
+    ? `The ${titlesOf(changed)} have changed since you last accepted them`
+    : `The ${titlesOf(changed)} has changed since you last accepted it`
+  return {
+    heading: 'We have updated our terms',
+    body: `${changedSentence}, and you have not accepted the ${titlesOf(firstTime)} before. Please review and accept them to continue using Crest Suite.`,
+  }
 }
 
 export default function LegalReacceptance() {
-  const { signOut, refreshProfile } = useAuth()
+  const { signOut, refreshProfile, legalAccepted } = useAuth()
   const [checked, setChecked] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [recorded, setRecorded] = useState(false)
 
   const pending = docsRequiringReacceptance()
-  const firstTime = isFirstAcceptance(pending)
+  const copy = gateCopy(pending, legalAccepted)
+  const changedTypes = new Set(splitPendingDocs(pending, legalAccepted).changed.map(d => d.docType))
   const many = pending.length > 1
 
   async function accept() {
@@ -107,7 +173,7 @@ export default function LegalReacceptance() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
           <ScrollText size={26} aria-hidden="true" style={{ color: 'var(--theme-accent)' }} />
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>
-            {firstTime ? 'Please accept our terms' : <>We&apos;ve updated our terms</>}
+            {copy.heading}
           </h1>
         </div>
 
@@ -119,13 +185,7 @@ export default function LegalReacceptance() {
             color: 'var(--theme-text2)',
           }}
         >
-          {firstTime
-            ? (many
-              ? 'Please review and accept these documents to continue using Crest Suite.'
-              : 'Please review and accept this document to continue using Crest Suite.')
-            : (many
-              ? 'These documents have changed since you last accepted them. Please review and accept them to continue using Crest Suite.'
-              : 'This document has changed since you last accepted it. Please review and accept it to continue using Crest Suite.')}
+          {copy.body}
         </p>
 
         <ul style={{ listStyle: 'none', margin: '0 0 20px', padding: 0 }}>
@@ -156,6 +216,11 @@ export default function LegalReacceptance() {
                 </a>
                 <span style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
                   Version {d.version} · effective {d.effectiveAdLabel}
+                  {/* Only for a document this business accepted before, and only when the ledger
+                      names the version (S855). */}
+                  {changedTypes.has(d.docType) && lastAcceptedVersion(legalAccepted, d.docType) && (
+                    <> · last accepted: version {lastAcceptedVersion(legalAccepted, d.docType)}</>
+                  )}
                 </span>
               </div>
               {/* Only rendered when there is one. A "What changed" heading over an empty box is a

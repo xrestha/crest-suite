@@ -185,6 +185,15 @@ passes.
 the 1000-row truncation rule and the RESTRICTIVE-policy empty read — an empty result is not evidence
 of an empty table.
 
+## First acceptance or update is read from the outlet's own ledger (S855)
+
+The gate's heading and sentence come from AuthContext's `legalAccepted` (every row of the gating
+doc types, any version), never from which versions were ever published. Owner decision: the record is
+per business, so a doc type with no row for this outlet is a first acceptance ("Please accept our
+terms"), and a row from `register_trial` or a signed paper agreement counts as an earlier one ("We
+have updated our terms"). A mixed set names which document changed (`gateCopy`). No migration: the
+read already filters by type only.
+
 ## Where each surface lives, and why not where you'd expect
 
 - **Client-facing acceptance record → Help, not Settings.** `/settings` sits behind

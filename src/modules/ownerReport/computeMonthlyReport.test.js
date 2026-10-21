@@ -597,6 +597,6 @@ describe('Inventory Turnover is COGS over the stock of the same items (S849, OWN
   })
 })
 
-test('the schema version moved for S849', () => {
-  expect(CURRENT_SCHEMA_VERSION).toBe(18)
+test('the schema version moved for S855', () => {
+  expect(CURRENT_SCHEMA_VERSION).toBe(19)
 })

@@ -27,6 +27,7 @@ paths:
   - "src/modules/ims/reports/supplierAttribution.test.js"
   - "src/modules/ims/reports/vendorBalanceHelpers.js"
   - "src/modules/ims/reports/vendorBalanceHelpers.test.js"
+  - "src/modules/ims/reports/vendorNetBasis.js"
   - "src/modules/ims/purchases/**"
   - "src/modules/ims/vendors/**"
   - "src/modules/ownerReport/computeVendorPurchasingSection.js"
@@ -53,9 +54,9 @@ valuation.
 **Owner decision D10.** A return may pick a bill from up to 12 earlier months and sits in the month on
 screen (its own `period_id`/`bs_day`). The over-return cap reads every return against the line in any
 month. Every reader values such a return at its own bill's discount through `readPriorBillLines.js`:
-VAT and Non-VAT directly, and Payment Report, Vendor Report, Supplier Contribution and
-`computeVendorPurchasingSection` through `applyPriorBillFactors` / `mergeFactors` in
-`supplierAttribution.js` (`vendorNetByItem({ priorFactors })`), and the Owner Dashboard's Purchases · Cash / Credit
+VAT and Non-VAT directly, Vendor Report and `computeVendorPurchasingSection` through
+`vendorNetBasis.js` (S855), Payment Report and Supplier Contribution through `applyPriorBillFactors` /
+`mergeFactors` in `supplierAttribution.js` (`vendorNetByItem({ priorFactors })`), and the Owner Dashboard's Purchases · Cash / Credit
 through `billPayables(..., { priorBillLines })` (S853; it was the fifth reader, at list price). A reader that only looks at this
 month's bills falls back to the list rate, which is the defect to watch for in a fifth reader. Vendor
 Report's drilldown lists earlier-bill and unlinked return rows. Purchase 1L+ joined them in S792
@@ -228,14 +229,22 @@ one bill, 10,000 gross, 1,000 trade discount, no returns
 The stat strip renders above the tab switch, so the wrong total sat directly under a card stating
 the right one. Nothing on the page cross-checks the two, and each was individually plausible.
 
-**The fix is one arithmetic exposed once, not two expressions kept in step.** `allocateBillDiscounts()`
-runs at the top of the `ix` memo and `lineNetOf(p)` / `retValueOf(r)` come out of it; the summary
-column, the matrix, the per-method columns, the drilldown and every workbook sheet read those. The
-per-vendor Discount column is **derived** as `gross − allocatedNet` rather than read from a parallel
-rollup, so the Discount cell and the Net Spend beside it cannot be computed two ways.
+**The fix is one arithmetic exposed once, not two expressions kept in step.** `vendorNetBasis()`
+(`vendorNetBasis.js` since S855, over `allocateBillDiscounts()`) runs at the top of the `ix` memo and
+`lineNetOf(p)` / `retValueOf(r)` come out of it; the summary column, the matrix, the per-method
+columns (`netForMethod`), the drilldown and every workbook sheet read those. The per-vendor Discount
+column is **derived** as `gross − allocatedNet` rather than read from a parallel rollup, so the
+Discount cell and the Net Spend beside it cannot be computed two ways.
 
 **The tell is a page with tabs or view modes over one dataset, where each mode builds its own
 totals.** Ask which expression each mode's money comes from, and make it one.
+
+**The Owner Report's supplier table reads the same helper since S855** (`vendorSpendRows`, owner
+decision: Cash + Credit + FonePay must add up to each supplier's Net Spend, before VAT, after
+discount). Its own copy, under a header claiming it mirrored this page, split the LIST price less
+returns, so a discounted bill's discount sat inside its method's column and the three read more than
+Net Spend. Its Unpaid Credit stays what is owed, VAT included, and can exceed Credit. A page that
+says it mirrors another should import from it, not restate it.
 
 ### `VendorReport` now genuinely reaches `calcBillTotals` (S725)
 

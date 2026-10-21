@@ -1068,7 +1068,20 @@ async function computeTrendSection(clientId, period, currentPartial) {
 //   - PNL-8: stock transfers between outlets fold into Net Purchases, COGS, on-hand and the count gap
 //     (`ims.transferIn` / `transferOut`); in the Inventory Depth sub-sections as well. A month with no
 //     transfers computes as before.
-export const CURRENT_SCHEMA_VERSION = 18
+// 19 (S855, owner decision): the supplier table's Cash / Credit / FonePay split is on the Net Spend
+//   basis — after the allocated bill discount, returns at their discounted price, before VAT (the
+//   cost basis on a `vat_is_cost` line) — through Vendor Report's own helper (`vendorNetBasis.js`),
+//   so the three add up to each supplier's Net Spend and the month's to `grandNet`
+//   (`vendorPurchasing.grandCash` / `grandCredit` / `grandFonepay`, new). v18 split the LIST price
+//   less returns, so a discounted bill's whole discount sat in its method's column and the three
+//   added up to more than Net Spend. `vendorPurchasing.splitBasis: 'net'` marks it; the page and
+//   the workbook say an older report's split is before discount. Riding along, also Vendor Report's
+//   rules: Discount is Gross − the allocated net (a bill whose lines are all free no longer makes a
+//   negative Net Spend out of its recorded discount), a supplier with only returns this month gets
+//   a row, and `vendorPurchasing.unassigned` carries the no-supplier bills' figures. Unpaid Credit
+//   (`billAging`) is unchanged and stays what is owed, VAT included, so it can be larger than
+//   Credit. No Trend marker: Trend does not compare suppliers.
+export const CURRENT_SCHEMA_VERSION = 19
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

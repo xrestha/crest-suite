@@ -26,6 +26,29 @@ function withLetterhead(title, bizInfo, periodLabel, dataRows) {
   return ws
 }
 
+// The Vendor Summary sheet's rows (S855). A v19 section splits Net Spend itself, so its Cash, Credit
+// and FonePay add up to Net Spend on every row, the no-supplier row and the TOTAL. An older section
+// split the list price: its TOTAL leaves those three blank and a note row says why, since a workbook
+// mailed on carries no page to explain it.
+export function vendorSummaryRows(vp) {
+  const splitNet = vp?.splitBasis === 'net'
+  const row = (label, f, bills) => ({
+    Vendor: label, 'Gross (NPR)': round2(f.gross), 'Discount (NPR)': round2(f.discount), 'Returned (NPR)': round2(f.returned),
+    'Net Spend (NPR)': round2(f.net), 'Cash (NPR)': round2(f.cash), 'Credit (NPR)': round2(f.credit), 'FonePay (NPR)': round2(f.fonepay), Bills: bills,
+  })
+  const rows = (vp?.vendors || []).map(v => row(v.name, v, v.billCount))
+  if (rows.length === 0) return rows
+  if (vp.unassigned) rows.push(row('No supplier recorded', vp.unassigned, vp.unassigned.billCount))
+  rows.push(row('TOTAL (every bill this month)', {
+    gross: vp.grandGross, discount: vp.grandDiscount, returned: vp.grandReturn, net: vp.grandNet,
+    cash: splitNet ? vp.grandCash : null, credit: splitNet ? vp.grandCredit : null, fonepay: splitNet ? vp.grandFonepay : null,
+  }, ''))
+  if (!splitNet) {
+    rows.push({ Vendor: 'Cash, Credit and FonePay on this report are before the bill discount (the rule it was made under), so for a supplier with a discount they add up to more than its Net Spend.' })
+  }
+  return rows
+}
+
 // `report` is a monthly_owner_reports row (has bs_year/bs_month/snapshot); `bizInfo` is
 // { name, vat, address, vatReg } for the client, same shape the report page already loads, plus
 // the page's `madeLine` (reportMadeLine.js) when it has one.
@@ -202,10 +225,7 @@ export function exportMonthlyReportExcel(report, bizInfo) {
 
   if (snapshot.vendorPurchasing) {
     const vp = snapshot.vendorPurchasing
-    const vendorRows = (vp.vendors || []).map(v => ({
-      Vendor: v.name, 'Gross (NPR)': round2(v.gross), 'Discount (NPR)': round2(v.discount), 'Returned (NPR)': round2(v.returned),
-      'Net Spend (NPR)': round2(v.net), 'Cash (NPR)': round2(v.cash), 'Credit (NPR)': round2(v.credit), 'FonePay (NPR)': round2(v.fonepay), Bills: v.billCount,
-    }))
+    const vendorRows = vendorSummaryRows(vp)
     if (vendorRows.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(vendorRows), 'Vendor Summary')
     // v18 (OWNER-REPORT-8): what is still owed on each bill (VAT, discount and returns in).
     const remainingCol = vp.billAging?.basis === 'owed' ? 'Still Owed (NPR)' : 'Remaining (NPR)'

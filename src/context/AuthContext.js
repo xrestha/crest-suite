@@ -149,10 +149,11 @@ export function AuthProvider({ children }) {
   const [session, setSession]                   = useState(null)
   const [profile, setProfile]                   = useState(null)
   const [featureFlags, setFeatureFlags]         = useState({})
-  // Acceptance rows for the documents that currently demand re-acceptance. [] = none outstanding,
-  // null = the read FAILED and we must not conclude anything from it. Those two have to stay
-  // distinguishable: treating a failed read as "nothing accepted" would gate every owner in the
-  // product behind a modal the moment the table became unreachable.
+  // Acceptance rows for the documents that currently demand re-acceptance, every version of them.
+  // [] = none outstanding, null = the read FAILED and we must not conclude anything from it. Those two
+  // have to stay distinguishable: treating a failed read as "nothing accepted" would gate every owner
+  // in the product behind a modal the moment the table became unreachable. The gate also reads these
+  // rows to word itself: a document type with no row at all is a first acceptance (S855).
   const [legalAccepted, setLegalAccepted]       = useState([])
   const [loading, setLoading]                   = useState(true)
   const [ready, setReady]                       = useState(false)
@@ -1029,7 +1030,11 @@ export function AuthProvider({ children }) {
       plan,
       isTrial, trialPending, trialExpired, trialDaysLeft, trialPurgeInDays, subscribeRequested, requestSubscription,
       accessLocked, accessReason, graceDaysLeft,
-      legalReacceptRequired, refreshProfile: () => session?.user?.id && fetchProfile(session.user.id),
+      // `legalAccepted` is every acceptance row this outlet holds for the documents that can gate it,
+      // in any version (null = the read failed). The gate reads it to tell a first acceptance from a
+      // changed document (S855): the record is per business, so a row from the trial signup or a
+      // signed paper agreement counts as an earlier acceptance.
+      legalReacceptRequired, legalAccepted, refreshProfile: () => session?.user?.id && fetchProfile(session.user.id),
       featureFlags, hasFeature, hasWeather,
       // Multi-outlet. `outlets` is [] for everyone not in a group, so every consumer of these
       // degrades to today's single-outlet behavior without a special case.
