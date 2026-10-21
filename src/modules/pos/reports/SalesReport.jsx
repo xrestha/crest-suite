@@ -1,5 +1,5 @@
 import { npr } from '../../../shared/nepalMoney'
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { chartMotion } from '../../../shared/chartMotion'
@@ -230,19 +230,37 @@ function BillsCell({ bills, returns }) {
 
 const RETURNS_TIP = "Credit notes are shown as MINUS figures on the day they were issued. The bill they credit stays at its full value on the day it was sold, so a bill and its credit note in the same range cancel out in the totals."
 
-const TABS = [
-  { key: 'daily',    label: 'Daily' },
-  { key: 'hourly',   label: 'Hourly' },
-  { key: 'voucher',  label: 'Bill Register' },
-  { key: 'compxref', label: 'Comped Bills' },
-  { key: 'payment',  label: 'Payment Summary' },
-  { key: 'delivery', label: 'Delivery Partners' },
-  { key: 'category', label: 'Category Wise' },
-  { key: 'producttype', label: 'Product Type' },
-  { key: 'item',     label: 'Item Wise' },
-  { key: 'customer', label: 'Customer Wise' },
-  { key: 'onelakh',  label: '1L+ Report' },
+// The eleven views under four headings (S854, owner decision): pick a heading, then one of its
+// views. This is the ONE list: the heading row, each heading's views row and the view-to-heading
+// lookup are all derived from it, so a view cannot sit under two headings or under none. A new
+// view goes into exactly one group here, and the body, the export and the empty check below each
+// need its branch.
+export const TAB_GROUPS = [
+  { key: 'time', label: 'Over time', tabs: [
+    { key: 'daily',    label: 'Daily' },
+    { key: 'hourly',   label: 'Hourly' },
+  ] },
+  { key: 'bills', label: 'Bills & payments', tabs: [
+    { key: 'voucher',  label: 'Bill Register' },
+    { key: 'payment',  label: 'Payment Summary' },
+    { key: 'delivery', label: 'Delivery Partners' },
+    { key: 'compxref', label: 'Comped Bills' },
+  ] },
+  { key: 'menu', label: 'Menu', tabs: [
+    { key: 'category', label: 'Category Wise' },
+    { key: 'producttype', label: 'Product Type' },
+    { key: 'item',     label: 'Item Wise' },
+  ] },
+  { key: 'customers', label: 'Customers & tax', tabs: [
+    { key: 'customer', label: 'Customer Wise' },
+    { key: 'onelakh',  label: '1L+ Report' },
+  ] },
 ]
+// A view key to its heading. A key on no heading resolves to null and the rows render nothing for
+// it, rather than falling through to some default heading.
+const GROUP_OF_TAB = Object.fromEntries(TAB_GROUPS.flatMap(g => g.tabs.map(t => [t.key, g])))
+const groupOfTab = key => GROUP_OF_TAB[key] || null
+const HEADING_TABS = TAB_GROUPS.map(g => ({ key: g.key, label: g.label }))
 // The DISPLAY ORDER of Payment Summary's rows, derived from posOrdersConstants.js so a method added
 // there sorts into place rather than drifting. It decides order only, never membership: the rows
 // are grouped dynamically (salesReportMath.js buildPaymentRows), so any method that actually appears
@@ -251,7 +269,9 @@ const TABS = [
 // breakdown accumulated only methods it already knew; that was PosShifts' Z-report, never this tab.)
 // 'Loyalty' is deliberately absent from PAYMENT_METHODS — that is the list a cashier PICKS, and a
 // points redemption is applied, not picked (S290->S291 learned the same with Foodmandu/Pathao).
-const PAY_METHOD_ORDER = [...PAYMENT_METHODS, 'Loyalty', 'Credit']
+// 'Deposit' (S854), a booking deposit used to pay part of a bill, is applied the same way, so it
+// is named here beside Loyalty and never in PAYMENT_METHODS (pos-billing.md: a tender is three lists).
+const PAY_METHOD_ORDER = [...PAYMENT_METHODS, 'Loyalty', 'Deposit', 'Credit']
 // The Product Type tab's veg axis, in reading order (S846 added Egg). A label not listed sorts last.
 const VEG_AXIS_ORDER = ['Veg', 'Egg', 'Non-Veg', 'Not set']
 
@@ -286,9 +306,19 @@ export default function SalesReport() {
   const currentFy = getBsFiscalYear(today.year, today.month)
 
   const [tab, setTab] = useState('daily')
+  // The heading is never stored: it is read off the view, so a drill (Payment Summary to Bill
+  // Register) or any other setTab lands under the right heading by itself.
+  const activeGroup = groupOfTab(tab)
+  // The view last open under each heading during this visit, so going back to a heading returns
+  // to where the reader was in it. A heading not yet visited opens on its first view.
+  const lastViewRef = useRef({})
+  useEffect(() => {
+    const g = groupOfTab(tab)
+    if (g) lastViewRef.current[g.key] = tab
+  }, [tab])
   // Drill-down from Payment Summary → Bill Register: clicking a payment-method row filters the
-  // Bill Register tab down to just that method's bills. Cleared on any direct tab-bar click so a
-  // manual visit to Bill Register always starts unfiltered.
+  // Bill Register tab down to just that method's bills. Cleared on any direct view or heading
+  // change so a manual visit to Bill Register always starts unfiltered.
   const [paymentFilter, setPaymentFilter] = useState(null)
   // Delivery Partners tab: 'all' or one partner name. Drives the KPI cards, the bill table and
   // the Excel export together - and the export's scope line says which, since a filtered sheet
@@ -296,6 +326,17 @@ export default function SalesReport() {
   // them deliberately ignores it: that table IS the who-owes-what answer, and filtering it away
   // would remove the comparison the filter exists to drill into.
   const [partnerFilter, setPartnerFilter] = useState('all')
+  // A view picked from either row: the views row directly, or a heading, which opens its last view.
+  const selectView = key => { setTab(key); setPaymentFilter(null); setPartnerFilter('all') }
+  const selectHeading = groupKey => {
+    // Pressing (or arrowing onto) the heading already open changes nothing, so it does not clear
+    // a payment filter the reader drilled into.
+    if (groupKey === activeGroup?.key) return
+    const g = TAB_GROUPS.find(x => x.key === groupKey)
+    if (!g) return
+    const last = lastViewRef.current[g.key]
+    selectView(g.tabs.some(t => t.key === last) ? last : g.tabs[0].key)
+  }
 
   /* ── Letterhead info for Excel exports — fetched once per client, independent of date range ── */
   const [bizInfo, setBizInfo] = useState({ name: '', vat: '', address: '' })
@@ -419,7 +460,7 @@ export default function SalesReport() {
 
     const results = await settleAll([
       // Paged: the child pos_order_items read below was already wrapped (S529) while this parent
-      // was not, so on a busy month every one of this page's ten tabs silently reported the first
+      // was not, so on a busy month every one of this page's views silently reported the first
       // 1000 bills as if they were all of them — a believable total, not an error.
       fetchAllRows(() => scopedFrom('pos_orders', ORDER_COLUMNS)
         .eq('close_type', 'paid')
@@ -1323,10 +1364,10 @@ export default function SalesReport() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">
-          Sales Report <Tip text="Eleven views of the same POS sales data: Daily and Hourly show when revenue happens, Bill Register lists every individual voucher, Comped Bills cross-references paid bills with the item(s) comped out of them, Payment Summary breaks it down by how customers paid, Delivery Partners tracks Foodmandu/Pathao bills from Credit through settlement and checks what each platform withheld against the rate you agreed with it, Category, Product Type, Item, and Customer show where it comes from, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={340}>ⓘ</Tip>
+          Sales Report <Tip text="Eleven views of the same POS sales data, under four headings. Over time: Daily and Hourly show when revenue happens. Bills & payments: Bill Register lists every individual voucher, Payment Summary breaks it down by how customers paid, Delivery Partners tracks Foodmandu/Pathao bills from Credit through settlement and checks what each platform withheld against the rate you agreed with it, and Comped Bills cross-references paid bills with the item(s) comped out of them. Menu: Category Wise, Product Type and Item Wise show what sold. Customers & tax: Customer Wise shows who bought it, and 1L+ Report is the Nepal VAT Annexure 13 compliance check." width={340}>ⓘ</Tip>
           </h1>
           <p className="page-subtitle">
-            One report, eleven ways to slice it.
+            Four headings, eleven views: pick a heading, then one of its views.
           </p>
         </div>
         <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1337,9 +1378,19 @@ export default function SalesReport() {
         </div>
       </div>
 
-      {/* Tabs (S776): the row had no selected state a screen reader could hear, and every tab was its own Tab stop. */}
-      <Tabs idBase="pos-sales-report" label="Sales Report views" tabs={TABS} active={tab}
-        onChange={key => { setTab(key); setPaymentFilter(null); setPartnerFilter('all') }} style={{ marginBottom: 16 }} />
+      {/* Tabs (S776): the row had no selected state a screen reader could hear, and every tab was its own Tab stop.
+          Two rows since S854: the four headings as underline section tabs, then the chosen
+          heading's views as pills, so the two levels do not read as one long row. Both wrap at a
+          phone's width rather than scroll, so no view hides past the edge. No hasPanel: the body
+          below is a set of sibling conditionals, not a TabPanel. */}
+      <Tabs idBase="pos-sales-report-section" label="Sales Report sections" variant="panel"
+        className="no-print" tabs={HEADING_TABS} active={activeGroup?.key ?? null}
+        onChange={selectHeading} style={{ marginBottom: 12 }} />
+      {activeGroup && (
+        <Tabs idBase="pos-sales-report" label={`Sales Report views: ${activeGroup.label}`}
+          className="no-print" tabs={activeGroup.tabs} active={tab}
+          onChange={selectView} style={{ marginBottom: 16 }} />
+      )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
         {tab === 'onelakh' ? (
@@ -1387,7 +1438,7 @@ export default function SalesReport() {
           <div className="report-error-title">Could not list the earlier fiscal years</div>
           <p className="report-error-body">{fyListErrorInfo.text}</p>
           <p className="report-error-hint">
-            Until they load, only FY {currentFy} can be picked above. Open another tab and come back
+            Until they load, only FY {currentFy} can be picked above. Open another view and come back
             to 1L+ to try again.
           </p>
           {fyListErrorInfo.detail && <p className="action-error-detail">{fyListErrorInfo.detail}</p>}

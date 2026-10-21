@@ -63,6 +63,9 @@ import BillingStation from './BillingStation'
 import MoveTableModal from './MoveTableModal'
 import MoveDishesModal from './MoveDishesModal'
 import RowMenu from '../../../components/RowMenu'
+import WaitlistPanel from '../waitlist/WaitlistPanel'
+import { loadOrderDeposit, applyDeposit, depositErrorInfo } from '../deposits/depositApi'
+import { useWaitlist } from '../waitlist/useWaitlist'
 import { mainTableOfJoin, joinedTablesOf, moveSlipItems, movedSentByKey, moveNoticeItems, partBillLabel } from './tableMoves'
 import { equalShares, MIN_SHARES, MAX_SHARES } from './shareSplit'
 import PosImsPostingBanner from './PosImsPostingBanner'
@@ -319,6 +322,11 @@ export default function PosOrders({ billingStation = false } = {}) {
   // The booking the order being opened belongs to. A ref rather than state: performSave reads it
   // synchronously right after the pos_orders insert returns — the same reason savingRef exists.
   const seatReservationRef = useRef(null)
+  // S854: the walk-in waitlist on the floor. Its panel, and the list itself, polled only while the
+  // floor (or the open panel) is on screen. A party handed to Seat rides seatReservationRef as
+  // { kind: 'waitlist', ... }, so every refusal a booking's seat meets applies to it unchanged.
+  const [waitlistOpen, setWaitlistOpen] = useState(false)
+  const waitlist = useWaitlist({ enabled: !billingStation && (view === 'floor' || waitlistOpen) })
   const [reservationSettings, setReservationSettings] = useState(DEFAULT_RESERVATION_SETTINGS)
   const location = useLocation()
   const navigate = useNavigate()
@@ -386,6 +394,8 @@ export default function PosOrders({ billingStation = false } = {}) {
   const [outletName,    setOutletName]    = useState('')
   const [notePresets,   setNotePresets]   = useState([])
   const [noteFocusIdx,  setNoteFocusIdx]  = useState(null)
+  // S854: the cart line whose "+ Note" was tapped, by line key, until its box is left empty.
+  const [noteOpenKey,   setNoteOpenKey]   = useState(null)
   // ME-driven suggestion chips
   const [suggestions,       setSuggestions]       = useState([])
   const [manualSuggestions, setManualSuggestions] = useState({}) // { recipeId: [suggestedRecipeId] }
@@ -484,6 +494,14 @@ export default function PosOrders({ billingStation = false } = {}) {
   // see [[Split Payment (multi-tender) for POS Charge]] plan). tenders: [{ method, amount, tenderedAmount }]
   const [splitMode,    setSplitMode]    = useState(false)
   const [tenders,       setTenders]     = useState([])
+  // S854: the booking deposit the bill in the payment window may use (loadOrderDeposit: the one of the
+  // booking seated on it, with its balance), and whether that read failed. Its Deposit line is written
+  // on the open bill by apply_booking_deposit at Charge time, as points are redeemed, so an abandoned
+  // bill holds nothing; liveDepositRef names the order while such a line MAY stand, set before the call.
+  const [orderDeposit, setOrderDeposit] = useState(null)
+  const [depositReadFailed, setDepositReadFailed] = useState(false)
+  const liveDepositRef = useRef(null)
+  const depositReadForRef = useRef(null)
   const [tenderMethod, setTenderMethod] = useState('Cash')
   const [tenderAmtStr, setTenderAmtStr] = useState('')
   // { orderId } while a points redemption MAY be standing on that order (S754). Set BEFORE the redeem
@@ -622,9 +640,8 @@ export default function PosOrders({ billingStation = false } = {}) {
   // that screen's order SAVES online (performSave), and the hold is dropped by backToFloor — so
   // backing out, or a failed save, leaves the conflict on the floor to try again.
   const conflictRecoveryRef = useRef(null)
-  // S754 (owner decision): "Update Order" with unsent lines asks whether to send them now.
-  // { units, lines, where } while the ask is open.
-  const [sendPrompt, setSendPrompt] = useState(null)
+  // S854: the ← ask when the cart has unsaved changes, { n } while open (requestBackToFloor).
+  const [leavePrompt, setLeavePrompt] = useState(null)
   const [floorMsg,        setFloorMsg]        = useState('') // transient floor-view banner (e.g. blocked-table message)
   // The floor notices behind their one summary line (two or more at once, after an outage): shown or not.
   const [floorNoticesOpen, setFloorNoticesOpen] = useState(false)
@@ -726,7 +743,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   // What a close is doing right now, for the Confirm button's label ("Printing…") — a close is several
   // round trips, and "Processing…" for all of them said nothing about which one was slow.
   const [closeStep, setCloseStep] = useState('')
-  // Re-entry guard for performSave — saveOrder/sendTicket are only gated by the `saving` state,
+  // Re-entry guard for performSave — the send paths are only gated by the `saving` state,
   // which doesn't update synchronously, so a double-tap on Send Order before the re-render commits
   // can enter performSave twice with orderId still null and insert two pos_orders rows. A ref for
   // the same reason as closingRef above: it needs to be readable/settable synchronously mid-call.
@@ -1098,6 +1115,9 @@ export default function PosOrders({ billingStation = false } = {}) {
   // With no combo it is the same arithmetic this screen always ran (subtotal − discount + VAT on the
   // discounted base, to the rupee); with one, each line keeps its own share of the discount (0 for a combo dish).
   const payTotal  = computeOrderAmounts({ discount_amount: discountAmt }, payableOrderItems, vatReg).net
+  // The same lines before the discount (S854): the heading's "667 − 67 off" adds up, because a discount
+  // also lowers the VAT, and dishes made free in this window are out of both figures.
+  const payGross  = computeOrderAmounts({ discount_amount: 0 }, payableOrderItems, vatReg).net
   // Buyer Name + Phone become compulsory (not just optional) whenever a discount is applied, or
   // when the bill is going on Credit — both cases need an identifiable, audited record.
   const requireBuyerId = discountAmt > 0 || payMethod === 'Credit'
@@ -1116,7 +1136,7 @@ export default function PosOrders({ billingStation = false } = {}) {
   // "Use max" on a half-paid bill take the collected total past the bill (S754).
   const redeemableTotal = Math.max(0, payTotal - tenders.filter(t => t.method !== 'Loyalty').reduce((s, t) => s + t.amount, 0))
   // Once a payment is recorded, what it was measured against is frozen (S754): the discount and
-  // the item-comp picker lock, the same way "Single Payment" already did. Undo the tenders to edit.
+  // the item-comp picker lock, the same way "Single Payment" already did. Remove the tenders to edit.
   // S809 CHECKOUT-7: so is everything a close try sent while that try is unsettled — it can still land,
   // and a bill it closes is finished as it was sent. The method and tender controls lock with them.
   const closeLocked = !!orderId && unsettledCloses.some(a => a.orderId === orderId)
@@ -1614,6 +1634,25 @@ export default function PosOrders({ billingStation = false } = {}) {
     ;(line?.querySelector('button') || backBtnRef.current)?.focus()
   }, [orderItems])
 
+  // S854 (owner decision): Alt+S sends and Alt+P opens Payment on a till with a keyboard. Only on the
+  // order screen, never while a dialog is open over it, and by key position (e.code), because a Mac's
+  // Option key turns the letter into another character. The handlers are read through a ref, set
+  // each render below, so the listener is attached once per visit to the order screen.
+  const tillKeysRef = useRef(null)
+  useEffect(() => {
+    if (view !== 'order') return undefined
+    const onKey = e => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return
+      if (e.code !== 'KeyS' && e.code !== 'KeyP') return
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      e.preventDefault()
+      if (e.code === 'KeyS') tillKeysRef.current?.send()
+      else tillKeysRef.current?.pay()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [view])
+
   if (!hasPosAccess('staff')) return <Navigate to="/pos" replace />
   // The Floor → Billing nav item is Supervisor+; a nav item is not a guard and /pos/billing is a
   // plain URL, so the page says no itself. Back to Orders rather than /pos: a staff PIN that got
@@ -1776,10 +1815,10 @@ export default function PosOrders({ billingStation = false } = {}) {
         orderId:   o.id,
         openedAt:  o.opened_at || null,
         itemCount: items.reduce((s, i) => s + i.qty, 0),
-        // What the guest will pay (owner decision): VAT included, free dishes left out, before any
-        // discount. The POS Dashboard's Open bills figure is the same sum (openBillTotal). A comp is
-        // written only as a bill closes, so a comped row here is a close in flight, or one a cancelled
-        // close left (foldCompedSplits puts that back into its line on the order screen).
+        // What the guest will pay (owner decision): VAT included, before any discount. The POS
+        // Dashboard's Open bills figure is the same sum (openBillTotal). A comp is written only as a
+        // bill closes, so a comped row here is a close in flight, or one a cancelled close left; it
+        // counts (S854), because the order screen folds it back into its line and charges it.
         total:     openBillTotal(items, vatReg),
         covers:    o.covers,
         pending:   items.filter(i => !i.sent_to_kot).length,
@@ -3868,7 +3907,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     updateItemNote(idx, [...existing, phrase].join(', '))
   }
 
-  /* ── core save (shared by saveOrder and sendTicket) ── */
+  /* ── core save (shared by the send paths and the hold) ── */
 
   // Returns { ok: true, oid, oNo, items } — `items` the server's priced lines (null offline) — or
   // { ok: false, handled, error }. `handled` means this function already put the refusal in front of
@@ -4010,7 +4049,12 @@ export default function PosOrders({ billingStation = false } = {}) {
       // decided elsewhere in the meantime (cancelled, seated on another device) is left alone.
       const seatRes = seatReservationRef.current
       seatReservationRef.current = null
-      if (seatRes?.id) {
+      if (seatRes?.id && seatRes.kind === 'waitlist') {
+        // S854: a waitlist party the same way; a party taken off the list on another device meanwhile
+        // (count 0) is left as it is there.
+        const res = await waitlist.markSeated(seatRes.id, oid, { timeoutMs: SEND_READ_MS })
+        if (res?.error) warnWrite(`${seatRes.customer_name} still shows on the waitlist though the order was saved. Take them off with ⋯ → Cancel entry on the Waitlist.`, res.error)
+      } else if (seatRes?.id) {
         const { error: linkErr } = await bounded(scopedUpdate('pos_reservations', { ...stampFor('seated'), order_id: oid })
           .eq('id', seatRes.id).in('status', ['booked', 'confirmed', 'arrived']), 'Linking the booking', SEND_READ_MS)
         if (linkErr) warnWrite(`The booking for ${seatRes.customer_name} still shows as waiting in Reservations though its order was saved, and closing this bill will not complete it. In Reservations, use ⋯ → Mark done on it.`, linkErr)
@@ -4517,40 +4561,29 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
   }
 
-  // S754 (owner decision): Update Order on an order that already exists, with lines not yet sent to
-  // a station, asks first — "Send N new items to the kitchen/bar now?" with Send / Just save. An
-  // order with nothing unsent saves exactly as before, and a NEW order still auto-sends on its first
-  // save (commitSaveOrder). The ask renders in the ORDER-screen return, where this runs (S578).
+  // S854 (owner decision): ONE Send. A new order sends every line on its first save (commitSaveOrder);
+  // an order that already exists sends every line not yet sent, food to the kitchen and drinks to the
+  // bar by Ticket Routing, in one save (saveAndSendUnsent); with nothing unsent it only saves. Keeping
+  // a course back is "Save, do not send yet" in the menu beside Send (holdOrder), a choice the waiter
+  // makes, never a question asked on every press: S754's Send / Just save ask and the separate KOT and
+  // BOT buttons are gone. Held lines show on the floor as unsent, as they always did.
   function saveOrder() {
     if (!clientId) return
     if (orderItems.length === 0) { setMsg('error:Add at least one item.'); return }
     if (savingRef.current) return
-    if (orderId) {
-      const unsent = orderItems.filter(i => !i.sent_to_kot)
-      if (unsent.length > 0) {
-        const isBot = i => botCategories.has(i.category || 'Other')
-        const hasKot = unsent.some(i => !isBot(i))
-        const hasBot = unsent.some(isBot)
-        setSendPrompt({
-          // What the station has not been told about yet — a line sent as 2 and now 3 is 1 new.
-          units: unsent.reduce((n, i) => n + Math.max(0, (Number(i.qty) || 0) - (Number(i.sent_qty) || 0)), 0),
-          lines: unsent.length,
-          where: hasKot && hasBot ? 'kitchen and bar' : hasBot ? 'bar' : 'kitchen',
-        })
-        return
-      }
-    }
-    commitSaveOrder()
+    if (orderId && orderItems.some(i => !i.sent_to_kot)) return saveAndSendUnsent()
+    return commitSaveOrder()
   }
 
-  // "Send" on that ask: one save, then every unsent line to its station — KOT/BOT routing by
-  // category exactly as the KOT and BOT buttons route it, and the print gated on the sent flag
-  // landing, never the other way round (S654: a printed ticket the server still counts as unsent is
-  // how a dish gets cooked twice). The flag rides on the save itself (performSave's sendKeys, S754),
-  // one write for both stations — not sendTicket twice: offline, a second enqueue built from the same
-  // cart snapshot would put the first station's lines back to unsent in the queued payload.
+  function holdOrder() { commitSaveOrder({ hold: true }) }
+
+  // Send on an existing order: one save, then every unsent line to its station — KOT/BOT routing by
+  // category, and the print gated on the sent flag landing, never the other way round (S654: a
+  // printed ticket the server still counts as unsent is how a dish gets cooked twice). The flag rides
+  // on the save itself (performSave's sendKeys, S754), one write for both stations — never two sends:
+  // offline, a second enqueue built from the same cart snapshot would put the first station's lines
+  // back to unsent in the queued payload.
   async function saveAndSendUnsent() {
-    setSendPrompt(null)
     if (!clientId || orderItems.length === 0) return
     if (savingRef.current) return
     const unsentItems = orderItems.filter(i => !i.sent_to_kot)
@@ -4565,10 +4598,10 @@ export default function PosOrders({ billingStation = false } = {}) {
       // No answer (S809 ORDER-FLOW-3, -5) is kept on this till and prints (3f, Q16); `unknown` is left only
       // when this till could not keep it either (its local store failed): not known whether it landed, so
       // nothing prints yet — the till finds out (the poll, or the next press reads the order first).
-      if (saved.unknown) { screen.say(unknownSendText({ stage: saved.stage, what: 'the new items', press: 'Update Order' })); return }
+      if (saved.unknown) { screen.say(unknownSendText({ stage: saved.stage, what: 'the new items', press: 'Send' })); return }
       if (!saved.ok) {
         // A refusal is an answer: nothing landed, so nothing printed.
-        if (!saved.handled) screen.say(`error:That did not go through — nothing printed. Press Update Order again. ${errorText(saved.error, 'staff')}`)
+        if (!saved.handled) screen.say(`error:That did not go through — nothing printed. Press Send again. ${errorText(saved.error, 'staff')}`)
         return
       }
       const { oid, oNo } = saved
@@ -4578,9 +4611,12 @@ export default function PosOrders({ billingStation = false } = {}) {
       const botPrinted = botItems.length > 0 ? printTicket('BOT', botItems, oNo, { local: saved.keptOnTill }) : true
       logKotSend('KOT', kotItems, oid, oNo)
       logKotSend('BOT', botItems, oid, oNo)
-      screen.say(saved.keptOnTill ? queuedSendText({ printed: kotPrinted && botPrinted }) : kotPrinted && botPrinted
+      // The answer is returned too, for "Send and go back" (S854), which leaves only on an ok.
+      const said = saved.keptOnTill ? queuedSendText({ printed: kotPrinted && botPrinted }) : kotPrinted && botPrinted
         ? 'ok:Order updated and sent!'
-        : 'error:Sent to the kitchen/bar, but the ticket did NOT print — allow pop-ups for this site, then press Reprint KOT/BOT.')
+        : 'error:Sent to the kitchen/bar, but the ticket did NOT print — allow pop-ups for this site, then press Reprint KOT/BOT.'
+      screen.say(said)
+      return said
     } finally {
       // ORDER-FLOW-5: whatever happened, this till can send and take payment again.
       savingRef.current = false
@@ -4589,7 +4625,8 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
   }
 
-  async function commitSaveOrder() {
+  // `hold` (S854) saves without sending anything, a new order included: "Save, do not send yet".
+  async function commitSaveOrder({ hold = false } = {}) {
     if (!clientId) return
     if (orderItems.length === 0) { setMsg('error:Add at least one item.'); return }
     if (savingRef.current) return
@@ -4599,25 +4636,27 @@ export default function PosOrders({ billingStation = false } = {}) {
     const screen = watchScreen()
 
     const wasNew = !orderId
+    const fires = wasNew && !hold
+    const press = hold ? 'Save, do not send yet (beside Send)' : wasNew ? 'Send Order' : 'Update Order'
     try {
       // A NEW order auto-sends every line on its first save, so its lines are marked sent in that same
       // save (sendKeys 'all'). sent_to_kot/sent_qty are what make "already sent" true for every other
       // device, and for this one after a reload; the print below runs only once the save returned ok,
       // so a ticket can never print for lines the server still counts as unsent (S654).
-      const saved = await performSave(wasNew ? { sendKeys: 'all', queue: true } : { queue: true })
+      const saved = await performSave(fires ? { sendKeys: 'all', queue: true } : { queue: true })
       // No answer (S809 ORDER-FLOW-3, -5) is kept on this till and prints (3f, Q16); `unknown` is left only
-      // when this till could not keep it either. Once the new order itself exists, its button reads Update Order.
+      // when this till could not keep it either. Once the new order itself exists, its button reads Send.
       if (saved.unknown) {
-        screen.say(unknownSendText({ stage: saved.stage, what: wasNew ? 'the order' : 'your changes', press: wasNew && saved.stage === 'order' ? 'Send Order' : 'Update Order', fires: wasNew }))
+        screen.say(unknownSendText({ stage: saved.stage, what: wasNew ? 'the order' : 'your changes', press: fires && saved.stage === 'order' ? 'Send Order' : press, fires }))
         return
       }
       if (!saved.ok) {
-        if (!saved.handled) screen.say(`error:That did not go through${wasNew ? ' — nothing printed' : ''}. Press ${wasNew ? 'Send Order' : 'Update Order'} again. ${errorText(saved.error, 'staff')}`)
+        if (!saved.handled) screen.say(`error:That did not go through${fires ? ' — nothing printed' : ''}. Press ${press} again. ${errorText(saved.error, 'staff')}`)
         return
       }
       const { oid, oNo } = saved
 
-      if (wasNew) {
+      if (fires) {
         const kotItems = orderItems.filter(i => !botCategories.has(i.category || 'Other'))
         const botItems = orderItems.filter(i =>  botCategories.has(i.category || 'Other'))
         if (screen.here()) markLinesSent(orderItems)
@@ -4628,67 +4667,16 @@ export default function PosOrders({ billingStation = false } = {}) {
         // A blocked pop-up used to be overwritten by "Order sent!" one line later (S754), so the
         // waiter walked away believing a ticket had printed. The send itself did land — the lines
         // are marked sent and the KDS has them — so the recovery is a reprint, never a re-send.
-        screen.say(saved.keptOnTill ? queuedSendText({ printed: kotPrinted && botPrinted }) : kotPrinted && botPrinted
+        const said = saved.keptOnTill ? queuedSendText({ printed: kotPrinted && botPrinted }) : kotPrinted && botPrinted
           ? 'ok:Order sent!'
-          : 'error:Sent to the kitchen/bar, but the ticket did NOT print — allow pop-ups for this site, then press Reprint KOT/BOT.')
-      } else {
-        screen.say(saved.keptOnTill ? queuedSendText({ fires: false }) : 'ok:Saved.')
+          : 'error:Sent to the kitchen/bar, but the ticket did NOT print — allow pop-ups for this site, then press Reprint KOT/BOT.'
+        screen.say(said)
+        return said
       }
-    } finally {
-      // ORDER-FLOW-5: whatever happened, this till can send and take payment again.
-      savingRef.current = false
-      sendingCartRef.current = null
-      setSaving(false)
-    }
-  }
-
-  /* ── KOT / BOT ── */
-
-  async function sendTicket(station) {
-    if (orderItems.length === 0) { setMsg('error:Add items first.'); return }
-
-    const unsentItems = orderItems.filter(i => {
-      if (i.sent_to_kot) return false
-      return station === 'BOT'
-        ? botCategories.has(i.category || 'Other')
-        : !botCategories.has(i.category || 'Other')
-    })
-
-    if (unsentItems.length === 0) {
-      setMsg(`error:No new ${station === 'BOT' ? 'bar' : 'kitchen'} items to send.`)
-      return
-    }
-
-    if (savingRef.current) return
-    savingRef.current = true
-    sendingCartRef.current = cartKeyMap(orderItems)
-    setSaving(true); setMsg('')
-    const screen = watchScreen()
-    try {
-      // This station's unsent lines are marked sent IN the save (matched by line key — recipe plus
-      // customization), so the print below is gated on the server holding them as sent, exactly as the
-      // first-save auto-send is: a printed ticket the server does not consider sent is the shape that
-      // gets a dish cooked twice. Online and offline alike — the queued payload is the same rows.
-      const saved = await performSave({ sendKeys: new Set(unsentItems.map(lineKeyOf)), queue: true })
-      // No answer (S809 ORDER-FLOW-3, -5) is kept on this till and prints (3f, Q16); `unknown` is left only
-      // when this till could not keep it either: not known whether it landed.
-      if (saved.unknown) { screen.say(unknownSendText({ stage: saved.stage, what: `the ${station}`, press: station })); return }
-      if (!saved.ok) {
-        if (!saved.handled) screen.say(`error:${station} did not go through — nothing printed. Press ${station} again. ${errorText(saved.error, 'staff')}`)
-        return
-      }
-      const { oid, oNo } = saved
-
-      // The on-screen cart is updated separately from what was saved, because lines may have been
-      // tapped in while the save was awaiting — and not at all once the waiter has left this order.
-      if (screen.here()) markLinesSent(unsentItems)
-
-      const printed = printTicket(station, unsentItems, oNo, { local: saved.keptOnTill })
-      logKotSend(station, unsentItems, oid, oNo)
-      // Same as saveOrder: the send landed, only the paper did not (S754).
-      screen.say(saved.keptOnTill ? queuedSendText({ printed }) : printed
-        ? `ok:${station} sent!`
-        : `error:${station} sent to the station, but the ticket did NOT print — allow pop-ups for this site, then press Reprint KOT/BOT.`)
+      const said = saved.keptOnTill ? queuedSendText({ fires: false })
+        : hold ? 'ok:Saved. Nothing went to the kitchen or bar; press Send when it should.' : 'ok:Saved.'
+      screen.say(said)
+      return said
     } finally {
       // ORDER-FLOW-5: whatever happened, this till can send and take payment again.
       savingRef.current = false
@@ -4926,6 +4914,8 @@ export default function PosOrders({ billingStation = false } = {}) {
     setSplitMode(false); setTenders([]); setTenderMethod('Cash'); setTenderAmtStr('')
     setLoyaltyBalance(null); setLoyaltyHeld(0); setLoyaltyOnOtherBills([]); setLoyaltyScheme(null); setRedeemStr(''); setLoyaltyLookupMsg('')
     setBillPreviewOpen(false)
+    setOrderDeposit(null); setDepositReadFailed(false)
+    if (orderId) loadBillDeposit(orderId)
     // A try at this bill is still unsettled (S809 CHECKOUT-7): the window opens on what that try sent,
     // locked, rather than on a blank payment the cashier could change before it lands.
     const kept = closeAttemptFor(orderId)?.sent
@@ -4950,6 +4940,45 @@ export default function PosOrders({ billingStation = false } = {}) {
       // own read (S809 IMS-HANDOFF-3): a PIN login cannot read `items`, so its rates came back 0.
       await loadCompCosts()
     }
+  }
+
+  // S854: the booking deposit this bill may use. A failed read offers none and says so beside a Retry;
+  // the deposit is then refunded from Reservations as any unused one is. A Deposit line already on the
+  // bill (an earlier try, another till) is marked live, so Cancel or a charge without it hands it back.
+  async function loadBillDeposit(oid) {
+    depositReadForRef.current = oid
+    setDepositReadFailed(false)
+    const res = await loadOrderDeposit(oid, clientId)
+    if (depositReadForRef.current !== oid) return
+    if (res.error) {
+      console.error('booking deposit read failed:', res.error)
+      setDepositReadFailed(true)
+      return
+    }
+    setOrderDeposit(res.data)
+    if (res.data?.onThisBill) liveDepositRef.current = { orderId: oid }
+  }
+
+  // "Use" on the deposit line: a Split payment line for what the deposit can pay of what is still to
+  // take. A tender like any other until Charge, when apply_booking_deposit writes it.
+  function addDepositTender() {
+    if (!orderDeposit || tenders.some(t => t.method === 'Deposit')) return
+    const left = Math.max(0, payTotal - tenders.reduce((n, t) => n + t.amount, 0))
+    const amount = Math.min(orderDeposit.balance, left)
+    if (amount <= 0) return
+    if (!splitMode) { setSplitMode(true); setPayMethod('Cash'); setTenderMethod('Cash'); setTenderAmtStr(''); setDeliveryPartner('') }
+    setTenders(prev => [...prev, { method: 'Deposit', amount }])
+  }
+
+  // Takes a Deposit line off the bill it may stand on (apply_booking_deposit with 0). Returns
+  // { ok, text } like cancelLiveRedemption; nothing standing is a no-op.
+  async function handBackDeposit() {
+    const live = liveDepositRef.current
+    if (!live?.orderId) return { ok: true, text: '' }
+    const res = await applyDeposit(live.orderId, 0)
+    if (res.error) return { ok: false, text: res.noAnswer ? 'The till did not hear back.' : depositErrorInfo(res.error, 'staff').text }
+    if (liveDepositRef.current === live) liveDepositRef.current = null
+    return { ok: true, text: '' }
   }
 
   async function openCompTab() {
@@ -5014,28 +5043,41 @@ export default function PosOrders({ billingStation = false } = {}) {
     setTenderAmtStr('')
   }
 
-  // ↩ Undo removes the most recent tender, and the one before it then carries the button, so pressing
-  // again steps further back: tenders are screen state until the close. Closing the payment window
-  // ("Discard N recorded payments?") drops them all. That is how a mis-keyed earlier payment is fixed,
+  // Remove takes any one tender off (S854, owner decision; it was the last one only): tenders are screen
+  // state until the close, each recorded against the balance left when it was added, so taking one out
+  // only raises what is still to take, and the others keep their amounts and change. Closing the payment
+  // window ("Discard N recorded payments?") drops them all. That is how a mis-keyed payment is fixed,
   // never by voiding and re-ringing the bill, which books a void and re-sends the food (S809 DOCS-2).
   //
-  // Undoing the Loyalty tender after a close attempt that got as far as redeeming (S754) hands the
+  // Removing the Loyalty tender after a close attempt that got as far as redeeming (S754) hands the
   // points back first — redeem_loyalty_points(order, 0) — and keeps the tender on screen if that
   // fails, so the screen never shows "no points used" while the customer's balance is still debited.
-  async function undoLastTender() {
+  async function removeTender(index) {
     if (undoingTenderRef.current) return
-    const last = tenders[tenders.length - 1]
-    if (last?.method === 'Loyalty' && liveRedemptionRef.current?.orderId === orderId) {
+    const target = tenders[index]
+    if (!target) return
+    if (target.method === 'Loyalty' && liveRedemptionRef.current?.orderId === orderId) {
       undoingTenderRef.current = true
       setCloseMsg('')
       const res = await cancelLiveRedemption()
       undoingTenderRef.current = false
       if (!res.ok) {
-        setCloseMsg(`error:The points could not be handed back yet, so they stay on this bill — try Undo again. ${res.text}`)
+        setCloseMsg(`error:The points could not be handed back yet, so they stay on this bill — try Remove again. ${res.text}`)
         return
       }
     }
-    setTenders(t => t.slice(0, -1))
+    if (target.method === 'Deposit' && liveDepositRef.current?.orderId === orderId) {
+      undoingTenderRef.current = true
+      setCloseMsg('')
+      const res = await handBackDeposit()
+      undoingTenderRef.current = false
+      if (!res.ok) {
+        setCloseMsg(`error:The deposit line could not be taken off this bill yet, so it stays — try Remove again. ${res.text}`)
+        return
+      }
+    }
+    // By identity, not position: the list cannot have moved under an await, but a second tap can.
+    setTenders(t => t.filter(x => x !== target))
   }
 
   // Hands back a redemption that may be standing on `liveRedemptionRef`'s order: redeeming 0 cancels
@@ -5065,6 +5107,14 @@ export default function PosOrders({ billingStation = false } = {}) {
   // for a bill this screen is no longer closing.
   function dismissBillingAfterRefusal() {
     setBillingOpen(false)
+    // S854: a Deposit line an earlier try left on this bill is taken off the same way, so the deposit
+    // can still be refunded if the bill is never charged with it.
+    if (liveDepositRef.current?.orderId === orderId && !closeAttemptFor(orderId)) {
+      const where = orderLabel()
+      void handBackDeposit().then(res => {
+        if (!res.ok) warnWrite(`The booking deposit tried on ${where} is still on that bill, so it cannot be refunded until the bill is charged or the deposit is removed in its payment window. ${res.text}`)
+      }, e => console.error('deposit hand-back failed:', e))
+    }
     // While a try at this bill is unsettled its points stay with it (S809 CHECKOUT-7): handed back now,
     // a late landing would close a bill paid partly in points nobody spent. The poll hands them back
     // if that try turns out not to have landed.
@@ -5123,6 +5173,7 @@ export default function PosOrders({ billingStation = false } = {}) {
           {liveRedemptionRef.current?.orderId === orderId
             ? ' The points already redeemed on this bill are handed back to the customer.'
             : tenders.some(t => t.method === 'Loyalty') ? ' No points have been deducted yet.' : ''}
+          {tenders.some(t => t.method === 'Deposit') && ' The booking deposit stays with the booking, to use or refund later.'}
         </p>
       ),
       // A redemption a failed close left standing is cancelled before the modal goes (S754). If that
@@ -5132,6 +5183,13 @@ export default function PosOrders({ billingStation = false } = {}) {
           const res = await cancelLiveRedemption()
           if (!res.ok) {
             setCloseMsg(`error:The points redeemed on this bill could not be handed back, so the payment screen stayed open — try Cancel again. ${res.text}`)
+            return
+          }
+        }
+        if (liveDepositRef.current?.orderId === orderId) {
+          const res = await handBackDeposit()
+          if (!res.ok) {
+            setCloseMsg(`error:The deposit line on this bill could not be taken off, so the payment screen stayed open — try Cancel again. ${res.text}`)
             return
           }
         }
@@ -5189,7 +5247,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (fullInvoice) return block(fullInvoice.text, fullInvoice.label, fullInvoice.field)
     if (splitMode && (remaining > 0 || tenders.length === 0)) return block('Split payment is not fully collected yet.', null, 'pos-orders-amount')
     if (tendersOverpaid) {
-      return block(`The payments recorded (${fmtNpr(tendersTotal)}) are more than this bill now comes to (${fmtNpr(payTotal)}) — the total changed after they were taken. Undo the payments and take them again against the new total.`, null)
+      return block(`The payments recorded (${fmtNpr(tendersTotal)}) are more than this bill now comes to (${fmtNpr(payTotal)}) — the total changed after they were taken. Remove the payments and take them again against the new total.`, null)
     }
     // redeem_loyalty_points debits the account on the phone stored on the ORDER (S754), so a
     // redemption with the phone since cleared would fail at the RPC with a message about the bill.
@@ -5528,7 +5586,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       // and exception reports), and the comp slip prints from this in-memory cart — so an unsaved
       // line on a comp slip reached the paper (and, until S809 4e, IMS) while never existing on the
       // order. performSave only persists lines, covers and guest-request accepts;
-      // it never fires a ticket (that is saveOrder/sendTicket), so it is safe for all three.
+      // it never fires a ticket (that is the send paths'), so it is safe for all three.
       //
       // Bounded like every step here (S776). A save that timed out may still land, and a retry is safe:
       // performSave reads a stale refusal back and counts its own landed lines as saved.
@@ -5715,7 +5773,7 @@ export default function PosOrders({ billingStation = false } = {}) {
         // S809 2g (CUSTOMERS-PARKING-3): the points are worth what the server charged for them (the
         // outlet's point value now, which a manager may have changed since the phone was entered). The
         // points line takes that amount and the cashier checks the rest before confirming again; the
-        // redemption stands, and the next Confirm replaces it (Undo or Cancel hands it back).
+        // redemption stands, and the next Confirm replaces it (Remove or Cancel hands it back).
         if (!redErr && redeemedAmountDiffers(redeemed, loyaltyTender.amount)) {
           const worth = Number(redeemed)
           setLoyaltyPointValue(worth / loyaltyTender.points)
@@ -5729,6 +5787,33 @@ export default function PosOrders({ billingStation = false } = {}) {
           setCloseMsg(redErr.hint === HINT.rank
             ? 'error:Redeeming points needs a POS Supervisor login or above — nothing was charged.'
             : `error:Could not redeem the points, so the bill was not charged — ${errorText(redErr, 'staff')}`)
+          return false
+        }
+      }
+
+      // S854: a booking deposit pays as its own Split line, written on the open bill by
+      // apply_booking_deposit just before the close, as points are; the amount replaces any earlier
+      // line, so a retried Confirm never uses it twice. A Split charge without it first takes off a line
+      // an earlier try left; any other close has it handed back by guard_pos_order_close itself.
+      const depositTender = closeType === 'paid' && isSplit ? tenders.find(t => t.method === 'Deposit') : null
+      if (!depositTender && isSplit && liveDepositRef.current?.orderId === orderId) {
+        const back = await handBackDeposit()
+        if (!back.ok) {
+          setCloseMsg(`error:The deposit line an earlier try left on this bill could not be taken off, so it was not charged — try again. ${back.text}`)
+          return false
+        }
+      }
+      if (depositTender) {
+        setCloseStep('Using the deposit…')
+        // Marked BEFORE the call, as a redemption is: a lost answer may still have landed.
+        liveDepositRef.current = { orderId }
+        const used = await applyDeposit(orderId, depositTender.amount, { ms: CLOSE_STEP_MS })
+        if (used.error) {
+          const byEarlier = await settleIfEarlierClosed(earlier, used.error)
+          if (byEarlier) return byEarlier === 'finished'
+          setCloseMsg(used.noAnswer
+            ? 'error:The till did not hear back about the deposit, so the bill was not charged. Press Confirm again: the deposit line is replaced, never used twice.'
+            : `error:${depositErrorInfo(used.error, 'staff').text}`)
           return false
         }
       }
@@ -5902,6 +5987,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // The bill is closed and numbered. Nothing an earlier attempt redeemed is "standing" any more —
     // it is this bill's tender now. (A redemption standing on another bill stays tracked.)
     if (liveRedemptionRef.current?.orderId === updated.id) liveRedemptionRef.current = null
+    if (liveDepositRef.current?.orderId === updated.id) liveDepositRef.current = null
     if (refusedTendersRef.current?.orderId === updated.id) refusedTendersRef.current = null
     const where = (background && attempt?.where) || orderLabel()
     const step = background ? () => {} : setCloseStep
@@ -5932,7 +6018,7 @@ export default function PosOrders({ billingStation = false } = {}) {
           // refused anyway (the server will not let the legs exceed the bill). So look first: legs
           // already there means it landed; none there means one retry, still inside the window.
           const { data: legs, error: legsErr } = await bounded(scopedFrom('pos_order_payments', 'amount')
-            .eq('order_id', updated.id).neq('payment_method', 'Loyalty'), 'Checking the payments')
+            .eq('order_id', updated.id).not('payment_method', 'in', '(Loyalty,Deposit)'), 'Checking the payments')
           const want = cashTenders.reduce((s, t) => s + t.amount, 0)
           const found = legs || []
           const have = found.reduce((s, l) => s + (Number(l.amount) || 0), 0)
@@ -6408,21 +6494,21 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
     const n = unsavedChangeCount(orderItems)
     if (n === 0) { backToFloor(); return }
-    askConfirm({
-      title: `Discard ${n} unsaved item${n === 1 ? '' : 's'}?`,
-      confirmLabel: 'Discard changes', danger: true,
-      cancelLabel: 'Keep editing',
-      // Inside the order screen's own stacking context (position: fixed at 1000).
-      zIndex: 1200,
-      body: (
-        <p style={{ margin: 0 }}>
-          {n === 1 ? 'One line on this order has' : `${n} lines on this order have`} changed since it was last saved.
-          Going back now drops {n === 1 ? 'that change' : 'those changes'} — nothing reaches the kitchen, the bar or the bill.
-          Press <strong>{orderId ? 'Update Order' : 'Send Order'}</strong> first to keep {n === 1 ? 'it' : 'them'}.
-        </p>
-      ),
-      run: () => backToFloor(),
-    })
+    // S854 (owner decision): three answers, Send and go back first. useConfirm has two buttons, so
+    // this is its own small dialog (leavePrompt), rendered in the order-screen return.
+    setLeavePrompt({ n })
+  }
+
+  // "Send and go back": the Send button's own press, then the floor only once it answered ok, so a
+  // refusal, a missed print or a removal reason it still needs stays on this screen where it is said.
+  async function sendAndGoBack() {
+    setLeavePrompt(null)
+    const where = orderLabel()
+    const token = screenTokenRef.current
+    const said = await saveOrder()
+    if (typeof said !== 'string' || !said.startsWith('ok:') || screenTokenRef.current !== token) return
+    backToFloor()
+    setFloorMsg(said.replace(/^ok:/, `ok:${where}: `))
   }
 
   function clearAllOccupiedTables() {
@@ -6531,7 +6617,21 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
     }
   }
 
-  const kotCount = orderItems.filter(i => !i.sent_to_kot && !botCategories.has(i.category || 'Other')).length
+  // S854: what Send would send. A line sent as 2 and now 3 is 1 new; a changed note on a sent line is a
+  // change with no new units.
+  const unsentLines = orderItems.filter(i => !i.sent_to_kot)
+  const unsentUnits = unsentLines.reduce((n, i) => n + Math.max(0, (Number(i.qty) || 0) - (Number(i.sent_qty) || 0)), 0)
+  const sendLabel = !orderId ? 'Send Order'
+    : unsentLines.length === 0 ? 'Update Order'
+    : unsentUnits > 0 ? `Send ${unsentUnits} new` : 'Send change'
+  const sendWhere = (() => {
+    const bar = unsentLines.some(i => botCategories.has(i.category || 'Other'))
+    const kitchen = unsentLines.some(i => !botCategories.has(i.category || 'Other'))
+    return bar && kitchen ? 'the kitchen and the bar' : bar ? 'the bar' : 'the kitchen'
+  })()
+  const sendTip = unsentLines.length === 0
+    ? 'Saves the order. Everything on it has already gone to the kitchen or bar. Alt+S on a keyboard.'
+    : `Saves the order and sends what is new to ${sendWhere}: food prints at the kitchen and drinks at the bar (POS Setup, Ticket Routing). To keep a course back, use Save, do not send yet in the menu beside it. Alt+S on a keyboard.`
   // S836: the tables joined to the bill on screen, the guest QR orders waiting at any of its tables, and
   // the Table menu (a part bill's is only "put back").
   const joinedHere = orderId ? joinedTablesOf(orderId, tableJoins, tables) : []
@@ -6546,7 +6646,6 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         joinedHere.length > 0 && '-',
         ...joinedHere.map(t => ({ key: `release:${t.id}`, label: `Release ${t.name}`, onSelect: () => releaseJoinedTable(t) })),
       ]
-  const botCount = orderItems.filter(i => !i.sent_to_kot && botCategories.has(i.category || 'Other')).length
 
   const pendingTables    = Object.values(tableOrders).filter(o => o.pending > 0)
   const pendingTableCount = pendingTables.length
@@ -6570,6 +6669,42 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
   const comboCountOf = comboId => [...cartCombos.values()].reduce((n, b) => n + (b.combo_id === comboId ? b.qty : 0), 0)
   const visMenu   = filterMenu(menu, menuTab, menuQuery)
 
+  // S854 (owner decision): Enter in the menu search adds the first dish the grid shows (the first combo
+  // on the Combos tab), exactly as a tap on it would, then clears the search for the next dish.
+  function onMenuSearchKey(e) {
+    if (e.key !== 'Enter' || e.nativeEvent?.isComposing) return
+    e.preventDefault()
+    const gridShown = menuLoaded || (menuLoadError && menu.length > 0)
+    if (!menuQuery || !gridShown) return
+    const top = onCombosTab ? visCombos[0] : visMenu[0]
+    if (!top) return
+    if (onCombosTab) tapCombo(top)
+    else addItemRef.current(top)
+    setMenuSearch('')
+  }
+
+  // S776: the reason used to live only in the Tip, and a tablet has no hover — so on an order not yet
+  // sent the Payment button simply did nothing. It stays pressable and says why.
+  const payBlocker = !orderId
+    ? 'Send or save the order first — a bill is charged against a saved order.'
+    : !isOnline ? 'Reconnect to take payment — the bill number comes from the server.'
+    : !billingSettingsLoaded ? tillSettingsBlockText(!!settingsFailure) : null
+  function pressPayment() {
+    if (payBlocker) {
+      // S809 2a: unread settings — the press asks again, and a failed read's notice already
+      // sits above this button, so it is not said twice.
+      if (orderId && isOnline && !billingSettingsLoaded) { loadTillSettings(); if (settingsFailure) return }
+      setMsg(`error:${payBlocker}`); return
+    }
+    openBilling()
+  }
+
+  // The Alt+S / Alt+P handlers for this render (the listener sits above the access checks).
+  tillKeysRef.current = {
+    send: () => { if (!saving && orderItems.length > 0) saveOrder() },
+    pay: () => { if (hasPosAccess('supervisor') && !saving) pressPayment() },
+  }
+
   // A cart line's marks (sent to which station, the kitchen's timer, the +N added since), its kitchen
   // note with the presets, and its amount: one definition for a plain line and a combo's dish (S839).
   const cartLineTotal = item => item.qty * item.unit_price * (1 + (vatReg ? (item.vat_rate ?? 0) : 0))
@@ -6577,7 +6712,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
     const kotTimer = item.sent_to_kot ? kotTimerLabel(ticketForLine(orderKotTickets, item), kotNow) : null
     return (<>
       {item.sent_to_kot && (
-        <Tip text="Ticket already sent to the station — press KOT/BOT again only if you add more of this item">
+        <Tip text="Ticket already sent to the station. Send sends it again only if you add more of this dish or change its note.">
           <span style={{
             fontSize: 10, fontWeight: 700, flexShrink: 0,
             // S846: a sent line is a plain state, so it reads as the grey badge does; only an unsent
@@ -6598,7 +6733,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
         </Tip>
       )}
       {!item.sent_to_kot && (item.sent_qty || 0) > 0 && item.qty > item.sent_qty && (
-        <Tip text={`${item.qty - item.sent_qty} extra added since last ticket — press KOT or BOT to send the addition to the station`}>
+        <Tip text={`${item.qty - item.sent_qty} extra added since the last ticket. Press Send to send the addition to the station.`}>
           <span style={{
             fontSize: 10, fontWeight: 700, flexShrink: 0,
             background: 'var(--theme-amber)', color: amberBadgeText,
@@ -6610,17 +6745,33 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
       )}
     </>)
   }
-  const cartNoteEditor = (item, idx) => (<>
+  // S854 (owner decision): the note box opens only on a tap of "+ Note", or when the line already has a
+  // note, so a cart of ten dishes is not ten empty boxes. It closes again when left empty.
+  const cartNoteEditor = (item, idx) => !(item.notes || noteOpenKey === lineKeyOf(item) || noteFocusIdx === idx)
+    ? (
+      <button type="button" className="till-hit--row cart-note-open"
+        aria-label={`Add a kitchen note for ${item.name}`}
+        onClick={() => { setNoteOpenKey(lineKeyOf(item)); setNoteFocusIdx(idx) }}>
+        + Note
+      </button>
+    )
+    : (<>
       <input
         type="text"
         aria-label={`Note for ${item.name}`}
         value={item.notes || ''}
+        // Opened by "+ Note": the box takes the focus the button had.
+        autoFocus={noteOpenKey === lineKeyOf(item) && !item.notes}
         onChange={e => updateItemNote(idx, e.target.value)}
         onFocus={() => setNoteFocusIdx(idx)}
         // Keep the presets while focus moves INTO them (S776): Tab from the note used to blur
         // it, hide the presets and move focus to whatever came after them.
-        onBlur={e => { if (!e.currentTarget.closest('[data-cart-line]')?.contains(e.relatedTarget)) setNoteFocusIdx(null) }}
-        placeholder="+ Kitchen note (e.g. serve after starters)"
+        onBlur={e => {
+          if (e.currentTarget.closest('[data-cart-line]')?.contains(e.relatedTarget)) return
+          setNoteFocusIdx(null)
+          if (noteOpenKey === lineKeyOf(item)) setNoteOpenKey(null)
+        }}
+        placeholder="Kitchen note (e.g. serve after starters)"
         className="till-hit--row"
         // S833: a written note is an instruction (often an allergy), so it reads in the body ink;
         // only the empty box's prompt stays quiet. Every note was grey italic before.
@@ -6637,7 +6788,11 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             <button
               key={p}
               onMouseDown={e => e.preventDefault()}
-              onBlur={e => { if (!e.currentTarget.closest('[data-cart-line]')?.contains(e.relatedTarget)) setNoteFocusIdx(null) }}
+              onBlur={e => {
+                if (e.currentTarget.closest('[data-cart-line]')?.contains(e.relatedTarget)) return
+                setNoteFocusIdx(null)
+                if (noteOpenKey === lineKeyOf(item)) setNoteOpenKey(null)
+              }}
               onClick={() => addPresetToNote(idx, p)}
               className="till-hit--row"
               style={{
@@ -7130,6 +7285,8 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
               placeholder="Search dishes or code…"
               value={menuSearch}
               onChange={e => setMenuSearch(e.target.value)}
+              onKeyDown={onMenuSearchKey}
+              enterKeyHint="enter"
               style={{
                 marginLeft: 'auto', flex: `1 0 ${narrowTill ? 180 : 160}px`, maxWidth: narrowTill ? 'none' : 240,
                 background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
@@ -7391,22 +7548,27 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
               : <p style={{ margin: '0 0 10px', fontSize: 13, lineHeight: 1.45, color: 'var(--theme-green-text)' }}>{msg.replace(/^ok:/, '')}</p>)}
 
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-              <button
-                className="btn btn-primary"
-                style={{ flex: 1, minWidth: 0, padding: '12px 0', fontSize: 16, justifyContent: 'center', display: 'flex' }}
-                onClick={saveOrder}
-                disabled={saving || orderItems.length === 0}
-              >
-                {saving ? 'Sending…' : orderId ? 'Update Order' : 'Send Order'}
-              </button>
+              {/* S854 (owner decision): ONE Send. Food goes to the kitchen and drinks to the bar by Ticket
+                  Routing; the label says how much is new. Holding a course back is the menu beside it. */}
+              <Tip text={sendTip} style={{ display: 'inline-block', flex: 1, minWidth: 0, borderBottom: 'none' }}>
+                <button
+                  className="btn btn-primary"
+                  style={{ width: '100%', padding: '12px 0', fontSize: 16, justifyContent: 'center', display: 'flex' }}
+                  onClick={saveOrder}
+                  disabled={saving || orderItems.length === 0}
+                  aria-keyshortcuts="Alt+S"
+                >
+                  {saving ? 'Sending…' : sendLabel}
+                </button>
+              </Tip>
+              <RowMenu label="More ways to save this order" zIndex={1100} className="till-hit--row"
+                disabled={saving}
+                items={[unsentLines.length > 0 && {
+                  key: 'hold', label: 'Save, do not send yet', onSelect: holdOrder,
+                  hint: 'Keeps the new dishes on the order without a ticket, to send later with Send.',
+                }]} />
 
               {hasPosAccess('supervisor') && (() => {
-                // S776: the reason used to live only in the Tip, and a tablet has no hover — so on an order
-                // not yet sent the button simply did nothing. It stays pressable and says why.
-                const payBlocker = !orderId
-                  ? 'Send or save the order first — a bill is charged against a saved order.'
-                  : !isOnline ? 'Reconnect to take payment — the bill number comes from the server.'
-                  : !billingSettingsLoaded ? tillSettingsBlockText(!!settingsFailure) : null
                 const payDisabled = saving || !!payBlocker
                 return (
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -7427,16 +7589,8 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                         // The fade is the class's: `.btn:disabled` while saving, `.btn[aria-disabled]` while blocked.
                         cursor: payDisabled ? 'default' : 'pointer',
                       }}
-                      onClick={() => {
-                        if (payBlocker) {
-                          // S809 2a: unread settings — the press asks again, and a failed read's notice already
-                          // sits above this button, so it is not said twice.
-                          if (orderId && isOnline && !billingSettingsLoaded) { loadTillSettings(); if (settingsFailure) return }
-                          setMsg(`error:${payBlocker}`); return
-                        }
-                        openBilling()
-                      }}
-                      disabled={saving} aria-disabled={payBlocker ? true : undefined}>
+                      onClick={pressPayment}
+                      disabled={saving} aria-disabled={payBlocker ? true : undefined} aria-keyshortcuts="Alt+P">
                       Payment
                     </button>
                   </Tip>
@@ -7445,51 +7599,6 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
               })()}
             </div>
 
-            <div style={{ display: 'flex', gap: 8 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <Tip text="Kitchen Order Ticket — sends every unsent item that is not routed to the bar (POS Setup → Ticket Routing) to the kitchen printer. Bold + badge show how many items are waiting."
-                  style={{ display: 'inline-block', width: '100%', borderBottom: 'none' }}>
-                  <button
-                    className={`ticket-btn${kotCount > 0 ? ' ticket-btn--pending' : ''}`}
-                    style={{ width: '100%', padding: '12px 0', fontSize: 16 }}
-                    onClick={() => sendTicket('KOT')}
-                    disabled={saving || kotCount === 0}
-                  >
-                    KOT
-                    {kotCount > 0 && (
-                      <span style={{
-                        position: 'absolute', top: -6, right: -4,
-                        background: 'var(--theme-amber)', color: amberBadgeText,
-                        borderRadius: 'var(--radius-full)', fontSize: 10, fontWeight: 700,
-                        padding: '1px 5px', lineHeight: 1.4, pointerEvents: 'none',
-                      }}>{kotCount}</span>
-                    )}
-                  </button>
-                </Tip>
-              </div>
-              {/* S809 3m (Q15): an outlet whose Ticket Routing sends nothing to the bar has no BOT to press. */}
-              {routingShown && botCategories.size > 0 && <div style={{ flex: 1, minWidth: 0 }}>
-                <Tip text="Bar Order Ticket — sends unsent bar/beverage items to the bar printer. Bold + badge show how many items are waiting."
-                  style={{ display: 'inline-block', width: '100%', borderBottom: 'none' }}>
-                  <button
-                    className={`ticket-btn${botCount > 0 ? ' ticket-btn--pending' : ''}`}
-                    style={{ width: '100%', padding: '12px 0', fontSize: 16 }}
-                    onClick={() => sendTicket('BOT')}
-                    disabled={saving || botCount === 0}
-                  >
-                    BOT
-                    {botCount > 0 && (
-                      <span style={{
-                        position: 'absolute', top: -6, right: -4,
-                        background: 'var(--theme-amber)', color: amberBadgeText,
-                        borderRadius: 'var(--radius-full)', fontSize: 10, fontWeight: 700,
-                        padding: '1px 5px', lineHeight: 1.4, pointerEvents: 'none',
-                      }}>{botCount}</span>
-                    )}
-                  </button>
-                </Tip>
-              </div>}
-            </div>
           </div>
         </div>
 
@@ -7530,17 +7639,19 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
               <p style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)', fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>
                 {billingTab === 'writeoff' && compCostFailed ? '—' : fmtNpr(billingTab === 'writeoff' ? compTotal : billingTab === 'pay' ? payTotal : total)}
                 {billingTab === 'writeoff' && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>{compCostFailed ? '(food cost could not be read — open the tab again to retry)' : compChoicesUnsaved ? '(food cost, not menu price; the slip adds the choices of a dish not saved yet)' : '(food cost, not menu price)'}</span>}
+                {/* S854: one discount figure that includes the VAT it takes off, so the two numbers add up to
+                    the total. The printed bill keeps its Discount line before VAT, as the tax rules want. */}
                 {billingTab === 'pay' && discountAmt > 0 && (
                   <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text3)', marginLeft: 8 }}>
-                    ({fmtNpr(total)} − {fmtNpr(discountAmt)} discount)
+                    ({fmtNpr(payGross)} − {fmtNpr(payGross - payTotal)} {vatReg ? 'off, VAT included' : 'discount'})
                   </span>
                 )}
               </p>
             </div>
 
-            {(kotCount + botCount) > 0 && (
+            {unsentLines.length > 0 && (
               <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '8px 10px' }}>
-                ⚠ {kotCount + botCount} item{kotCount + botCount !== 1 ? 's' : ''} not yet sent to the kitchen/bar.
+                ⚠ {unsentLines.length} item{unsentLines.length !== 1 ? 's' : ''} not yet sent to the kitchen/bar.
               </p>
             )}
             {/* S817 4i (S809.4 follow-up, D21): closing or voiding this bill turns away a guest QR order
@@ -7630,17 +7741,19 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                         style={disabledStyle({ ...billInput, width: '100%' }, tendersLocked)} />
                     </div>
                   )}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                  {/* S854: a class with a phone step, never an inline `1fr 1fr` (page-layout.md). A `1fr` track
+                      cannot shrink below its input's own width, so at 390px PAN and Phone ran off the window. */}
+                  <div className="buyer-grid">
                     {/* Placeholder text is not a label (it vanishes on the first keystroke), and a
                         red border is reinforcement, not the message — so each field carries its
                         name and the mandatory ones carry aria-invalid (S682). */}
                     <input id="pos-orders-buyer-name" placeholder="Name" aria-label="Buyer name" aria-invalid={buyerRequired && !buyerName.trim() ? true : undefined} value={buyerName} onChange={e => setBuyerName(e.target.value)}
-                      style={{ ...billInput, borderColor: buyerRequired && !buyerName.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
-                    <input placeholder="PAN No." aria-label="Buyer PAN number" value={buyerPan} onChange={e => setBuyerPan(e.target.value)} style={billInput} />
+                      style={{ ...billInput, width: '100%', borderColor: buyerRequired && !buyerName.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
+                    <input placeholder="PAN No." aria-label="Buyer PAN number" value={buyerPan} onChange={e => setBuyerPan(e.target.value)} style={{ ...billInput, width: '100%' }} />
                     <input id="pos-orders-buyer-address" placeholder="Address" aria-label="Buyer address" aria-invalid={requireFullInvoice && !buyerAddress.trim() ? true : undefined} value={buyerAddress} onChange={e => setBuyerAddress(e.target.value)}
-                      style={{ ...billInput, borderColor: requireFullInvoice && !buyerAddress.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
+                      style={{ ...billInput, width: '100%', borderColor: requireFullInvoice && !buyerAddress.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
                     <input id="pos-orders-buyer-phone" placeholder="Phone" aria-label="Buyer phone" aria-invalid={requireBuyerId && !buyerPhone.trim() ? true : undefined} value={buyerPhone} onChange={e => setBuyerPhone(e.target.value)}
-                      style={{ ...billInput, borderColor: requireBuyerId && !buyerPhone.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
+                      style={{ ...billInput, width: '100%', borderColor: requireBuyerId && !buyerPhone.trim() ? 'var(--theme-red)' : 'var(--theme-border)' }} />
                   </div>
                   <input placeholder="Remarks" aria-label="Bill remarks" value={billRemarks} onChange={e => setBillRemarks(e.target.value)} style={{ ...billInput, width: '100%' }} />
                 </div>
@@ -7658,10 +7771,38 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     `disabled` locks every method and tender control while a try at this bill is
                     unsettled (S809 CHECKOUT-7); the footer says why. */}
                 <fieldset className="pay-lock" disabled={closeLocked}>
+                {/* S854: a deposit the party paid at booking, offered as a Split line. VAT stays on the
+                    whole bill: the deposit is a payment, never a discount. */}
+                {orderDeposit && orderDeposit.balance > 0 && (() => {
+                  const onBill = tenders.find(t => t.method === 'Deposit')
+                  const rest = orderDeposit.balance - (onBill?.amount || 0)
+                  return (
+                    <div className="note-banner deposit-banner">
+                      <span>
+                        Deposit paid at booking: <strong>{fmtNpr(orderDeposit.balance)}</strong> ({orderDeposit.label}).
+                        {onBill
+                          ? ` On this bill as ${fmtNpr(onBill.amount)}.${rest > 0 ? ` The other ${fmtNpr(rest)} is refunded from Reservations after the bill.` : ''}`
+                          : ' It pays part of this bill as its own payment line; VAT stays on the whole bill.'}
+                      </span>
+                      {!onBill && (
+                        <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={addDepositTender}
+                          disabled={remaining <= 0}>
+                          Use {fmtNpr(Math.min(orderDeposit.balance, remaining))}
+                        </button>
+                      )}
+                    </div>
+                  )
+                })()}
+                {depositReadFailed && (
+                  <p role="status" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-text2)' }}>
+                    Could not check this bill for a booking deposit, so none is offered.{' '}
+                    <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => loadBillDeposit(orderId)}>Retry</button>
+                  </p>
+                )}
                 <div className="pay-method-head">
                   <span style={{ ...sectionLabel, margin: 0 }}>{splitMode ? 'Split between methods' : 'Payment method'}</span>
                   {splitMode ? (
-                    <Tip text={tenders.length > 0 ? 'Undo all the payments below first to go back to one method.' : 'Collect this bill with one payment method.'}>
+                    <Tip text={tenders.length > 0 ? 'Remove all the payments below first to go back to one method.' : 'Collect this bill with one payment method.'}>
                       <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={() => setSplitMode(false)} disabled={tenders.length > 0}>
                         Back to one method
                       </button>
@@ -7772,7 +7913,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                       </div>
                       {tendersOverpaid && (
                         <p role="alert" style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-red-text)' }}>
-                          ▲ {fmtNpr(tendersTotal)} recorded against a bill that now comes to {fmtNpr(payTotal)}. Undo the payments below and take them again.
+                          ▲ {fmtNpr(tendersTotal)} recorded against a bill that now comes to {fmtNpr(payTotal)}. Remove the payments below and take them again.
                         </p>
                       )}
                       {tenders.map((t, i) => (
@@ -7792,13 +7933,12 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                               </button>
                             </Tip>
                             {/* S846: the one control that takes money back off a bill was the smallest and
-                                faintest on the screen (11px underlined text, no touch floor, no focus ring). */}
-                            {i === tenders.length - 1 && (
-                              <button type="button" onClick={undoLastTender} className="btn btn-ghost btn-sm till-hit--row"
-                                aria-label={`Undo the ${t.method} payment of ${fmtNpr(t.amount)}`}>
-                                ↩ Undo
-                              </button>
-                            )}
+                                faintest on the screen (11px underlined text, no touch floor, no focus ring).
+                                S854: on every payment, not only the last. */}
+                            <button type="button" onClick={() => removeTender(i)} className="btn btn-ghost btn-sm till-hit--row"
+                              aria-label={`Remove the ${t.method} payment of ${fmtNpr(t.amount)}`}>
+                              ✕ Remove
+                            </button>
                           </span>
                         </div>
                       ))}
@@ -8337,25 +8477,25 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           </div>
         </Modal>
       )}
-      {/* S754: Update Order's "send the new lines?" ask. In THIS return because saveOrder runs on
-          the order screen (S578); zIndex above the order screen's own fixed layer at 1000. */}
-      {sendPrompt && (
+      {/* S854: the ← ask over unsaved changes — Send and go back, Leave without saving, Stay. In THIS
+          return because requestBackToFloor runs on the order screen (S578); zIndex above the order
+          screen's own fixed layer at 1000. */}
+      {leavePrompt && (
         <Modal
-          title={sendPrompt.units > 0
-            ? `Send ${sendPrompt.units} new item${sendPrompt.units === 1 ? '' : 's'} to the ${sendPrompt.where} now?`
-            : `Send ${sendPrompt.lines} change${sendPrompt.lines === 1 ? '' : 's'} to the ${sendPrompt.where} now?`}
-          onClose={() => setSendPrompt(null)}
-          maxWidth={440}
+          title={`${leavePrompt.n} unsaved change${leavePrompt.n === 1 ? '' : 's'} on this order`}
+          onClose={() => setLeavePrompt(null)}
+          maxWidth={460}
           zIndex={1200}
         >
           <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-            {sendPrompt.lines === 1 ? 'One line on this order has' : `${sendPrompt.lines} lines on this order have`} not gone to the {sendPrompt.where} yet.
-            <strong> Send</strong> saves the order, prints the ticket and puts it on the Kitchen Display.
-            <strong> Just save</strong> keeps {sendPrompt.lines === 1 ? 'it' : 'them'} on the order unsent — press KOT or BOT later to send.
+            {leavePrompt.n === 1 ? 'One line on this order has' : `${leavePrompt.n} lines on this order have`} changed since it was last saved.
+            <strong> Send and go back</strong> saves the order and sends what is new to the kitchen and bar, as Send does.
+            <strong> Leave without saving</strong> drops {leavePrompt.n === 1 ? 'that change' : 'those changes'}: nothing reaches the kitchen, the bar or the bill.
           </p>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
-            <button type="button" className="btn btn-ghost" onClick={() => { setSendPrompt(null); commitSaveOrder() }}>Just save</button>
-            <button type="button" className="btn btn-primary" onClick={saveAndSendUnsent}>Send</button>
+          <div className="leave-prompt-actions">
+            <button type="button" className="btn btn-ghost till-hit--row" onClick={() => setLeavePrompt(null)}>Stay</button>
+            <button type="button" className="btn btn-danger till-hit--row" onClick={() => { setLeavePrompt(null); backToFloor() }}>Leave without saving</button>
+            <button type="button" className="btn btn-primary till-hit--row" onClick={sendAndGoBack}>Send and go back</button>
           </div>
         </Modal>
       )}
@@ -8492,6 +8632,24 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
       </Modal>
     )}
 
+    {/* ── The walk-in waitlist (S854). In the FLOOR return, beside its button. Seat closes it and arms
+           the party for the next free table tapped, as a seat from Reservations is armed. ── */}
+    {waitlistOpen && (
+      <WaitlistPanel
+        waitlist={waitlist}
+        outletName={outletName}
+        onClose={() => setWaitlistOpen(false)}
+        onSeat={entry => {
+          setWaitlistOpen(false)
+          seatReservationRef.current = {
+            kind: 'waitlist', id: entry.id, customer_name: entry.customer_name,
+            phone: entry.phone || '', party_size: entry.party_size,
+          }
+          setFloorMsg(`ok:Tap a free table to seat ${entry.customer_name} ×${entry.party_size}.`)
+        }}
+      />
+    )}
+
     {/* ── Seat prompt: a tapped table has a booking due (S677). Lives in the FLOOR return, the
            same tree as openTable's callers — see the two-returns note in pos-billing.md. ── */}
     {seatPrompt && (
@@ -8552,6 +8710,13 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 >📄 Recent Bills</button>
               </Tip>
             )}
+            {/* S854 (owner decision): the walk-in waitlist lives on the floor. */}
+            <Tip text="Parties waiting for a table: who, how many, and how long you told them. Add one when every table is full; WhatsApp or call them when a table frees up, then Seat them.">
+              <button className="btn btn-ghost" onClick={() => setWaitlistOpen(true)} style={{ fontSize: 13, flexShrink: 0 }}
+                aria-label={`Waitlist, ${waitlist.liveCount} waiting`}>
+                Waitlist ({waitlist.liveCount})
+              </button>
+            </Tip>
             <button className="btn btn-ghost" onClick={openTakeaway} style={{ fontSize: 13, flexShrink: 0 }}>
               + Takeaway
             </button>

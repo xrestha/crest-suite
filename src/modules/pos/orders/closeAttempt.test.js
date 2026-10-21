@@ -129,6 +129,8 @@ describe('finishing from the stored bill', () => {
     const sent = [{ method: 'Cash', amount: 1500 }, { method: 'eSewa', amount: 900 }, { method: 'Loyalty', amount: 100, points: 100 }]
     expect(legsToRecord(sent, [])).toEqual([{ method: 'Cash', amount: 1500 }, { method: 'eSewa', amount: 900 }])
     expect(legsToRecord(sent, [{ payment_method: 'Loyalty', amount: 100 }])).toHaveLength(2) // the redemption's own leg
+    // S854: a booking deposit's leg is apply_booking_deposit's, never re-sent after the close.
+    expect(legsToRecord([...sent, { method: 'Deposit', amount: 500 }], [{ payment_method: 'Deposit', amount: 500 }])).toHaveLength(2)
     expect(legsToRecord(sent, [{ payment_method: 'Cash', amount: 1500 }])).toEqual([])
     expect(legsToRecord(sent, null)).toHaveLength(2) // unread: the server decides
     expect(legsToRecord(undefined, [])).toEqual([])

@@ -115,6 +115,25 @@ describe('Expected Cash and its SQL twin in pos_shifts_guard', () => {
     expect(jsx).not.toMatch(/m\.order_id/)
   })
 
+  // S854: a booking deposit taken in cash is a Cash In of its own kind, and a cash refund of one a Cash
+  // Out. Expected Cash needs no new term on either side only because each kind is pinned to one
+  // direction and both sides count by direction; and a Deposit payment line is a tender, never cash, so
+  // the money is not counted again on the night the deposit pays the bill.
+  it('a booking deposit and its refund move one way each, are named, and a Deposit line is never cash (S854)', () => {
+    expect(kinds).toEqual(expect.arrayContaining(['deposit', 'deposit_refund']))
+    expect(inKinds).toEqual(expect.arrayContaining(['deposit']))
+    expect(outKinds).toEqual(expect.arrayContaining(['deposit_refund']))
+    expect(jsx).toContain("if (m.kind === 'deposit') return 'Booking deposit'")
+    expect(jsx).toContain("if (m.kind === 'deposit_refund') return 'Booking deposit refunded'")
+    expect(jsx).toContain(".filter(m => m.kind === 'deposit').reduce(")
+    expect(jsx).toContain(".filter(m => m.kind === 'deposit_refund').reduce(")
+    // The method breakdown knows the Deposit line (a method it does not know is silently dropped), and
+    // cash sales stay byMethod.Cash, so the Deposit line never reaches the drawer count.
+    expect(jsx).toContain("const PAY_METHODS = [...PAYMENT_METHODS, 'Loyalty', 'Deposit', 'Credit']")
+    expect(jsx).toContain('const cashSales = byMethod.Cash || 0')
+    expect(guard).not.toMatch(/'Deposit'/)
+  })
+
   it('the guard checks every cash figure the close sends, and the close still sends each one', () => {
     const checked = [...guard.matchAll(/\(\d+, '([\w.]+)', NEW\.closing_report/g)].map(m => m[1])
     expect(checked).toEqual(['cashSales', 'byMethod.Cash', 'cashIn', 'cashOut',

@@ -303,7 +303,7 @@ export default function PosDashboard() {
             <Tile
               label="Open bills"
               tip={'Bills still running — food ordered, not yet paid. The age of the oldest is how long a table has been sitting with an open bill.'
-                + (canMoney ? ` The amount is what the guests will pay${floor.vatReg ? ', VAT included' : ''}, free dishes left out, before any bill discount, worked out as the Billing list and the floor tiles do.` : '')}
+                + (canMoney ? ` The amount is what the guests will pay${floor.vatReg ? ', VAT included' : ''}, before any bill discount, worked out as the order screen, the Billing list and the floor tiles do.` : '')}
               value={floor.open.count}
               sub={<div className="stat-sub">
                 {floor.open.count === 0 ? 'None open' : `Oldest ${floor.open.oldestMins} min`}

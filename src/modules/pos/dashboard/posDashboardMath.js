@@ -114,9 +114,9 @@ export function hourlyPeaks(rows) {
 // Sales Report's own rule), so the rows always add back to the day's sales.
 const METHOD_GROUP = {
   Cash: 'Cash', eSewa: 'Wallet / QR', Khalti: 'Wallet / QR', FonePay: 'Wallet / QR',
-  Card: 'Card', Credit: 'Credit (unpaid)', Loyalty: 'Loyalty points',
+  Card: 'Card', Credit: 'Credit (unpaid)', Loyalty: 'Loyalty points', Deposit: 'Booking deposits',
 }
-const GROUP_ORDER = ['Cash', 'Wallet / QR', 'Card', 'Credit (unpaid)', 'Loyalty points', 'Other']
+const GROUP_ORDER = ['Cash', 'Wallet / QR', 'Card', 'Credit (unpaid)', 'Loyalty points', 'Booking deposits', 'Other']
 
 /** A credit note comes off the methods its bill was paid with, in the same shares (a Split bill's
  *  legs), the way the Sales Report's Payment Summary attributes it. `legsByOrder` must hold the legs
@@ -183,19 +183,21 @@ export function topItems(items, n = 5) {
 }
 
 /** What a bill still running comes to, the way the guest will pay it (owner decision): VAT included
- *  when the outlet is VAT registered (`vatReg`), comped (free) lines left out, before any bill
- *  discount, to the rupee. It is the payment window's own total with no discount
- *  (computeOrderAmounts' net over the payable lines), so the floor tiles, the Billing list and the
- *  POS Dashboard all show the figure the bill will open on. A comp splits its line in two
- *  (apply_pos_item_comps), so a part comp is a comped row of its own and needs no count here. */
+ *  when the outlet is VAT registered (`vatReg`), before any bill discount, to the rupee. It is the
+ *  payment window's own total with no discount (computeOrderAmounts' net), so the floor tiles, the
+ *  Billing list and the POS Dashboard all show the figure the bill will open on. A comped row counts
+ *  (S854, owner decision: the tile matches the order screen). A comp is written only as a bill closes,
+ *  so a comped row on an open order is a close in flight or one a cancelled close left behind, and the
+ *  order screen folds that back into its line and charges it (foldCompedSplits); the next save hands
+ *  the comp back. The free dishes of a close are taken off in the payment window, never here. */
 export function openBillTotal(items, vatReg) {
-  const payable = (items || []).filter(i => !i.comped)
-    .map(i => ({ ...i, qty: num(i.qty), unit_price: num(i.unit_price), vat_rate: num(i.vat_rate) }))
-  return computeOrderAmounts({ discount_amount: 0 }, payable, vatReg).net
+  const lines = (items || [])
+    .map(i => ({ ...i, comped: false, qty: num(i.qty), unit_price: num(i.unit_price), vat_rate: num(i.vat_rate) }))
+  return computeOrderAmounts({ discount_amount: 0 }, lines, vatReg).net
 }
 
 /** The bills still running: how many, the oldest's age in minutes, and what is on them as the guests
- *  will pay it (openBillTotal: VAT included when `vatReg`, comped lines left out, before discount). */
+ *  will pay it (openBillTotal: VAT included when `vatReg`, before discount, as the order screen). */
 export function openBillsSummary(openOrders, nowMs = Date.now(), vatReg = true) {
   const list = openOrders || []
   const oldest = list.reduce((m, o) => {

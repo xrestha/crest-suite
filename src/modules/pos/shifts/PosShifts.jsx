@@ -21,6 +21,7 @@ import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK } from '../orders/po
 import { outletHasIms } from '../orders/posImsWaiting'
 import { forgoneMenuValue } from '../reports/salesReportMath'
 import { PAYMENT_METHODS } from '../orders/posOrdersConstants'
+import { DEPOSIT_METHODS } from '../deposits/depositState'
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { nepalTime, nepalDateAd, nepalBsLong, nepalHour } from '../../../shared/nepalTime'
 import {
@@ -41,7 +42,10 @@ const fmtNpr = npr
 // to be in THIS list though, because the breakdown below only accumulates methods it already
 // knows: `if (byMethod[p.payment_method] !== undefined)` silently drops anything else, so a
 // redeemed bill would leave the method breakdown short of the bill total with nothing saying so.
-const PAY_METHODS = [...PAYMENT_METHODS, 'Loyalty', 'Credit']
+// 'Deposit' (S854) is the same kind of line: a booking deposit paying part of its bill, written by
+// apply_booking_deposit, never picked. It is part of the night sales (the bill carries VAT in full);
+// the money itself came in when the deposit was taken, which the Booking Deposits lines show.
+const PAY_METHODS = [...PAYMENT_METHODS, 'Loyalty', 'Deposit', 'Credit']
 const DENOMINATIONS = [1000, 500, 100, 50, 20, 10, 5, 2, 1]
 // Time limits (S809 SHIFTS-9). A supabase call can hang with no error (withTimeout.js), and Cancel is
 // inert while a dialog saves, so an unbounded wait was a page whose only way out was a reload that
@@ -171,12 +175,13 @@ function buildShiftSlipHtml({ mode, outletName, propertyAddress, label, openedBy
   <div class="row"><span>Bills (Paid):</span><span>${report.paidCount}</span></div>
   <div class="row"><span>Voided:</span><span>${report.voidCount}</span></div>
   <div class="row"><span>Complimentary:</span><span>${report.compCount}</span></div>
+  ${depositSlipLines(report)}
   <hr>
   <div class="row"><span>Opening Cash:</span><span>${npr2(opening)}</span></div>
   <div class="row"><span>Cash Sales:</span><span>${npr2(report.cashSales)}</span></div>
-  ${report.cashIn  ? `<div class="row"><span>Cash In${report.creditSettlementsCash ? ` (incl. ${npr2(report.creditSettlementsCash)} from credit customers)` : ''}:</span><span>+${npr2(report.cashIn)}</span></div>` : ''}
+  ${report.cashIn  ? `<div class="row"><span>Cash In${esc(cashInParts(report, npr2))}:</span><span>+${npr2(report.cashIn)}</span></div>` : ''}
   ${report.cashOut ? `<div class="row"><span>Cash Out${esc(cashOutParts(report, npr2, 'refunded'))}:</span><span>-${npr2(report.cashOut)}</span></div>` : ''}
-  ${(report.movements || []).filter(m => m.kind === 'refund' || m.kind === 'credit_receipt_cancel').map(m => `<div class="row ind"><span>${esc(m.kind === 'credit_receipt_cancel' && m.reason ? m.reason : movementLabel(m))}</span><span>-${npr2(Number(m.amount) || 0)}</span></div>`).join('')}
+  ${(report.movements || []).filter(m => m.kind === 'refund' || m.kind === 'credit_receipt_cancel' || m.kind === 'deposit_refund').map(m => `<div class="row ind"><span>${esc((m.kind === 'credit_receipt_cancel' || m.kind === 'deposit_refund') && m.reason ? m.reason : movementLabel(m))}</span><span>-${npr2(Number(m.amount) || 0)}</span></div>`).join('')}
   <div class="row tot"><span>Expected Cash:</span><span>${npr2(expected)}</span></div>
   <div class="row"><span>Counted Cash:</span><span>${npr2(closing)}</span></div>
   <div class="row tot"><span>Variance:</span><span>${varianceLabel}</span></div>
@@ -225,6 +230,15 @@ export async function loadShiftReport(clientId, shiftId, compCost = {}) {
   // stopped at 1000 would understate the drawer with no error anywhere — the silently-wrong-total
   // shape, on the one screen whose entire job is reconciling against cash. `.order('id')` is both
   // the tiebreaker paging needs and the deterministic order the query previously had none of.
+  //
+  // S854: the booking deposits taken or refunded on this shift, by method. Not sales, and not one of the
+  // cash figures the close is checked against (a Cash deposit and its cash refund are already in Cash In
+  // and Cash Out through their own entries), so a failed read never fails this report: the lines then
+  // say they could not be read. Started first and awaited with the second wave, which needs nothing of it.
+  const depositsRead = fetchAllRows(() => scopedFromRaw('pos_booking_deposits', clientId,
+    'id, amount, method, shift_id, refunded_amount, refund_method, refund_shift_id')
+    .or(`shift_id.eq.${shiftId},refund_shift_id.eq.${shiftId}`).order('id'))
+    .catch(error => ({ data: null, error }))
   const firstWave = await Promise.all([
     fetchAllRows(() => scopedFromRaw('pos_orders', clientId, 'id, close_type, payment_method, paid_amount, discount_amount, closed_at')
       .eq('shift_id', shiftId).order('id')),
@@ -264,6 +278,13 @@ export async function loadShiftReport(clientId, shiftId, compCost = {}) {
   // in pos_shifts_guard's sum. Named only so the screen and the slip can say what that cash was.
   const receiptCancelsCash = moveList
     .filter(m => m.kind === 'credit_receipt_cancel').reduce((s, m) => s + (Number(m.amount) || 0), 0)
+  // A Cash booking deposit and its cash refund (S854, record_ / refund_booking_deposit): each pinned to
+  // one direction, so both are already in cashIn / cashOut and in pos_shifts_guard's sum. Named only so
+  // the screen and the slip can say what that cash was. A deposit is not a sale.
+  const depositsCash = moveList
+    .filter(m => m.kind === 'deposit').reduce((s, m) => s + (Number(m.amount) || 0), 0)
+  const depositRefundsCash = moveList
+    .filter(m => m.kind === 'deposit_refund').reduce((s, m) => s + (Number(m.amount) || 0), 0)
   // The note number beside each refund. A label, never a figure, so a failed lookup degrades to
   // "Refund" rather than failing the report the drawer is counted against. S847: started here and
   // awaited with the second wave below, which needs nothing of it — it used to be a round trip of its
@@ -283,8 +304,9 @@ export async function loadShiftReport(clientId, shiftId, compCost = {}) {
   // Both derive their id list from `orders` above and neither reads the other, so they are one
   // wave rather than two. Chunked because an `.in()` list is spelled out in the URL and both
   // return several rows per order — a busy shift's split bills alone can outgrow either limit.
-  const [notesRes, ...secondWave] = await Promise.all([
+  const [notesRes, depositsRes, ...secondWave] = await Promise.all([
     noteLabels,
+    depositsRead,
     fetchAllRowsChunked(splitOrderIds,
       ids => scopedFromRaw('pos_order_payments', clientId, 'order_id, payment_method, amount').in('order_id', ids).order('id')),
     // With each line's choices' stock lines, which a Complimentary bill's food cost includes.
@@ -348,6 +370,9 @@ export async function loadShiftReport(clientId, shiftId, compCost = {}) {
     orderCount, paidCount, voidCount, compCount, byMethod,
     discountTotal, voidTotal, compTotal, salesTotal, cashSales,
     movements: moveList, cashIn, cashOut, creditSettlementsCash, refundsCash, receiptCancelsCash,
+    // S854: booking deposits. The two cash figures are labels inside Cash In / Cash Out; `deposits` is
+    // what was taken and refunded on the shift by method, or null when its read failed.
+    depositsCash, depositRefundsCash, deposits: depositLinesOf(depositsRes, shiftId),
     // What Voided Value is measured in, frozen with the report (S814 4d, SHIFTS-5). A closing_report
     // without it was frozen when voids were valued with VAT; the History row says so. Not one of the
     // eight cash figures pos_shifts_guard checks, so it can never refuse a close.
@@ -363,17 +388,65 @@ function movementLabel(m) {
   if (m.kind === 'credit_settlement') return m.credit_receipt_id ? 'Customer payment' : 'Credit settled'
   if (m.kind === 'credit_receipt_cancel') return 'Customer payment cancelled'
   if (m.kind === 'refund') return m.credit_note_label ? `Refund — ${m.credit_note_label}` : 'Refund'
+  // S854: a booking deposit taken in cash, and a deposit handed back in cash (the reason names it).
+  if (m.kind === 'deposit') return 'Booking deposit'
+  if (m.kind === 'deposit_refund') return 'Booking deposit refunded'
   return m.direction === 'in' ? 'Cash in' : 'Cash out'
+}
+
+// What Cash In holds besides ordinary cash ins, for its label: "incl. NPR 2,000 from credit customers,
+// NPR 5,000 booking deposits". A report frozen before S854 has no depositsCash, which reads as none.
+function cashInParts(report, fmt) {
+  const parts = []
+  if (report.creditSettlementsCash > 0) parts.push(`${fmt(report.creditSettlementsCash)} from credit customers`)
+  if (report.depositsCash > 0) parts.push(`${fmt(report.depositsCash)} booking deposits`)
+  return parts.length ? ` (incl. ${parts.join(', ')})` : ''
 }
 
 // What Cash Out holds besides ordinary cash outs, for its label: "incl. NPR 300 refunded on Credit
 // Notes, NPR 500 customer payments cancelled". A closing_report frozen before S843 has no
-// receiptCancelsCash, which reads as none.
+// receiptCancelsCash, which reads as none; one frozen before S854 no depositRefundsCash.
 function cashOutParts(report, fmt, refundWords) {
   const parts = []
   if (report.refundsCash > 0) parts.push(`${fmt(report.refundsCash)} ${refundWords}`)
   if (report.receiptCancelsCash > 0) parts.push(`${fmt(report.receiptCancelsCash)} customer payments cancelled`)
+  if (report.depositRefundsCash > 0) parts.push(`${fmt(report.depositRefundsCash)} booking deposits refunded`)
   return parts.length ? ` (incl. ${parts.join(', ')})` : ''
+}
+
+// The Booking Deposits lines (S854): what was taken on this shift and what was refunded on it, each by
+// the way it was paid. Not sales: VAT is charged on the final bill, where a deposit shows as the Deposit
+// payment method. null when the read failed (the screen says so; no cash figure depends on it).
+function depositLinesOf(res, shiftId) {
+  if (!res || res.error) return null
+  const taken = Object.fromEntries(DEPOSIT_METHODS.map(m => [m, 0]))
+  const refunded = Object.fromEntries(DEPOSIT_METHODS.map(m => [m, 0]))
+  for (const d of res.data || []) {
+    if (d.shift_id === shiftId && taken[d.method] !== undefined) taken[d.method] += Number(d.amount) || 0
+    const way = d.refund_method || d.method
+    if (d.refund_shift_id === shiftId && refunded[way] !== undefined) refunded[way] += Number(d.refunded_amount) || 0
+  }
+  const sum = o => Object.values(o).reduce((s, n) => s + n, 0)
+  return { taken, refunded, takenTotal: sum(taken), refundedTotal: sum(refunded) }
+}
+
+// True when a report has deposit lines to show: some taken or refunded, or a failed read to own up to.
+// A report frozen before S854 has no `deposits` key and shows nothing.
+function hasDepositLines(report) {
+  const d = report?.deposits
+  if (d === undefined) return false
+  return d === null || d.takenTotal > 0 || d.refundedTotal > 0
+}
+
+// The same lines on the 80mm slip.
+function depositSlipLines(report) {
+  if (!hasDepositLines(report)) return ''
+  const d = report.deposits
+  if (d === null) return '<hr><div class="row"><span>Booking deposits:</span><span>not read</span></div>'
+  const byWay = o => DEPOSIT_METHODS.filter(m => o[m]).map(m => `<div class="row ind"><span>${m}</span><span>${npr2(o[m])}</span></div>`).join('')
+  return `<hr>
+  ${d.takenTotal > 0 ? `<div class="row"><span>Deposits taken (not sales):</span><span>${npr2(d.takenTotal)}</span></div>${byWay(d.taken)}` : ''}
+  ${d.refundedTotal > 0 ? `<div class="row"><span>Deposits refunded:</span><span>${npr2(d.refundedTotal)}</span></div>${byWay(d.refunded)}` : ''}`
 }
 
 // The one definition of what should be in the drawer. Opening float, plus cash taken over the
@@ -423,11 +496,43 @@ function ReportBody({ report, opening, closing, variance }) {
         <table className="data-table">
           <tbody>
             {PAY_METHODS.map(m => (
-              <tr key={m}><td>{m}</td><td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(report.byMethod[m] || 0)}</td></tr>
+              <tr key={m}>
+                <td>{m === 'Deposit'
+                  ? <Tip text="Part of the bills on this shift paid by a booking deposit taken earlier. It is a sale tonight, with VAT on the full bill; its money came in when the deposit was taken, so it is not cash in this drawer." width={280}>Deposit</Tip>
+                  : m}</td>
+                <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(report.byMethod[m] || 0)}</td>
+              </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* S854: booking deposits taken and refunded on this shift, by method. Not sales. */}
+      {hasDepositLines(report) && (
+        <>
+          <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>
+            <Tip text="Money taken in advance for party bookings on this shift, and deposits handed back. Not sales: VAT is charged on the final bill, where a deposit shows as the Deposit payment method. A Cash deposit and a cash refund are already inside Cash In and Cash Out below." width={300}>
+              Booking Deposits
+            </Tip>
+          </p>
+          {report.deposits === null ? (
+            <p className="note-banner" style={{ margin: '0 0 20px' }}>The booking deposits of this shift could not be read, so they are not listed here. The cash figures below do not depend on them.</p>
+          ) : (
+            <div className="table-wrap" style={{ marginBottom: 20 }}>
+              <table className="data-table">
+                <tbody>
+                  {DEPOSIT_METHODS.filter(m => report.deposits.taken[m]).map(m => (
+                    <tr key={`taken-${m}`}><td>Deposits taken · {m}</td><td style={{ textAlign: 'right', fontWeight: 600 }}>{fmtNpr(report.deposits.taken[m])}</td></tr>
+                  ))}
+                  {DEPOSIT_METHODS.filter(m => report.deposits.refunded[m]).map(m => (
+                    <tr key={`refunded-${m}`}><td>Deposits refunded · {m}</td><td style={{ textAlign: 'right', fontWeight: 600 }}>−{fmtNpr(report.deposits.refunded[m])}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
 
       <p style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 8px' }}>Cash Reconciliation</p>
       <div className="table-wrap">
@@ -438,8 +543,8 @@ function ReportBody({ report, opening, closing, variance }) {
             {(report.cashIn || 0) > 0 && (
               <tr>
                 <td>
-                  <Tip text="Cash that entered the drawer without being a sale — a pay-in, or a credit customer or delivery partner paying in cash towards their Credit bills (in full or in part). Those payments used to be invisible here, so the drawer read as 'over' by the amount paid.">
-                    Cash In{report.creditSettlementsCash > 0 ? ` (incl. ${fmtNpr(report.creditSettlementsCash)} from credit customers)` : ''}
+                  <Tip text="Cash that entered the drawer without being a sale — a pay-in, a credit customer or delivery partner paying in cash towards their Credit bills (in full or in part), or a booking deposit taken in cash. Those payments used to be invisible here, so the drawer read as 'over' by the amount paid.">
+                    Cash In{cashInParts(report, fmtNpr)}
                   </Tip>
                 </td>
                 <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-green-text)' }}>+{fmtNpr(report.cashIn)}</td>
@@ -447,7 +552,7 @@ function ReportBody({ report, opening, closing, variance }) {
             )}
             {(report.cashOut || 0) > 0 && (
               <tr>
-                <td><Tip text="Cash taken out of the drawer during the shift — paying a supplier, a staff advance, a float drop to the safe, a refund handed back on a Credit Note, or the cash of a customer payment cancelled as a mistake.">
+                <td><Tip text="Cash taken out of the drawer during the shift — paying a supplier, a staff advance, a float drop to the safe, a refund handed back on a Credit Note, the cash of a customer payment cancelled as a mistake, or a booking deposit handed back in cash.">
                   Cash Out{cashOutParts(report, fmtNpr, 'refunded on Credit Notes')}
                 </Tip></td>
                 <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--theme-red-text)' }}>−{fmtNpr(report.cashOut)}</td>

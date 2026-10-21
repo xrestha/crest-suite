@@ -37,7 +37,7 @@ jest.mock('../../../context/AuthContext', () => ({ useAuth: () => mockAuth }))
 jest.mock('../../../utils/viewPosBill', () => ({ viewPosBill: jest.fn() }))
 
 // eslint-disable-next-line import/first
-import SalesReport from './SalesReport'
+import SalesReport, { TAB_GROUPS } from './SalesReport'
 // eslint-disable-next-line import/first
 import { viewPosBill } from '../../../utils/viewPosBill'
 
@@ -64,9 +64,21 @@ beforeEach(() => {
   }
 })
 
+// S854: the views sit under four headings, so a view is opened by its heading first. By id, not by
+// role, for the reason above: a heading opens its first view, which may be the 200-row register.
+const headingTab = key => document.getElementById(`pos-sales-report-section-tab-${key}`)
+const viewTab = key => document.getElementById(`pos-sales-report-tab-${key}`)
+function openView(heading, view) {
+  const g = TAB_GROUPS.find(x => x.label === heading)
+  const t = g.tabs.find(x => x.label === view)
+  expect(headingTab(g.key).textContent).toBe(heading)
+  fireEvent.click(headingTab(g.key))
+  expect(viewTab(t.key).textContent).toBe(view)
+  fireEvent.click(viewTab(t.key))
+}
 async function openRegister() {
   render(<SalesReport />)
-  fireEvent.click(await screen.findByRole('tab', { name: 'Bill Register' }))
+  openView('Bills & payments', 'Bill Register')
   return screen.findByText(/of 450 rows shown/)
 }
 // The register is the last table on the page; its row groups are thead, tbody, tfoot.
@@ -98,7 +110,7 @@ test('the header, Voucher# and Net are sticky, corners highest', async () => {
 
 test('a payment filter shows and is cleared by a named button, which starts the register at one page again', async () => {
   render(<SalesReport />)
-  fireEvent.click(await screen.findByRole('tab', { name: 'Payment Summary' }))
+  openView('Bills & payments', 'Payment Summary')
   fireEvent.click(await screen.findByRole('button', { name: 'Cash' }))
   expect(await screen.findByText('Filtered: paid by Cash')).toBeTruthy()
   expect(bodyRows()).toHaveLength(200) // 225 Cash bills
@@ -131,7 +143,7 @@ test('a part-paid delivery bill counts only what it still owes in Outstanding, a
     { order_id: 'p1', amount: 100, commission: 0, pos_credit_receipts: { method: 'eSewa', cancelled_at: '2026-10-15T05:00:00Z' } },
   ], error: null }
   const { container } = render(<SalesReport />)
-  fireEvent.click(await screen.findByRole('tab', { name: 'Delivery Partners' }))
+  openView('Bills & payments', 'Delivery Partners')
   await screen.findByText('Part paid · NPR 500 owed')
   const outstanding = [...container.querySelectorAll('.stat-card')].find(c => c.textContent.startsWith('Outstanding'))
   // 1,130 − 600 received − 30 commission = 500 still owed on p1, and all of p2's 500.
@@ -182,7 +194,7 @@ test('a card\'s View bill opens the same bill the row does, and its figures open
 
 test('the payment filter narrows the cards as it narrows the table', async () => {
   render(<SalesReport />)
-  fireEvent.click(await screen.findByRole('tab', { name: 'Payment Summary' }))
+  openView('Bills & payments', 'Payment Summary')
   fireEvent.click(await screen.findByRole('button', { name: 'Cash' }))
   await screen.findByText('Filtered: paid by Cash')
   expect(cards()).toHaveLength(200)
@@ -193,7 +205,7 @@ test('the payment filter narrows the cards as it narrows the table', async () =>
 
 test('the hourly chart is an h2 under the page h1', async () => {
   render(<SalesReport />)
-  fireEvent.click(await screen.findByRole('tab', { name: 'Hourly' }))
+  openView('Over time', 'Hourly')
   expect(await screen.findByRole('heading', { level: 2, name: 'Net Sales by Hour' })).toBeTruthy()
 })
 
@@ -205,7 +217,7 @@ test('the 1L+ TOTAL row fills Taxable and Non-Taxable, as every row does', async
     { ...lines[0], order_id: 'p2', unit_price: 500, vat_rate: 0 },
   ], error: null }
   render(<SalesReport />)
-  fireEvent.click(await screen.findByRole('tab', { name: '1L+ Report' }))
+  openView('Customers & tax', '1L+ Report')
   await screen.findByText('Ram Thapa')
   const foot = within(screen.getAllByRole('table').at(-1).querySelector('tfoot')).getAllByRole('cell').map(c => c.textContent)
   // TOTAL, Gross, Taxable, Non-Taxable, VAT, Net, Flag
@@ -237,7 +249,7 @@ describe('Product Type: the veg axis', () => {
 
   test('reads Veg, Egg, Non-Veg, Not set, in that order', async () => {
     render(<SalesReport />)
-    fireEvent.click(await screen.findByRole('tab', { name: 'Product Type' }))
+    openView('Menu', 'Product Type')
     fireEvent.click(await screen.findByRole('button', { name: 'Veg / Egg / Non-Veg' }))
     expect(axisRows()).toEqual(['Veg', 'Egg', 'Non-Veg', 'Not set'])
   })
@@ -245,9 +257,77 @@ describe('Product Type: the veg axis', () => {
   test('a database without is_egg still gives the report, with egg dishes as Non-Veg', async () => {
     mockAnswers['recipes:is_egg'] = { data: null, error: { code: '42703', message: 'column recipes.is_egg does not exist' } }
     render(<SalesReport />)
-    fireEvent.click(await screen.findByRole('tab', { name: 'Product Type' }))
+    openView('Menu', 'Product Type')
     fireEvent.click(await screen.findByRole('button', { name: 'Veg / Non-Veg' }))
     expect(axisRows()).toEqual(['Veg', 'Non-Veg', 'Not set'])
     expect(screen.queryByText(/could not load/i)).toBeNull()
+  })
+})
+
+// S854 (owner decision): eleven views under four headings. Pick a heading, then one of its views.
+describe('Four headings, then their views', () => {
+  const tablist = name => document.querySelector(`[role="tablist"][aria-label="${name}"]`)
+  const tabNames = name => within(tablist(name)).getAllByRole('tab').map(t => t.textContent)
+  const selectedIn = name => within(tablist(name)).getByRole('tab', { selected: true }).textContent
+
+  test('every view sits under exactly one heading, and all eleven are there', () => {
+    const keys = TAB_GROUPS.flatMap(g => g.tabs.map(t => t.key))
+    expect(new Set(keys).size).toBe(keys.length)
+    expect([...keys].sort()).toEqual([
+      'category', 'compxref', 'customer', 'daily', 'delivery', 'hourly', 'item', 'onelakh', 'payment', 'producttype', 'voucher',
+    ])
+    expect(new Set(TAB_GROUPS.map(g => g.key)).size).toBe(TAB_GROUPS.length)
+    for (const g of TAB_GROUPS) expect(g.tabs.length).toBeGreaterThan(0)
+  })
+
+  test('the heading row shows the four headings, opening on Over time and Daily', async () => {
+    render(<SalesReport />)
+    expect(tabNames('Sales Report sections')).toEqual(['Over time', 'Bills & payments', 'Menu', 'Customers & tax'])
+    expect(selectedIn('Sales Report sections')).toBe('Over time')
+    expect(tabNames('Sales Report views: Over time')).toEqual(['Daily', 'Hourly'])
+    expect(selectedIn('Sales Report views: Over time')).toBe('Daily')
+    // One views row at a time: only the open heading's views are on the page.
+    expect(document.querySelectorAll('[role="tablist"]')).toHaveLength(2)
+    // Let the range load land inside the test, so its updates are not reported as stray.
+    expect((await screen.findAllByText('NPR 45,000')).length).toBeGreaterThan(0)
+  })
+
+  test('choosing a heading shows its views and opens the first; going back opens the one last used', async () => {
+    render(<SalesReport />)
+    fireEvent.click(headingTab('menu'))
+    expect(selectedIn('Sales Report sections')).toBe('Menu')
+    expect(tabNames('Sales Report views: Menu')).toEqual(['Category Wise', 'Product Type', 'Item Wise'])
+    expect(selectedIn('Sales Report views: Menu')).toBe('Category Wise')
+    expect(tablist('Sales Report views: Over time')).toBeNull()
+
+    fireEvent.click(viewTab('item'))
+    fireEvent.click(headingTab('customers'))
+    expect(tabNames('Sales Report views: Customers & tax')).toEqual(['Customer Wise', '1L+ Report'])
+    expect(selectedIn('Sales Report views: Customers & tax')).toBe('Customer Wise')
+
+    fireEvent.click(headingTab('menu'))
+    expect(selectedIn('Sales Report views: Menu')).toBe('Item Wise')
+    expect((await screen.findAllByText('Tea')).length).toBeGreaterThan(0)
+  })
+
+  test('the Payment Summary drill lands on Bill Register under Bills & payments, and is remembered there', async () => {
+    render(<SalesReport />)
+    openView('Bills & payments', 'Payment Summary')
+    fireEvent.click(await screen.findByRole('button', { name: 'Cash' }))
+    await screen.findByText('Filtered: paid by Cash')
+    expect(selectedIn('Sales Report sections')).toBe('Bills & payments')
+    expect(selectedIn('Sales Report views: Bills & payments')).toBe('Bill Register')
+
+    // Pressing the heading already open changes nothing, so the drilled filter stays.
+    fireEvent.click(headingTab('bills'))
+    expect(screen.getByText('Filtered: paid by Cash')).toBeTruthy()
+
+    // Away and back: the heading reopens Bill Register, the view the drill left it on, unfiltered.
+    fireEvent.click(headingTab('time'))
+    expect(selectedIn('Sales Report sections')).toBe('Over time')
+    fireEvent.click(headingTab('bills'))
+    expect(selectedIn('Sales Report views: Bills & payments')).toBe('Bill Register')
+    expect(screen.queryByText('Filtered: paid by Cash')).toBeNull()
+    expect(screen.getByRole('status').textContent).toMatch(/^200 of 450 rows shown/)
   })
 })

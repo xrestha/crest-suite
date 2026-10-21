@@ -108,6 +108,11 @@ export const RESTORE_ORDER = [
   'pos_loyalty_ledger',
   // Reservations reference pos_orders (order_id) and pos_tables (via the join table), both above.
   'pos_reservations', 'pos_reservation_tables',
+  // A waitlist party seated on a bill names it (order_id), so after the orders too (S854).
+  'pos_waitlist',
+  // A booking deposit names its booking, its bill and its shift, and the cash entries below name it
+  // (S854). pos_booking_deposits_guard lets the operator's restore insert a row taken before it.
+  'pos_booking_deposits',
   'pos_credit_notes',
   // After the shifts, the orders AND the credit notes (S809 DATABASE-3): a refund names its note.
   // A restored note's own trigger (pos_credit_note_settle, S809 2e) links its bill and writes no

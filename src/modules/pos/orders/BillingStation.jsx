@@ -95,7 +95,7 @@ export default function BillingStation({
                   {fmtNpr(grandTotal)}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
-                  <Tip text="The sum of every bill still open on the floor right now, as the guests will pay it: VAT included where this outlet charges VAT, free dishes left out, before any bill discount. It is what is sitting on tables uncollected, not the takings of the day, and it moves as orders are added to and bills are settled.">
+                  <Tip text="The sum of every bill still open on the floor right now, as the guests will pay it: VAT included where this outlet charges VAT, before any bill discount, as the order screen shows it. It is what is sitting on tables uncollected, not the takings of the day, and it moves as orders are added to and bills are settled.">
                     on the floor
                   </Tip>
                 </div>

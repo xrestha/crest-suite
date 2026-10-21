@@ -176,6 +176,7 @@ const POS_RECORD_WORDS: Record<string, [string, string]> = {
   'pos_parking_slips.issued_by':        ['issued 1 parking slip', 'issued {n} parking slips'],
   'pos_parking_slips.exited_by':        ['marked 1 vehicle as gone', 'marked {n} vehicles as gone'],
   'pos_reservations.created_by':        ['took 1 booking', 'took {n} bookings'],
+  'pos_waitlist.created_by':            ['added 1 party to the waitlist', 'added {n} parties to the waitlist'],
   'pos_loyalty_ledger.created_by':      ['recorded 1 points entry', 'recorded {n} points entries'],
   'pos_guest_order_requests.decided_by': ['answered 1 guest QR order', 'answered {n} guest QR orders'],
   'pos_table_moves.moved_by':           ['made 1 table move, join or split', 'made {n} table moves, joins or splits'],
@@ -187,6 +188,8 @@ const POS_RECORD_WORDS: Record<string, [string, string]> = {
   // S843: customer payment receipts (a numbered receipt per payment on Credit bills).
   'pos_credit_receipts.received_by':    ['received 1 customer payment', 'received {n} customer payments'],
   'pos_credit_receipts.cancelled_by':   ['cancelled 1 customer payment', 'cancelled {n} customer payments'],
+  'pos_booking_deposits.taken_by':      ['took 1 booking deposit', 'took {n} booking deposits'],
+  'pos_booking_deposits.refunded_by':   ['refunded 1 booking deposit', 'refunded {n} booking deposits'],
   // S843 membership: who added a membership type, and who recorded a customer's agreement to keep
   // their birthday and anniversary.
   'pos_membership_types.created_by':    ['added 1 membership type', 'added {n} membership types'],
@@ -335,6 +338,8 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   // receipt guards let the service role through.
   await del(admin.from('pos_credit_receipt_lines').delete().eq('client_id', clientId), 'pos_credit_receipt_lines')
   await del(admin.from('pos_credit_receipts').delete().eq('client_id', clientId), 'pos_credit_receipts')
+  // S854: a booking deposit names its booking, its bill and its shift; its cash entries are already gone.
+  await del(admin.from('pos_booking_deposits').delete().eq('client_id', clientId), 'pos_booking_deposits')
   await del(admin.from('pos_loyalty_ledger').delete().eq('client_id', clientId), 'pos_loyalty_ledger')
   // Reservations BEFORE orders, and that order is load-bearing (S818, RESERVATIONS-6): order_id is
   // ON DELETE SET NULL, and a Seated booking must keep its order (CHECK
@@ -343,6 +348,8 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
   // every table it clears (the S382 lesson).
   await del(admin.from('pos_reservation_tables').delete().eq('client_id', clientId), 'pos_reservation_tables')
   await del(admin.from('pos_reservations').delete().eq('client_id', clientId), 'pos_reservations')
+  // S854: a waitlist party links its bill (order_id) the way a booking does, so it goes before the orders too.
+  await del(admin.from('pos_waitlist').delete().eq('client_id', clientId), 'pos_waitlist')
   await del(admin.from('pos_kot_removals').delete().eq('client_id', clientId), 'pos_kot_removals')
   // S837: the kitchen and bar print queue. It holds no key to an order, so its place is free; the
   // printer computers themselves are revoked above (revokeClientTablets) and cascade with the client.
@@ -2676,6 +2683,7 @@ Deno.serve(async (req) => {
         // order_id is NO ACTION) and the shifts (see deleteClientDataFor).
         await del(admin.from('pos_credit_receipt_lines').delete().eq('client_id', clientId), 'pos_credit_receipt_lines')
         await del(admin.from('pos_credit_receipts').delete().eq('client_id', clientId), 'pos_credit_receipts')
+        await del(admin.from('pos_booking_deposits').delete().eq('client_id', clientId), 'pos_booking_deposits')
         // pos_kot_removals cascades from pos_orders, so this delete is not load-bearing — it is
         // here so the sequence still names every table it clears, which is what makes a missed
         // one visible on review (S382's pos_credit_notes was missed exactly by being implicit).
@@ -2683,6 +2691,7 @@ Deno.serve(async (req) => {
         // Reservations before orders: a Seated booking must keep its order (see deleteClientDataFor).
         await del(admin.from('pos_reservation_tables').delete().eq('client_id', clientId), 'pos_reservation_tables')
         await del(admin.from('pos_reservations').delete().eq('client_id', clientId), 'pos_reservations')
+        await del(admin.from('pos_waitlist').delete().eq('client_id', clientId), 'pos_waitlist')
         await del(admin.from('pos_kot_removals').delete().eq('client_id', clientId), 'pos_kot_removals')
         // S837: the print queue is a POS transaction; the printer computers are setup and stay.
         await del(admin.from('pos_print_jobs').delete().eq('client_id', clientId), 'pos_print_jobs')

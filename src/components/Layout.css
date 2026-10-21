@@ -1465,7 +1465,7 @@ textarea,
 
 /* Applied alongside role="button"/tabIndex={0} on clickable cards and rows that aren't real
    <button> elements (dashboard KPI cards, queue table rows) — gives keyboard users a visible
-   focus indicator, matching .ticket-btn's existing focus-visible treatment. */
+   focus indicator, matching the till buttons' focus-visible treatment. */
 .interactive-card:focus-visible,
 tr.interactive-row:focus-visible {
   outline: 2px solid var(--theme-focus-outline);
@@ -1518,7 +1518,7 @@ tr.interactive-row:focus-visible {
 
 /* ClientDashboard.jsx's two "period expired" action buttons (admin's "Go to Periods", the
    client's "End Month & Start Month") were duplicated inline style objects with no hover state at
-   all — every other button in the app (.btn, .btn-ghost, .ticket-btn) has one. Consolidated here
+   all — every other button in the app (.btn, .btn-ghost) has one. Consolidated here
    so both share one definition and get real hover feedback instead of reimplementing button
    styling from scratch. */
 .amber-action-btn {
@@ -2867,6 +2867,17 @@ tr.resv-row--new { --theme-text3: var(--theme-text2); }
   color: var(--theme-text2);
 }
 .note-banner strong { color: var(--theme-text1); }
+/* The payment window's booking-deposit line (S854): the fact, then its Use button at the right, wrapping
+   under it on a phone. Tighter than a page's note, inside the window's form column. */
+.deposit-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
 
 /* The line under a table or form that says what follows from it (S805, the HR critique). At most two
    sentences: the problem, then the relief. HR had grown 11px walls of seven to twenty sentences here,
@@ -3361,6 +3372,19 @@ table.data-table td input[readonly] {
   .pair-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* The payment window's buyer details (S854): two across, one per row on a phone. `minmax(0, 1fr)`
+   because a plain `1fr` track will not shrink below its input's own width, which at 390px pushed
+   PAN and Phone off the window and made it scroll sideways (live check, S853). */
+.buyer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+@media screen and (max-width: 520px) {
+  .buyer-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* A form's fields filling as many 220px columns as fit, one of them two columns wide (S803). Final
    Settlement's inputs were an inline `repeat(auto-fill, minmax(220px, 1fr))` with a `span 2` date
    picker: below two tracks' width a span-2 item forces an IMPLICIT second track, and at 390px the
@@ -3500,7 +3524,6 @@ table.data-table td input[readonly] {
     min-height: 44px;
   }
   .till-hit--row,
-  .ticket-btn,
   /* S841: every tender, Single/Split, the tender method and the delivery partner on the payment
      window. A class of its own, so no coarse rule reached it: 34px, where a cashier picked Card for
      eSewa on a tablet. */
@@ -3724,54 +3747,33 @@ table.data-table td input[readonly] {
   box-shadow: inset 0 0 0 2px var(--theme-focus-outline), inset 0 0 0 5px var(--theme-focus-ring);
 }
 
-.ticket-btn {
+/* A cart line's "+ Note" (S854): the kitchen note box opens only on this tap. Quiet text, the till's
+   touch floor and focus pair from .till-hit--row beside it. */
+.cart-note-open {
   -webkit-appearance: none;
   appearance: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  padding: 8px 0;
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 500;
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0 2px;
   font-family: inherit;
+  font-size: 11px;
+  color: var(--theme-text2);
   cursor: pointer;
-  position: relative;
-  background: var(--theme-input-bg);
+}
+.cart-note-open:hover {
   color: var(--theme-text1);
-  border: 1px solid var(--theme-border-lt);
-  transition: background 0.13s, color 0.13s, border-color 0.13s;
+  text-decoration: underline;
 }
 
-.ticket-btn:focus {
-  outline: none;
-}
-
-.ticket-btn:focus-visible {
-  outline: 2px solid var(--theme-focus-outline);
-  outline-offset: 2px;
-}
-
-.ticket-btn:hover:not(:disabled),
-.ticket-btn:active:not(:disabled) {
-  background: var(--theme-table-hover);
-  border-color: var(--theme-accent);
-}
-
-.ticket-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-/* A KOT/BOT button with unsent items on it. Amber, matching the count badge it carries and the
-   cart's own "+N" chip — the control used to say two things at once, a neutral border for "there
-   is something here" and a red badge for the count, and red is a fault colour in this module
-   (posSignals.js) while an unfired line is the normal state of every order ever taken. */
-.ticket-btn--pending {
-  font-weight: 700;
-  border-color: var(--theme-amber);
+/* The order screen's leave ask (S854): Stay, Leave without saving, Send and go back. Wraps on a phone
+   rather than squeezing three labels into one row. */
+.leave-prompt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
 }
 
 /* The 200px floor is set by what a card HOLDS, not by taste. `.stat-value` is 24px/700 and the

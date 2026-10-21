@@ -46,7 +46,10 @@ describe('no reader takes an empty list for the default any more', () => {
     expect(code).not.toMatch(/pos_bot_categories\.length > 0/)
     expect(code).not.toMatch(/arr\?\.length \? arr : \['Beverage'\]/)
   })
-  test('the till hides its BOT button when nothing goes to the bar', () => {
-    expect(readers.till).toMatch(/botCategories\.size > 0 && <div/)
+  // S854 (owner decision): one Send, no KOT or BOT buttons. Send splits the lines by the same set, so an
+  // outlet whose routing sends nothing to the bar prints every dish at the kitchen.
+  test('the one Send routes each line by the bar set, and no BOT button is left', () => {
+    expect(readers.till).toMatch(/botCategories\.has\(i\.category \|\| 'Other'\)/)
+    expect(readers.till).not.toMatch(/sendTicket\('BOT'\)/)
   })
 })

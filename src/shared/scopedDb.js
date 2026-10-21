@@ -68,6 +68,9 @@ export const CLIENT_SCOPED_TABLES = [
   // over bills. Both client_id NOT NULL; client sessions only read them (record_credit_receipt /
   // cancel_credit_receipt write). Membership types (S843, 20261015130000), the scheme a customer joins.
   'pos_credit_receipts', 'pos_credit_receipt_lines', 'pos_membership_types',
+  // Walk-in waitlist and booking deposits (S854). Both client_id NOT NULL. Any login of the outlet
+  // reads and writes the waitlist; deposits are read here and written only by their DEFINER functions.
+  'pos_waitlist', 'pos_booking_deposits',
   // Cross-module
   'monthly_owner_reports',
   // Each person's own checklist choices per outlet (S790): admin view-as reads it here; exported, never restored.

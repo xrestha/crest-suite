@@ -35,7 +35,15 @@ import { bookedCoversByHour, overSeatsHours } from './reservationCapacity'
 import { fillTemplate, openWhatsApp } from './whatsappLink'
 import ReservationModal from './ReservationModal'
 import SeatTableModal, { SEAT_TABLE_SELECT } from './SeatTableModal'
-import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
+import { profileNamesRpc, namesMapOf, fillMissingNames, loadProfileNames } from '../../../shared/profileNames'
+import { randomUUID } from '../../../utils/uuid'
+import DepositModal from '../deposits/DepositModal'
+import {
+  depositOfReservation, depositBadge, depositActions, refundOnEndPlan, refundConsequence, depositMoney, depositBalance,
+} from '../deposits/depositState'
+import { loadReservationDeposits, refundDeposit, refundOutcome, recordOutcome, depositErrorInfo } from '../deposits/depositApi'
+import { printDepositReceipt } from '../deposits/depositReceiptHtml'
+import { openPrintWindow, closeQuietly } from '../customers/creditReceiptHtml'
 
 const REQUEST_POLL_MS = 15000
 // The day list refreshes on its own too, so a colleague's "Arrived" on the door phone reaches the
@@ -71,6 +79,10 @@ const rowsSig = rows => rowsSignature(rows, [
   'duration_minutes', 'cancel_reason', 'source', 'arrived_at', 'order_id', 'updated_at', 'created_by',
 ]) + '#' + (rows || []).map(r => tableIdsOf(r).join('+')).join(',')
 const idsSig = set => [...set].sort().join(',')
+// The deposits the rows draw (S854): each amount, what its bill used, what was refunded, and the bill
+// it is on. A failed read is its own state (null), never an empty map.
+const depositsSig = v => (v?.byReservation == null ? `x:${v?.error ? 'e' : ''}` : Object.keys(v.byReservation).sort()
+  .map(k => `${k}=${v.byReservation[k].map(d => `${d.id}:${d.amount}:${d.used_amount}:${d.refunded_amount}:${d.order_id || ''}`).join('+')}`).join(','))
 
 // What the status line says a move did. Seated is not here: it leaves the page.
 const VERB = { confirmed: 'confirmed', arrived: 'marked arrived', completed: 'marked done', no_show: 'marked no-show', booked: 'reinstated' }
@@ -87,8 +99,12 @@ const VERB = { confirmed: 'confirmed', arrived: 'marked arrived', completed: 'ma
  * (Confirm → Arrived → Seat); No-show, Cancel, Done and the same-day reversals live in the menu.
  */
 export default function PosReservations() {
-  const { clientId, hasPosAccess } = useAuth()
+  const { clientId, hasPosAccess, isAdmin, profile } = useAuth()
   const canOpen = hasPosAccess('staff') // the route guard below; the sweep waits on it too
+  // S854: a deposit is taken and refunded by a POS supervisor, a POS manager or the Owner (the server
+  // checks pos_caller_has_rank itself). Crest support records no money for an outlet it is viewing: the
+  // functions act for the signed-in login own outlet, as the S843 customer payments do.
+  const canMoney = hasPosAccess('supervisor') && !isAdmin
   const { scopedFrom, scopedUpdate } = useScopedDb()
   const navigate = useNavigate()
   const biz = useBizInfo()
@@ -124,6 +140,17 @@ export default function PosReservations() {
   const [reviveTarget, setReviveTarget] = useState(null)
   const [expandedId, setExpandedId] = useState(null)
   const [now, setNow] = useState(() => Date.now())
+  // Booking deposits (S854): the rows deposits, the open bills (a deposit on one cannot be refunded),
+  // and the take and refund dialogs. `working` says a refund after a Cancel or No-show is under way.
+  const [deposits, setDeposits] = useState({ byReservation: {}, error: null })
+  const [openOrderIds, setOpenOrderIds] = useState(() => new Set())
+  const [depositTarget, setDepositTarget] = useState(null)
+  const [refundTarget, setRefundTarget] = useState(null) // { row, deposit }
+  const [refundBusy, setRefundBusy] = useState(false)
+  const [refundLost, setRefundLost] = useState(false)
+  const [refundError, setRefundError] = useState(null)
+  const [working, setWorking] = useState('')
+  const refundRequestId = useRef(null)
   const seenRequestIds = useRef(new Set())
   const requestsLoadedOnce = useRef(false)
 
@@ -180,6 +207,11 @@ export default function PosReservations() {
     const listRows = filter === 'upcoming' || filter === 'unconfirmed'
       ? (dayRows || []).filter(r => stillInPlay(r, dayStartMs, Date.now()))
       : dayRows || []
+    // S854: the listed bookings deposits, a second read because it needs their ids. A failed one never
+    // blanks the book: the rows still show, the deposits say they could not be read, and no deposit
+    // action is offered (a failed read is not "no deposit").
+    const dep = await loadReservationDeposits({ scopedFrom }, listRows.map(r => r.id))
+    if (!dayReq.isCurrent(key)) return
     // S840: a booking Crest support took is named only when its id is asked for, so the takers the
     // names read did not name are asked for before anything is set (usually none, and then nothing
     // is sent), so a quiet refresh never drops a name and puts it back. A failure only leaves those
@@ -197,6 +229,14 @@ export default function PosReservations() {
     commitRequests(reqRows || [])
     setIfChanged(setTables, tbls || [], l => rowsSignature(l, ['id', 'name', 'section', 'capacity', 'status']))
     setIfChanged(setOpenTableIds, new Set((open || []).map(o => o.table_id).filter(Boolean)), idsSig)
+    setIfChanged(setOpenOrderIds, new Set((open || []).map(o => o.id)), idsSig)
+    if (dep.error) {
+      // A quiet refresh keeps the last good deposits, as it keeps the last good page.
+      console.error('booking deposits could not be read:', dep.error)
+      if (!quiet) setDeposits({ byReservation: null, error: dep.error })
+    } else {
+      setIfChanged(setDeposits, { byReservation: dep.byReservation, error: null }, depositsSig)
+    }
     setIfChanged(setSettings, normalizeReservationSettings(s?.pos_reservation_settings), v => JSON.stringify(v))
     setIfChanged(setHours, { open: s?.pos_open_time || '', close: s?.pos_close_time || '' }, v => `${v.open}|${v.close}`)
     setNewCount(changed || 0)
@@ -253,7 +293,7 @@ export default function PosReservations() {
   // The day list too — see LIST_POLL_MS. Skipped while a dialog is open so a refresh cannot
   // pull a row out from under a decision being made about it. The Seat dialog reads its own busy
   // marks meanwhile (S835, SeatTableModal).
-  const dialogOpen = !!(modal || seatTarget || cancelTarget || noShowTarget || doneTarget || reviveTarget)
+  const dialogOpen = !!(modal || seatTarget || cancelTarget || noShowTarget || doneTarget || reviveTarget || depositTarget || refundTarget)
   useEffect(() => {
     if (!clientId || dialogOpen) return
     const id = setInterval(() => { if (navigator.onLine) load({ quiet: true }) }, LIST_POLL_MS)
@@ -364,16 +404,146 @@ export default function PosReservations() {
     navigate('/pos/orders', { state: { seatReservation: { reservation: r, table } } })
   }
 
+  // ── Booking deposits (S854) ─────────────────────────────────────────────────────────────────────
+  // The deposit a row speaks for, and whether it is a Deposit line on an open bill now (then it cannot
+  // be refunded until the payment window takes it off). null while the deposits read has failed.
+  const depositFor = r => (deposits.byReservation ? depositOfReservation(deposits.byReservation[r.id]) : null)
+  const onOpenBillOf = d => !!d && !!d.order_id && !(Number(d.used_amount) > 0) && openOrderIds.has(d.order_id)
+  // The letterhead: no receipt prints without the outlet name (useBizInfo gates on `ready`).
+  const outlet = biz.ready ? { name: biz.name, address: biz.address } : null
+
+  // Prints a deposit receipt into `w` (opened on the press). Who took and who refunded it are named
+  // from the server (get_client_profile_names) unless this login just did it; an unread name prints blank.
+  async function printDeposit(w, deposit, row, { takenBy = null, refundedBy = null, copy = false } = {}) {
+    const need = [takenBy == null ? deposit.taken_by : null, refundedBy == null ? deposit.refunded_by : null].filter(Boolean)
+    let map = {}
+    if (need.length > 0) {
+      const res = await loadProfileNames(supabase, clientId, need)
+      if (res.error) console.error('deposit receipt: a name could not be read, printed blank:', res.error)
+      map = res.map || {}
+    }
+    try {
+      return printDepositReceipt(w, {
+        deposit, booking: row, outlet, copyLabel: copy ? 'COPY' : '',
+        takenBy: takenBy ?? (map[deposit.taken_by] || ''), refundedBy: refundedBy ?? (map[deposit.refunded_by] || ''),
+      })
+    } catch (err) {
+      console.error('printing a deposit receipt failed unexpectedly:', err)
+      closeQuietly(w)
+      return { printed: false, error: { message: 'The receipt could not be printed. Print it again from the booking.' } }
+    }
+  }
+
+  async function reprintDeposit(row, deposit) {
+    const w = openPrintWindow()
+    setActionError(null)
+    const p = await printDeposit(w, deposit, row, { copy: true })
+    if (!p.printed) setActionError({ text: p.error?.message || 'The receipt did not print.', detail: '' })
+  }
+
+  // Take deposit answered with a deposit: say so, reload, print into the window the press opened.
+  async function depositAnswered({ result, w }) {
+    const row = depositTarget
+    setDepositTarget(null)
+    setActionError(null)
+    const out = recordOutcome(result, { customerName: row?.customer_name })
+    setNotice({ text: out.text, jumpIso: null })
+    void load({ quiet: true })
+    const p = await printDeposit(w, result.deposit, row, { takenBy: profile?.full_name || '' })
+    if (!p.printed) setActionError({ text: `The deposit is recorded, but its receipt did not print. ${p.error?.message || ''}`.trim(), detail: '' })
+  }
+
+  function askRefund(row, deposit) {
+    setActionError(null)
+    setRefundError(null)
+    setRefundLost(false)
+    refundRequestId.current = randomUUID()
+    setRefundTarget({ row, deposit })
+  }
+
+  // The Refund dialog: one call, the whole balance left, the way it came. A press with no answer keeps
+  // the dialog on Check again, which sends the same request id (refunded once, however often it is sent).
+  async function confirmRefund() {
+    if (!refundTarget || refundBusy) return
+    const { row, deposit } = refundTarget
+    const w = openPrintWindow()
+    setRefundBusy(true)
+    setRefundError(null)
+    let result
+    try {
+      result = await refundDeposit({ depositId: deposit.id, requestId: refundRequestId.current, priorLost: refundLost })
+    } catch (err) {
+      console.error('refunding a deposit failed unexpectedly:', err)
+      result = { status: 'unknown', error: err }
+    }
+    setRefundBusy(false)
+    const out = refundOutcome(result, deposit, { customerName: row.customer_name })
+    if (result.status === 'refunded' || result.status === 'replayed') {
+      setRefundTarget(null)
+      setNotice({ text: out.text, jumpIso: null })
+      void load({ quiet: true })
+      const p = await printDeposit(w, result.deposit, row, { refundedBy: result.status === 'refunded' ? (profile?.full_name || '') : null })
+      if (!p.printed) setActionError({ text: `The deposit was refunded, but the refund slip did not print. ${p.error?.message || ''}`.trim(), detail: '' })
+      return
+    }
+    closeQuietly(w)
+    if (result.status === 'unknown') setRefundLost(true)
+    setRefundError({ kind: out.kind, text: out.text, detail: result.error ? depositErrorInfo(result.error).detail : '' })
+  }
+
+  // A Cancel or No-show by a supervisor or manager refunds the deposit in the same flow (owner decision:
+  // always refunded, no choice to keep it). The booking move lands first: a refund that then fails
+  // leaves the row on Refund due, which is visible, never a refund on a booking still live.
+  async function refundAfterEnd(row, deposit, w, verb) {
+    setWorking(`Refunding the deposit of ${row.customer_name}…`)
+    let result
+    try {
+      result = await refundDeposit({ depositId: deposit.id, requestId: randomUUID() })
+    } catch (err) {
+      console.error('refunding a deposit failed unexpectedly:', err)
+      result = { status: 'unknown', error: err }
+    }
+    setWorking('')
+    void load({ quiet: true })
+    const out = refundOutcome(result, deposit, { customerName: row.customer_name, checkAgain: false })
+    if (result.status === 'refunded' || result.status === 'replayed') {
+      setNotice(n => ({ text: `${n?.text ? `${n.text} ` : ''}${out.text}`, jumpIso: n?.jumpIso || null }))
+      const p = await printDeposit(w, result.deposit, row, { refundedBy: profile?.full_name || '' })
+      if (!p.printed) setActionError({ text: `The deposit was refunded, but the refund slip did not print. ${p.error?.message || ''}`.trim(), detail: '' })
+      return
+    }
+    closeQuietly(w)
+    setActionError({
+      text: result.status === 'unknown'
+        ? `The booking is ${verb}. ${out.text}`
+        : `The booking is ${verb}, and its deposit shows Refund due. ${out.text}`,
+      detail: result.error ? depositErrorInfo(result.error).detail : '',
+    })
+  }
+
   async function confirmCancel() {
     if (!cancelTarget || !cancelReason) return
-    const ok = await transition(cancelTarget, 'cancelled', { cancel_reason: cancelReason })
-    if (ok) { setCancelTarget(null); setCancelReason('') }
+    const row = cancelTarget
+    const dep = depositFor(row)
+    const plan = refundOnEndPlan({ deposit: dep, canMoney, onOpenBill: onOpenBillOf(dep) })
+    // The slip window opens on the press itself, before anything is awaited.
+    const w = plan?.refund ? openPrintWindow() : null
+    const ok = await transition(row, 'cancelled', { cancel_reason: cancelReason })
+    if (!ok) { closeQuietly(w); return }
+    setCancelTarget(null); setCancelReason('')
+    if (plan?.refund) await refundAfterEnd(row, dep, w, 'cancelled')
   }
 
   async function confirmNoShow() {
     if (!noShowTarget) return
-    const ok = await transition(noShowTarget, 'no_show')
-    if (ok) setNoShowTarget(null)
+    const row = noShowTarget
+    const dep = depositFor(row)
+    const plan = refundOnEndPlan({ deposit: dep, canMoney, onOpenBill: onOpenBillOf(dep) })
+    const w = plan?.refund ? openPrintWindow() : null
+    const ok = await transition(row, 'no_show')
+    if (!ok) { closeQuietly(w); return }
+    setNoShowTarget(null)
+    if (plan?.refund) await refundAfterEnd(row, dep, w, 'marked no-show')
   }
 
   async function confirmDone() {
@@ -439,6 +609,17 @@ export default function PosReservations() {
     if (r.status === 'confirmed') step = stepBtn(r, 'Arrived', () => transition(r, 'arrived'), { tip: 'The party is here and waiting for a table.' })
     if (r.status === 'arrived')   step = stepBtn(r, 'Seat', () => setSeatTarget(r), { tip: 'Pick the table — opens the order with the party size as covers.' })
 
+    // S854: the booking deposit. A row whose deposit is owed back (the booking is over, or its bill used
+    // part) makes the refund its one next step; Take, Refund and Print live in the menu otherwise.
+    // Nothing is offered while the deposits read has failed (`da` null): a failed read is not "none".
+    const dep = depositFor(r)
+    const da = deposits.byReservation ? depositActions({ reservation: r, deposit: dep, canMoney, onOpenBill: onOpenBillOf(dep) }) : null
+    const refundStep = !step && !!da?.refundDue && !!da?.canRefund
+    if (refundStep) {
+      step = stepBtn(r, `Refund ${depositMoney(da.balance)}`, () => askRefund(r, dep),
+        { tip: 'A deposit is always refunded, the way it came. Opens the refund for what is left on it.' })
+    }
+
     const revivable = canRevive(r, now)
     const menu = (
       <RowMenu key="more" label={`More for ${r.customer_name}`} disabled={busyId != null && busyId !== r.id} busy={busyId === r.id}
@@ -446,6 +627,9 @@ export default function PosReservations() {
           r.status === 'booked' && canTransition(r.status, 'arrived') && { key: 'arrived', label: 'Arrived', onSelect: () => transition(r, 'arrived') },
           r.status !== 'arrived' && canTransition(r.status, 'seated') && { key: 'seat', label: 'Seat…', onSelect: () => setSeatTarget(r) },
           canTransition(r.status, 'completed') && { key: 'done', label: 'Mark done…', onSelect: () => setDoneTarget(r) },
+          da?.canTake && { key: 'deposit', label: 'Take deposit…', onSelect: () => { setActionError(null); setDepositTarget(r) } },
+          da?.canRefund && !refundStep && { key: 'refund', label: `Refund deposit (${depositMoney(da.balance)})…`, onSelect: () => askRefund(r, dep) },
+          da?.canReprint && { key: 'deposit-print', label: 'Print deposit receipt', onSelect: () => reprintDeposit(r, dep) },
           '-',
           // S818 (D23): from the booked time only. Before it a party is not late, and a guest who
           // calls to say they will not come is a Cancel.
@@ -583,6 +767,14 @@ export default function PosReservations() {
           )}
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNotice(null)}>Dismiss</button>
         </div>
+      )}
+      {working && <p role="status" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-text2)' }}>{working}</p>}
+      {/* S854: a failed deposits read is said, never shown as bookings with no deposit. */}
+      {!loading && !loadError && deposits.error && (
+        <ActionError error={{
+          text: 'The booking deposits could not be read, so no deposit shows on the rows and none can be taken or refunded here. Reload the page to try again.',
+          detail: depositErrorInfo(deposits.error).detail,
+        }} />
       )}
 
       {loading ? (
@@ -755,6 +947,8 @@ export default function PosReservations() {
                     // The disclosure only exists when there is more than the row already shows.
                     const hasMore = !!(r.cancel_reason || (r.notes && preview !== String(r.notes).replace(/\s+/g, ' ').trim()))
                     const open = expandedId === r.id
+                    const rowDeposit = depositFor(r)
+                    const depBadge = depositBadge(r, rowDeposit, { onOpenBill: onOpenBillOf(rowDeposit) })
                     return (
                       <Fragment key={r.id}>
                         <tr>
@@ -773,6 +967,9 @@ export default function PosReservations() {
                             {late && <> <Tip text={`More than ${settings.arrival_grace_minutes} minutes past the booked time and not marked arrived.`} width={220}><span className="badge badge-amber">△ late</span></Tip></>}
                             {waiting != null && waiting >= settings.arrival_grace_minutes && (
                               <> <Tip text="Marked arrived this long ago and still not seated." width={200}><span className="badge badge-amber">△ waiting {waiting} min</span></Tip></>
+                            )}
+                            {depBadge && (
+                              <> <Tip text={depBadge.tip} width={280}><span className={`badge ${depBadge.badge}`}>{depBadge.text}</span></Tip></>
                             )}
                             <span className="cell-sub">{displayPhone(r.phone)}{preview ? ` · ${preview}` : ''}</span>
                           </td>
@@ -830,6 +1027,9 @@ export default function PosReservations() {
         // a guest who asked and was refused is false.
         const declining = cancelTarget.status === 'requested'
         const reasons = declining ? DECLINE_REASONS : CANCEL_REASONS
+        // S854: a deposit is always refunded (owner decision); this says how, before anything is done.
+        const cancelDeposit = depositFor(cancelTarget)
+        const depositPlan = refundOnEndPlan({ deposit: cancelDeposit, canMoney, onOpenBill: onOpenBillOf(cancelDeposit) })
         return (
           <Modal title={declining ? `Decline — ${cancelTarget.customer_name}` : `Cancel booking — ${cancelTarget.customer_name}`}
             onClose={busyId ? () => {} : () => setCancelTarget(null)} maxWidth={440}>
@@ -838,6 +1038,9 @@ export default function PosReservations() {
                 ? 'The guest\'s phone will show the request as declined, with this reason.'
                 : 'The booking leaves the floor and its tables are released. It stays on record as cancelled, and can be reinstated from the ⋯ menu until the end of its day.'}
             </p>
+            {depositPlan && (
+              <p className="note-banner" style={{ margin: '0 0 12px' }}>{depositPlan.text}</p>
+            )}
             <div className="form-field">
               <label htmlFor="resv-cancel-reason">Reason</label>
               <select id="resv-cancel-reason" className="form-select" value={cancelReason} onChange={e => setCancelReason(e.target.value)}>
@@ -869,6 +1072,11 @@ export default function PosReservations() {
             <li>Releases any held tables and drops the booking from the floor.</li>
             <li>Feeds the no-show rate on the Covers Report.</li>
             <li>If they turn up later today, undo it from the ⋯ menu — <em>They turned up</em>.</li>
+            {(() => {
+              const d = depositFor(noShowTarget)
+              const plan = refundOnEndPlan({ deposit: d, canMoney, onOpenBill: onOpenBillOf(d) })
+              return plan ? <li>{plan.text}</li> : null
+            })()}
           </ul>
           {/* S835: a refusal stays in the dialog (it stays open), where it is seen. The page's own
               ActionError sits behind this scrim; the server refuses a no-show before the booked time
@@ -927,6 +1135,29 @@ export default function PosReservations() {
           </ul>
         </ConfirmModal>
       ))}
+
+      {/* S854: Take deposit, and Refund deposit. */}
+      {depositTarget && (
+        <DepositModal reservation={depositTarget} onClose={() => setDepositTarget(null)} onAnswered={depositAnswered} />
+      )}
+
+      {refundTarget && (
+        <ConfirmModal
+          title={`Refund deposit — ${refundTarget.row.customer_name}`}
+          confirmLabel={refundLost ? 'Check again' : `Refund ${depositMoney(depositBalance(refundTarget.deposit))}`}
+          busy={refundBusy}
+          busyLabel="Refunding…"
+          onConfirm={confirmRefund}
+          onCancel={() => setRefundTarget(null)}
+        >
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {refundConsequence(refundTarget.deposit, refundTarget.row.customer_name).map(line => <li key={line}>{line}</li>)}
+            <li>A slip marked REFUNDED prints for the guest to sign.</li>
+          </ul>
+          {refundError?.kind === 'warn' && <p className="note-banner" role="status" style={{ margin: '12px 0 0' }}>{refundError.text}</p>}
+          {refundError?.kind === 'error' && <ActionError error={{ text: refundError.text, detail: refundError.detail }} />}
+        </ConfirmModal>
+      )}
     </div>
   )
 }

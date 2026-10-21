@@ -90,13 +90,18 @@ export function storedDiscountRatio(items, discountAmount) {
   return base > 0 && d > 0 ? Math.min(1, d / base) : 0
 }
 
+// The legs a server function writes on the open bill, never the till after the close: Loyalty
+// (redeem_loyalty_points) and, since S854, a booking Deposit (apply_booking_deposit).
+export const SERVER_LEG_METHODS = ['Loyalty', 'Deposit']
+
 // The Split legs a settled close may still record: that try's own tenders, never the screen's, and none
-// once any leg is already on the bill. The Loyalty leg is the redemption's own and never sent from here.
+// once any leg is already on the bill. A server-written leg (above) is never sent from here.
 // `existing` null means the legs could not be read: the insert is tried, and the server (which refuses
 // legs beyond the bill) decides.
+
 export function legsToRecord(sentTenders, existing) {
-  if (existing && existing.some(l => l.payment_method !== 'Loyalty')) return []
-  return (sentTenders || []).filter(t => t.method !== 'Loyalty')
+  if (existing && existing.some(l => !SERVER_LEG_METHODS.includes(l.payment_method))) return []
+  return (sentTenders || []).filter(t => !SERVER_LEG_METHODS.includes(t.method))
 }
 
 // The customer-book row a closed bill names, taken from the bill rather than the screen. Null unless it
