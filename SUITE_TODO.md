@@ -12,6 +12,9 @@ session number** (or move it to a decisions record if one is started), so this f
 **S853 owner decisions (2026-10-21, asked in plain words):**
 - **Decided, no change:** the Fixed Assets Disposal Report keeps gain green / loss red.
 - **Build next:** `LegalReacceptance` telling a first acceptance from a repeat one exactly.
+- ✅ **Done 2026-10-21:** all eight below were regenerated on the live app as Crest support and read back at v18
+  (BLOOM CAFE Net Margin Shrawan 23.1% → 19.7%, Bhadra 21.9% → 18.0%; PKR 17.9% → 15.0%, 15.9% → 13.1%; CASA Ashadh
+  −60.7% → −65.5%, Shrawan −32.5% → −23.0%, Bhadra −31.8% → −32.8%, Ashwin −34.2% → −34.4%).
 - **Frozen owner reports to Regenerate (live read 2026-10-21):** 9 reports exist, all made before the S849
   release (current version 18). Crest support presses Regenerate Snapshot on the eight newer ones: BLOOM CAFE
   Shrawan and Bhadra 2083 (v14); BLOOM CAFE - PKR Shrawan and Bhadra 2083 (v14, no Owner login, so support);

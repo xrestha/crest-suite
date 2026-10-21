@@ -15,6 +15,15 @@ through in place, or this file goes back to being 92% history and stops being re
   order screen; **deposits for party bookings** and a **walk-in waitlist** (section C, each planned first).
 - **Build, as its own project:** a room map for the floor (owner chose it over the card grid).
 - **Decided, no change:** the Vegetarian filter keeps showing egg choices inside a dish and in combo picks.
+- **Live checks run 2026-10-21 (S853, the new build on BLOOM CAFE; results on the Crest Live Checks page):** passed the
+  floor-notice fold, tile = Billing list = POS Dashboard totals, the KDS settle on Start/Ready/Served, Start · 10m and
+  Other time, Membership phone cards, POS Setup tabs, the menu search, the device gate, the booking page when off, Find a
+  table, Close Shift, the drawer marks, the floor focus ring, the guest mark key (it sits inside Filters), and the cart's
+  choices line. Test bills were voided as "Test order". **Found:** at 390px the payment window's buyer-details rows run
+  14px wide (PAN and Phone cut off, the window scrolls sideways) when a discount needs them, and its header reads
+  "NPR 600 (NPR 667 − NPR 59 discount)", which does not add up because the VAT drops by NPR 8 too. Still needing a
+  person: build-your-own and combos (they need paid bills), the refused-Add scroll (no BLOOM dish has a required choice
+  without a pre-pick), the Billing guards, the idle lock, the non-Suite upsell and the storeroom count phone.
 - **Still parked:** the tablet re-activation code (ACCESS-10), paid SMS, phone verification, QR auto-confirmation, barcode.
 
 **S852 whole-product audit (2026-10-21, 13/20): ✅ done** in one release (crest-v467); the report and its Resolution table are `.impeccable/audit/2026-10-20T15-06-02Z__crest-suite-all-modules.md`. Filed from it, not fixed:
