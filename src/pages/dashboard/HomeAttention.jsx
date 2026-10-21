@@ -105,7 +105,10 @@ export default function HomeAttention({
   }, [load])
 
   const hrCount = !imsMode && showHr && canHrApprove ? (hrApprovals?.error ? null : hrApprovals?.total ?? 0) : undefined
-  const loading = counts === null || (hrCount !== undefined && hrApprovals?.loading)
+  // The par row's count comes from the dashboard's own load (S852): a number, null when its stock or
+  // par read failed ("couldn't check"), undefined while that load is still running.
+  const wantPar = showIms && canReorder
+  const loading = counts === null || (hrCount !== undefined && hrApprovals?.loading) || (wantPar && reorderCount === undefined)
   const items = [
     posFront && { key: 'guest', count: counts?.guest, failed: counts?.guest === null, tone: 'red',
       text: 'QR orders from guests nobody has accepted — the kitchen has not seen them', to: '/pos/orders', linkText: 'Accept' },
@@ -125,7 +128,7 @@ export default function HomeAttention({
           text: 'till bills or credit notes not yet in Inventory, so the month’s sales and stock use are off', to: '/periods', linkText: 'Post them from Periods' }
       : { key: 'post', count: counts?.unposted, failed: counts?.unposted === null,
           text: 'till bills or credit notes not yet in Inventory, so the month’s sales and stock use are off. The Owner posts them from Periods, or a POS manager from POS → Orders' }),
-    showIms && canReorder && { key: 'par', count: reorderCount, failed: false,
+    wantPar && { key: 'par', count: reorderCount, failed: reorderCount === null,
       text: 'stock items below their par level', to: '/reorder', linkText: 'Reorder Report' },
   ].filter(Boolean)
   const anyShown = items.some(i => i.failed || i.count > 0)

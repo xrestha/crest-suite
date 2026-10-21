@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
 import { useSettings } from '../../context/SettingsContext'
-import { fcBand, fcThresholds, recipeCostOf } from '../../shared/imsFormulas'
+import { fcBand, fcThresholds, recipeCostOf, varianceFlagPct } from '../../shared/imsFormulas'
 import { nmBand, descendingBand, bandFigure } from '../../shared/operatingBands'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
@@ -26,7 +26,7 @@ import { mtdClock, nepalBsToday, countedDaysText, prorate } from '../../modules/
 import { revenueOf, netSpendOf, operatingFigures } from '../../modules/dashboard/ownerDashboardData'
 import { readPeriodTransfers, transferValueByItem } from '../../modules/ims/transfers/transferFlows'
 import { loadDeliveryCommission, bsMonthWindow } from '../../shared/deliveryCommission'
-import { settleWithin } from '../../utils/withTimeout'
+import { settleWithin, withTimeout } from '../../utils/withTimeout'
 import { fcTrendView, MIN_COMPARED_MONTHS } from '../../modules/dashboard/fcTrendMath'
 import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom'
 import {
@@ -50,7 +50,7 @@ import { nepalBs, nepalCivilDate, serviceDayStartIso } from '../../shared/nepalT
 import { carryOverFrom, stillInPlay } from '../../modules/pos/reservations/reservationStatus'
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients, getSuggestedPrice } from '../../utils/recipeCost'
-import { buildStockRows, buildUsageMap, transferNetQtyMap } from '../../modules/ims/stockcount/stockReportCalc'
+import { buildStockRows } from '../../modules/ims/stockcount/stockReportCalc'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { allocateBillDiscounts, returnCostValue } from '../../modules/ims/reports/supplierAttribution'
 import { valuePeriods, periodWastageValue, WASTAGE_VALUE_SELECT } from '../../modules/ims/reports/periodCost'
@@ -72,9 +72,86 @@ import { KDS_LATE_MS } from '../../modules/pos/posSignals'
 import { KOT_CHANGE_ITEMS } from '../../modules/pos/kitchenNotes'
 import { summariseBills, returnsOf } from '../../modules/pos/dashboard/posDashboardMath'
 import { HOME_POS_READS, HOME_KITCHEN_READS, anyReadFailed, keepLastGood, readUnavailable } from './homePosStats'
+import { buildTopVariance, topVarianceRows, isTopVarianceView } from './homeTopVariance'
 import { waitingRequests } from '../../shared/reservationSeen'
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
 const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
+
+// Every read a loader waits on has a time limit (S852, the Owner Dashboard's READ_TIMEOUT_MS): a hung
+// request comes back as that read's own `error`, so a stall is a failed read with a Retry, never a
+// tile that shimmers for ever. The recipe walk runs up to five rounds of reads, so it gets longer.
+const READ_TIMEOUT_MS = 20000
+const WALK_TIMEOUT_MS = 30000
+const read = (promise, label) => settleWithin(promise, READ_TIMEOUT_MS, label)
+// The Net margin pill's dot takes nmBand's verdict, as the footer and the tile do (S852). It was
+// green for any margin at or above 0. A dot is a fill, so it takes the base hue, not a *-text one.
+const NET_MARGIN_DOT = { good: c => c.green, watch: c => c.accentInk, high: c => c.red }
+
+// Shared KPI text styles, one definition for every KPI grid on the page (IMS, HR, POS) and the upsell
+// tile. Module scope since S852, so UpsellCard below can read them without being declared in render.
+// kpiValueStyle keeps the hero (bigger/bolder) vs secondary two-tier hierarchy explicit via its params.
+const kpiLabelStyle = { fontSize: 10, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }
+const kpiSubtextStyle = { fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }
+const kpiValueStyle = (size, weight = 700) => ({ fontSize: size, fontWeight: weight, lineHeight: 1.1 })
+const kpiSkeleton = <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+
+// The figure of a KPI tile (S852, the S803 pattern the Owner and HR Dashboards use). A tile that opens
+// a page holds a Tip, which is a control of its own, so the tile cannot be role="button" (page-layout.md):
+// the card keeps the mouse click, and the figure is the real button, named "<label>: <value>", which is
+// the keyboard and screen-reader way in. At module scope so React sees one stable component type.
+function KpiFigure({ onOpen, name, style, title, children }) {
+  if (!onOpen) return <div style={style} title={title}>{children}</div>
+  return (
+    <button type="button" className="stat-card__open" onClick={e => { e.stopPropagation(); onOpen() }}>
+      <span className="sr-only">{name}: </span>
+      <span style={{ display: 'block', ...style }} title={title}>{children}</span>
+    </button>
+  )
+}
+
+// Compact upsell card for a locked feature → links to /pricing. Only rendered when the feature is
+// locked; an admin grant flips hasFeature(...) → the real KPI shows instead. Uses var(--theme-purple)
+// (the rationed 4th-color token) instead of a hardcoded indigo — the old #818cf8/rgba(129,140,248,*)
+// literal was unconditional across all 10 theme presets (a Bright-preset-only exception, retired with
+// that preset in S612) and an unaudited contrast risk on light presets. At module scope since S852: it
+// was declared inside the page's render, so it was a new component type, remounted, on every render.
+// It holds no control of its own, so the whole tile stays the one button.
+function UpsellCard({ label, tier, blurb }) {
+  const navigate = useNavigate()
+  return (
+    <div
+      onClick={() => navigate('/pricing')}
+      role="button"
+      tabIndex={0}
+      className="stat-card stat-card--compact interactive-card"
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/pricing') } }}
+      // The same box as the KPI tiles it sits beside — it occupies one of their slots and must
+      // measure like one — minus the shadow, because a dashed ghost tile is not a figure and
+      // should sit back from the cards that are.
+      style={{
+        background: 'color-mix(in srgb, var(--theme-purple) 8%, transparent)',
+        border: '1px dashed color-mix(in srgb, var(--theme-purple) 40%, transparent)',
+        boxShadow: 'none', cursor: 'pointer'
+      }}
+    >
+      <div style={{ ...kpiLabelStyle, marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
+        <span>{label}</span><Lock size={12} aria-hidden="true" />
+      </div>
+      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-purple-text)', lineHeight: 1.2 }}>Unlock with {tier}</div>
+      <div style={kpiSubtextStyle}>{blurb} · View plans →</div>
+    </div>
+  )
+}
+
+// A chart card's body when the reads behind it failed (S852): said in words, never drawn as the
+// chart's empty state ("No purchase data"), which is a claim about the month.
+function ChartReadFailed({ height, text, hint = 'Retry from the notice at the top of the page.' }) {
+  return (
+    <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+      <p style={{ color: 'var(--theme-text2)', fontSize: 12, margin: 0 }}>{text} {hint}</p>
+    </div>
+  )
+}
 
 // Today's BS date as Kathmandu reads it (S792, PLANNING-9) is `nepalBsToday`, which moved to
 // mtdClock.js in S849 (OWNER-DASHBOARD-17) so the Owner Dashboard reads the same "today".
@@ -386,7 +463,12 @@ export default function ClientDashboard({ scope = 'home' }) {
   const [stats, setStats]               = useState(cachedStats ?? null)
   const [activePeriod, setActivePeriod] = useState(() => readDashboardCache('activePeriod', effectiveClientId))
   const [loading, setLoading]           = useState(!cachedStats)
-  const [topVariance, setTopVariance]   = useState(() => readDashboardCache('topVariance', effectiveClientId) ?? [])
+  // Top Variance Items' view (homeTopVariance.js, S852): counted items only, judged at render. A new
+  // cache key, because the old one held rows built from a missing count read as 0.
+  const [topVariance, setTopVariance]   = useState(() => {
+    const cached = readDashboardCache('topVarianceView', effectiveClientId)
+    return isTopVarianceView(cached) ? cached : null
+  })
   const [categorySpend, setCategorySpend] = useState(() => readDashboardCache('categorySpend', effectiveClientId) ?? [])
   const [dailyTrend, setDailyTrend]     = useState(() => readDashboardCache('dailyTrend', effectiveClientId) ?? [])
   const [hasDailySales, setHasDailySales] = useState(() => readDashboardCache('hasDailySales', effectiveClientId) ?? false)
@@ -519,12 +601,13 @@ export default function ClientDashboard({ scope = 'home' }) {
     // reference data) — fired immediately instead of sitting inside the same Promise.all as the
     // seven period-scoped queries below, which used to make all fifteen wait on the period lookup
     // even though most of them had no reason to.
+    // Each read has its own time limit (READ_TIMEOUT_MS, S852), so one hung read fails its own tiles.
     const independentPromise = Promise.all([
-      scopedFrom('items', '*', { count: 'exact', head: true }).eq('is_active', true).eq('is_sub_recipe', false),
-      scopedFrom('vendors', '*', { count: 'exact', head: true }).eq('is_active', true),
+      read(scopedFrom('items', '*', { count: 'exact', head: true }).eq('is_active', true).eq('is_sub_recipe', false), 'Item count'),
+      read(scopedFrom('vendors', '*', { count: 'exact', head: true }).eq('is_active', true), 'Vendor count'),
       // NULL-safe (S714): .neq drops NULL-category rows, which undercounted the menu.
-      scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).or('category.is.null,category.neq.Sub-Recipe'),
-      scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).eq('category', 'Sub-Recipe'),
+      read(scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).or('category.is.null,category.neq.Sub-Recipe'), 'Recipe count'),
+      read(scopedFrom('recipes', '*', { count: 'exact', head: true }).eq('is_active', true).eq('category', 'Sub-Recipe'), 'Sub-recipe count'),
       // THE FOUR MASTER-DATA READS BELOW ARE PAGED (S734), AND THEY ARE THE PRODUCERS.
       //
       // The three transaction reads in the batch below were paged long ago; these were not,
@@ -545,23 +628,23 @@ export default function ClientDashboard({ scope = 'home' }) {
       //
       // Same producer-and-consumer rule S706 found on Items and S708 on Vendors: the consumer
       // was paged and the read that feeds it was not. `.order('id')` is the unique tiebreaker.
-      fetchAllRows(() => scopedFrom('recipes', 'id, name, selling_price, category, is_active, target_fc_pct, cost_price, vat_rate').order('id')),
-      fetchAllRows(() => scopedFrom('items', 'id, name, uom, per_uom_rate, yield_pct, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
-      fetchAllRows(() => scopedFrom('par_levels', 'item_id, par_qty').order('id')),
+      read(fetchAllRows(() => scopedFrom('recipes', 'id, name, selling_price, category, is_active, target_fc_pct, cost_price, vat_rate').order('id')), 'Recipes'),
+      read(fetchAllRows(() => scopedFrom('items', 'id, name, uom, per_uom_rate, yield_pct, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('id')), 'Items'),
+      read(fetchAllRows(() => scopedFrom('par_levels', 'item_id, par_qty').order('id')), 'Par levels'),
       // Unfiltered by is_active — an item deactivated mid-period still has real purchase/wastage
       // history for that period. Used for Top Items by Spend and itemRateMap below so those don't
       // silently drop/zero-cost that history, unlike the active-only `items` fetch above (which
       // still correctly limits Variance/Reorder/the item COUNT to currently-active stock items).
-      fetchAllRows(() => scopedFrom('items', 'id, name, per_uom_rate').eq('is_sub_recipe', false).order('id')),
+      read(fetchAllRows(() => scopedFrom('items', 'id, name, per_uom_rate').eq('is_sub_recipe', false).order('id')), 'Item rates'),
     ])
 
     // .single() reports error.code 'PGRST116' when the result set isn't exactly one row — for
     // this query that just means "no open period right now," a normal, common state, not a
     // failure. Only anything else is a genuine fetch failure worth surfacing.
-    const { data: period, error: periodErr } = await scopedFrom('monthly_periods')
+    const { data: period, error: periodErr } = await read(scopedFrom('monthly_periods')
       .eq('status', 'open')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      .limit(1).single()
+      .limit(1).single(), 'Open month')
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
 
     const periodFailed = !!(periodErr && periodErr.code !== 'PGRST116')
@@ -586,8 +669,9 @@ export default function ClientDashboard({ scope = 'home' }) {
     // a failed history degrades one chart, it does not make the page's figures incomplete.
     const bsNow = nepalBsToday()
     const periodIsThisMonth = !!period && period.bs_year === bsNow.year && period.bs_month === bsNow.month
+    // A hung history read is a failed one (S852): no Target is captured from it.
     const historyPromise = periodIsThisMonth
-      ? loadForecastHistory(scopedFrom, period, effectiveClientId).catch(err => ({ error: err?.message || String(err) }))
+      ? settleWithin(loadForecastHistory(scopedFrom, period, effectiveClientId), WALK_TIMEOUT_MS, 'Past months')
       : Promise.resolve(null)
 
     const dependentPromise = Promise.all([
@@ -639,7 +723,8 @@ export default function ClientDashboard({ scope = 'home' }) {
       // purchase, out comes off like a return, at the sender's frozen value — in Net Purchases, Spend %
       // so far, Est. Net Margin %, the cost pie and on-hand. A failed read fails the figures.
       period ? readPeriodTransfers(scopedFrom, [period.id]) : { data: [] },
-    ])
+    // Each with its own time limit (S852), so a hung read is that read's failure.
+    ].map(p => read(p, 'Month figures')))
     // Labour by the one rule (S849, GAPS-4): finalized payroll, else the HR wage estimate accrued to
     // yesterday; no HR read at all without HR or on a fenced login. Its own promise beside the batch.
     const labourPromise = period
@@ -683,8 +768,9 @@ export default function ClientDashboard({ scope = 'home' }) {
     const dashRecipeIds = (recipes || []).map(r => r.id)
     // The recipe walk throws on a failed read (S695); null here means "could not be computed"
     // and is folded into hadRealError below, the same way a failed read in either batch is.
+    // A walk that hangs is a walk that failed (S852).
     const ingredientBreakdownPromise = dashRecipeIds.length > 0
-      ? explodeRecipeIngredients(supabase, dashRecipeIds).catch(err => { console.error('Dashboard: recipe walk failed', err); return null })
+      ? withTimeout(explodeRecipeIngredients(supabase, dashRecipeIds), WALK_TIMEOUT_MS, 'Recipe walk').catch(err => { console.error('Dashboard: recipe walk failed', err); return null })
       : Promise.resolve({})
 
     const [dependentResults, rawBreakdown, forecastHistory, labourResult, commission] = await Promise.all([dependentPromise, ingredientBreakdownPromise, historyPromise, labourPromise, commissionPromise])
@@ -705,7 +791,7 @@ export default function ClientDashboard({ scope = 'home' }) {
 
     // What customized plates used beyond their recipes (S758). Throws on a failed read, like the
     // recipe walk above, and is folded into hadRealError the same way — null = not computed.
-    const deltaExplosion = await loadDeltaExplosion(supabase, (salesData || []).map(s => s.ingredient_deltas))
+    const deltaExplosion = await withTimeout(loadDeltaExplosion(supabase, (salesData || []).map(s => s.ingredient_deltas)), WALK_TIMEOUT_MS, 'Option stock lines')
       .catch(err => { console.error('Dashboard: option stock-line walk failed', err); return null })
     if (loadIdRef.current !== myId) return // superseded during the option stock-line read
 
@@ -721,6 +807,31 @@ export default function ClientDashboard({ scope = 'home' }) {
     // on those tiles, never a figure computed without it.
     const figuresFailed = periodFailed || !!independentResults[4]?.error
       || [0, 1, 2, 5, 8].some(i => !!dependentResults[i]?.error)
+    // Every other tile, by the reads it is built from (S852). The banner above said "may be incomplete"
+    // over tiles that read as real: a failed wastage read was "NPR 0", a failed recipes read a green
+    // "0 of 0" on Menu Health, failed purchases "No purchase data" and a failed par read "No items
+    // below par". A tile whose own read failed shows "—" and says so. Indexes: independentResults
+    // 0-3 the counts, 4 recipes, 5 items, 6 par levels, 7 every item's rate; dependentResults 0
+    // purchases, 1 returns, 2 sales, 3 opening, 4 closing, 5 overheads, 6 wastage, 7 staff meals,
+    // 8 transfers.
+    const indFailed = i => !!independentResults[i]?.error
+    const depFailed = i => !!dependentResults[i]?.error
+    // On-hand, below par and variance: opening + purchases − use − closing, item by item.
+    const shelfFailed = periodFailed || indFailed(5) || [0, 1, 2, 3, 4, 6, 7, 8].some(depFailed)
+      || rawBreakdown === null || deltaExplosion === null
+    const failed = {
+      period: periodFailed,
+      items: indFailed(0), vendors: indFailed(1), recipes: indFailed(2) || indFailed(3),
+      wastage: periodFailed || depFailed(6),
+      // The count needs the menu, its costs and the rates; the opportunity line needs the sales.
+      menu: periodFailed || indFailed(4) || indFailed(7) || rawBreakdown === null || depFailed(2),
+      // Spend by Category and Top Items by Spend.
+      spend: periodFailed || indFailed(5) || indFailed(7) || [0, 1, 8].some(depFailed),
+      // Daily Purchases vs Sales: the day's purchases net of returns, and its sales at their prices.
+      trend: periodFailed || indFailed(4) || [0, 1, 2].some(depFailed),
+      stock: shelfFailed || indFailed(6),
+      variance: shelfFailed,
+    }
 
     // purchaseTotal = purchases NET of bill discounts − returns. `discount_amount` is a BILL-level
     // figure repeated on every line, so a raw Σ qty × rate charged the undiscounted price into
@@ -759,12 +870,11 @@ export default function ClientDashboard({ scope = 'home' }) {
     // ratio divides by (OWNER-DASHBOARD-8). The Revenue tile keeps showing everything so far.
     const revenueCounted = revenueOf(salesData, currentPriceMap, clock).counted
 
-    // theoreticalMap: item-level usage this period, through the ONE depletion rule every stock
-    // page applies (S696) — POS supersedes a manual row for the same recipe and day, a credit note
-    // never puts stock back. This page used to sum every row raw, so a day sold in both POS and
-    // manual entry consumed its ingredients twice on the Variance widget and the Reorder panel.
-    // deltaExplosion adds each customized plate's option stock lines (S758).
-    const theoreticalMap = buildUsageMap(salesData, ingredientBreakdown, deltaExplosion)
+    // Item-level usage this period goes through the ONE depletion rule every stock page applies
+    // (S696) — POS supersedes a manual row for the same recipe and day, a credit note never puts
+    // stock back — inside buildStockRows (Items to Reorder) and buildTopVariance (Top Variance). This
+    // page used to sum every row raw, so a day sold in both POS and manual entry consumed its
+    // ingredients twice on both. deltaExplosion adds each customized plate's option stock lines (S758).
 
     // itemRateMap built from allItems (unfiltered by is_active) — an item deactivated mid-period
     // still has real wastage/recipe-cost history for that period; it shouldn't zero-cost to 0.
@@ -809,43 +919,34 @@ export default function ClientDashboard({ scope = 'home' }) {
       })
     }
 
-    // PATCHED: purchMap net of returns
-    const purchMap = {}
+    // Each item's spend, net of returns. (The quantities on the shelf, for Top Variance and Items to
+    // Reorder, are worked out by buildTopVariance and buildStockRows from the raw rows.)
     const purchValueMap = {}
     ;allocatedPurchases.forEach(p => {
-      purchMap[p.item_id] = (purchMap[p.item_id] || 0) + parseFloat(p.qty || 0)
-      // Net of the bill discount (see purchaseTotal above); qty is untouched — a discount changes
-      // what was paid, not what arrived.
+      // Net of the bill discount (see purchaseTotal above) — a discount changes what was paid, not
+      // what arrived.
       purchValueMap[p.item_id] = (purchValueMap[p.item_id] || 0) + p.lineCost
     })
     ;(returns || []).forEach(r => {
-      purchMap[r.item_id] = (purchMap[r.item_id] || 0) - parseFloat(r.qty || 0)
       purchValueMap[r.item_id] = (purchValueMap[r.item_id] || 0) - returnCostValue(r)
     })
-    // Stock moved between the group's outlets (S849, PNL-8) moves the shelf like a purchase and a
-    // return, so Top Variance agrees with the Variance page, and received stock is this outlet's
-    // spend in Spend by Category and Top Items (sent stock is not).
-    Object.entries(transferNetQtyMap(transfersData)).forEach(([id, q]) => { purchMap[id] = (purchMap[id] || 0) + q })
+    // Stock moved between the group's outlets (S849, PNL-8): received stock is this outlet's spend in
+    // Spend by Category and Top Items (sent stock is not).
     const tVal = transferValueByItem(transfersData)
     Object.entries(tVal.in).forEach(([id, v]) => { purchValueMap[id] = (purchValueMap[id] || 0) + v })
     Object.entries(tVal.out).forEach(([id, v]) => { purchValueMap[id] = (purchValueMap[id] || 0) - v })
 
-    const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) })
-    const closeMap = {}; (closing || []).forEach(r => { closeMap[r.item_id] = parseFloat(r.physical_qty) })
-
-    // Variance top 5 — gated on canVariance (Growth+); see Menu Health comment above for why
-    // this needs a data gate, not just a render gate.
-    if (canVariance) {
-      const varRows = (items || []).map(item => {
-        const actual = (openMap[item.id] || 0) + (purchMap[item.id] || 0) - (closeMap[item.id] || 0)
-        const theoretical = theoreticalMap[item.id] || 0
-        const variance = actual - theoretical
-        const value = variance * parseFloat(item.per_uom_rate || 0)
-        return { name: item.name, variance, value, uom: item.uom, category: item.categories?.name }
-      }).filter(r => r.value > 0).sort((a, b) => b.value - a.value).slice(0, 5)
-      put(setTopVariance, 'topVariance', varRows)
+    // Top Variance Items — gated on canVariance (Growth+); see Menu Health comment above for why
+    // this needs a data gate, not just a render gate. Built the Variance page's way (S852,
+    // homeTopVariance.js): an item with no closing count is not judged, so it can never read as
+    // Over-used with a Value at Risk. Nothing is built from a failed read: the card says it failed.
+    if (canVariance && !failed.variance) {
+      put(setTopVariance, 'topVarianceView', buildTopVariance({
+        items, opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData,
+        sales: salesData, breakdown: ingredientBreakdown, explosion: deltaExplosion, transfers: transfersData,
+      }))
     } else {
-      put(setTopVariance, 'topVariance', [])
+      put(setTopVariance, 'topVarianceView', null)
     }
 
     // Category spend (net)
@@ -933,7 +1034,10 @@ export default function ClientDashboard({ scope = 'home' }) {
     // and a second tab racing this one cannot overwrite the snapshot the first has just written.
     let nextSalesTargetSnap = isCurrentSnapshot('sales', period?.sales_projection_snapshot) ? period.sales_projection_snapshot : null
     let nextPurchTargetSnap = isCurrentSnapshot('purch', period?.purch_projection_snapshot) ? period.purch_projection_snapshot : null
-    if (period && isCurrentMonth && !historyFailed && canCapture) {
+    // Nor from a load where any other read failed (S852): a short sales or purchases read, or a menu
+    // that priced sales at 0, would freeze a wrong week for the whole month just the same. Not
+    // capturing costs nothing: the next load that reads everything captures it.
+    if (period && isCurrentMonth && !historyFailed && !hadRealError && canCapture) {
       const capture = (kind, column, base) => {
         const snap = makeSnapshot(kind, base, { monthEndDay, weekdayOf, capturedDay: bsToday.day })
         scopedUpdate('monthly_periods', { [column]: snap })
@@ -1061,8 +1165,10 @@ export default function ClientDashboard({ scope = 'home' }) {
     // Reorder — the same on-hand and below-par calculation the Reorder Report this panel links
     // to uses (S696; this used to be its own copy that deducted neither wastage nor staff meals,
     // so the tile could say 3 and the report 7). Gated on canReorder (Growth+); see Menu Health
-    // comment above for why this needs a data gate, not just a render gate.
-    if (canReorder) {
+    // comment above for why this needs a data gate, not just a render gate. A failed shelf read
+    // computes nothing (S852): the panel, Stock on hand and Needs attention's par row say it failed,
+    // where they used to say "No items below par" over a par or closing read that never arrived.
+    if (canReorder && !failed.stock) {
       const stockRows = buildStockRows({
         items, opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData,
         sales: salesData, breakdown: ingredientBreakdown, pars: parLevels, explosion: deltaExplosion,
@@ -1111,6 +1217,9 @@ export default function ClientDashboard({ scope = 'home' }) {
       itemCount, vendorCount, recipeCount, subRecipeCount,
       purchaseTotal, purchaseCounted: spend.counted, transfers: spend.transfers,
       revenueTotal, revenueCounted, overheadTotal, overheadBuckets, figuresFailed,
+      // Which tiles' reads failed (S852). Only ever true in memory: a load with a failed read is
+      // never cached, so a cached stats object has none and reads as all loaded.
+      failed,
       labourParts: labourResult?.parts ?? null,
       commission: { status: commission.status, amount: commission.amount, unsettledBills: commission.unsettledBills },
       wastageValueTotal, underpricedCount, costedPricedCount, menuOpportunityTotal,
@@ -1123,9 +1232,18 @@ export default function ClientDashboard({ scope = 'home' }) {
     // would come back EMPTY, not failed — and "0 employees · NPR 0 payroll" is the kind of zero this
     // page must never paint. So the tiles are not loaded or shown below supervisor rank at all.
     if (!hasHrAccess('supervisor')) { setHrStats(null); return }
-    const { data: employees, error } = await scopedFrom('hr_employees', 'status, basic_salary, pay_basis')
+    // Paged: one row per employee, read as a list it counts. Time-limited like every read here (S852).
+    const { data: employees, error } = await read(fetchAllRows(() => scopedFrom('hr_employees', 'id, status, basic_salary, pay_basis').order('id')), 'Employees')
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
     setLoadErrors(prev => ({ ...prev, hr: error ? 'HR data failed to load — figures below may be incomplete or stale.' : '' }))
+    // A failed read is not an empty staff list (S852): it computed "0 employees, NPR 0 payroll" and
+    // cached it for the next visit. Now it keeps the last good figures of THIS outlet, or shows "—",
+    // and is never cached (the homePosStats.keepLastGood rule). Stamped with the outlet for the same
+    // reason the POS card is (S849, GAPS-3); a cached card from before the stamp is refused.
+    if (error) {
+      setHrStats(prev => (prev && !prev.failed && prev.clientId === effectiveClientId ? prev : { clientId: effectiveClientId, failed: true }))
+      return
+    }
     const total     = employees?.length || 0
     const active    = employees?.filter(e => e.status === 'active').length || 0
     const probation = employees?.filter(e => e.status === 'probation').length || 0
@@ -1134,7 +1252,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     const payroll   = (employees || [])
       .filter(e => (e.status === 'active' || e.status === 'probation') && (e.pay_basis || 'monthly') === 'monthly')
       .reduce((s, e) => s + parseFloat(e.basic_salary || 0), 0)
-    setAndCache(setHrStats, 'hrStats', { total, active, probation, payroll })
+    setAndCache(setHrStats, 'hrStats', { clientId: effectiveClientId, total, active, probation, payroll })
   }
 
   // POS figures — Revenue/Covers/Avg Check for the current open BS period (matching the IMS
@@ -1156,11 +1274,12 @@ export default function ClientDashboard({ scope = 'home' }) {
 
   async function loadPosStats(myId) {
     // See loadStats' identical .single() comment above — PGRST116 (no open period) is expected,
-    // not a failure.
-    const { data: period, error: periodErr } = await scopedFrom('monthly_periods')
+    // not a failure. Every read here is time-limited (S852): a hung one fails its own tiles, which keep
+    // their last good figures (keepLastGood) under the banner's Retry.
+    const { data: period, error: periodErr } = await read(scopedFrom('monthly_periods')
       .eq('status', 'open')
       .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      .limit(1).single()
+      .limit(1).single(), 'Open month')
 
     let ordersErr = null, notesErr = null
     let summary = summariseBills([])
@@ -1184,15 +1303,15 @@ export default function ClientDashboard({ scope = 'home' }) {
       // Both carry `part_of_order_id` beside `table_id` (S836): a part bill has no table but is
       // dine-in (coversMath.isDineIn), so without it its guests would fall out of Covers Served.
       const [bills, notes] = await Promise.all([
-        fetchAllRows(() =>
+        read(fetchAllRows(() =>
           scopedFrom('pos_orders', 'id, table_id, part_of_order_id, covers, paid_amount, discount_amount, close_type, closed_at')
             .eq('close_type', 'paid')
             .gte('closed_at', fromTs).lte('closed_at', toTs)
-            .order('id')),
-        fetchAllRows(() =>
+            .order('id')), 'Bills'),
+        read(fetchAllRows(() =>
           scopedFrom('pos_credit_notes', 'id, order_id, net_amount, created_at, pos_orders!pos_credit_notes_order_id_fkey(id, table_id, part_of_order_id, covers)')
             .gte('created_at', fromTs).lte('created_at', toTs)
-            .order('id')),
+            .order('id')), 'Credit notes'),
       ])
       ordersErr = bills.error
       notesErr = notes.error
@@ -1221,18 +1340,18 @@ export default function ClientDashboard({ scope = 'home' }) {
     if (dayStart && dayEndBoundary) {
       const dayEnd = new Date(new Date(dayEndBoundary).getTime() + 6 * 3600000).toISOString()
       const [b, r] = await Promise.all([
-        scopedFrom('pos_reservations', 'status, party_size, reserved_for, duration_minutes')
+        read(scopedFrom('pos_reservations', 'status, party_size, reserved_for, duration_minutes')
           .in('status', ['booked', 'confirmed', 'arrived', 'seated'])
-          .gte('reserved_for', carryOverFrom(dayStart)).lte('reserved_for', dayEnd),
+          .gte('reserved_for', carryOverFrom(dayStart)).lte('reserved_for', dayEnd), 'Bookings'),
         // S834: a request whose time has passed is not counted (reservationSeen.js, as the nav chip).
-        waitingRequests(scopedFrom('pos_reservations', 'id', { count: 'exact', head: true })),
+        read(waitingRequests(scopedFrom('pos_reservations', 'id', { count: 'exact', head: true })), 'Booking requests'),
       ])
       const dayStartMs = new Date(dayStart).getTime()
       bookings = (b.data || []).filter(x => stillInPlay(x, dayStartMs, Date.now())); bookingsErr = b.error
       requestsPending = r.count || 0; requestsErr = r.error
     }
 
-    const { data: tables, error: tablesErr } = await scopedFrom('pos_tables', 'status').neq('status', 'inactive')
+    const { data: tables, error: tablesErr } = await read(scopedFrom('pos_tables', 'status').neq('status', 'inactive'), 'Tables')
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
     const tablesOccupied = (tables || []).filter(t => t.status === 'occupied').length
     const tablesTotal    = (tables || []).length
@@ -1263,12 +1382,12 @@ export default function ClientDashboard({ scope = 'home' }) {
     // over at 6 AM (serviceDayStartIso), with no upper bound — a ticket sent at 11:50 PM is still on
     // the board at 12:30 AM, so it is still on this card. Paged: one row per send per station, and a
     // long service at a busy outlet can pass 1,000 (the KDS pages the same read).
-    const { data, error } = await fetchAllRows(() => scopedFrom('pos_kot_log', 'id, status, sent_at, started_at, ready_at')
+    const { data, error } = await read(fetchAllRows(() => scopedFrom('pos_kot_log', 'id, status, sent_at, started_at, ready_at')
       .eq('station', kdsStation)
       .neq('status', 'cancelled')
       .not('items', 'cs', KOT_CHANGE_ITEMS) // a CHANGE ticket (S809 3a) is not a dish made or waiting
       .gte('sent_at', serviceDayStartIso())
-      .order('id'))
+      .order('id')), 'Kitchen tickets')
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
 
     const rows = data || []
@@ -1371,11 +1490,12 @@ export default function ClientDashboard({ scope = 'home' }) {
   }
 
   async function loadFcTrend(currentPeriod, myId) {
-    const { data: closedPeriods, error: closedErr } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month')
+    // Time-limited like every read here (S852): a hung read is a failed one, which draws nothing.
+    const { data: closedPeriods, error: closedErr } = await read(scopedFrom('monthly_periods', 'id, bs_year, bs_month')
       .eq('status', 'closed')
       .order('bs_year', { ascending: false })
       .order('bs_month', { ascending: false })
-      .limit(11)
+      .limit(11), 'Closed months')
 
     const closed = closedPeriods || []
     // The open period's own id is folded into the same query batch (rather than this function
@@ -1426,7 +1546,7 @@ export default function ClientDashboard({ scope = 'home' }) {
       // Stock moved between the group's outlets (S849, PNL-8): in adds like a purchase, out comes off
       // like a return, in a closed month's COGS (valuePeriods) and the open month's spend alike.
       readPeriodTransfers(scopedFrom, periodIds),
-    ])
+    ].map(p => read(p, 'Food cost trend')))
     const [
       { data: allPurch }, { data: allRet }, { data: allSales }, { data: recipeData },
       { data: trendItems }, { data: allOpening }, { data: allClosing }, { data: allWaste }, { data: allStaff },
@@ -1550,6 +1670,10 @@ export default function ClientDashboard({ scope = 'home' }) {
   // keeps its band; Spend % so far and Est. Net Margin % keep the settle guard for stock purchases.
   // `stats.clock` is the clock the figures were computed on (one load, one clock).
   const statsCurrent = stats?.statsVersion === 2
+  // Which tiles' reads failed on the last load (S852, loadStats' `failed`). A cached stats object has
+  // none, because a load with a failed read is never cached.
+  const imsFailed = stats?.failed || {}
+  const notLoadedText = 'Could not load — see the notice above'
   const sClock = statsCurrent ? stats.clock : null
   const daysText = countedDaysText(sClock)
   const firstDayNote = 'Ratios start after today — the first full day'
@@ -1629,7 +1753,9 @@ export default function ClientDashboard({ scope = 'home' }) {
   // a non-sighted user gets zero information from a trend/proportion a sighted user reads at a
   // glance. Rendered via ChartCard's `footer` slot (inside the same card, so it doesn't add an
   // extra grid item the way a sibling element would).
-  const categorySpendSummary = categorySpend.length === 0
+  const categorySpendSummary = imsFailed.spend
+    ? 'Purchases could not be loaded.'
+    : categorySpend.length === 0
     ? 'No purchase data for this period.'
     : `Top spend category: ${categorySpend[0].name} at NPR ${categorySpend[0].value.toLocaleString('en-IN')}${categorySpendTotal > 0 ? ` (${Math.round((categorySpend[0].value / categorySpendTotal) * 100)}% of total purchases)` : ''}.`
   // ── Rain adjustment on the live SALES forecast (S784) ───────────────────────────────────────
@@ -1716,6 +1842,8 @@ export default function ClientDashboard({ scope = 'home' }) {
     if (todayIdx === -1) return dailyTrendView.slice(-10)
     return dailyTrendView.slice(Math.max(0, todayIdx - 6), todayIdx + 4)
   })()
+  // Today's hollow dot is on the chart (S851): the legend names it (S852).
+  const todayDotShown = dailyTrendView.some(r => r.inProgress && (r.purchToday != null || (hasDailySales && r.salesToday != null)))
   // Today's sold-so-far rides on its own key (S851), and is part of "so far".
   const dailyTrendPurchTotal = dailyTrend.reduce((s, d) => s + (d.purchases ?? d.purchToday ?? 0), 0)
   const dailyTrendSalesTotal = dailyTrend.reduce((s, d) => s + (d.sales ?? d.salesToday ?? 0), 0)
@@ -1745,10 +1873,14 @@ export default function ClientDashboard({ scope = 'home' }) {
   const targetBasis = snap => (snap.source === 'history'
     ? "last 4 weeks' pace"
     : `set on Day ${snap.capturedDay} from this month's first ${snap.sampleDays} days`)
-  const dailyTrendSummary = dailyTrend.length === 0
+  const dailyTrendSummary = imsFailed.trend
+    ? 'Purchases or sales could not be loaded, so the trend is not shown.'
+    : dailyTrend.length === 0
     ? 'No purchase or sales data for this period.'
     : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}.` : ''}${salesProjectionView ? ` Projected month-end revenue: NPR ${salesProjectionView.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${rainForecastDays.length ? ` The sales forecast allows for rain on day ${rainForecastDays.join(', ')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${salesTarget ? ` Sales target (${targetBasis(salesTarget)}): NPR ${salesTargetMonthEnd.toLocaleString('en-IN')}.` : ''}${purchTarget ? ` Purchase target (${targetBasis(purchTarget)}): NPR ${purchTarget.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${festivalDayNums.length ? ` Festival days from Holiday Calendar: day ${dayRanges(festivalDayNums)}.` : ''}${festivalLearned.map(l => ` The sales forecast for day ${dayRanges(l.days)} is ${l.pct}% of a usual day, from how day ${dayRanges(l.from)} sold.`).join('')}`
-  const topItemSpendSummary = topItemSpend.length === 0
+  const topItemSpendSummary = imsFailed.spend
+    ? ''
+    : topItemSpend.length === 0
     ? 'No purchase data for this period.'
     : `Top items by spend: ${topItemSpend.slice(0, 3).map(i => `${i.fullName} at NPR ${i.value.toLocaleString('en-IN')}`).join(', ')}.`
   // ── Food Cost % trend: an unfinished month is not a data point ──────────────────────────────
@@ -1861,6 +1993,7 @@ export default function ClientDashboard({ scope = 'home' }) {
   // SETTLE_DAY days old, where one bulk purchase decides the sign. The pill, slice and footer all read
   // `marginWithheld`, so the card cannot judge a figure the tile beside it does not.
   const marginWithheld = marginWithhold || periodTooEarly
+  const netMarginVerdict = verdictFigure(netMarginPct, nmBand, marginWithhold)
   const costSliceFill = name => costSliceColor(name, { withheld: marginWithheld })
   // The sentence for whichever labour branch the page took (S683's rule: a branch the page knows
   // about is said out loud). Before S756 this only fired for "Labor tab empty but HR has basic
@@ -1879,66 +2012,27 @@ export default function ClientDashboard({ scope = 'home' }) {
       ? 'Labour could not be loaded, so the margin is not shown. Retry from the notice at the top of the page.'
     : null
   const labourNoteIsWarning = labourWithheld || labour?.source === 'unreadable' || labour?.source === 'failed'
-  const costBreakdownSummary = costBreakdown.length === 0
+  const costBreakdownSummary = stats?.figuresFailed
+    ? 'The cost figures could not be loaded.'
+    : costBreakdown.length === 0
     ? 'No cost data for this period.'
     : `Revenue breakdown this period: ${costBreakdown.map(r => `${r.name} NPR ${Math.round(r.value).toLocaleString('en-IN')}`).join(', ')}. Net margin: ${netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}.${labourNote ? ` ${labourNote}` : ''}`
 
-  // Shared mini card style + a11y — returns a spreadable props object so every KPI card gets
-  // keyboard support (role/tabIndex/onKeyDown) and a visible focus ring for free, instead of each
-  // clickable div being mouse-only. Non-interactive cards (onClick == null) get style only.
-  // .stat-card --compact, not a fourth hand-rolled copy of the same box. This file, OwnerDashboard
-  // and AdminDashboardOverview each typed .stat-card's five box properties out inline and then
-  // drifted on the one thing that shows — 10x14 here, 14x16 there, 12x14 there, against the
-  // class's own 20 — so a KPI card meant nothing in particular across the four dashboards. The
-  // --compact tier is for a strip with a REAL gap (these sit in .stat-grid--compact): shadow kept,
-  // seam pull dropped. Only cursor and the interaction props are this call site's business.
-  const kpiCard = (onClick) => ({
-    className: onClick ? 'stat-card stat-card--compact interactive-card' : 'stat-card stat-card--compact',
-    ...(onClick ? {
-      style: { cursor: 'pointer' },
-      onClick,
-      role: 'button',
-      tabIndex: 0,
-      onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }
-    } : {})
-  })
-  // Shared KPI text styles — single source of truth for label/value/subtext sizing across every
-  // KPI grid section (IMS Row 1/2, HR, POS), so a future re-tune is a 3-line edit, not a sweep of
-  // 15+ inline style objects. kpiValueStyle keeps the hero (bigger/bolder) vs secondary two-tier
-  // hierarchy explicit via its params, rather than one flattened size for every card.
-  const kpiLabelStyle = { fontSize: 10, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }
-  const kpiSubtextStyle = { fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }
-
-  const kpiValueStyle = (size, weight = 700) => ({ fontSize: size, fontWeight: weight, lineHeight: 1.1 })
-
-  // Compact upsell card for a locked feature → links to /pricing. Only render when the
-  // feature is locked; an admin grant flips hasFeature(...) → real KPI shows instead.
-  // Uses var(--theme-purple) (the rationed 4th-color token) instead of a hardcoded indigo —
-  // the old #818cf8/rgba(129,140,248,*) literal was unconditional across all 10 theme presets
-  // (a Bright-preset-only exception, retired with that preset in S612) and an unaudited contrast risk on light presets.
-  const UpsellCard = ({ label, tier, blurb }) => (
-    <div
-      onClick={() => navigate('/pricing')}
-      role="button"
-      tabIndex={0}
-      className="stat-card stat-card--compact interactive-card"
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/pricing') } }}
-      // The same box as the KPI tiles it sits beside — it occupies one of their slots and must
-      // measure like one — minus the shadow, because a dashed ghost tile is not a figure and
-      // should sit back from the cards that are.
-      style={{
-        background: 'color-mix(in srgb, var(--theme-purple) 8%, transparent)',
-        border: '1px dashed color-mix(in srgb, var(--theme-purple) 40%, transparent)',
-        boxShadow: 'none', cursor: 'pointer'
-      }}
-    >
-      <div style={{ ...kpiLabelStyle, marginBottom: 4, display: 'flex', justifyContent: 'space-between' }}>
-        <span>{label}</span><Lock size={12} aria-hidden="true" />
-      </div>
-      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-purple-text)', lineHeight: 1.2 }}>Unlock with {tier}</div>
-      <div style={kpiSubtextStyle}>{blurb} · View plans →</div>
-    </div>
-  )
+  // Shared mini card style — returns a spreadable props object for every KPI card. .stat-card
+  // --compact, not a fourth hand-rolled copy of the same box. This file, OwnerDashboard and
+  // AdminDashboardOverview each typed .stat-card's five box properties out inline and then drifted on
+  // the one thing that shows — 10x14 here, 14x16 there, 12x14 there, against the class's own 20 — so a
+  // KPI card meant nothing in particular across the four dashboards. The --compact tier is for a strip
+  // with a REAL gap (these sit in .stat-grid--compact): shadow kept, seam pull dropped.
+  //
+  // A card that opens a page keeps the mouse click on the whole card; its keyboard and screen-reader
+  // way in is the figure, a real button (KpiFigure, S852). Until S852 the card itself was
+  // role="button" with tabIndex and Enter/Space, which a screen reader announced as one button whose
+  // name was the whole card, with the label's Tip trigger nested inside it (invalid inside a button).
+  const openPage = path => (path ? () => navigate(path) : null)
+  const kpiCard = (path) => (path
+    ? { className: 'stat-card stat-card--compact interactive-card', style: { cursor: 'pointer' }, onClick: openPage(path) }
+    : { className: 'stat-card stat-card--compact' })
 
   // Module-composable: show a section header per module only when 2+ modules are active.
   // Dashboard sections reflect the displayed client's actual subscription (clientModules),
@@ -2003,7 +2097,8 @@ export default function ClientDashboard({ scope = 'home' }) {
   // The card renders only on a page with one module (the Inventory Dashboard, or a single-module
   // /dashboard: imsChartsAndTables sits in the `!showModuleHeaders` branch), so the read is asked for
   // only then (S814 4d). Home of 2+ modules used to read a month of sales for a card it never drew.
-  const { buckets: salesMixBuckets, loading: salesMixLoading } = useFoodBeverageSplit({
+  // `error` too (S852): a failed read said "No sales data", a claim about the month.
+  const { buckets: salesMixBuckets, loading: salesMixLoading, error: salesMixError } = useFoodBeverageSplit({
     activePeriod,
     includeManual: !showModuleHeaders && salesMixIncludeManual,
     includePos: !showModuleHeaders && salesMixIncludePos,
@@ -2025,7 +2120,9 @@ export default function ClientDashboard({ scope = 'home' }) {
       return (assigned[cat] = CHART_COLORS[nextFallback++ % CHART_COLORS.length])
     }
   })()
-  const salesMixSummary = salesMixTotal <= 0
+  const salesMixSummary = salesMixError
+    ? 'The sales mix could not be loaded.'
+    : salesMixTotal <= 0
     ? 'No sales data for this period.'
     : `Sales mix this period: ${salesMixCategories.map(c => `${c} NPR ${Math.round(salesMixBuckets[c]).toLocaleString('en-IN')} (${((salesMixBuckets[c] / salesMixTotal) * 100).toFixed(0)}%)`).join(', ')}.`
   // Whether each half of the merged card has anything to offer at all — "available" means
@@ -2039,13 +2136,21 @@ export default function ClientDashboard({ scope = 'home' }) {
   // shapes below: the full single-page layout when IMS is the only module, or a trimmed top-pill
   // row (card count matched to HR/POS) plus a full-width "details" section when 2+ modules share
   // the page. Gating/upsell logic per card is unchanged from before this split.
+  //
+  // Figures are text1 (S852, the One Signal Meaning Rule the Owner Dashboard and the IMS, HR and POS
+  // pages follow): red, amber or green only from a band or a threshold (Spend % so far, Fixed Costs %,
+  // Est. Net Margin %, Menu Health, a queue waiting on someone). Net Purchases used to be accent-ink,
+  // which on Light is a near-danger crimson, and Revenue green, Wastage red above zero: the same
+  // month's wastage was a verdict here and a fact on the Owner Dashboard.
+  //
+  // A tile whose own read failed shows "—" and says so (S852): `imsFailed`, above.
   const netPurchasesCard = (
-    <div {...kpiCard(() => navigate('/purchases'))}>
+    <div {...kpiCard('/purchases')}>
       <div style={kpiLabelStyle}>Net Purchases</div>
-      <div style={{ ...kpiValueStyle(18), color: 'var(--theme-accent-ink)' }}>
-        {loading || (stats && !statsCurrent) ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : stats?.figuresFailed ? '—' : `NPR ${(stats?.purchaseTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
-      </div>
-      <div style={kpiSubtextStyle}>{stats?.figuresFailed ? "Couldn't load — see the notice above" : <>After bill discounts &amp; returns · {periodLabel} →</>}</div>
+      <KpiFigure onOpen={openPage('/purchases')} name="Net Purchases" style={{ ...kpiValueStyle(18), color: stats?.figuresFailed ? 'var(--theme-text2)' : 'var(--theme-text1)' }}>
+        {loading || (stats && !statsCurrent) ? kpiSkeleton : stats?.figuresFailed ? '—' : `NPR ${(stats?.purchaseTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+      </KpiFigure>
+      <div style={kpiSubtextStyle}>{stats?.figuresFailed ? notLoadedText : <>After bill discounts &amp; returns · {periodLabel} →</>}</div>
       {/* Stock moved between the group's outlets is in this figure (S849, PNL-8), so it is named. */}
       {!loading && transfersLine && <div style={kpiSubtextStyle}>{transfersLine}</div>}
     </div>
@@ -2062,19 +2167,19 @@ export default function ClientDashboard({ scope = 'home' }) {
   // base, and a till total that excluded VAT would not tie to the cash drawer. What was missing
   // is the sentence, so each card now names its own basis in its subtext.
   const revenueCard = canSales ? (
-    <div {...kpiCard(() => navigate('/sales'))}>
+    <div {...kpiCard('/sales')}>
       <div style={kpiLabelStyle}>
         <Tip text="Sales recorded for this period, before VAT and after discounts. For a POS client this already includes every bill the till closed — the POS section's own Revenue tile is the same trade counted WITH VAT, which is why the two figures differ by roughly the VAT rate." width={280}>Revenue</Tip>
       </div>
-      <div style={{ ...kpiValueStyle(18), color: 'var(--theme-green-text)' }}>
-        {loading || (stats && !statsCurrent) ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : stats?.figuresFailed ? '—' : `NPR ${(stats?.revenueTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
-      </div>
-      <div style={kpiSubtextStyle}>Sales entries, excl. VAT →</div>
+      <KpiFigure onOpen={openPage('/sales')} name="Revenue, sales entries excluding VAT" style={{ ...kpiValueStyle(18), color: stats?.figuresFailed ? 'var(--theme-text2)' : 'var(--theme-text1)' }}>
+        {loading || (stats && !statsCurrent) ? kpiSkeleton : stats?.figuresFailed ? '—' : `NPR ${(stats?.revenueTotal || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+      </KpiFigure>
+      <div style={kpiSubtextStyle}>{stats?.figuresFailed ? notLoadedText : 'Sales entries, excl. VAT →'}</div>
     </div>
   ) : null
 
   const foodCostCard = canSales ? (
-    <div {...kpiCard(() => navigate(canVariance ? '/variance' : '/summary'))}>
+    <div {...kpiCard(canVariance ? '/variance' : '/summary')}>
       <div style={kpiLabelStyle}>
         {/* "Spend % so far", not "Food Cost %" (S792, owner decision D30). This tile divides what
             was BOUGHT by sales and never reads a count; Monthly Summary, the P&L and every closed
@@ -2084,12 +2189,12 @@ export default function ClientDashboard({ scope = 'home' }) {
       </div>
       {/* Client-configured thresholds, not a fourth hardcoded copy of 35/45 — Settings offers
           fc_warning_pct/fc_critical_pct and this card is the headline they were added for. */}
-      <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(fcPct, fcCardBand).color }} title={verdictFigure(fcPct, fcCardBand).title}>
-        {loading || (stats && !statsCurrent) ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : verdictFigure(fcPct, fcCardBand).text}
-      </div>
+      <KpiFigure onOpen={openPage(canVariance ? '/variance' : '/summary')} name={SPEND_SO_FAR_LABEL} style={{ ...kpiValueStyle(22, 800), color: verdictFigure(fcPct, fcCardBand).color }} title={verdictFigure(fcPct, fcCardBand).title}>
+        {loading || (stats && !statsCurrent) ? kpiSkeleton : verdictFigure(fcPct, fcCardBand).text}
+      </KpiFigure>
       <div style={kpiSubtextStyle}>
         {figs?.firstDay ? firstDayNote
-          : stats?.figuresFailed ? "Couldn't load — see the notice above"
+          : stats?.figuresFailed ? notLoadedText
           : daysText
           ? `${daysText} · stock transfers included`
           : <><Tip text={`Coloured against your food cost target from Settings → Thresholds (watch above ${fcBands.warn}%, too high above ${fcBands.critical}%) as a guide: over a whole month what you buy is close to what you use, unless stock is building up or running down.`} width={260}>Food cost target ≤{fcBands.warn}%</Tip> →</>}
@@ -2098,7 +2203,7 @@ export default function ClientDashboard({ scope = 'home' }) {
   ) : null
 
   const fixedCostsCard = canOverheads ? (
-    <div {...kpiCard(() => navigate('/overheads'))}>
+    <div {...kpiCard('/overheads')}>
       <div style={kpiLabelStyle}>
         {/* The tip used to say "Target: under 60% combined" while the colours banded at 50 and
             65 — so a 58% read amber under a sentence calling it on target. The card states the
@@ -2108,12 +2213,12 @@ export default function ClientDashboard({ scope = 'home' }) {
       {/* S849: fixed costs are counted for the finished days, so this ratio is no longer lumpy and
           keeps its band from day 2 (no settle guard). Withheld (grey, no mark) when labour may be
           missing or is not judged — a fenced login, a failed read, pay not set for some staff. */}
-      <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(ohPct, ohCardBand, labourWithheld, false).color }} title={verdictFigure(ohPct, ohCardBand, labourWithheld, false).title}>
-        {loading || (stats && !statsCurrent) ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : figs?.firstDay ? '—' : verdictFigure(ohPct, ohCardBand, labourWithheld, false).text}
-      </div>
+      <KpiFigure onOpen={openPage('/overheads')} name="Fixed Costs % of Revenue" style={{ ...kpiValueStyle(22, 800), color: verdictFigure(ohPct, ohCardBand, labourWithheld, false).color }} title={verdictFigure(ohPct, ohCardBand, labourWithheld, false).title}>
+        {loading || (stats && !statsCurrent) ? kpiSkeleton : figs?.firstDay ? '—' : verdictFigure(ohPct, ohCardBand, labourWithheld, false).text}
+      </KpiFigure>
       <div style={kpiSubtextStyle}>
         {figs?.firstDay ? firstDayNote
-          : stats?.figuresFailed ? "Couldn't load — see the notice above"
+          : stats?.figuresFailed ? notLoadedText
           : labour && labour.amount == null ? `Not shown — ${labourNotes.short}`
           : fixedCostTotal ? `${daysText ? `Fixed costs for ${daysText.replace(/^Days?/, m => m.toLowerCase())} · ` : ''}NPR ${fixedCostTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })} →`
           : 'No overhead data'}
@@ -2136,12 +2241,12 @@ export default function ClientDashboard({ scope = 'home' }) {
         <Tip text={`Revenue minus what you have SPENT on stock so far this month (net purchases — not food cost, which needs the month-end stock count to know what was used — with stock received from your other outlets added and stock sent to them taken off), labor, overheads and tax & fees${posOn ? ', and delivery-partner commission (Foodmandu, Pathao) on bills sold this month' : ''}, as a % of revenue, over the days already finished — what the business keeps. For the month in progress, rent and other fixed costs are counted for the days that have passed. Buying a month of stock in one go lowers it; cooking from last month's stock raises it. With Crest HR, labor is the finalized payroll run or, until it is finalized, the HR wage estimate; without it, the Overheads Labor tab — never both. The line under the figure says which one was used. Healthy Nepal F&B target: ≥20%.`} width={300}>Est. Net Margin %</Tip>
       </div>
       <div style={{ ...kpiValueStyle(22, 800), color: verdictFigure(netMarginPct, nmBand, marginWithhold).color }} title={verdictFigure(netMarginPct, nmBand, marginWithhold).title}>
-        {loading || (stats && !statsCurrent) ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : figs?.firstDay ? '—' : verdictFigure(netMarginPct, nmBand, marginWithhold).text}
+        {loading || (stats && !statsCurrent) ? kpiSkeleton : figs?.firstDay ? '—' : verdictFigure(netMarginPct, nmBand, marginWithhold).text}
       </div>
       {/* Inherits Spend's lumpiness through the purchases, so it keeps the settle guard. */}
       <div style={kpiSubtextStyle}>
         {figs?.firstDay ? firstDayNote
-          : stats?.figuresFailed ? "Couldn't load — see the notice above"
+          : stats?.figuresFailed ? notLoadedText
           : labour && labour.amount == null ? `Not shown — ${labourNotes.short}`
           : commission?.status === 'failed' ? 'Not shown — delivery commission could not be loaded'
           : fixedMissing ? `Not judged — no fixed costs entered for ${activePeriod ? BS_MONTHS[activePeriod.bs_month - 1] : 'this month'} yet · Overheads →`
@@ -2166,54 +2271,67 @@ export default function ClientDashboard({ scope = 'home' }) {
   const activePeriodCard = (
     <div {...kpiCard(null)}>
       <div style={kpiLabelStyle}>Active Period</div>
-      <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)' }}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : periodLabel}</div>
-      <div style={{ ...kpiSubtextStyle, color: activePeriod ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
-        {activePeriod ? '● Open' : '● No open period'}
+      <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)' }}>{loading ? kpiSkeleton : imsFailed.period ? '—' : periodLabel}</div>
+      {/* A failed month read is not "No open period" (S852): that is a claim about the client. */}
+      <div style={{ ...kpiSubtextStyle, color: imsFailed.period ? kpiSubtextStyle.color : activePeriod ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
+        {imsFailed.period ? notLoadedText : activePeriod ? '● Open' : '● No open period'}
       </div>
     </div>
   )
 
+  // A count tile: the count, or "—" when its own read failed (S852), never a blank.
+  const countFigure = (failedRead, value) => (loading ? kpiSkeleton : failedRead ? '—' : value)
+  const countStyle = failedRead => ({ ...kpiValueStyle(18), color: failedRead ? 'var(--theme-text2)' : 'var(--theme-text1)' })
+
   const itemsCard = (
-    <div {...kpiCard(() => navigate('/items'))}>
+    <div {...kpiCard('/items')}>
       <div style={kpiLabelStyle}>Items in Master</div>
-      <div style={kpiValueStyle(18)}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : stats?.itemCount}</div>
-      <div style={kpiSubtextStyle}>Active ingredients →</div>
+      <KpiFigure onOpen={openPage('/items')} name="Items in Master" style={countStyle(imsFailed.items)}>{countFigure(imsFailed.items, stats?.itemCount)}</KpiFigure>
+      <div style={kpiSubtextStyle}>{imsFailed.items ? notLoadedText : 'Active ingredients →'}</div>
     </div>
   )
 
   const vendorsCard = (
-    <div {...kpiCard(() => navigate('/vendors'))}>
+    <div {...kpiCard('/vendors')}>
       <div style={kpiLabelStyle}>Vendors</div>
-      <div style={kpiValueStyle(18)}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : stats?.vendorCount}</div>
-      <div style={kpiSubtextStyle}>Active suppliers →</div>
+      <KpiFigure onOpen={openPage('/vendors')} name="Vendors" style={countStyle(imsFailed.vendors)}>{countFigure(imsFailed.vendors, stats?.vendorCount)}</KpiFigure>
+      <div style={kpiSubtextStyle}>{imsFailed.vendors ? notLoadedText : 'Active suppliers →'}</div>
     </div>
   )
 
   const recipesCard = canRecipes ? (
-    <div {...kpiCard(() => navigate('/recipes'))}>
+    <div {...kpiCard('/recipes')}>
       <div style={kpiLabelStyle}>Costed Recipes</div>
-      <div style={kpiValueStyle(18)}>{loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : stats?.recipeCount}</div>
+      <KpiFigure onOpen={openPage('/recipes')} name="Costed Recipes" style={countStyle(imsFailed.recipes)}>{countFigure(imsFailed.recipes, stats?.recipeCount)}</KpiFigure>
       <div style={kpiSubtextStyle}>
-        {stats?.subRecipeCount > 0 ? `+ ${stats.subRecipeCount} sub-recipes →` : 'Active menu items →'}
+        {imsFailed.recipes ? notLoadedText : stats?.subRecipeCount > 0 ? `+ ${stats.subRecipeCount} sub-recipes →` : 'Active menu items →'}
       </div>
     </div>
   ) : (
     <UpsellCard label="Costed Recipes" tier="Growth" blurb="Cost every dish & protect margins" />
   )
 
+  // Menu Health keeps its colour: each dish is judged against its own target food cost, so red means
+  // some are over it. Green needs a dish to have been judged: "0 of 0" is no verdict at all (S852).
+  const menuColor = imsFailed.menu ? 'var(--theme-text2)'
+    : stats?.underpricedCount > 0 ? 'var(--theme-red-text)'
+    : stats?.costedPricedCount > 0 ? 'var(--theme-green-text)'
+    : 'var(--theme-text1)'
   const menuHealthCard = canMenuReprice ? (
-    <div {...kpiCard(() => navigate('/menu-repricing'))}>
+    <div {...kpiCard('/menu-repricing')}>
       <div style={kpiLabelStyle}>
         <Tip text="Dishes whose current food-cost % is above their target — priced too low to hit the margin you set. Open the Menu Repricing report for the prices to charge." width={300}>Menu Health</Tip>
       </div>
-      <div style={{ ...kpiValueStyle(18), color: stats?.underpricedCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' }}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `${stats?.underpricedCount || 0} of ${stats?.costedPricedCount || 0}`}
-      </div>
-      <div style={{ ...kpiSubtextStyle, color: stats?.menuOpportunityTotal > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>
+      <KpiFigure onOpen={openPage('/menu-repricing')} name="Menu Health, dishes under target" style={{ ...kpiValueStyle(18), color: menuColor }}>
+        {loading ? kpiSkeleton : imsFailed.menu ? '—' : `${stats?.underpricedCount || 0} of ${stats?.costedPricedCount || 0}`}
+      </KpiFigure>
+      <div style={kpiSubtextStyle}>
         {loading ? 'under target →'
+          : imsFailed.menu ? notLoadedText
           : stats?.menuOpportunityTotal > 0
             ? `NPR ${Math.round(stats.menuOpportunityTotal).toLocaleString('en-IN')}/mo opportunity →`
-            : 'dishes under target →'}
+            : stats?.costedPricedCount > 0 ? 'dishes under target →'
+            : 'no dish is costed and priced yet →'}
       </div>
     </div>
   ) : (
@@ -2221,14 +2339,14 @@ export default function ClientDashboard({ scope = 'home' }) {
   )
 
   const wastageCard = (
-    <div {...kpiCard(() => navigate('/wastage-report'))}>
+    <div {...kpiCard('/wastage-report')}>
       <div style={kpiLabelStyle}>
         <Tip text="Everything logged as waste this period, valued at each item's rate: raw items, prep (sub-recipes) and hidden items alike — the same total as the Wastage Report." width={260}>Wastage Value</Tip>
       </div>
-      <div style={{ ...kpiValueStyle(18), color: stats?.wastageValueTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
-        {loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : `NPR ${Math.round(stats?.wastageValueTotal || 0).toLocaleString('en-IN')}`}
-      </div>
-      <div style={kpiSubtextStyle}>This period →</div>
+      <KpiFigure onOpen={openPage('/wastage-report')} name="Wastage Value" style={{ ...kpiValueStyle(18), color: imsFailed.wastage ? 'var(--theme-text2)' : 'var(--theme-text1)' }}>
+        {loading ? kpiSkeleton : imsFailed.wastage ? '—' : `NPR ${Math.round(stats?.wastageValueTotal || 0).toLocaleString('en-IN')}`}
+      </KpiFigure>
+      <div style={kpiSubtextStyle}>{imsFailed.wastage ? notLoadedText : 'This period →'}</div>
     </div>
   )
 
@@ -2242,11 +2360,11 @@ export default function ClientDashboard({ scope = 'home' }) {
   // nobody computed must not render as one. `0 · 0 Leave · 0 OT …` is the most reassuring thing
   // this tile can say, and it was exactly what a refused or dropped read produced.
   const hrHeadlineCard = (
-    <div {...kpiCard(() => navigate('/hr/dashboard'))}>
+    <div {...kpiCard('/hr/dashboard')}>
       <div style={kpiLabelStyle}>Pending Approvals</div>
-      <div style={{ ...kpiValueStyle(22, 800), color: hrApprovals.error ? 'var(--theme-text2)' : hrApprovals.total > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
-        {hrApprovals.loading ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : hrApprovals.error ? '—' : hrApprovals.total}
-      </div>
+      <KpiFigure onOpen={openPage('/hr/dashboard')} name="Pending Approvals" style={{ ...kpiValueStyle(22, 800), color: hrApprovals.error ? 'var(--theme-text2)' : hrApprovals.total > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
+        {hrApprovals.loading ? kpiSkeleton : hrApprovals.error ? '—' : hrApprovals.total}
+      </KpiFigure>
       <div style={kpiSubtextStyle}>
         {hrApprovals.loading ? 'Loading…'
           : hrApprovals.error ? 'Count unavailable — open HR Dashboard →'
@@ -2255,51 +2373,49 @@ export default function ClientDashboard({ scope = 'home' }) {
     </div>
   )
 
-  // Employee counts and payroll are supervisor-and-up figures (see loadHrStats).
+  // Employee counts and payroll are supervisor-and-up figures (see loadHrStats). Figures in text1
+  // (S852): Active was green and Basic Payroll accent-ink, colours with no band behind them. A failed
+  // read with no last good figures shows "—", never "0 employees · NPR 0".
+  const hrFailed = !!hrStats?.failed
+  const hrFigure = value => (!hrStats ? kpiSkeleton : hrFailed ? '—' : value)
+  const hrValueStyle = size => ({ ...kpiValueStyle(size, 800), color: hrFailed ? 'var(--theme-text2)' : 'var(--theme-text1)' })
   const hrSecondaryCards = !hasHrAccess('supervisor') ? null : (
     <>
-      <div {...kpiCard(() => navigate('/hr/employees'))}>
+      <div {...kpiCard('/hr/employees')}>
         <div style={kpiLabelStyle}>Total Employees</div>
-        <div style={{ ...kpiValueStyle(22, 800), color: 'var(--theme-text1)' }}>
-          {!hrStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : hrStats.total}
-        </div>
-        <div style={kpiSubtextStyle}>All statuses →</div>
+        <KpiFigure onOpen={openPage('/hr/employees')} name="Total Employees" style={hrValueStyle(22)}>{hrFigure(hrStats?.total)}</KpiFigure>
+        <div style={kpiSubtextStyle}>{hrFailed ? notLoadedText : 'All statuses →'}</div>
       </div>
-      <div {...kpiCard(() => navigate('/hr/employees'))}>
+      <div {...kpiCard('/hr/employees')}>
         <div style={kpiLabelStyle}>Active</div>
-        <div style={{ ...kpiValueStyle(22, 800), color: 'var(--theme-green-text)' }}>
-          {!hrStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : hrStats.active}
-        </div>
-        {hrStats && hrStats.probation > 0 && (
-          <div style={{ ...kpiSubtextStyle, color: 'var(--theme-accent-ink)' }}>{hrStats.probation} on probation</div>
-        )}
+        <KpiFigure onOpen={openPage('/hr/employees')} name="Active employees" style={hrValueStyle(22)}>{hrFigure(hrStats?.active)}</KpiFigure>
+        {hrFailed ? <div style={kpiSubtextStyle}>{notLoadedText}</div>
+          : hrStats && hrStats.probation > 0 && <div style={kpiSubtextStyle}>{hrStats.probation} on probation</div>}
       </div>
       <div {...kpiCard(null)}>
         <div style={kpiLabelStyle}>
           <Tip text="Sum of monthly basic salary for active and probation employees paid monthly (daily and hourly rates are left out). Full payroll with allowances, SSF and TDS is computed during payroll run." width={260}>Basic Payroll / Month</Tip>
         </div>
-        <div style={{ ...kpiValueStyle(18, 800), color: 'var(--theme-accent-ink)' }}>
-          {!hrStats
-            ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
-            : `NPR ${Math.round(hrStats.payroll).toLocaleString('en-IN')}`}
+        <div style={hrValueStyle(18)}>
+          {hrFigure(hrStats?.payroll != null ? `NPR ${Math.round(hrStats.payroll).toLocaleString('en-IN')}` : '—')}
         </div>
-        <div style={kpiSubtextStyle}>Basic salary only</div>
+        <div style={kpiSubtextStyle}>{hrFailed ? notLoadedText : 'Basic salary only'}</div>
       </div>
     </>
   )
 
   // A tile whose own read failed with no last good figure to keep (S809 3n, REPORTS-8, homePosStats.js)
   // shows "—" and says so: a zero here would read as a quiet night or an empty pass.
-  const posGone = read => readUnavailable(posStats, read)
+  const posGone = readName => readUnavailable(posStats, readName)
   const posKitchenHeadlineCard = (
-    <div {...kpiCard(() => navigate('/pos/kds'))}>
+    <div {...kpiCard('/pos/kds')}>
       <div style={kpiLabelStyle}>Open Tickets</div>
-      <div style={{ ...kpiValueStyle(22, 800), ...(posGone('tickets') ? { color: 'var(--theme-text2)' } : null) }}>
-        {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('tickets') ? '—' : posStats.openNow}
-      </div>
+      <KpiFigure onOpen={openPage('/pos/kds')} name="Open Tickets" style={{ ...kpiValueStyle(22, 800), color: posGone('tickets') ? 'var(--theme-text2)' : 'var(--theme-text1)' }}>
+        {!posStats ? kpiSkeleton : posGone('tickets') ? '—' : posStats.openNow}
+      </KpiFigure>
       <div style={kpiSubtextStyle}>
         {!posStats
-          ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+          ? kpiSkeleton
           : posGone('tickets') ? <>Couldn&apos;t load — open the Kitchen Display →</>
           : <>New + In Progress →</>}
       </div>
@@ -2308,20 +2424,21 @@ export default function ClientDashboard({ scope = 'home' }) {
 
   const posKitchenSecondaryCards = (
     <>
-      <div {...kpiCard(() => navigate('/pos/kds'))}>
+      <div {...kpiCard('/pos/kds')}>
         <div style={kpiLabelStyle}>
           <Tip text="Open tickets sent more than 15 minutes ago — same threshold the ticket display itself flags." width={220}>Late</Tip>
         </div>
-        <div style={{ ...kpiValueStyle(18), color: posGone('tickets') ? 'var(--theme-text2)' : posStats?.lateCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
-          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('tickets') ? '—' : posStats.lateCount}
-        </div>
+        {/* Red keeps its threshold: a ticket past the Kitchen Display's 15 minutes. */}
+        <KpiFigure onOpen={openPage('/pos/kds')} name="Late tickets" style={{ ...kpiValueStyle(18), color: posGone('tickets') ? 'var(--theme-text2)' : posStats?.lateCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' }}>
+          {!posStats ? kpiSkeleton : posGone('tickets') ? '—' : posStats.lateCount}
+        </KpiFigure>
         <div style={kpiSubtextStyle}>{posGone('tickets') ? <>Couldn&apos;t load →</> : <>&gt; 15 min →</>}</div>
       </div>
-      <div {...kpiCard(() => navigate('/pos/kds'))}>
+      <div {...kpiCard('/pos/kds')}>
         <div style={kpiLabelStyle}>Ready &amp; Waiting</div>
-        <div style={{ ...kpiValueStyle(18), ...(posGone('tickets') ? { color: 'var(--theme-text2)' } : null) }}>
-          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('tickets') ? '—' : posStats.readyWaiting}
-        </div>
+        <KpiFigure onOpen={openPage('/pos/kds')} name="Ready and waiting" style={{ ...kpiValueStyle(18), color: posGone('tickets') ? 'var(--theme-text2)' : 'var(--theme-text1)' }}>
+          {!posStats ? kpiSkeleton : posGone('tickets') ? '—' : posStats.readyWaiting}
+        </KpiFigure>
         <div style={kpiSubtextStyle}>{posGone('tickets') ? <>Couldn&apos;t load →</> : <>Last 20 min →</>}</div>
       </div>
       <div {...kpiCard(null)}>
@@ -2330,12 +2447,12 @@ export default function ClientDashboard({ scope = 'home' }) {
         </div>
         <div style={kpiValueStyle(18)}>
           {!posStats
-            ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+            ? kpiSkeleton
             : posStats.avgPrepMin != null ? `${posStats.avgPrepMin} min` : '—'}
         </div>
         <div style={kpiSubtextStyle}>
           {!posStats
-            ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+            ? kpiSkeleton
             : posGone('tickets') ? <>Couldn&apos;t load</>
             : <>{posStats.completedToday} completed this service</>}
         </div>
@@ -2344,31 +2461,33 @@ export default function ClientDashboard({ scope = 'home' }) {
   )
 
   // See the note on `revenueCard` above: this is `pos_orders.paid_amount`, the amount actually
-  // tendered, VAT included — the IMS Revenue tile beside it is the same trade before VAT.
+  // tendered, VAT included — the IMS Revenue tile beside it is the same trade before VAT. In text1
+  // (S852): it was green, a colour with no band behind it.
   const posFrontHeadlineCard = (
-    <div {...kpiCard(() => navigate('/pos/sales-report'))}>
+    <div {...kpiCard('/pos/sales-report')}>
       <div style={kpiLabelStyle}>
         <Tip text="Billed incl. VAT on this period's paid bills, less credit notes issued this period — the Sales Report's rule: a credited bill stays on the day it was sold; its note comes off the day it is issued. The Inventory section's Revenue tile counts the same sales before VAT, so the two will not match." width={280}>Revenue</Tip>
       </div>
-      <div style={{ ...kpiValueStyle(22, 800), color: posGone('sales') ? 'var(--theme-text2)' : 'var(--theme-green-text)' }}>
-        {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('sales') ? '—' : `NPR ${Math.round(posStats.revenueTotal).toLocaleString('en-IN')}`}
-      </div>
+      <KpiFigure onOpen={openPage('/pos/sales-report')} name="POS revenue, billed including VAT" style={{ ...kpiValueStyle(22, 800), color: posGone('sales') ? 'var(--theme-text2)' : 'var(--theme-text1)' }}>
+        {!posStats ? kpiSkeleton : posGone('sales') ? '—' : `NPR ${Math.round(posStats.revenueTotal).toLocaleString('en-IN')}`}
+      </KpiFigure>
       <div style={kpiSubtextStyle}>{posGone('sales') ? <>Couldn&apos;t load — open the Sales Report →</> : <>{periodLabel} · billed, incl. VAT →</>}</div>
     </div>
   )
 
+  const tablesPath = hasPosAccess('manager') ? '/pos/tables' : null
   const posFrontSecondaryCards = (
     <>
-      <div {...kpiCard(() => navigate('/pos/covers-report'))}>
+      <div {...kpiCard('/pos/covers-report')}>
         <div style={kpiLabelStyle}>
           <Tip text="Guests seated at tables on paid bills closed this period: the Covers Report's count. Takeaway and delivery bills seat no guests, so they are not counted here; a bill later credit-noted still counts its guests." width={260}>Covers Served</Tip>
         </div>
-        <div style={{ ...kpiValueStyle(18), ...(posGone('sales') ? { color: 'var(--theme-text2)' } : null) }}>
-          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('sales') ? '—' : posStats.coversTotal}
-        </div>
+        <KpiFigure onOpen={openPage('/pos/covers-report')} name="Covers Served" style={{ ...kpiValueStyle(18), color: posGone('sales') ? 'var(--theme-text2)' : 'var(--theme-text1)' }}>
+          {!posStats ? kpiSkeleton : posGone('sales') ? '—' : posStats.coversTotal}
+        </KpiFigure>
         <div style={kpiSubtextStyle}>
           {!posStats
-            ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+            ? kpiSkeleton
             : posGone('sales') ? <>Couldn&apos;t load — open the Covers Report →</>
             : posStats.dineInBills != null ? <>{posStats.dineInBills} dine-in bill{posStats.dineInBills === 1 ? '' : 's'} →</>
             : <>{posStats.billCount} bill{posStats.billCount === 1 ? '' : 's'} →</>}
@@ -2379,31 +2498,32 @@ export default function ClientDashboard({ scope = 'home' }) {
           <Tip text="Revenue (after this period's credit notes) ÷ every paid bill closed this period, a credited one included." width={240}>Avg Check</Tip>
         </div>
         <div style={{ ...kpiValueStyle(18), ...(posGone('sales') ? { color: 'var(--theme-text2)' } : null) }}>
-          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('sales') ? '—' : `NPR ${Math.round(posStats.avgCheck).toLocaleString('en-IN')}`}
+          {!posStats ? kpiSkeleton : posGone('sales') ? '—' : `NPR ${Math.round(posStats.avgCheck).toLocaleString('en-IN')}`}
         </div>
         <div style={kpiSubtextStyle}>{posGone('sales') ? <>Couldn&apos;t load</> : 'Revenue ÷ bills'}</div>
       </div>
-      <div {...kpiCard(hasPosAccess('manager') ? () => navigate('/pos/tables') : null)}>
+      {/* In text1 (S852): occupied tables were accent-ink, a colour with no threshold behind it. */}
+      <div {...kpiCard(tablesPath)}>
         <div style={kpiLabelStyle}>Tables Occupied</div>
-        <div style={{ ...kpiValueStyle(18), color: posGone('tables') ? 'var(--theme-text2)' : posStats?.tablesOccupied > 0 ? 'var(--theme-accent-ink)' : 'var(--theme-text1)' }}>
-          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('tables') ? '—' : `${posStats.tablesOccupied} / ${posStats.tablesTotal}`}
-        </div>
-        <div style={kpiSubtextStyle}>{posGone('tables') ? <>Couldn&apos;t load</> : hasPosAccess('manager') ? 'Right now →' : 'Right now'}</div>
+        <KpiFigure onOpen={openPage(tablesPath)} name="Tables Occupied" style={{ ...kpiValueStyle(18), color: posGone('tables') ? 'var(--theme-text2)' : 'var(--theme-text1)' }}>
+          {!posStats ? kpiSkeleton : posGone('tables') ? '—' : `${posStats.tablesOccupied} / ${posStats.tablesTotal}`}
+        </KpiFigure>
+        <div style={kpiSubtextStyle}>{posGone('tables') ? <>Couldn&apos;t load</> : tablesPath ? 'Right now →' : 'Right now'}</div>
       </div>
       {/* Tonight's bookings (S677) — what is still walking through the door, beside what has
           already been served. Amber only when public requests are waiting on a staff Accept:
           that is the one state here that is waiting on a person (posSignals.js). A cached
           posStats from before this tile existed lacks the fields, hence the `?? 0`. */}
-      <div {...kpiCard(() => navigate('/pos/reservations'))}>
+      <div {...kpiCard('/pos/reservations')}>
         <div style={kpiLabelStyle}>
           <Tip text="Bookings for tonight's service that are still expected or already seated, from the Reservations page. 'To come' is the guest count not yet seated — the covers the floor should be ready for on top of what is already served." width={280}>Bookings Tonight</Tip>
         </div>
-        <div style={{ ...kpiValueStyle(18), color: posGone('bookings') ? 'var(--theme-text2)' : (posStats?.requestsPending ?? 0) > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
-          {!posStats ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} /> : posGone('bookings') ? '—' : (posStats.bookingsTonight ?? 0)}
-        </div>
+        <KpiFigure onOpen={openPage('/pos/reservations')} name="Bookings Tonight" style={{ ...kpiValueStyle(18), color: posGone('bookings') ? 'var(--theme-text2)' : (posStats?.requestsPending ?? 0) > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text1)' }}>
+          {!posStats ? kpiSkeleton : posGone('bookings') ? '—' : (posStats.bookingsTonight ?? 0)}
+        </KpiFigure>
         <div style={kpiSubtextStyle}>
           {!posStats
-            ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
+            ? kpiSkeleton
             : posGone('bookings') ? <>Couldn&apos;t load — open Reservations →</>
             : (posStats.requestsPending ?? 0) > 0
               ? <>{posStats.requestsPending} request{posStats.requestsPending === 1 ? '' : 's'} to accept →</>
@@ -2419,6 +2539,13 @@ export default function ClientDashboard({ scope = 'home' }) {
   // multi-module IMS content renders in its own full-width details section below the pill grid
   // (never squeezed into a column), that conditional no longer applies — this is unconditionally
   // full-width in both layouts.
+  // Needs attention's par row (S852): null is "couldn't check" (a failed stock or par read), undefined
+  // is "not loaded yet", a number is the count. It was given the count alone and never failed, so it
+  // could say "Nothing is waiting on you" over a read that failed.
+  const attentionReorderCount = imsFailed.stock ? null : (reorderCount ?? undefined)
+  // Top Variance Items, judged at render at the client's own tolerance (S852, homeTopVariance.js).
+  const varianceRows = topVarianceRows(topVariance, settings)
+  const varianceTolerance = varianceFlagPct(settings)
   const imsChartsAndTables = !loading && activePeriod && (
     <>
       <div className="dash-spend-purchases-row dash-row">
@@ -2455,6 +2582,13 @@ export default function ClientDashboard({ scope = 'home' }) {
             // always points at a real tabpanel wrapping the active view's content.
             const panel = kids => (
               <div role="tabpanel" id={`${idBase}-panel`} aria-labelledby={`${idBase}-tab-${spendView}`}>{kids}</div>
+            )
+            // A failed purchases or items read is not a month with no purchases (S852).
+            if (imsFailed.spend) return (
+              <>
+                {tabs}
+                {panel(<ChartReadFailed height={contentH} text="Purchases could not be loaded." />)}
+              </>
             )
             if (spendView === 'category') {
               if (categorySpend.length === 0) return (
@@ -2545,7 +2679,8 @@ export default function ClientDashboard({ scope = 'home' }) {
                 <ResponsiveContainer width="100%" height={big ? contentH - 60 : contentH}>
                   <BarChart data={shown} layout="vertical" margin={{ top: 0, right: 8, bottom: 0, left: 0 }}>
                     <XAxis type="number" hide />
-                    <YAxis type="category" dataKey="name" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} width={big ? 130 : 90} />
+                    {/* 10px is the floor for real text (S852); the narrow axis grew with it. */}
+                    <YAxis type="category" dataKey="name" tick={{ fill: colors.text3, fontSize: big ? 11 : 10 }} tickLine={false} axisLine={false} width={big ? 130 : 100} />
                     <Tooltip
                       contentStyle={TOOLTIP_CHROME}
                       formatter={(v, n, p) => [`NPR ${Number(v).toLocaleString('en-IN')}${purchaseTotal > 0 ? ` (${((v / purchaseTotal) * 100).toFixed(1)}% of purchases)` : ''}`, p.payload.fullName || n]}
@@ -2586,7 +2721,8 @@ export default function ClientDashboard({ scope = 'home' }) {
           // scroll requirement rather than remove it.
           modalHeight={340}
           cardStyle={{ minWidth: 0 }}
-          legend={<>
+          // Nothing about lines that were not drawn (S852): a failed read has no legend or forecast.
+          legend={!imsFailed.trend && <>
             {/* A legend swatch must equal the series it labels, so these take the chart's own
                 fixed hex rather than a theme token — the label text beside each carries the
                 readable contrast. The live projections repeat their metric's hue and are told
@@ -2613,10 +2749,19 @@ export default function ClientDashboard({ scope = 'home' }) {
                   : `What you usually spend on each weekday, from this month's first ${purchTarget.sampleDays} days (there weren't 4 weeks of purchases before ${periodLabel} to learn from).`} A weekday you bought nothing on counts as zero, so your usual restock day sits high and your quiet buying days sit low. Festival days in Holiday Calendar are left out of that usual week, and the purchase target is never scaled for a festival. It stays fixed for the rest of ${periodLabel}. Hover any day: here green means UNDER the target, because spending less than usual is the win. A grey ≈ means the day was close enough to count as on target.`}>Purch. Target</Tip>
               </span>
             )}
+            {/* S852: the hollow dot is named here, whatever the footer says. The footer named it in
+                one branch only, so a failed history or holiday read, or a month with no forecast,
+                drew the dot with no words for it. */}
+            {todayDotShown && (
+              <span style={{ color: 'var(--theme-text2)' }}>
+                <span aria-hidden="true">○</span>{' '}
+                <Tip text="Today is still trading. The hollow dot is what today has sold or bought so far, so it usually sits below the line. It joins the line once the day is over.">Today so far</Tip>
+              </span>
+            )}
             {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}
           </>}
           footer={<>
-            {(salesProjection || purchProjection || salesTarget || purchTarget || forecastHistoryFailed || festivalsUnread) && (
+            {!imsFailed.trend && (salesProjection || purchProjection || salesTarget || purchTarget || forecastHistoryFailed || festivalsUnread) && (
               <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)', display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
                 {/* S851: each figure is led by its line's own glyph and hue, as in the legend, and
                     the figure itself is plain text1. It was purple for sales and red for purchases:
@@ -2693,7 +2838,7 @@ export default function ClientDashboard({ scope = 'home' }) {
             )}
             {/* S784: the rain adjustment's own lines. Printed in the footer rather than only in a
                 hover, so a screenshot or a print keeps which days were adjusted and by how much. */}
-            {salesForecastInputs && (weatherFeature ? (weatherLocated ? (
+            {!imsFailed.trend && salesForecastInputs && (weatherFeature ? (weatherLocated ? (
               <div style={{ marginTop: 4, fontSize: 11, color: 'var(--theme-text2)', display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
                 {rainForecastDays.length > 0 ? (
                   <span>
@@ -2754,6 +2899,8 @@ export default function ClientDashboard({ scope = 'home' }) {
             <p className="sr-only">{dailyTrendSummary}</p>
           </>}
           renderChart={h => {
+            // A failed purchases or sales read is not a quiet month (S852).
+            if (imsFailed.trend) return <ChartReadFailed height={h} text="Purchases or sales could not be loaded." />
             if (dailyTrend.length === 0) return (
               <div style={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <p style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No purchase or sales data</p>
@@ -2771,12 +2918,13 @@ export default function ClientDashboard({ scope = 'home' }) {
               const dow = activePeriod ? WEEKDAY_INITIALS[bsToAd(activePeriod.bs_year, activePeriod.bs_month, dayNum).getDay()] : ''
               return (
                 <g transform={`translate(${x},${y})`}>
-                  <text x={0} y={0} dy={big ? 12 : 10} textAnchor="middle" fill={colors.text3} fontSize={big ? 11 : 9}>{dayNum}</text>
+                  {/* 10px is the floor for real text (S852); both lines were 9px and 8px. */}
+                  <text x={0} y={0} dy={big ? 12 : 10} textAnchor="middle" fill={colors.text3} fontSize={big ? 11 : 10}>{dayNum}</text>
                   {/* colors.text1 (the theme's brightest text token, resolved per-preset — not a
                       literal #fff, which would go invisible on every light preset's white card)
                       rather than the dim text3 this used originally: reported as too hard to read
                       against text3's tertiary contrast, full opacity to match. */}
-                  {dow && <text x={0} y={0} dy={big ? 24 : 20} textAnchor="middle" fill={colors.text1} fontSize={big ? 9 : 8}>{dow}</text>}
+                  {dow && <text x={0} y={0} dy={big ? 24 : 21} textAnchor="middle" fill={colors.text1} fontSize={10}>{dow}</text>}
                 </g>
               )
             }
@@ -2814,8 +2962,13 @@ export default function ClientDashboard({ scope = 'home' }) {
                   {/* Small height must clear the tick's own 8px offset plus the second line's
                       dy=20 and its descender, or the weekday initial renders past the SVG's
                       bottom edge and is clipped (see smallHeight above). */}
-                  <XAxis dataKey="day" tick={dayAxisTick} height={big ? 32 : 34} tickLine={false} axisLine={false} interval={0} />
-                  <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 40 : 32} />
+                  {/* The compact card scrolls at 44px a day, so it shows every day. The expanded month
+                      thins its days on a narrow screen (S852): every one of 30 at 390px overlapped.
+                      Recharts measures the tickFormatter's text to decide, so it measures the day
+                      number the tick draws, not "Day 12". */}
+                  <XAxis dataKey="day" tick={dayAxisTick} height={big ? 32 : 34} tickLine={false} axisLine={false}
+                    interval={big ? 'preserveStartEnd' : 0} minTickGap={big ? 6 : 5} tickFormatter={v => String(v).replace('Day ', '')} />
+                  <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 40 : 32} />
                   {/* See TrendTooltipContent at module scope for why this chart needs custom
                       content (anchor-day suppression, value-sorted rows, the target arrows). */}
                   <Tooltip content={<TrendTooltipContent big={big} />} />
@@ -2949,9 +3102,9 @@ export default function ClientDashboard({ scope = 'home' }) {
                         {/* extendDomain (S826): with every month above 42%, the auto domain left the
                             Good line off the chart and Recharts dropped it without a word, so the one
                             line saying where "good" is never showed on the chart that needed it. */}
-                        <ReferenceLine y={fcBands.warn} ifOverflow="extendDomain" stroke={colors.greenText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcBands.warn}%`, fill: colors.greenText, fontSize: 9, position: 'right' }} />
-                        <ReferenceLine y={fcBands.critical} ifOverflow="extendDomain" stroke={colors.redText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcBands.critical}%`, fill: colors.redText, fontSize: 9, position: 'right' }} />
-                        {big && fcAvg && <ReferenceLine y={fcAvg.pct} stroke={colors.text2} strokeDasharray="2 3" strokeOpacity={0.85} label={{ value: `avg ${fcAvg.pct.toFixed(1)}%`, fill: colors.text2, fontSize: 9, position: 'insideBottomRight' }} />}
+                        <ReferenceLine y={fcBands.warn} ifOverflow="extendDomain" stroke={colors.greenText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcBands.warn}%`, fill: colors.greenText, fontSize: 10, position: 'right' }} />
+                        <ReferenceLine y={fcBands.critical} ifOverflow="extendDomain" stroke={colors.redText} strokeDasharray="4 3" strokeOpacity={0.5} label={{ value: `${fcBands.critical}%`, fill: colors.redText, fontSize: 10, position: 'right' }} />
+                        {big && fcAvg && <ReferenceLine y={fcAvg.pct} stroke={colors.text2} strokeDasharray="2 3" strokeOpacity={0.85} label={{ value: `avg ${fcAvg.pct.toFixed(1)}%`, fill: colors.text2, fontSize: 10, position: 'insideBottomRight' }} />}
                         <Tooltip content={<FcTrendTooltipContent big={big} bander={fcCardBand} warn={fcBands.warn} />} />
                         {/* The line in three pieces (S826, fcTrendMath.js): faint wherever it touches
                             a grey month, solid between fully counted months, dashed into the open
@@ -2999,8 +3152,10 @@ export default function ClientDashboard({ scope = 'home' }) {
               smallHeight={costTabAvailable && mixTabAvailable ? 172 : 140}
               footer={costCardEffectiveView === 'cost' ? (
                 <>
-                  <div style={{ fontSize: 11, marginTop: 8, color: netMarginPct == null || marginWithheld ? 'var(--theme-text2)' : netMarginPct >= 0 ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
-                    Net margin: {netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'}
+                  {/* Banded by nmBand, the tile's own rule (S852). It was green for any margin at or
+                      above 0, so a 5% margin read green here beside a tile marking it ▲. */}
+                  <div style={{ fontSize: 11, marginTop: 8, color: netMarginVerdict.color }} title={netMarginVerdict.title}>
+                    Net margin: {netMarginVerdict.text}
                     {netMarginPct != null && netMarginPct < 0 && ' — costs exceeded revenue this period'}
                   </div>
                   {periodTooEarly && netMarginPct != null && (
@@ -3047,6 +3202,13 @@ export default function ClientDashboard({ scope = 'home' }) {
                   : kids
 
                 if (costCardEffectiveView === 'cost') {
+                  // The pie is the money tiles' figures, so their failure is its failure (S852).
+                  if (stats?.figuresFailed) return (
+                    <>
+                      {tabs}
+                      {panel(<ChartReadFailed height={contentH} text="The cost figures could not be loaded." />)}
+                    </>
+                  )
                   if (costBreakdown.length === 0) return (
                     <>
                       {tabs}
@@ -3070,7 +3232,7 @@ export default function ClientDashboard({ scope = 'home' }) {
                           {/* The tile's figure, so the tile's name (S792, D30): purchases ÷ sales. */}
                           {fcPct != null && <StatPill label={SPEND_SO_FAR_LABEL} value={`${fcPct.toFixed(1)}%`} color={COST_BREAKDOWN_COLORS['Food Cost']} />}
                           {/* No verdict dot while the margin is withheld (labour missing, or before SETTLE_DAY), matching the footer and the tile. */}
-                          <StatPill label="Net margin" value={netMarginPct != null ? `${netMarginPct.toFixed(1)}%` : '—'} color={netMarginPct == null || marginWithheld ? undefined : netMarginPct >= 0 ? colors.green : colors.red} />
+                          <StatPill label="Net margin" value={netMarginVerdict.text} color={marginWithheld ? undefined : NET_MARGIN_DOT[nmBand(netMarginPct).key]?.(colors)} />
                         </div>
                       )}
                       <ResponsiveContainer width="100%" height={big ? contentH - 60 : contentH}>
@@ -3114,6 +3276,13 @@ export default function ClientDashboard({ scope = 'home' }) {
                 }
 
                 // costCardEffectiveView === 'mix'
+                // A failed read is not "No sales data" (S852): the hook returns its error.
+                if (salesMixError && !salesMixLoading) return (
+                  <>
+                    {tabs}
+                    {panel(<ChartReadFailed height={contentH} text="The sales mix could not be loaded." hint="Reload the page to try again." />)}
+                  </>
+                )
                 if (salesMixLoading) return (
                   <>
                     {tabs}
@@ -3192,16 +3361,33 @@ export default function ClientDashboard({ scope = 'home' }) {
       {/* ── Bottom: Variance + Reorder side by side ── */}
       {<div className="dash-row" style={{ display: 'grid', gridTemplateColumns: canReorder ? 'repeat(auto-fit, minmax(320px, 1fr))' : '1fr', gap: 16 }}>
 
-        {/* Variance table */}
+        {/* Variance table — counted items only (S852, homeTopVariance.js). It used to read a missing
+            closing count as 0, so for most of every month every item bought read as Over-used, in
+            red, with a Value at Risk. Now: a failed read says so; a month with no count says it needs
+            one; otherwise the rows the Variance page would flag Over, at the client's tolerance. */}
         {canVariance ? (
           <div className="card card--compact">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <h3 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Top Variance Items</h3>
-              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => navigate('/variance')}>Full Report →</button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/variance')}>Full Report →</button>
             </div>
-            {topVariance.length === 0 ? (
-              <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: '16px 0' }}>
-                Complete stock count + add sales to see variance.
+            {imsFailed.variance ? (
+              <p style={{ color: 'var(--theme-text2)', fontSize: 12, margin: '16px 0' }}>
+                — Could not load the stock figures, so nothing is judged. Retry from the notice at the top of the page.
+              </p>
+            ) : !isTopVarianceView(topVariance) ? (
+              <span className="skeleton" style={{ display: 'block', width: '100%', height: '3em', margin: '8px 0' }} />
+            ) : topVariance.countedItems === 0 ? (
+              <div style={{ margin: '8px 0' }}>
+                <p style={{ color: 'var(--theme-text1)', fontSize: 13, fontWeight: 600, margin: 0 }}>Needs a stock count</p>
+                <p style={{ color: 'var(--theme-text2)', fontSize: 12, margin: '4px 0 0' }}>
+                  Variance compares what was used with what your recipes say should have been. What was used is known only once the closing stock is counted, so no item is judged yet.
+                </p>
+                <Link to="/stock" className="dash-tile-link">Stock Count →</Link>
+              </div>
+            ) : varianceRows.length === 0 ? (
+              <p style={{ color: 'var(--theme-text2)', fontSize: 12, margin: '16px 0' }}>
+                No counted item is over-used beyond your ±{varianceTolerance}% tolerance.
               </p>
             ) : (
               <div className="table-wrap">
@@ -3210,24 +3396,31 @@ export default function ClientDashboard({ scope = 'home' }) {
                   <tr>
                     <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'left', paddingBottom: 8, borderBottom: '1px solid var(--theme-border)' }}>Item</th>
                     <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'right', paddingBottom: 8, borderBottom: '1px solid var(--theme-border)' }}>
-                      <Tip text="Qty used above what recipes predict — indicates waste, theft, or over-portioning.">Over-used</Tip>
+                      <Tip text={`Quantity used above what your recipes predict, by more than your ±${varianceTolerance}% tolerance (Settings → Thresholds). Counted items only: opening + purchases − wastage − staff meals − the closing count, against sales × recipe. Points to waste, theft or over-portioning.`} width={260}>Over-used</Tip>
                     </th>
                     <th scope="col" style={{ color: 'var(--theme-text2)', fontWeight: 500, textAlign: 'right', paddingBottom: 8, borderBottom: '1px solid var(--theme-border)' }}>
-                      <Tip text="Over-used qty × item rate. The NPR cost of unaccounted usage this period." width={200}>Value at Risk</Tip>
+                      <Tip text="Over-used quantity × the item rate: what the usage nobody accounted for cost this period." width={220}>Value at Risk</Tip>
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {topVariance.map((row, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--theme-bg)' }}>
+                  {varianceRows.map(row => (
+                    <tr key={row.itemId} style={{ borderBottom: '1px solid var(--theme-bg)' }}>
                       <td style={{ padding: '4px 0', fontWeight: 600, color: 'var(--theme-text1)' }}>{row.name}</td>
-                      <td style={{ padding: '4px 0', textAlign: 'right', color: 'var(--theme-red-text)' }}>+{Number(row.variance.toFixed(1)).toLocaleString('en-IN')} {row.uom}</td>
-                      <td style={{ padding: '4px 0', textAlign: 'right', fontWeight: 700, color: 'var(--theme-red-text)' }}>NPR {Number(row.value.toFixed(0)).toLocaleString('en-IN')}</td>
+                      {/* The band's colour and its ▲, so the verdict is not colour alone. */}
+                      <td style={{ padding: '4px 0', textAlign: 'right', color: row.band.color, whiteSpace: 'nowrap' }} title={row.band.label}>{row.band.mark} +{Number(row.variance.toFixed(1)).toLocaleString('en-IN')} {row.uom}</td>
+                      <td style={{ padding: '4px 0', textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>{npr(Math.round(row.value))}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               </div>
+            )}
+            {/* Named, not silently left out: an item with stock and no count is not judged. */}
+            {!imsFailed.variance && isTopVarianceView(topVariance) && topVariance.countedItems > 0 && topVariance.uncounted > 0 && (
+              <p style={{ color: 'var(--theme-text3)', fontSize: 11, margin: '8px 0 0' }}>
+                Counted items only: {topVariance.uncounted} item{topVariance.uncounted === 1 ? '' : 's'} with stock {topVariance.uncounted === 1 ? 'has' : 'have'} no closing count yet and {topVariance.uncounted === 1 ? 'is' : 'are'} not judged.
+              </p>
             )}
           </div>
         ) : (
@@ -3237,18 +3430,21 @@ export default function ClientDashboard({ scope = 'home' }) {
         {/* Reorder panel */}
         {canReorder ? (
           <div className="card card--compact">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <h3 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Items to Reorder</h3>
-              <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => navigate('/reorder')}>Full Report →</button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/reorder')}>Full Report →</button>
             </div>
-            {reorderItems.length === 0 ? (
-              <p style={{ color: 'var(--theme-text3)', fontSize: 12, margin: '16px 0' }}>
-                No items below par.{' '}
-                <button
-                  onClick={() => navigate('/reorder')} className="interactive-card"
-                  style={{ background: 'none', border: 'none', padding: '4px 6px', margin: '-4px -6px', font: 'inherit', color: 'var(--theme-accent-ink)', cursor: 'pointer' }}
-                >Set par levels →</button>
+            {imsFailed.stock ? (
+              // A failed par or stock read is not "No items below par" (S852).
+              <p style={{ color: 'var(--theme-text2)', fontSize: 12, margin: '16px 0' }}>
+                — Could not load the stock or par figures. Retry from the notice at the top of the page.
               </p>
+            ) : reorderItems.length === 0 ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
+                <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>No items below par.</span>
+                {/* A real button with the touch floor (S852): it was a 105 × 26 bare button. */}
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/reorder')}>Set par levels →</button>
+              </div>
             ) : (
               <div>
                 {reorderItems.map((item, i) => (
@@ -3345,7 +3541,9 @@ export default function ClientDashboard({ scope = 'home' }) {
 
       {/* Only Crest opens a month from nothing ('+ New Period' is admin-only, S790), so the old
           "Click here to create one in Periods →" sent every client to a page where they could not. */}
-      {showIms && !activePeriod && !loading && (isAdmin ? (
+      {/* Not on a failed month read (S852): "no month is open" is a claim about the client, and the
+          error notice above already says the read failed. */}
+      {showIms && !activePeriod && !loading && !imsFailed.period && (isAdmin ? (
         <div
           className="card interactive-card dash-row" style={{ cursor: 'pointer', borderColor: 'color-mix(in srgb, var(--theme-accent) 30%, transparent)' }}
           onClick={() => navigate('/periods')} role="button" tabIndex={0}
@@ -3478,7 +3676,7 @@ export default function ClientDashboard({ scope = 'home' }) {
           canSeeImsPosting={isAdmin || isOwner || hasImsAccess('supervisor')}
           canHrApprove={hasHrAccess('supervisor')}
           hrApprovals={hrApprovals}
-          reorderCount={reorderCount} canReorder={canReorder}
+          reorderCount={attentionReorderCount} canReorder={canReorder}
           bookingRequests={posStats && !posStats.kitchen ? (posStats.requestsPending ?? 0) : 0}
         />
       )}
@@ -3496,7 +3694,7 @@ export default function ClientDashboard({ scope = 'home' }) {
           clientId={effectiveClientId}
           showIms={showIms} showHr={false} showPos={dashMods.pos} posIsStationTeam={posIsStationTeam}
           canSeeImsPosting={isAdmin || isOwner || hasImsAccess('supervisor')}
-          reorderCount={reorderCount} canReorder={canReorder}
+          reorderCount={attentionReorderCount} canReorder={canReorder}
           activePeriod={activePeriod} periodExpired={periodExpired}
         />
       )}
@@ -3531,8 +3729,8 @@ export default function ClientDashboard({ scope = 'home' }) {
                       Stock on hand — active items
                     </Tip>
                   </h3>
-                  <div className="stat-value">{stockOnHand == null ? '—' : npr(stockOnHand)}</div>
-                  <div className="stat-sub">{periodLabel}, estimated until the closing count</div>
+                  <div className="stat-value">{imsFailed.stock || stockOnHand == null ? '—' : npr(stockOnHand)}</div>
+                  <div className="stat-sub">{imsFailed.stock ? notLoadedText : `${periodLabel}, estimated until the closing count`}</div>
                   <Link to="/stock-report" className="dash-tile-link">Stock Report →</Link>
                 </div>
               )}
