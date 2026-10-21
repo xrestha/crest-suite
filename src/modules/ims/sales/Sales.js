@@ -20,6 +20,8 @@ import SupersedeConfirmModal from './SupersedeConfirmModal'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { firstError } from '../../../shared/queryError'
 import { disabledStyle } from '../../../shared/inlineFieldState'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -46,6 +48,10 @@ const TAB_LABELS = { bulk: 'Bulk Entry', daily: 'Daily Entry', breakdown: 'Daily
 // two are read-only views of whatever POS has already posted, so they stay available.
 const ENTRY_TABS = ['bulk', 'daily']
 const READ_ONLY_TAB = 'summary'
+// Whether a month row is unchanged in what a load reads off it (S855): its status decides whether
+// a Bulk draft is kept, and its year and month date the till hand-over.
+const sameMonthRow = (a, b) => !!a && !!b && a.id === b.id && a.status === b.status
+  && a.bs_year === b.bs_year && a.bs_month === b.bs_month
 
 // `sales_entries.source` is nullable — DEFAULT 'manual', no NOT NULL — so every row written before
 // the column had a default reads as NULL. A SERVER-side `.neq('source','pos_comp')` therefore drops
@@ -129,13 +135,15 @@ export default function Sales() {
   // `selectedPeriod` can be the one being left.
   const bulkDraftOffFor = period => posOwnsSales || (!canEditClosedPeriods && period?.status === 'closed')
   const { scopedFrom } = useScopedDb()
-  // periods/recipes only (the menu + period list) are cached for an instant revisit — deliberately
-  // NOT the entered-quantity maps (sales/dailySales/etc. below), which a Save reads as the
+  // recipes only (the menu) are cached for an instant revisit — deliberately NOT the
+  // entered-quantity maps (sales/dailySales/etc. below), which a Save reads as the
   // "current" baseline to merge edits into. For a POS-enabled client, sales_entries keeps changing
   // in the background all day as bills close, so those must always reload fresh rather than risk
   // a stale cached number silently reaching a save. See conversation with Aashish (2026-07-27).
-  const [periods, setPeriods]       = useState(() => readPageCache('sales', 'periods', effectiveClientId) ?? [])
+  // The month list comes from the shared list (S855, periodList.js), not this cache.
+  const [periods, setPeriods]       = useState([])
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   // A SECOND guard, keyed `${periodId}:${day}` (S601's rule, applied to the axis this page actually
   // races on). periodReq keys on the period id alone, so it cannot tell one day of a period from
   // another — and the Daily tab reloads on every ‹/› press. Two quick clicks start two loads; the
@@ -264,7 +272,7 @@ export default function Sales() {
   const activeRecipeCount = recipes.filter(r => !r._hidden).length
   const hiddenWithSales = recipes.length - activeRecipeCount
 
-  // Only wraps setPeriods/setRecipes below — deliberately not used for anything a save merges
+  // Only wraps setMenuRecipes below — deliberately not used for anything a save merges
   // against (see comment above the periods/recipes useState calls).
   function setAndCache(setter, section, value) {
     setter(value)
@@ -318,8 +326,28 @@ export default function Sales() {
 
   async function init() {
     setLoading(true)
-    const results = await Promise.all([
-      scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    // The open month comes from the shared list, its sales read beside it (S855, periodList.js). On
+    // this entry page the guess only starts the reads: the dropdown, the lock and both saves take
+    // the fresh list, applied below once it has landed. The loads read the month ROW as well as its
+    // id (no draft is kept for a locked month; the till hand-over reads its dates), so a guessed
+    // month the fresh list kept but changed loads again before anything is shown. init() claims
+    // the month it loads, as useLatestRequest's own docs require, inside initPeriodLoad.
+    let list = []
+    let loadedRow = null
+    // The row is handed over: `periods` is not set until the end, so the loaders cannot look it up.
+    const loadMonth = (id, row) => {
+      loadedRow = row
+      return Promise.all([loadSales(id, row), loadAllDaySums(id, row)])
+    }
+    const [out, recipesRes] = await Promise.all([
+      initPeriodLoad({
+        req: periodReq, initKey, periodList,
+        pick: l => l.find(x => x.status === 'open') || null,
+        setPeriods: l => { list = l },
+        select: () => {},
+        load: id => loadMonth(id, list.find(x => x.id === id)),
+      }),
       // `.or(...)`, not `.neq('category','Sub-Recipe')` (S714). category is NULLABLE with no
       // default, and a server-side .neq also drops every NULL row — silently. Menu Pricing carries
       // the same fix and the same comment; three sibling reads never got it.
@@ -336,20 +364,16 @@ export default function Sales() {
     // `recipes`, so an empty menu builds an EMPTY PAYLOAD — which save_sales_day treats as "delete
     // this day's manual rows and insert nothing". The S682 guard below this only ever covered the
     // sales reads; the menu the payload is built from was never checked.
-    const failed = firstError(results)
+    const failed = firstError([out, recipesRes])
     if (failed) { noteLoad('init', failed); setLoading(false); return }
     noteLoad('init', null)
-    const [{ data: p }, { data: r }] = results
-    setAndCache(setPeriods, 'periods', p || [])
-    setAndCache(setMenuRecipes, 'recipes', r || [])
-    const open = (p || []).find(x => x.status === 'open')
-    if (open) {
-      periodReq.begin(open.id)   // claim the page, as useLatestRequest's own docs require of init()
-      setSelectedPeriod(open)
-      // `open` handed over: setPeriods has not re-rendered yet, so `periods` is still the old list.
-      await Promise.all([loadSales(open.id, open), loadAllDaySums(open.id, open)])
-    }
-    setLoading(false)
+    setAndCache(setMenuRecipes, 'recipes', recipesRes.data || [])
+    if (out.superseded) return   // a newer claim owns the page and its loading flag
+    const open = out.chosen
+    if (open && periodReq.isCurrent(open.id) && !sameMonthRow(loadedRow, open)) await loadMonth(open.id, open)
+    setPeriods(list)
+    if (open) setSelectedPeriod(open)
+    if (!open || periodReq.isCurrent(open.id)) setLoading(false)
   }
 
   async function loadSales(periodId, period = periods.find(p => p.id === periodId)) {

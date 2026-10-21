@@ -21,6 +21,8 @@ import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { fetchAllRows, runChunkedByIds } from '../../../shared/fetchAllRows'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import {
@@ -98,12 +100,10 @@ export default function MenuEngineering() {
   const { settings } = useSettings()
   const clientId = authClientId || profile?.client_id
   const { scopedFrom, scopedUpdate } = useScopedDb()
+  // One guard for the list and the load since S855: the first load starts inside init() beside the
+  // month list (initPeriodLoad), not from a second effect, so the two can no longer race.
   const periodReq = useLatestRequest()
-  // A SECOND guard, not a shared one. Both effects fire on an admin client switch, in declaration
-  // order — so on one `useLatestRequest` the period LOAD's claim (still carrying the previous
-  // client's period id) would supersede the period LIST's, and the new outlet's dropdown would
-  // never be set. Each loader holds its own, per the rule Roster's two loaders established.
-  const periodsReq = useLatestRequest()
+  const periodList = usePeriodList()
   const { colors } = useTheme()
 
   const [periods, setPeriods]     = useState([])
@@ -111,8 +111,8 @@ export default function MenuEngineering() {
   const [items, setItems]         = useState([])   // enriched recipe rows
   const [loading, setLoading]     = useState(false)
   const [loadError, setLoadError] = useState(null)
-  // This page's `loading` starts false (it only covers loadData), so the no-period state needs
-  // its own "have we fetched periods yet" flag or it flashes on every first paint.
+  // This page's `loading` starts false (init() and a period change set it), so the no-period state
+  // needs its own "have we fetched periods yet" flag or it flashes on every first paint.
   const [periodsLoaded, setPeriodsLoaded] = useState(false)
   const [filterQ, setFilterQ]     = useState('All')
   const [search, setSearch]       = useState('')
@@ -123,29 +123,43 @@ export default function MenuEngineering() {
   // either. Non-blocking, under the content, naming the consequence.
   const [classWriteError, setClassWriteError] = useState(null)
 
-  useEffect(() => { if (!authLoading && clientId) loadPeriods() }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (periodId && clientId) loadData() }, [periodId, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!authLoading && clientId) init() }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function loadPeriods() {
-    // `loadPeriods` auto-selects a period, so it claims the page too (S601's own contract:
-    // anything that sets the period must call begin()). An admin switching clients re-runs this,
-    // and without the claim the slower client's list could land last and leave the dropdown
-    // naming one outlet's month over another outlet's figures.
-    const key = periodsReq.begin(`periods:${clientId}`)
-    const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
-      .order('bs_year', { ascending: false })
-      .order('bs_month', { ascending: false })
-    if (!periodsReq.isCurrent(key)) return
-    // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
-    if (error) { setLoadError(error); setPeriodsLoaded(true); return }
-    const withLabel = (data || []).map(p => ({
-      ...p,
-      label: `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}`
-    }))
-    setPeriods(withLabel)
+  async function init() {
+    // `init` auto-selects a period, so it claims the page too (S601's own contract: anything that
+    // sets the period must call begin()). An admin switching clients re-runs this, and without the
+    // claim the slower client's list could land last and leave the dropdown naming one outlet's
+    // month over another outlet's figures. The month comes from the shared list, the report
+    // starting beside it (S855, periodList.js): the open one, else the latest.
+    const initKey = periodReq.begin(`periods:${clientId}`)
+    setLoading(true)
+    setLoadError(null)
+    const built = {}
+    const out = await initPeriodLoad({
+      req: periodReq, initKey, periodList,
+      setPeriods: list => setPeriods(list.map(p => ({ ...p, label: `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` }))),
+      select: p => setPeriodId(p ? p.id : ''),
+      load: async id => { built[id] = await loadData(id) },
+    })
+    if (out.superseded) return   // a period picked meanwhile owns the page and its loading flag
     setPeriodsLoaded(true)
-    const active = withLabel.find(p => p.status === 'open') || withLabel[0]
-    if (active) setPeriodId(active.id)
+    // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.chosen && !periodReq.isCurrent(out.chosen.id)) return
+    setLoading(false)
+    // The month opened on is the live one by construction (the open one, else the latest), and the
+    // write waits for the fresh list, so a month read from memory never re-labels the till.
+    if (out.chosen && built[out.chosen.id]) writeMeClass(built[out.chosen.id], out.chosen.id, out.chosen.id)
+  }
+
+  async function handlePeriodChange(id) {
+    setPeriodId(id)
+    setLoading(true)
+    const rows = await loadData(id)   // claims the page before its first await (S601)
+    // Only the load that still owns the page may clear the flag (S756).
+    if (!periodReq.isCurrent(id)) return
+    setLoading(false)
+    if (rows) writeMeClass(rows, id)
   }
 
   // The period whose classification POS is entitled to act on: the open one, or the most recent
@@ -157,9 +171,10 @@ export default function MenuEngineering() {
     [periods]
   )
 
-  async function loadData() {
+  // Resolves the classified rows (undefined when superseded or failed); `loading` and the me_class
+  // write belong to the caller, init() or handlePeriodChange (S855).
+  async function loadData(periodId) {
     const key = periodReq.begin(periodId)   // claim the page before any await (S601)
-    setLoading(true)
     setLoadError(null)
 
     // Recipes (menu items only — exclude sub-recipes) and this period's sales are independent
@@ -197,9 +212,9 @@ export default function MenuEngineering() {
     ])
     // S612 silent-zero rule: a failed read must not render the "no menu items found" empty state.
     if (!periodReq.isCurrent(key)) return   // superseded by a newer period selection
-    if (recErr) { setLoadError(recErr); setItems([]); setLoading(false); return }
+    if (recErr) { setLoadError(recErr); setItems([]); return }
     // A failed sales read would classify every dish as a zero-sale Dog (S612).
-    if (salesErr) { setLoadError(salesErr); setItems([]); setLoading(false); return }
+    if (salesErr) { setLoadError(salesErr); setItems([]); return }
 
     // computeRecipeCosts recurses through sub-recipe ingredients and applies yield_pct — a
     // hand-rolled ingMap reading only direct item_id ingredients (as this used to) silently
@@ -214,11 +229,11 @@ export default function MenuEngineering() {
       if ((recipes || []).length > 0) ingMap = await computeRecipeCosts(supabase, recipes.map(r => r.id))
     } catch (err) {
       if (!periodReq.isCurrent(key)) return
-      setLoadError(err); setItems([]); setLoading(false); return
+      setLoadError(err); setItems([]); return
     }
     if (!periodReq.isCurrent(key)) return
 
-    if (!recipes) { setLoading(false); return }
+    if (!recipes) return
 
     // Per-recipe rollups, in ONE pass — `sales` is the biggest array on the page and a `.filter()`
     // per recipe inside the `.map()` below would walk it once per dish.
@@ -279,8 +294,7 @@ export default function MenuEngineering() {
     }))
 
     setItems(final)
-    setLoading(false)
-    writeMeClass(final, periodId)
+    return final
   }
 
   // Writes the quadrant back to `recipes.me_class`, which POS's suggestion engine reads live.
@@ -302,9 +316,10 @@ export default function MenuEngineering() {
   // of them since S792 (RECIPES-1) — its bowl-and-spoon "Star" had been ranked up on the till. NULL
   // passes `recipes_me_class_check` and the till scores it neutrally, below a Star or a Puzzle and
   // never filtered out like a Dog.
-  async function writeMeClass(rows, forPeriodId) {
+  // `liveId` is passed by init(), whose closure predates the list it just read.
+  async function writeMeClass(rows, forPeriodId, liveId = livePeriodId) {
     setClassWriteError(null)
-    if (!forPeriodId || forPeriodId !== livePeriodId) return
+    if (!forPeriodId || forPeriodId !== liveId) return
     const byClass = new Map()
     rows.forEach(r => {
       const cls = r.quadrant ? r.quadrant.toLowerCase() : null
@@ -440,7 +455,7 @@ export default function MenuEngineering() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select aria-label="Period" className="form-select" value={periodId} onChange={e => setPeriodId(e.target.value)}>
+          <select aria-label="Period" className="form-select" value={periodId} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
           {/* View toggle */}

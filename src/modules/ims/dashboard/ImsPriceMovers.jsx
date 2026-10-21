@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { withTimeout } from '../../../utils/withTimeout'
 import { npr } from '../../../shared/nepalMoney'
@@ -53,22 +54,35 @@ export function moverVerdict(r) {
 
 export default function ImsPriceMovers({ activePeriod }) {
   const { scopedFrom } = useScopedDb()
+  const periodList = usePeriodList()
   const latest = useLatestRequest()
   const [state, setState] = useState(null) // { rows, beforeLabel } | { error }
 
   const load = useCallback(async () => {
     if (!activePeriod?.id) return
     const id = latest.begin(activePeriod.id)
+    // purchase_entries is period-scoped, not client-scoped, so it stays on supabase.from() as
+    // ClientDashboard's own reads do. One row per bill line per period: paged.
+    const readBills = periodId => {
+      const p = fetchAllRows(() => supabase.from('purchase_entries').select('id, item_id, qty, rate').eq('period_id', periodId).order('id'))
+      p.catch(() => {})   // awaited below on the path that keeps it; never an unhandled rejection
+      return p
+    }
     try {
-      const periodsRes = await withTimeout(scopedFrom('monthly_periods', 'id, bs_year, bs_month'), 20000, 'Price movers')
+      // The month list is the shared one (S855, periodList.js). This month's bills need no list, and
+      // with a list in memory the month before is guessed from it, so both bill reads start beside a
+      // fresh read of the list; the month before is read again only if the fresh list names another.
+      const { cached, fresh } = periodList()
+      const nowRead = readBills(activePeriod.id)
+      const guess = cached ? previousExistingPeriod(cached, activePeriod) : null
+      const guessRead = guess ? readBills(guess.id) : null
+      const periodsRes = await withTimeout(fresh, 20000, 'Price movers')
       if (periodsRes.error) throw periodsRes.error
       const before = previousExistingPeriod(periodsRes.data || [], activePeriod)
       if (!before) { if (latest.isCurrent(id)) setState({ rows: [], beforeLabel: null }); return }
-      // purchase_entries is period-scoped, not client-scoped, so it stays on supabase.from() as
-      // ClientDashboard's own reads do. One row per bill line per period: paged.
       const [nowRes, beforeRes] = await withTimeout(Promise.all([
-        fetchAllRows(() => supabase.from('purchase_entries').select('id, item_id, qty, rate').eq('period_id', activePeriod.id).order('id')),
-        fetchAllRows(() => supabase.from('purchase_entries').select('id, item_id, qty, rate').eq('period_id', before.id).order('id')),
+        nowRead,
+        guess?.id === before.id ? guessRead : readBills(before.id),
       ]), 25000, 'Price movers')
       if (nowRes.error) throw nowRes.error
       if (beforeRes.error) throw beforeRes.error
@@ -81,7 +95,7 @@ export default function ImsPriceMovers({ activePeriod }) {
     } catch (e) {
       if (latest.isCurrent(id)) setState({ error: e })
     }
-  }, [activePeriod, scopedFrom, latest])
+  }, [activePeriod, scopedFrom, periodList, latest])
 
   useEffect(() => { load() }, [load])
 

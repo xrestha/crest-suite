@@ -19,6 +19,8 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { withTimeout } from '../../../utils/withTimeout'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 import { fmtLineRate } from './purchaseLines'
 import { unitRateCell } from '../../../shared/unitRate'
@@ -60,6 +62,7 @@ export default function PurchaseOrders() {
   // lists would be invisible, since the skeleton must stay up until the PO list loads anyway.
   const [periods,        setPeriods]        = useState([])
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [vendors,        setVendors]        = useState([])
   const [items,          setItems]          = useState([])
@@ -121,32 +124,36 @@ export default function PurchaseOrders() {
   async function init() {
     setLoading(true)
     setLoadError(null)
-    const results = await Promise.all([
-      scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    // The month comes from the shared list, the orders read beside it (S855, periodList.js). On this
+    // entry page the guess only starts the reads: the month, its lock and the prefilled order take
+    // the fresh row, applied below once it has landed. The open period, else the latest one (S792,
+    // PURCHASES-10; the S722 rule): between ending one month and opening the next this selected
+    // nothing, an empty order list for a client with orders. initPeriodLoad claims the month it
+    // loads, the hook's own contract and the miss S698 fixed in Purchases.js.
+    let list = []
+    const [out, ...refs] = await Promise.all([
+      initPeriodLoad({
+        req: periodReq, initKey, periodList,
+        setPeriods: l => { list = l },
+        select: () => {},
+        load: loadPos,
+      }),
       scopedFrom('vendors').eq('is_active', true).order('name'),
       // Only what the page reads. It selected `*, categories(name)` — the category was never
       // rendered anywhere on this screen, so every visit paid for a join it threw away.
       scopedFrom('items', 'id, name, uom, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
     ])
-    const failed = firstError(results)
+    const failed = firstError(refs)
     if (failed) { setLoadError(failed); setLoading(false); return }
-    const [{ data: p }, { data: v }, { data: i }] = results
-    setPeriods(p || [])
+    const [{ data: v }, { data: i }] = refs
     setVendors(v || [])
     setItems(i || [])
-    // The open period, else the latest one (S792, PURCHASES-10; the S722 rule). Between ending one
-    // month and opening the next there is no open period, and this selected nothing — an empty
-    // order list for a client with orders, and no way to reach last month's but the dropdown.
-    // `periods` is newest first, so [0] is the latest.
-    const start = (p || []).find(x => x.status === 'open') || (p || [])[0]
-    if (start) {
-      // Claim the page for the auto-selected period — the hook's own contract, and the same miss
-      // S698 fixed in Purchases.js. Without it a period change during this first load can be
-      // overwritten by the load that started before it.
-      periodReq.begin(start.id)
-      setSelectedPeriod(start)
-      await loadPos(start.id)
-    }
+    if (out.superseded) return   // a newer claim owns the page
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    setPeriods(list)
+    const start = out.chosen
+    if (start) setSelectedPeriod(start)
     setLoading(false)
     applyPrefill(start, v || [], i || [])
   }

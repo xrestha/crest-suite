@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../../supabaseClient'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { readItemRefCounts, PRICE_CHANGE_KEEPS } from './itemRefTables'
@@ -31,7 +32,8 @@ function writeDismissed(clientId, sig) {
 }
 
 export default function VatCostPriceBanner({ items, clientId, vatMode, canUpdate, askConfirm, onUpdated }) {
-  const { scopedFrom, scopedUpdate } = useScopedDb()
+  const { scopedUpdate } = useScopedDb()
+  const periodList = usePeriodList()
   const [lines, setLines] = useState(null)
   const [periodRank, setPeriodRank] = useState(null)
   const [dismissed, setDismissed] = useState(() => (clientId ? readDismissed(clientId) : null))
@@ -43,24 +45,36 @@ export default function VatCostPriceBanner({ items, clientId, vatMode, canUpdate
     let live = true
     setLines(null); setPeriodRank(null); setDismissed(clientId ? readDismissed(clientId) : null)
     if (!clientId || (vatMode !== 'pan' && vatMode !== 'vat')) return undefined
-    ;(async () => {
-      const { data: periods, error: pErr } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month')
-        .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }).limit(REVIEW_PERIODS)
-      if (!live) return
-      if (pErr) { console.error('VAT price review: periods could not be read', pErr); return }
-      const ids = (periods || []).map(p => p.id)
-      if (ids.length === 0) return
-      const { data, error: lErr } = await fetchAllRows(() => supabase.from('purchase_entries')
+    const readLines = ids => {
+      const p = fetchAllRows(() => supabase.from('purchase_entries')
         .select('id, item_id, rate, vat_inclusive, vat_is_cost, period_id, bs_day, created_at')
         .in('period_id', ids).gt('rate', 0).order('id'))
+      p.catch(() => {})   // awaited below on the path that keeps it; never an unhandled rejection
+      return p
+    }
+    const recentIds = list => (list || []).slice(0, REVIEW_PERIODS).map(p => p.id)
+    ;(async () => {
+      // The months come from the shared list, newest first (S855, periodList.js). With a list in
+      // memory the bill lines are read at once, beside a fresh read of the list, and read again only
+      // if the fresh list names other months.
+      const { cached, fresh } = periodList()
+      const guessIds = recentIds(cached)
+      const guessRead = guessIds.length ? readLines(guessIds) : null
+      const { data: list, error: pErr } = await fresh
+      if (!live) return
+      if (pErr) { console.error('VAT price review: periods could not be read', pErr); return }
+      const periods = (list || []).slice(0, REVIEW_PERIODS)
+      const ids = periods.map(p => p.id)
+      if (ids.length === 0) return
+      const { data, error: lErr } = await (guessRead && guessIds.join() === ids.join() ? guessRead : readLines(ids))
       if (!live) return
       if (lErr) { console.error('VAT price review: bill lines could not be read', lErr); return }
-      const rank = new Map((periods || []).map(p => [p.id, p.bs_year * 100 + p.bs_month]))
+      const rank = new Map(periods.map(p => [p.id, p.bs_year * 100 + p.bs_month]))
       setPeriodRank(rank)
       setLines(data || [])
     })()
     return () => { live = false }
-  }, [clientId, vatMode, scopedFrom])
+  }, [clientId, vatMode, periodList])
 
   const rows = useMemo(
     () => (lines && periodRank ? vatCostPriceReview({ items, lines, periodRank, mode: vatMode }) : []),

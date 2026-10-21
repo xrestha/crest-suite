@@ -22,6 +22,8 @@ import PurchaseBillCards from './PurchaseBillCards'
 import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
@@ -65,6 +67,7 @@ export default function Purchases() {
     (cachedPeriods || []).find(x => x.status === 'open') || null
   const [periods, setPeriods]               = useState(cachedPeriods ?? [])
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [selectedPeriod, setSelectedPeriod] = useState(cachedInitialPeriod)
   const [items, setItems]                   = useState(() => readPageCache('purchases', 'items', effectiveClientId) ?? [])
   const [vendors, setVendors]               = useState(() => readPageCache('purchases', 'vendors', effectiveClientId) ?? [])
@@ -108,32 +111,54 @@ export default function Purchases() {
     // cache window keeps showing last-known data while this reloads quietly underneath.
     if (periods.length === 0) setLoading(true)
     setLoadError(null)
-    const results = await Promise.all([
-      scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    // The month comes from the shared list, the bills read beside it (S855, periodList.js). On this
+    // entry page the guess only starts the reads: the dropdown, the lock and every save take the
+    // fresh list, applied below once it has landed, so nothing is entered against a month read
+    // from memory. initPeriodLoad claims the month it loads (the hook's own contract, missed here
+    // until S698: a period change during this first load left the dropdown snapping back).
+    let list = []
+    let freshList = null
+    const [out, ...refs] = await Promise.all([
+      initPeriodLoad({
+        req: periodReq, initKey,
+        periodList: () => { const lists = periodList(); freshList = lists.fresh; return lists },
+        pick: l => (requestedPeriodId && l.find(x => x.id === requestedPeriodId)) || l.find(x => x.status === 'open') || null,
+        setPeriods: l => { list = l },
+        select: () => {},
+        load: id => { setLoadError(null); return Promise.all([loadPurchases(id), loadReturns(id)]) },
+      }),
       scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
       scopedFrom('vendors').eq('is_active', true).order('name')
     ])
     // A failed read is not an empty month, and must never be cached as one (S612/S631).
-    const failed = firstError(results)
+    const failed = firstError(refs)
     if (failed) { setLoadError(failed); setLoading(false); return }
-    const [{ data: p }, { data: i }, { data: v }] = results
-    setAndCache(setPeriods, 'periods', p || [])
+    const [{ data: i }, { data: v }] = refs
     setAndCache(setItems, 'items', i || [])
     setAndCache(setVendors, 'vendors', v || [])
-    const target =
-      (requestedPeriodId && (p || []).find(x => x.id === requestedPeriodId)) ||
-      (p || []).find(x => x.status === 'open')
-    if (target) {
-      // Claim the page for the auto-selected period (the hook's own contract, missed here until
-      // S698): without it a period change during this first load left the dropdown snapping back
-      // to the open month — init's setSelectedPeriod landed AFTER the user's — while the table
-      // showed the month they had chosen. Label and figures disagreeing is the exact thing the
-      // guard exists to prevent.
-      periodReq.begin(target.id)
-      setSelectedPeriod(target)
-      await Promise.all([loadPurchases(target.id), loadReturns(target.id)])
+    // A month picked from the cached list meanwhile owns the page. Its row and the dropdown still
+    // take the fresh copy, so the lock reads the month's real status.
+    const picked = out.superseded
+      || (out.chosen ? !periodReq.isCurrent(out.chosen.id) : list.some(p => periodReq.isCurrent(p.id)))
+    if (picked) {
+      const { data: fresh } = await freshList
+      if (fresh) {
+        setAndCache(setPeriods, 'periods', fresh)
+        setSelectedPeriod(prev => (prev && fresh.find(x => x.id === prev.id)) || prev)
+      }
+      return
     }
-    setLoading(false)
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    setAndCache(setPeriods, 'periods', list)
+    if (out.chosen) setSelectedPeriod(out.chosen)
+    else if (selectedPeriod) {
+      // No month to open on (none open, no ?period=): the month already on screen from the cached
+      // copy stays, as it did before, but as its fresh row and claimed, so its lock and reloads work.
+      const row = list.find(x => x.id === selectedPeriod.id)
+      if (row) { periodReq.begin(row.id); setSelectedPeriod(row) }
+    }
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function loadPurchases(periodId) {
@@ -1047,7 +1072,8 @@ export default function Purchases() {
           periods={periods}
           purchases={purchases}
           returns={returns}
-          isLocked={isLocked}
+          // A first load still settling has no confirmed month yet (S855), so no row is editable.
+          isLocked={isLocked || loading}
           effectiveClientId={effectiveClientId}
           onChanged={() => loadReturns(selectedPeriod.id)}
         />

@@ -1,13 +1,21 @@
 // Bulk Entry keeps unsaved typing in localStorage (salesEntryDraft.js) and brings it back when the
 // period loads again, with a notice, never silently. A draft typed over figures that were saved
 // since is not applied: the page asks.
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import Sales from './Sales'
 import { salesDraftSignature, readSalesDraft } from './salesEntryDraft'
+import { readPeriodList, clearPeriodLists } from '../../../shared/periodList'
+import { BS_MONTHS } from '../../../utils/bsCalendar'
 
 // The period's saved Bulk rows (bs_day 0), read by loadSales and by loadAllDaySums.
 let mockBulkRows = []
+// The month list the server returns (the shared list reads it, S855), and an optional gate that
+// holds that read until the test releases it.
+const P1 = { id: 'p1', bs_year: 2083, bs_month: 6, status: 'open' }
+let mockPeriods = [P1]
+let mockPeriodsGate = null
+let mockSalesReads = 0
 
 function mockBuilder(table) {
   const b = {
@@ -15,9 +23,13 @@ function mockBuilder(table) {
     eq: () => b, abortSignal: () => b,
     then: (res, rej) => {
       let data = []
-      if (table === 'monthly_periods') data = [{ id: 'p1', bs_year: 2083, bs_month: 6, status: 'open' }]
+      if (table === 'monthly_periods') {
+        const rows = mockPeriods
+        if (mockPeriodsGate) return mockPeriodsGate.then(() => ({ data: rows, error: null })).then(res, rej)
+        data = rows
+      }
       if (table === 'recipes') data = [{ id: 'r1', name: 'Momo', category: 'Food', selling_price: 200, is_active: true }]
-      if (table === 'sales_entries') data = mockBulkRows
+      if (table === 'sales_entries') { mockSalesReads++; data = mockBulkRows }
       return Promise.resolve({ data, error: null }).then(res, rej)
     },
   }
@@ -67,9 +79,40 @@ const qtyBox = () => screen.getByLabelText('Quantity sold: Momo')
 beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()
+  clearPeriodLists()   // the shared month list is module state, kept between tests otherwise
   mockBulkRows = []
+  mockPeriods = [P1]
+  mockPeriodsGate = null
+  mockSalesReads = 0
   mockSaves = 0
   mockStockDelayMs = 0
+})
+
+test('a guessed month starts the reads but is never shown or editable; the fresh list decides (S855)', async () => {
+  // The list in memory says Ashwin is open. Since it was read, Ashwin closed and Kartik opened.
+  await readPeriodList('c1')
+  const P2 = { id: 'p2', bs_year: 2083, bs_month: 7, status: 'open' }
+  mockPeriods = [P2, { ...P1, status: 'closed' }]
+  let release
+  mockPeriodsGate = new Promise(r => { release = r })
+  keep({ r1: '7' }, {})   // typed into Ashwin while it was open
+
+  renderPage()
+  // The guessed month's sales reads go out at once, beside the held list read...
+  await waitFor(() => expect(mockSalesReads).toBeGreaterThan(0))
+  await act(() => new Promise(r => setTimeout(r, 0)))
+  // ...and land on nothing a person can see or type into: no grid, no month, no dropdown entries.
+  expect(screen.queryByLabelText('Quantity sold: Momo')).not.toBeInTheDocument()
+  expect(screen.queryByText(new RegExp(BS_MONTHS[5]))).not.toBeInTheDocument()
+  expect(screen.getByRole('combobox', { name: 'Period' }).options).toHaveLength(0)
+
+  await act(async () => { release() })
+  const box = await screen.findByLabelText('Quantity sold: Momo')
+  expect(screen.getByRole('combobox', { name: 'Period' })).toHaveValue('p2')
+  expect(box).not.toBeDisabled()
+  expect(box).toHaveValue(null)   // Ashwin's figures are not put into Kartik
+  expect(screen.queryByText(/Brought back figures you typed earlier/)).not.toBeInTheDocument()
+  expect(readSalesDraft(ID)?.form).toEqual({ r1: '7' })   // and Ashwin's kept draft is untouched
 })
 
 test('figures kept from an earlier visit come back with a notice, and Discard forgets them', async () => {

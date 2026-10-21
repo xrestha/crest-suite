@@ -20,6 +20,8 @@ import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 import { buildStockRows } from '../stockcount/stockReportCalc'
 import { readPeriodTransfers } from '../transfers/transferFlows'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import RequisitionRejectModal from './RequisitionRejectModal'
 import { statusMeta, trailParts } from './requisitionTrail'
 import { findShortfalls } from './requisitionShortfall'
@@ -61,6 +63,7 @@ export default function Requisitions() {
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
 
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [items, setItems] = useState([])
@@ -121,31 +124,32 @@ export default function Requisitions() {
   async function init() {
     setLoading(true)
     setLoadError(null)
-    const [periodsRes, itemsRes, namesRes] = await Promise.all([
-      scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    // The month comes from the shared list, the slips read beside it (S855, periodList.js). On this
+    // entry page the guess only starts the reads: the dropdown, the lock and every save take the
+    // fresh list, applied below once it has landed. useLatestRequest's contract: anything that
+    // auto-selects a period claims it too, which initPeriodLoad does for the month it loads.
+    let list = []
+    const [out, itemsRes, namesRes] = await Promise.all([
+      initPeriodLoad({
+        req: periodReq, initKey, periodList,
+        setPeriods: l => { list = l },
+        select: () => {},
+        load: id => { setLoadError(null); return loadReqs(id) },
+      }),
       scopedFrom('items', 'id, name, uom, per_uom_rate, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
       profileNamesRpc(supabase, effectiveClientId),
     ])
-    const results = [periodsRes, itemsRes]
     // A failed read is not an empty period and must not render as one (S612 silent-zero rule).
-    const failed = firstError(results)
-    if (failed) { setLoadError(failed); setLoading(false); return }
-    const [{ data: p }, { data: i }] = results
+    if (itemsRes.error) { setLoadError(itemsRes.error); setLoading(false); return }
     setNamesFailed(!!namesRes.error)
     setNames(namesMapOf(namesRes.data))
-    setPeriods(p || [])
-    setItems(i || [])
-    const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
-    if (open) {
-      // useLatestRequest's contract: anything that auto-selects a period claims it too. Without
-      // this, a period picked while init() was still in flight got the new label over the old
-      // list, because init()'s trailing setLoading(false) landed after the newer load had started.
-      periodReq.begin(open.id)
-      setSelectedPeriod(open)
-      await loadReqs(open.id)
-      if (!periodReq.isCurrent(open.id)) return
-    }
-    setLoading(false)
+    setItems(itemsRes.data || [])
+    if (out.superseded) return   // a newer claim owns the page
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    setPeriods(list)
+    if (out.chosen) setSelectedPeriod(out.chosen)
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function loadReqs(periodId) {
@@ -701,8 +705,9 @@ ${text}`, detail })
             <button className="btn btn-ghost" onClick={backToList}>← Back to List</button>
           )}
           {/* Hidden while the list is empty, where the empty state carries the same button (S796):
-              two identical "+ New Requisition" controls on one screen made a first-time user choose. */}
-          <Fab onClick={startNew} label="+ New Requisition" show={mode === 'list' && !periodClosed && filteredReqs.length > 0} />
+              two identical "+ New Requisition" controls on one screen made a first-time user choose.
+              Not while loading: the slips of a guessed month can land before the month is confirmed (S855). */}
+          <Fab onClick={startNew} label="+ New Requisition" show={!loading && mode === 'list' && !periodClosed && filteredReqs.length > 0} />
         </div>
       </div>
 
