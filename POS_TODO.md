@@ -13,7 +13,17 @@ tap, "Send and go back", the till keys (Enter, Alt+S, Alt+P) and Remove on any p
 four headings, the tile after a cancelled close, the two payment-window findings below (phone width and the
 heading), deposits for party bookings (`20261021110000`) and the walk-in waitlist (`20261021100000`), both
 applied live, then the till floor 469 (`20261021120000`) once crest-v469 was live. Left from that list:
-the room map (its own project) and a browser pass of the new screens on BLOOM CAFE.
+the room map (its own project; cancelled S856) and a browser pass of the new screens on BLOOM CAFE.
+
+**S856 owner decisions (2026-10-21, asked in plain words); the closed items moved to
+[POS_DECISIONS.md](POS_DECISIONS.md) D with their text intact:**
+- **Keep the card grid** for the floor. This replaces S853's room map: asked again, the owner chose the grid.
+- **Kept Owner-only:** turning a dead tablet back on (ACCESS-10). **Dropped:** paid SMS, and phone verification
+  on the booking page with it; QR payment auto-confirmation (the built receiver and the admin QR tab stay,
+  switched off and unused, so nothing in the app changes). **Not needed:** barcode support. **Kept as is:**
+  hand-entered sales and purchase lines replaced on edit, until a client nears the NRs 5 crore tier.
+- **To the accountant:** the Tier-1 certification question, in one note with IMS's sales-side VAT question.
+- **The till checks still needing a person:** done together with the owner on BLOOM CAFE.
 
 **S853 owner decisions (2026-10-21, asked in plain words) on the open items below:**
 - **Build next:** one Send on the order screen (food to the kitchen, drinks to the bar), with holding a course
@@ -21,7 +31,8 @@ the room map (its own project) and a browser pass of the new screens on BLOOM CA
   keyboard shortcuts (Enter adds the top search match, keys for Send and Payment, any tender line removable);
   Sales Report's 11 tabs grouped under three or four headings; the tile after a cancelled close matching the
   order screen; **deposits for party bookings** and a **walk-in waitlist** (section C, each planned first).
-- **Build, as its own project:** a room map for the floor (owner chose it over the card grid).
+- **Build, as its own project:** a room map for the floor (owner chose it over the card grid). **Reversed
+  S856:** keep the card grid.
 - **Decided, no change:** the Vegetarian filter keeps showing egg choices inside a dish and in combo picks.
 - **Live checks run 2026-10-21 (S853, the new build on BLOOM CAFE; results on the Crest Live Checks page):** passed the
   floor-notice fold, tile = Billing list = POS Dashboard totals, the KDS settle on Start/Ready/Served, Start · 10m and
@@ -33,6 +44,7 @@ the room map (its own project) and a browser pass of the new screens on BLOOM CA
   person: build-your-own and combos (they need paid bills), the refused-Add scroll (no BLOOM dish has a required choice
   without a pre-pick), the Billing guards, the idle lock, the non-Suite upsell and the storeroom count phone.
 - **Still parked:** the tablet re-activation code (ACCESS-10), paid SMS, phone verification, QR auto-confirmation, barcode.
+  All five decided S856 (above).
 
 **S852 whole-product audit (2026-10-21, 13/20): ✅ done** in one release (crest-v467); the report and its Resolution table are `.impeccable/audit/2026-10-20T15-06-02Z__crest-suite-all-modules.md`. Filed from it, not fixed:
 - ✅ S853: Membership's Card types table (Switch off plus ⋯) overflowed a 390px phone; it now has phone cards like Members and transfers (S852).
@@ -922,11 +934,6 @@ when these were filed. Every item below assumes they are.
 - [x] **A credit note's reason line printed "(no money returned)"** — closed S755: the answer is
   `pos_credit_notes.refund_method`, shown in the Credit Note Book, never printed. Notes issued before
   S755 keep their reason text as printed.
-- [ ] 🔵 **A POS manager cannot re-activate a dead tablet** (ACCESS-10; the owner chose wording only on
-  2026-10-12, so the till now says "activated again by the Owner"). A POS manager has only a PIN, which a
-  revoked or never-activated tablet refuses, so only the Owner's email sign-in on that tablet can
-  activate it (or a POS manager still signed in there). The build, if wanted: an enrolment code the
-  Owner issues in Till Devices that a POS manager types on the tablet.
 - [x] **Deleting an open order that still had lines was refused as "this bill is closed and
   printed"** (found S755) — closed S822 (5b, `20261012170000`). `guard_pos_order_items_closed` and
   `guard_pos_order_payments_closed` (same fault: an open order with a points line said the bill was
@@ -937,8 +944,9 @@ when these were filed. Every item below assumes they are.
 
 ## B. Reports — compliance-adjacent
 
-- [ ] 🟡 `sales_entries`/`purchase_entries` hard-delete on edit (accepted risk — only matters near the NRs 5 crore certification tier). **`pos_orders` itself cannot be deleted or edited once billed, enforced by the database since S754** (`guard_pos_order_delete` plus the closed-bill lock in `guard_pos_order_close`, migration `20260916100000`, applied live 2026-09-14). Before that it was only true because no screen offered it: a till login could delete a billed order over REST. **Narrowed by S698 on the purchases side, not closed:** the replacement is now one transaction inside `save_purchase_bill` rather than two requests, so a bill can no longer end up holding both versions, and a bill with `payable_payments` against it is refused outright by a `BEFORE DELETE` trigger. The lines themselves are still replaced rather than superseded, so an audit trail beyond `audit_logs` would still need a version column. `sales_entries` is unchanged.
-- [ ] ⚪ Tier-1 software-certification legal question (needs an accountant's answer, not code)
+- [ ] ⚪ Tier-1 software-certification legal question (needs an accountant's answer, not code). **S856:** asked
+  in one note with IMS's sales-side VAT question. The hard-delete-on-edit row that sat here was kept as is
+  (S856) and moved to POS_DECISIONS.md D.
 
 ## B3. Quality passes on POS itself (added S652–S654, 2026-08-30)
 
@@ -1030,8 +1038,6 @@ critique's minor list and persona flags, and were deliberately not in that batch
   close is charged again by the order screen until the next save, so for that moment the tile shows less.
 - [x] ~~🟢 **Three print placeholders use `#666`, off the print ramp (#555/#777)**~~ — **closed S853**: no
   `#666` is left in `src/`, so its ignore (and the stale `#96700a` one) is gone; `3px` is scoped to its three files.
-- [ ] ⚪ **Should the floor be a map of the room** rather than a card grid sorted by name? (critique
-  question 1)
 
 ## B4. Timezone follow-ups left by S670
 
@@ -1048,28 +1054,21 @@ by the till — were closed by S754 and moved to `POS_DECISIONS.md`.
 
 ## C. Reservations — later phases (Phase 1 shipped S677, see POS_DECISIONS.md)
 
-- [ ] 🔵 **Paid SMS confirmations / reminders** (Sparrow or Aakash, ~NPR 1.5 per SMS). Opt-in per
-  client; the client must first register a sender ID with the telcos under NTA rules (business
-  documents, generic IDs prohibited). Build as an Edge Function `pos-sms` holding the token in
-  `client_secrets` (privilege invariant 4). Not before a client with a registered sender ID asks.
-- [ ] ⚪ **Phone verification on the public booking page** — impossible without an SMS rail; today
-  the staff WhatsApp/call IS the verification. Revisit with the SMS item.
+Nothing open. Paid SMS and phone verification on the booking page were dropped in S856 (POS_DECISIONS.md D).
 
 ## D. Known roadmap items
 
-- [ ] 🟡 QR payment auto-confirmation — receiver scaffold + admin UI shipped S271/S272, 2026-07-06 (`pos-payment-webhook` Edge Function; its secret is `client_secrets.pos_webhook_secret`, admin-only, set in Manage Clients → a client's QR tab — never on `settings`, which every login of the outlet can read). Still needs real FonePay/eSewa merchant onboarding + their actual signature scheme before anything goes live — low priority, blocked on merchant credentials, not engineering.
-- [ ] 🔴 Barcode support (structural, no current need identified)
+Nothing open. QR payment auto-confirmation was dropped and barcode support found not needed in S856
+(POS_DECISIONS.md D).
 
 ## Not on this list (deliberately out of scope)
 
 Full double-entry accounting / Chart of Accounts / Debtors-Creditors, multi-warehouse, batch/lot tracking, Production Entry transactions — confirmed general-ERP scope creep, not aligned with Crest's F&B cost-intelligence positioning.
 
-## Two of these five are not engineering
+## One item here is not engineering
 
-⚪ Tier-1 software-certification needs an accountant's answer; 🟡 QR payment auto-confirmation needs
-FonePay/eSewa merchant onboarding. Neither can be closed by a coding session, which is why both have
-sat here for months being scrolled past. They belong on a business to-do list — they are kept here
-only so the POS picture stays complete.
+⚪ Tier-1 software-certification needs an accountant's answer (S856: asked with IMS's sales-side VAT
+question). QR payment auto-confirmation, the other item that sat here, was dropped in S856.
 
 ---
 

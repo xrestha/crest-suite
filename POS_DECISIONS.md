@@ -202,6 +202,36 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 ## D. Known roadmap items
 
+- [x] ~~Seven parked POS items~~ — **decided S856, 2026-10-21, by the owner, asked in plain words.** Each one's
+  text as it stood in `POS_TODO.md`, then the answer:
+  - **The floor as a map of the room** rather than a card grid sorted by name (critique question 1, S846).
+    S853 chose to build it as its own project; asked again in S856, the owner chose **keep the card grid**,
+    and that answer stands.
+  - **A POS manager cannot re-activate a dead tablet** (ACCESS-10; the owner chose wording only on
+    2026-10-12, so the till now says "activated again by the Owner"). A POS manager has only a PIN, which a
+    revoked or never-activated tablet refuses, so only the Owner's email sign-in on that tablet can
+    activate it (or a POS manager still signed in there). The build, if wanted: an enrolment code the
+    Owner issues in Till Devices that a POS manager types on the tablet. **Kept Owner-only.**
+  - **Paid SMS confirmations / reminders** (Sparrow or Aakash, ~NPR 1.5 per SMS). Opt-in per client; the
+    client must first register a sender ID with the telcos under NTA rules (business documents, generic IDs
+    prohibited). Build as an Edge Function `pos-sms` holding the token in `client_secrets` (privilege
+    invariant 4). **Dropped.** Staff keep confirming by WhatsApp or a call.
+  - **Phone verification on the public booking page**: impossible without an SMS rail; today the staff
+    WhatsApp/call IS the verification. **Dropped with the SMS item.**
+  - **QR payment auto-confirmation**: receiver scaffold + admin UI shipped S271/S272, 2026-07-06
+    (`pos-payment-webhook` Edge Function; its secret is `client_secrets.pos_webhook_secret`, admin-only, set
+    in Manage Clients → a client's QR tab, never on `settings`). It needed real FonePay/eSewa merchant
+    onboarding and their signature scheme before anything went live. **Dropped; the built part stays**,
+    switched off and unused, so nothing in the app changes. The cashier keeps checking the phone by hand.
+  - **Barcode support** (structural, no current need identified). **Not needed.**
+  - **`sales_entries`/`purchase_entries` hard-delete on edit** (accepted risk, only matters near the NRs 5
+    crore certification tier). `pos_orders` cannot be deleted or edited once billed, enforced by the database
+    since S754 (`guard_pos_order_delete` plus the closed-bill lock in `guard_pos_order_close`, migration
+    `20260916100000`). Narrowed by S698 on the purchases side: the replacement is one transaction inside
+    `save_purchase_bill`, and a bill with `payable_payments` against it is refused by a `BEFORE DELETE`
+    trigger. The lines are still replaced rather than superseded, so an audit trail beyond `audit_logs` would
+    need a version column; `sales_entries` is unchanged. **Kept as is**; revisit if a client nears the tier.
+
 - [x] ~~Manual "Pair with" suggestions stay POS-only — the IMS branch deliberately has no Pair control~~ — settled S713, 2026-09-09. `recipe_suggestions` is edited from Menu Pricing, whose two branches are genuinely different pages; only the **POS-only** branch renders a Pair link on the row. The IMS branch had been rendering a full copy of the Pair With modal that nothing could open (`openSuggestModal` is called from one place, in the other branch) plus a `recipe_suggestions` read on every load whose result no element could reach — ~45 lines of unreachable JSX and a wasted round trip per page view, both now gone. **The absence is the decision, not an oversight**, and `Help.js` has documented it from the user side since the suggestion tiers shipped: a client with IMS gets *"frequently ordered together"* derived from its own POS sales history, and on Pro the full Menu Engineering ranking with CHEF'S PICK — both strictly richer than a hand-pinned list, and neither needs maintaining as the menu moves. A POS-only client has no sales-history engine to derive from, which is exactly why manual pinning exists there. If manual pinning is ever wanted for IMS clients too — the one real argument being that an owner may want to *force* a pairing the history does not support, e.g. pushing a new dish — it needs a Pair control in the IMS row and a decision about which list wins when both produce a suggestion; it does not need the deleted modal back. A comment where it stood says so. **Amended S715, 2026-09-09 — the decision stands, but its premise did not, and that is worth recording.** The argument above turns on IMS clients already getting something *strictly richer* than manual pinning: co-occurrence on Growth, and on Pro the Menu Engineering ranking with CHEF'S PICK. The Pro half of that had **never once worked**. `MenuEngineering.js` wrote `recipes.me_class` with an un-awaited postgrest builder, which sends no request at all, so the column was NULL for every client from the day the engine shipped (S210) — `PosOrders.jsx`'s `hasMeData` guard saw nothing, `isPlowhorse` never matched, and the amber CHEF'S PICK chip could not appear. Fixed in S715, so the sentence is true now. Two things to take from it: **the argument for not building something was resting on a feature nobody had verified was live**, and a paid tier can be dead for a year without a single error — `hasMeData` degrading gracefully to the lower tier is exactly what kept it quiet. Before citing a tier as the reason not to build its alternative, check the data it runs on is actually there.
 
 - [x] ~~S532 verification pass: POS PIN lockout was still bypassable after S531~~ — 2026-08-10, found by auditing what `anon` can actually EXECUTE rather than by re-reading the code (see `README.md` S532). S531 correctly moved `check_pos_pin_lock`/`record_pos_pin_attempt` *inside* `pos-staff-login` so the browser can't skip them, but never revoked the EXECUTE grant the browser had needed — all four lockout functions were created with no explicit GRANT/REVOKE, so they carried Postgres's default `GRANT EXECUTE TO PUBLIC`, and PUBLIC includes `anon`. `record_pos_pin_attempt` is `SECURITY DEFINER` with no auth check and its success branch is `UPDATE profiles SET pos_pin_failed_attempts = 0, pos_pin_locked_until = NULL WHERE id = p_staff_id`, so one anonymous POST with `p_success: true` cleared the counter for any staff member. POS is shielded in practice by the `pos_device_secret` gate that runs first (an attacker needs a valid device secret before the lockout is even reachable) — HR Self-Service, which takes only `{staff_id, pin}`, was the exploitable path. Fixed in `20260810190000` (`service_role`-only on the four lockout functions). Root cause is a grant trap distinct from the one already documented: an EXECUTE grant is per **signature**, not per name, so adding a parameter to a previously-hardened function creates a new signature carrying a fresh PUBLIC grant — `submit_guest_order` (both overloads) surfaced in the same audit for exactly this reason, alongside `submit_my_leave_request`/`submit_my_tada_claim`. **Verified live in a browser**: correct PIN signs in, four wrong PINs return `401`, the fifth returns `423` "Too many incorrect attempts" — the `423` being the proof, since it means the counter advanced across five separate requests under `service_role`.

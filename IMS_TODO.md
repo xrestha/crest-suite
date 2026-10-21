@@ -12,7 +12,9 @@ supplier split (the aging half was already fixed in S849). PERF-5 stayed open.
 
 **S856 (2026-10-21, crest-v471): PERF-5 shipped**, so the S793 load-time list is done. What is left in this file is
 not engineering: a count-PIN sign-in on a real storeroom phone (S761, below) and the accountant's question about a
-sales-side VAT view for IMS-only clients.
+sales-side VAT view for IMS-only clients. **Owner decisions (S856, asked in plain words):** the phone check is done
+together with the owner, step by step; the VAT question goes to the accountant first, in one note with POS's Tier-1
+certification question, and nothing is built until they answer.
 
 **S853 owner decisions (2026-10-21, asked in plain words):**
 - ✅ S855 **Build next:** PERF-2, PERF-3 and PERF-4 together (PERF-4 touches the service worker, so it is planned with
