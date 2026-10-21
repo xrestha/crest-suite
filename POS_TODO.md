@@ -33,8 +33,9 @@ the room map (its own project; cancelled S856) and a browser pass of the new scr
   dish name, owner); a credit note and Complimentary Slip counted a combo's dishes in Total Qty (now once,
   owner); the payment preview printed no covers; the credit note blamed a dropped connection when a print
   window had paused the page; Send's tip covered the message line on a phone.
-- **Open from the live check:** (1) the Z-report's Comp Food Cost counts whole Complimentary bills only, so a
-  comped dish on a paid bill (the Test Combo) is in no comp cost: owner question. (2) A percent discount skips
+- **Open from the live check:** (1) ✅ the Z-report's Comp Food Cost counted whole Complimentary bills only, so a
+  comped dish on a paid bill (the Test Combo) was in no comp cost: owner decision, count them too (S856,
+  crest-v471, `dishCompTotal`). (2) A percent discount skips
   combo dishes by design (pos-combos.md); check that the discount box says so to a cashier. (3) Still not
   pressed: the Billing refusal for a bill closed on another till, build-your-own, a guest QR combo, the
   non-Suite upsell.

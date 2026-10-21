@@ -160,6 +160,10 @@ one-open-shift index (23505). `loadOpenShift` runs under `useLatestRequest`; the
 (`closingShiftRef`): one closed elsewhere writes nothing and the page names Shift History. Messages
 that outlive the dialog go in `shiftReadError`/`pageMsg`, never its `msg`.
 
+**Comp Food Cost counts every comped dish on the shift (S856, owner decision)**: whole Complimentary bills
+and the `comped` lines of paid bills (`dishCompTotal`, shown under the figure), each at `posLineCosts`'
+plate cost. The Complimentary count stays whole bills.
+
 **`salesTotal` is "Total Sales", not "Total Collection"**, on the screen and the signed slip alike:
 it includes Credit bills, which are billed but not collected.
 

@@ -300,6 +300,9 @@ export async function loadShiftReport(clientId, shiftId, compCost = {}) {
   // whole order under one bucket.
   const splitOrderIds = list.filter(o => o.close_type === 'paid' && o.payment_method === 'Split').map(o => o.id)
   const needItems = list.filter(o => o.close_type === 'void' || o.close_type === 'writeoff')
+  // Dishes made free on a bill that was otherwise paid (S856, owner decision): Comp Food Cost counted
+  // whole Complimentary bills only, so a comped dish on a paid bill was in no comp figure at all.
+  const paidIds = list.filter(o => o.close_type === 'paid').map(o => o.id)
 
   // Both derive their id list from `orders` above and neither reads the other, so they are one
   // wave rather than two. Chunked because an `.in()` list is spelled out in the URL and both
@@ -312,6 +315,8 @@ export async function loadShiftReport(clientId, shiftId, compCost = {}) {
     // With each line's choices' stock lines, which a Complimentary bill's food cost includes.
     fetchAllRowsChunked(needItems.map(o => o.id),
       ids => scopedFromRaw('pos_order_items', clientId, `order_id, qty, unit_price, vat_rate, recipe_id, ${LINE_CHOICE_STOCK}`).in('order_id', ids).order('id')),
+    fetchAllRowsChunked(paidIds,
+      ids => scopedFromRaw('pos_order_items', clientId, `order_id, qty, unit_price, vat_rate, recipe_id, ${LINE_CHOICE_STOCK}`).in('order_id', ids).eq('comped', true).order('id')),
   ])
   if (!notesRes.error) {
     const byId = new Map((notesRes.data || []).map(n => [n.id, n]))
@@ -321,13 +326,13 @@ export async function loadShiftReport(clientId, shiftId, compCost = {}) {
     }
   }
   throwIfFailed(secondWave)
-  const [{ data: payments }, { data: items }] = secondWave
+  const [{ data: payments }, { data: items }, { data: paidComps }] = secondWave
   const paymentsByOrder = (payments || []).reduce((acc, p) => { (acc[p.order_id] = acc[p.order_id] || []).push(p); return acc }, {})
   const itemsByOrder = (items || []).reduce((acc, i) => { (acc[i.order_id] = acc[i.order_id] || []).push(i); return acc }, {})
 
   // One lookup per order id instead of a .find() down `needItems` per item row.
   const closeTypeById = new Map(needItems.map(o => [o.id, o.close_type]))
-  const compLines = (items || []).filter(i => closeTypeById.get(i.order_id) === 'writeoff')
+  const compLines = [...(items || []).filter(i => closeTypeById.get(i.order_id) === 'writeoff'), ...(paidComps || [])]
   // The till's own read (S809 IMS-HANDOFF-3): a supervisor closing the shift on a PIN cannot read
   // `items`, so the Z-report froze each Complimentary bill at its typed Cost Price (usually NPR 0).
   // Each dish is costed with its choices, as on its Complimentary Slip.
@@ -365,10 +370,15 @@ export async function loadShiftReport(clientId, shiftId, compCost = {}) {
     }
   }
 
+  // The comped dishes of paid bills, at the same plate cost as a Complimentary bill's. Inside compTotal,
+  // and kept apart so the screen and the slip can say how much of it they are.
+  const dishCompTotal = (paidComps || []).reduce((t, i) => t + i.qty * costing.costOf(i), 0)
+  compTotal += dishCompTotal
+
   const cashSales = byMethod.Cash || 0
   return {
     orderCount, paidCount, voidCount, compCount, byMethod,
-    discountTotal, voidTotal, compTotal, salesTotal, cashSales,
+    discountTotal, voidTotal, compTotal, dishCompTotal, salesTotal, cashSales,
     movements: moveList, cashIn, cashOut, creditSettlementsCash, refundsCash, receiptCancelsCash,
     // S854: booking deposits. The two cash figures are labels inside Cash In / Cash Out; `deposits` is
     // what was taken and refunded on the shift by method, or null when its read failed.
@@ -488,6 +498,9 @@ function ReportBody({ report, opening, closing, variance }) {
         <div className="card" style={{ padding: '14px 18px' }}>
           <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Comp Food Cost</div>
           <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--theme-text1)', fontVariantNumeric: 'tabular-nums' }}>{fmtNpr(report.compTotal)}</div>
+          {report.dishCompTotal > 0 && (
+            <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>incl. {fmtNpr(report.dishCompTotal)} on dishes comped on paid bills</div>
+          )}
         </div>
       </div>
 

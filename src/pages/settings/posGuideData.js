@@ -443,6 +443,7 @@ export const POS_GUIDE_GROUPS = [
         ],
         fields: [
           { label: 'X-report vs Z-report', desc: 'Current Shift during a shift is the X-report: a snapshot, not a live feed. "Totals as of {time}" says when it was read; Refresh reads it again, and so does coming back to the tab (S809 SHIFTS-10, owner decision: no timer). At close, the full report is captured and FROZEN onto the shift — history always shows the numbers as they were signed off, even if a bill is corrected later.' },
+          { label: 'Comp Food Cost', desc: 'The food cost of everything given away on the shift: whole Complimentary bills, and since S856 single dishes made free on a bill that was otherwise paid (shown as incl. NPR x on dishes comped on paid bills). Each plate is costed with its choices, as on the Complimentary Slip. Complimentary in the counts is still whole bills only.' },
         ],
         formulas: [
           'Expected cash = opening float + cash sales + cash in − cash out. Variance = counted − expected; balanced under one rupee, otherwise over/short.',
