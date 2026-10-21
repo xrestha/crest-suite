@@ -94,8 +94,8 @@ export default class AppErrorBoundary extends Component {
     // eslint-disable-next-line no-console
     console.error('AppErrorBoundary caught:', error, info)
     // A lazy route whose chunk no longer exists is a DEPLOY, not a crash — every page component
-    // in App.js is `React.lazy`, Vercel replaces the deployment's files, and the service worker's
-    // activate deletes the cache that held the old ones. Reload once and the new index.html names
+    // in App.js is `React.lazy`, Vercel replaces the deployment's files, and the service worker
+    // keeps only the chunks this device already fetched, one build back (S855). Reload once and the new index.html names
     // hashes that resolve. The side effect belongs here rather than in getDerivedStateFromError,
     // which must stay pure; if it starts a reload the fallback below is never seen.
     recoverFromChunkError(error)

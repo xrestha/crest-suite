@@ -186,23 +186,34 @@ Owner's. Four rules came out of re-analysing it, each of which had already been 
   `caches.match('/')`, so a per-URL entry is written and never read — dead growth, unbounded in
   the query string, while the shell itself only refreshed on a visit to `/`.
 
+**Two caches (S855): `CACHE_NAME` for the shell and unhashed files, a fixed `crest-static` for
+`/static/`.** CRA names every `/static/` file by its content hash, so an unchanged name is the same
+bytes; keeping them under the bumped name meant every deploy re-downloaded the whole app. Still bump
+`CACHE_NAME` every release: it refreshes `/`, the manifests, icons and `print-station-tick.js`, and
+the byte change is what `releaseWatch.js` waits for. Install records the new build's `/static/`
+list from `/asset-manifest.json` in a bookkeeping row under `/__crest-sw/` (never served). Activate
+copies `/static/` entries out of old `crest-v*` caches before deleting them, then **keeps the new
+build plus the build before it** and deletes the rest: skipWaiting + claim put a tab still on the
+old build under the new worker at once, and Vercel 404s old hashes. **The prune fails safe by
+KEEPING**: no readable list for the new build, a list missing its own entrypoints, or no list for
+the previous build (the first release, or one whose install could not read the manifest) skips it.
+Activation holds every fetch on the origin, so the tidy-up is time-bounded and never rejects.
+`serviceWorker.test.js` runs the real file against a fake Cache Storage.
+
 **The install precaches the app SHELL, and that is the boundary of offline support.** `/` plus
-the one js/css pair named in CRA's `/asset-manifest.json` `entrypoints`, fetched at install and
-cached individually so one 404 cannot throw away the other. Before S731 the install cached `/`
-alone, so offline the document loaded, asked for a `main.<hash>.js` that had never been fetched
-under the current `CACHE_NAME`, and rendered a blank white page — and since `CACHE_NAME` is bumped
-on every deploy and `activate` purges every other cache, that was the state after every deploy
-until the user next opened the app online. **Deliberately NOT all 283 files in the manifest**: the
-route chunks are 3.5 MB and this worker is installed by every diner who scans a table QR code. What
-precaching buys is the difference between a white screen and an app that boots and can explain
-itself. Supabase is cross-origin and never intercepted, so no DATA is cached here at all — anything
+the js/css pair in the manifest's `entrypoints`, each cached individually so one 404 cannot throw
+away the other (one already in `crest-static` is not downloaded again). Before S731 the install
+cached `/` alone, so offline after every deploy the document asked for a `main.<hash>.js` that had
+never been fetched and rendered a blank white page. **Deliberately NOT every file in the manifest**:
+the route chunks run to megabytes and this worker is installed by every diner who scans a table QR
+code. Supabase is cross-origin and never intercepted, so no DATA is cached here at all — anything
 that must survive a lost connection needs its own IndexedDB store (`src/utils/offlineQueue.js`),
 which is what Stock Count and POS have and nothing else does.
 
 **A dynamic import that fails is a DEPLOY, not a bug — `src/shared/chunkReload.js` is where that is
 decided.** Every page in `App.js` is `React.lazy` and `xlsx` is `await import('xlsx')` in 43 click
 handlers, so the app fetches its own code by hashed filename from an index.html served before the
-deploy; Vercel replaces those files and `activate` deletes the cached copies on the same event. The
+deploy; Vercel 404s the old hashes, and the worker keeps cached copies for one build back only. The
 two halves land in different places and only one of them is reachable from React: a lazy ROUTE
 rejects during render and `AppErrorBoundary` catches it, while an `import()` inside an `onClick` is
 thrown from an event handler, which that boundary **structurally cannot catch** — the Export button

@@ -4,10 +4,10 @@
 // Every page component in App.js is `React.lazy(() => import(...))` and `xlsx` is `await
 // import('xlsx')` inside 43 click handlers, so the app fetches its own code on demand, by hashed
 // filename, from an index.html that was served before the deploy. Vercel replaces the deployment's
-// files, so those hashes 404; the service worker's `activate` deletes every non-current cache on
-// the same event, so the copy that WAS cached goes too. An open tab therefore loses the ability to
-// load its own routes the moment a deploy lands, and nothing about that is visible until the next
-// navigation or Export click.
+// files, so those hashes 404. Since S855 the service worker keeps the previous build's cached
+// files, but only the ones this device had already fetched, and none older than one build back. An
+// open tab can therefore still lose the ability to load its own routes once a deploy lands, and
+// nothing about that is visible until the next navigation or Export click.
 //
 // The two halves land in different places, which is why this lives in its own module rather than
 // inside the error boundary:
