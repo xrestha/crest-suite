@@ -283,8 +283,10 @@ listed. Read only on a Customization outlet.
 `buildStockRows()` in `src/modules/ims/stockcount/stockReportCalc.js` (tested) is the only place
 that turns a period's opening, closing, purchases, returns, wastage, staff meals, sales and recipe
 breakdown into an item's on-hand, its par comparison and its shortfall. **Stock Report, Reorder
-Report, the Dashboard's Items to Reorder panel and Top Variance table, the Owner Dashboard's Items
-Below Par tile, the Monthly Owner Report and Requisitions' over-issue guard all call it.** A
+Report, the Dashboard's Items to Reorder panel, the Owner Dashboard's Items Below Par tile, the
+Monthly Owner Report and Requisitions' over-issue guard all call it.** (The Dashboard's Top Variance
+card never did; since S852 it is a variance-population consumer, `homeTopVariance.js` over
+`closingCountMap` / `judgedRows`, so an uncounted item is never judged Over.) A
 re-analysis of the Reorder Report on 2026-09-08 found five copies, no two alike:
 
 | Surface | Wastage | Staff meals | Sales dedup | Flag |

@@ -96,6 +96,7 @@ export const CUSTOMIZATION_GUIDE_GROUPS = [
           'Options and groups created before ordering existed all carry sort 0. The first Move renumbers the whole list to its on-screen order before swapping, so the move you see is the move that saves.',
           'The page notice (green line under the tabs) stays until the next action rather than vanishing on a timer — a flash that disappears in six seconds while you are reading it is not a notice.',
           'Admin can prepare groups on a client whose module is off; an amber banner says nothing is offered until it is switched on in Admin → Clients.',
+          'S852: the Option Groups load and every save on it and in its dialogs give up after 20 s. A load shows the error card with Try again; a save gives the button back and says it may have landed. Put it on dishes removes the group from dishes in chunks, so a large menu works, and a stop part-way lists which dishes came off and which still offer the group.',
         ],
         connections: 'Writes pos_option_groups, pos_options, pos_option_ingredients and (via Put it on dishes) pos_recipe_option_groups. Reads recipes for the dish list and, with IMS, items and sub-recipes for stock lines. Everything the till, the guest sheet and the report read starts here.',
       },

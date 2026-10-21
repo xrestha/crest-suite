@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-30T02:53:05.961Z",
+  "generatedAt": "2026-10-21T05:26:01.000Z",
   "title": "Design System: Crest Suite",
   "extensions": {
     "colorMeta": {
@@ -163,6 +163,22 @@
           "oklch(95.0% 0.002 67.7)"
         ],
         "lightPreset": "#ffffff"
+      },
+      "input-border": {
+        "role": "neutral",
+        "displayName": "Input Border",
+        "canonical": "#7a7675",
+        "tonalRamp": [
+          "oklch(15.0% 0.005 34.3)",
+          "oklch(26.0% 0.005 34.3)",
+          "oklch(37.0% 0.005 34.3)",
+          "oklch(48.0% 0.005 34.3)",
+          "oklch(59.0% 0.005 34.3)",
+          "oklch(70.0% 0.005 34.3)",
+          "oklch(82.0% 0.005 34.3)",
+          "oklch(95.0% 0.005 34.3)"
+        ],
+        "lightPreset": "#807c7b"
       },
       "table-hover": {
         "role": "neutral",

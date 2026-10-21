@@ -9,6 +9,10 @@ Suite Pro gate and its billing. Until S848, Suite items were filed in `IMS_TODO.
 **When an item here ships, record it in that session's CHANGELOG entry and mark the row ✅ with the
 session number** (or move it to a decisions record if one is started), so this file stays a to-do list.
 
+**S852 whole-product audit (2026-10-21, 13/20): ✅ done** in one release (crest-v467); the report and its Resolution table are `.impeccable/audit/2026-10-20T15-06-02Z__crest-suite-all-modules.md`. Filed from it, not fixed:
+- ⚪ Fixed Assets' Disposal Report colours gain / loss green / red by sign, a verdict on a plain fact.
+- ⚪ `LegalReacceptance` tells a first acceptance from a re-acceptance by `PRIOR_VERSIONS`; it is exact only once `AuthContext` exposes `legalAccepted`.
+
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
 Last updated: 2026-10-15 (S848 — the first whole-module review of Crest Suite, filed below).

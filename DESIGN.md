@@ -23,6 +23,10 @@ colors:
   ink-border: "#3a3836"
   ink-border-lt: "#2c2a29"
   input-bg: "#1e1d1c"
+  # A text field's resting border (S852). `ink-border` measured ~1.4:1 against the card and the well,
+  # under WCAG 1.4.11's 3:1 for a control boundary. Light is #807c7b; both clear 3:1 on card, well,
+  # page and a hovered row. Disabled and read-only still step down to ink-border-lt.
+  input-border: "#7a7675"
   table-hover: "rgba(255,255,255,0.04)"
   focus-ring: "rgba(255,86,60,0.15)"
   focus-outline: "#ffc4b8"
@@ -73,7 +77,7 @@ typography:
   # tokenised size (the sidebar's own --font-size-micro, --font-size-chevron) into a false
   # "outside the type ramp" finding.
   display:
-    fontFamily: "Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontFamily: "Archivo Variable, Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
     fontSize: "clamp(24px, 3.4vw, 32px)"
     fontWeight: 800
     lineHeight: 1.1
@@ -124,28 +128,28 @@ typography:
     lineHeight: 1.2
     letterSpacing: "0.04em"
   title:
-    fontFamily: "Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontFamily: "Archivo Variable, Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
     fontSize: "22px"
     fontWeight: 600
     lineHeight: 1.3
   figure:
-    fontFamily: "Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontFamily: "Archivo Variable, Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
     fontSize: "24px"
     fontWeight: 600
     lineHeight: 1.15
     fontFeature: "tabular-nums"
   body:
-    fontFamily: "Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontFamily: "Archivo Variable, Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
     fontSize: "13px"
     fontWeight: 400
     lineHeight: 1.5
   label:
-    fontFamily: "Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontFamily: "Archivo Variable, Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
     fontSize: "12px"
     fontWeight: 500
     letterSpacing: "0.04em"
   column-header:
-    fontFamily: "Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
+    fontFamily: "Archivo Variable, Archivo, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif"
     fontSize: "11px"
     fontWeight: 500
     letterSpacing: "0.08em"
@@ -566,7 +570,9 @@ second hue anywhere, only more and less of the one that was already there.
 
 ## Typography
 
-**Body Font:** Archivo (Google Font, 400/500/600/700/800), falling back to
+**Body Font:** Archivo, self-hosted since S852 from `@fontsource-variable/archivo` (one variable file per
+style, registered as `Archivo Variable`, every weight 100–900 plus italic) rather than a render-blocking
+Google Fonts stylesheet, falling back to
 `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`.
 **Signature Font:** Georgia, serif — the wordmark, the two full-page interstitials (`PremiumGate`,
 `SubscriptionLock`), and every print letterhead (gate pass, purchase
@@ -1165,8 +1171,15 @@ deliberately not italic, so it never reads as a waiter's note. The contract is `
 
 ### Inputs / Fields
 
-- **Style:** the input well (`--theme-input-bg`) inside a 1px `--theme-border`, square,
+- **Style:** the input well (`--theme-input-bg`) inside a 1px `--theme-input-border`, square,
   `9px 12px`, 13px. `.form-field` stacks a 12px/500 label over the control with a 6px gap.
+- **A field's edge is a control boundary, so it is held to 3:1 (S852).** Until S852 the border was
+  `--theme-border`, the rule colour, which measured 1.48:1 against the well on Light and 1.44:1 on
+  Night, and the well itself sat 1.21:1 / 1.06:1 off the card: a low-vision owner or a tablet in
+  daylight could not find where to type. `--theme-input-border` (Night `#7a7675`, Light `#807c7b`)
+  clears 3:1 against card, well, page and a hovered row on both presets, and a custom theme derives
+  one (`legibleBorder` in `ThemeContext.js`) whenever its card, well, page or border changes. It is a
+  field token, not a new rule colour: tables, cards and dividers keep `--theme-border`.
 - **`.form-input` vs `.form-select`:** a text input takes `.form-input`. `.form-select` carries
   `cursor: pointer`, so a text field wearing it announces itself as a menu — 60 inputs across 22
   files had done exactly that. `.form-input--auto` is the width escape hatch for a filter toolbar,
@@ -1420,6 +1433,12 @@ Amber at 22% over the card with a 3px bottom rule, red and pulsing once it escal
 top at z-index **3000** — above the POS till layers (1000) and the Quick Calculator (2500), below
 `Tip` (9999).
 
+**Its title and detail are `--theme-text1`, never the signal colour (S852).** The urgent title was
+`--theme-red-text` on its own red fill: 3.87:1 at rest and 2.65:1 at the pulse peak on Night, on the
+banner a cashier reads mid-service. The fill, the rule, the icon and the pulse already carry the red;
+the words carry the message. The pulse is a red layer that animates opacity only (S852), so the
+banner never repaints its own background every frame.
+
 Four properties are the design, not the implementation:
 
 - **It is not a modal.** No scrim, no focus trap, no `aria-modal`. A cashier mid-bill and a chef
@@ -1456,6 +1475,8 @@ before, where the near-flat tail reads as settling rather than stopping. Anythin
 
 - **Every animation must be switchable off by `prefers-reduced-motion`, which means it cannot be an
   inline style.** A `style={{ animation }}` cannot be reached by the media query. Use a class.
+  Since S852 the reduced-motion block also sets `--motion-fast` and `--motion-slow` to `0ms`, so an
+  inline `transition` written against the tokens stops too; a literal duration does not.
 - **Recharts is a second motion system that shares none of these tokens, on purpose.** It
   interpolates SVG attributes in JavaScript, so no stylesheet rule reaches it — a user who asked
   their OS for less motion still got the full 1500ms default on every chart. `chartMotion()`

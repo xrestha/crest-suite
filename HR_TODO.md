@@ -10,6 +10,9 @@ and are not re-asked. Start from the S798.0 index.
 plus a final polish (crest-v390 → v399). Nothing from it is open here; the report and its Resolution
 table are `.impeccable/audit/2026-10-06T00-48-41Z__src-modules-hr.md`.
 
+**S852 whole-product audit (2026-10-21, 13/20): ✅ done** in one release (crest-v467); the report and its Resolution table are `.impeccable/audit/2026-10-20T15-06-02Z__crest-suite-all-modules.md`. Filed from it, not fixed:
+- ⚪ On Modernist Light the installed Crest Staff app's black-translucent status bar draws white text over a light strip (`apple-mobile-web-app-status-bar-style` in index.html; iOS reads it at launch, so it cannot follow the theme). The HR-reachable S852 fixes are filed for hss-suite in `docs/CROSS-REPO.md`.
+
 **Status key:** 🔴 Not started · 🟡 Partial · ✅ Done · 🔵 Deferred · ⚪ Known, open
 
 ---

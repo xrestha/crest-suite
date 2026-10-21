@@ -6,6 +6,10 @@ them sits the S793 load-time backlog (PERF-n), from measuring the module on a sl
 
 **When an item here ships, strike it in the same commit and move it to the CHANGELOG entry.**
 
+**S852 whole-product audit (2026-10-21, 13/20): ✅ done** in one release (crest-v467); the report and its Resolution table are `.impeccable/audit/2026-10-20T15-06-02Z__crest-suite-all-modules.md`. Filed from it, not fixed:
+- ⚪ The live Menu Engineering page colours its quadrants green / purple / amber / red, while the Owner Report's quadrant names are ink since S852. Its scatter chart uses the hue as each quadrant's identity, so this needs a decision, not a sweep.
+- ⚪ `useFoodBeverageSplit` never clears `error` once the card stops asking for data (harmless today).
+
 **Status key:** 🔴 Not started · 🟡 Partial · ✅ Done · 🔵 Deferred · ⚪ Known, open
 
 ---
