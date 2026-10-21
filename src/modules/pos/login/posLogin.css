@@ -39,6 +39,22 @@
     calc(24px + env(safe-area-inset-left, 0px));
 }
 
+/* Their card (S852, TillGate in PosLogin.jsx): the heading centred, the body left-aligned so the
+   numbered steps read as steps. It was a 13px text3 paragraph, centred, with the steps run together. */
+.pos-login-gate { padding: 32px; width: 100%; max-width: 420px; }
+.pos-login-gate__icon { font-size: 32px; margin-bottom: 12px; text-align: center; }
+.pos-login-gate__title {
+  font-size: 17px; font-weight: 700; line-height: 1.3; color: var(--theme-text1);
+  margin: 0 0 16px; text-align: center;
+}
+.pos-login-gate p,
+.pos-login-gate ol { margin: 0 0 12px; font-size: 14px; line-height: 1.6; color: var(--theme-text2); }
+.pos-login-gate ol { padding-left: 22px; }
+.pos-login-gate li + li { margin-top: 6px; }
+.pos-login-gate strong { color: var(--theme-text1); }
+.pos-login-gate .pos-login-gate__help { margin-bottom: 24px; font-size: 13px; }
+.pos-login-gate .btn { width: 100%; justify-content: center; }
+
 /* A name tile and a PIN key. Their hover and press lived in onMouseEnter/Leave/Down/Up, which on a
    tablet fire only after the finger lifts (so the press showed after the tap was over) and left the
    last key tapped tinted, since a touch never sends a mouse-leave. Now the press is :active, the hover

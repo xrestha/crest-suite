@@ -10,6 +10,7 @@ import { listLockedCarts } from '../posLockedCart'
 import { useReleaseReload } from '../../../shared/releaseWatch'
 import { prefetchTillPages } from '../../../shared/prefetchPosPages'
 import ArrivalAlert from '../../../components/ArrivalAlert'
+import SupportContactLine from '../../../components/SupportContactLine'
 import { useGuestOrderAlerts, REPEAT_MS } from '../../../shared/hooks/useGuestOrderAlerts'
 import { guestAlertTitle, guestAlertDetail } from '../../../shared/guestAlertBridge'
 import { playGuestAlert, soundBlocked, unlockAudio } from '../posChime'
@@ -302,44 +303,35 @@ const pinDots = Math.max(4, pin.length)
   // this tablet again in /pos.
   if (deviceDead) {
     return (
-      <main className="pos-login-state">
-        <div className="card" role="alert" style={{ padding: 32, maxWidth: 380, textAlign: 'center' }}>
-          <h1 style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', margin: '0 0 8px' }}>
-            This till needs to be activated again by the Owner
-          </h1>
-          <p style={{ fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6, marginBottom: 24 }}>
-            Its device key no longer works, so staff can't sign in on it. The Owner signs in here with
-            email, opens <strong>POS → Admin → Till Devices</strong>, activates this tablet again, then
-            presses <strong>Sign out and open the PIN screen</strong>. A POS manager can do it only while
-            still signed in on this tablet: a PIN cannot sign in on it now.
-          </p>
-          <button className="btn btn-primary" onClick={() => navigate('/login')}>
-            Owner Login
-          </button>
-        </div>
-      </main>
+      <TillGate
+        alert
+        title="This till needs to be activated again by the Owner"
+        lead="Its device key no longer works, so staff PINs cannot sign in on it."
+        steps={[
+          <>Sign in here with the Owner account (email).</>,
+          <>Open <strong>POS → Admin → Till Devices</strong> and activate this tablet again.</>,
+          <>Press <strong>Sign out and open the PIN screen</strong>.</>,
+        ]}
+        ask="Ask the Owner to do this. A POS manager can do it only while still signed in on this tablet: a PIN cannot sign in on it now."
+        onOwnerLogin={() => navigate('/login')}
+      />
     )
   }
 
   if (!clientId || !deviceSecret) {
     return (
-      <main className="pos-login-state">
-        <div className="card" style={{ padding: 32, maxWidth: 380, textAlign: 'center' }}>
-          <div aria-hidden="true" style={{ fontSize: 32, marginBottom: 12 }}>📱</div>
-          <h1 style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', margin: '0 0 8px' }}>
-            This device isn't set up yet
-          </h1>
-          <p style={{ fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6, marginBottom: 24 }}>
-            Staff PIN login only works on a device the Owner has activated first.
-            Log in with your owner account, open <strong>POS → Admin → Till Devices</strong>, click
-            <strong> Activate</strong>, then <strong>Sign out and open the PIN screen</strong> — this
-            screen will then show your staff.
-          </p>
-          <button className="btn btn-primary" onClick={() => navigate('/login')}>
-            Owner Login
-          </button>
-        </div>
-      </main>
+      <TillGate
+        icon="📱"
+        title="This device is not set up yet"
+        lead="Staff sign in with a PIN only on a tablet the Owner has activated."
+        steps={[
+          <>Sign in with the Owner account.</>,
+          <>Open <strong>POS → Admin → Till Devices</strong> and press <strong>Activate</strong>.</>,
+          <>Press <strong>Sign out and open the PIN screen</strong>. Your staff then show here.</>,
+        ]}
+        ask="Ask the Owner to do this. Staff PINs cannot set up a device."
+        onOwnerLogin={() => navigate('/login')}
+      />
     )
   }
 
@@ -474,7 +466,6 @@ const pinDots = Math.max(4, pin.length)
                 width: 14, height: 14, borderRadius: 0,
                 background: i < pin.length ? 'var(--theme-accent)' : 'var(--theme-border)',
                 transition: 'background 0.15s',
-                boxShadow: i < pin.length ? '0 0 6px var(--theme-accent)' : 'none',
               }} />
             ))}
           </div>
@@ -531,6 +522,26 @@ const pinDots = Math.max(4, pin.length)
         </div>
       )}
     </div>
+    </main>
+  )
+}
+
+// The two "this till cannot sign anyone in" screens: never activated, and a key that was refused
+// (S852). Each was one centred paragraph with the steps run together; now a lead line, the steps in
+// order, who can do them, and Crest's support line for a floor that is stuck. The heading stays
+// centred over a left-aligned body (posLogin.css).
+function TillGate({ alert = false, icon = null, title, lead, steps, ask, onOwnerLogin }) {
+  return (
+    <main className="pos-login-state">
+      <div className="card pos-login-gate" role={alert ? 'alert' : undefined}>
+        {icon && <div aria-hidden="true" className="pos-login-gate__icon">{icon}</div>}
+        <h1 className="pos-login-gate__title">{title}</h1>
+        <p>{lead}</p>
+        <ol>{steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
+        <p>{ask}</p>
+        <p className="pos-login-gate__help">Stuck? Crest support: <SupportContactLine variant="inline" /></p>
+        <button className="btn btn-primary" onClick={onOwnerLogin}>Owner Login</button>
+      </div>
     </main>
   )
 }

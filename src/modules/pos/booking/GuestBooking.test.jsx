@@ -216,3 +216,23 @@ describe('the form (S842)', () => {
   })
 })
 
+
+// ── S852 ─────────────────────────────────────────────────────────────────────────────────────────
+describe('booking switched off (S852)', () => {
+  it('says so in a heading and tells the guest to contact the restaurant, with no Crest line', async () => {
+    mockAnswers.get_booking_page = { data: [], error: null } // no row: booking off, POS off or locked
+    renderPage()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Online booking is off' })).toBeTruthy()
+    expect(screen.getByText('Please contact the restaurant to book a table.')).toBeTruthy()
+    expect(screen.queryByText(/Powered by/)).toBeNull()
+  })
+
+  it('a send refused as closed names the outlet to contact', async () => {
+    mockAnswers.submit_reservation_request = { data: { ok: false, code: 'closed' }, error: null }
+    renderPage()
+    await screen.findByRole('button', { name: 'Request this table' })
+    expect(screen.queryByText(/Powered by/)).toBeNull()
+    fillAndSend()
+    expect(await screen.findByText('Online booking is off for Test Cafe right now. Please contact Test Cafe to book a table.')).toBeTruthy()
+  })
+})

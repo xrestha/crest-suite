@@ -77,9 +77,14 @@ test('a failed customer book read is a failed read, never "no birthdays"', () =>
   expect(screen.queryByText(/No birthdays or anniversaries/)).not.toBeInTheDocument()
 })
 
+// A card type's buttons are on its table row and its phone card (S852); CSS shows one or the other.
+// The table comes first; the delete tests press the phone card's copy, so both are proven wired.
+const typeTableButton = name => screen.getAllByRole('button', { name })[0]
+const typeCard = () => within(screen.getByRole('list', { name: 'Card types' }))
+
 test('switching off a type customers hold says their card discount stops, then switches it off', async () => {
   const { reloads } = renderTab()
-  fireEvent.click(screen.getByRole('button', { name: 'Switch off Gold' }))
+  fireEvent.click(typeTableButton('Switch off Gold'))
   const dialog = await screen.findByRole('dialog', { name: 'Switch off Gold?' })
   expect(dialog).toHaveTextContent('The 1 customer who holds one keeps their card, but while it is switched off the till gives them no card discount.')
   expect(mockState.writes).toEqual([])
@@ -91,7 +96,7 @@ test('switching off a type customers hold says their card discount stops, then s
 
 test('deleting a type customers hold offers to switch it off instead, and deletes nothing', async () => {
   renderTab()
-  fireEvent.click(screen.getByRole('button', { name: 'More for Gold' }))
+  fireEvent.click(typeCard().getByRole('button', { name: 'More for Gold' }))
   fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete…' }))
   const dialog = await screen.findByRole('dialog', { name: 'Gold cannot be deleted' })
   fireEvent.click(within(dialog).getByRole('button', { name: 'Switch it off instead' }))
@@ -102,7 +107,7 @@ test('deleting a type customers hold offers to switch it off instead, and delete
 test('a refused delete names why and offers the switch', async () => {
   mockState.answer = { data: null, error: { code: '23503', hint: 'membership_type_in_use', message: 'membership_type_in_use: customers still hold this membership type' } }
   renderTab({ book: { rows: ROWS.filter(r => r.id !== 'a') } }) // nobody holds it as far as this page knows
-  fireEvent.click(screen.getByRole('button', { name: 'More for Gold' }))
+  fireEvent.click(typeCard().getByRole('button', { name: 'More for Gold' }))
   fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete…' }))
   fireEvent.click(within(await screen.findByRole('dialog', { name: 'Delete the Gold card type?' })).getByRole('button', { name: 'Delete card type' }))
   expect(await screen.findByText(/cannot be deleted and nothing was changed/)).toBeInTheDocument()
@@ -126,6 +131,27 @@ test('the members list has a phone card per member, from the same rows as the ta
   expect(within(cards).getByRole('button', { name: 'Edit Asha Rai' })).toBeInTheDocument()
 })
 
+test('the card types have a phone card per type, with the same buttons as the table', () => {
+  const SILVER = { id: 't2', name: 'Silver', discount_pct: 5, valid_months: null, is_active: false }
+  renderTab({ types: [GOLD, SILVER] })
+  const cards = screen.getByRole('list', { name: 'Card types' })
+  const [gold, silver] = within(cards).getAllByRole('listitem')
+  expect(gold).toHaveTextContent('GoldOn')
+  expect(gold).toHaveTextContent('10% off · lasts 12 months · 1 holder')
+  expect(silver).toHaveTextContent('SilverSwitched off')
+  expect(silver).toHaveTextContent('5% off · never expires · 0 holders')
+  expect(within(gold).getByRole('button', { name: 'Switch off Gold' })).toBeInTheDocument()
+  expect(within(silver).getByRole('button', { name: 'Switch on Silver' })).toBeInTheDocument()
+  expect(within(silver).getByRole('button', { name: 'More for Silver' })).toBeInTheDocument()
+})
+
+test('a supervisor gets the phone cards without their buttons', () => {
+  renderTab({ canManage: false })
+  const cards = screen.getByRole('list', { name: 'Card types' })
+  expect(within(cards).getAllByRole('listitem')).toHaveLength(1)
+  expect(within(cards).queryByRole('button')).not.toBeInTheDocument()
+})
+
 test('a deleted card type hands focus to what happened once its row has gone', async () => {
   const props = {
     book: { rows: ROWS.filter(r => r.id !== 'a'), loading: false, error: null, stale: null },
@@ -134,7 +160,7 @@ test('a deleted card type hands focus to what happened once its row has gone', a
     onCustomerSaved: () => {},
   }
   const { rerender } = render(<MembershipTab {...props} />)
-  const more = screen.getByRole('button', { name: 'More for Gold' })
+  const more = typeTableButton('More for Gold')
   more.focus()
   fireEvent.click(more)
   fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete…' }))

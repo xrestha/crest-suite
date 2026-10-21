@@ -468,7 +468,7 @@ export default function OptionGroups() {
                 <section key={g.id} className="card" aria-labelledby={`grp-${g.id}`} style={{ margin: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
                     <h2 id={`grp-${g.id}`} style={{ margin: 0, fontSize: 16, color: g.is_active ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{g.name}</h2>
-                    <span className="badge-yellow">{KIND_LABEL[g.kind]}</span>
+                    <span className="badge-gray">{KIND_LABEL[g.kind]}</span>
                     {!g.is_active && <span className="badge-gray">Hidden</span>}
                     <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{ruleText({ min: g.min_select, max: g.max_select, included: g.included_count })}</span>
                     <Tip width={260} text={onDishes ? `Offered on: ${dishesForGroup(g.id).map(d => d.name).join(', ')}` : 'Not on any dish yet, so nothing offers it. Use “Put it on dishes”.'}>
@@ -544,7 +544,7 @@ export default function OptionGroups() {
                               <td>
                                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                                   {o.is_removal && <span className="badge-gray">Takes off</span>}
-                                  {o.is_default && <span className="badge-yellow">Pre-selected</span>}
+                                  {o.is_default && <span className="badge-gray">Pre-selected</span>}
                                   {!o.is_active && <span className="badge-gray">Hidden</span>}
                                 </div>
                               </td>
@@ -614,7 +614,7 @@ export default function OptionGroups() {
                           <span style={{ whiteSpace: 'nowrap', fontWeight: 500 }}>{d.name}</span>
                           {byoSet.has(d.id) && (
                             <Tip width={260} text="Build-your-own: the till always opens this dish's choices, and the QR menu walks them one step at a time." style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: 6 }}>
-                              <span className="badge-yellow">Build-your-own</span>
+                              <span className="badge-gray">Build-your-own</span>
                             </Tip>
                           )}
                           <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>
@@ -625,7 +625,7 @@ export default function OptionGroups() {
                         <td>
                           {attached.length ? (
                             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                              {attached.map(a => <span key={a.id} className="badge-yellow">{groupNameById.get(a.group_id) || '—'}</span>)}
+                              {attached.map(a => <span key={a.id} className="badge-gray">{groupNameById.get(a.group_id) || '—'}</span>)}
                             </div>
                           ) : byoSet.has(d.id) ? (
                             <span style={{ fontSize: 12, color: 'var(--theme-amber-text)' }}>△ Build-your-own, but it offers nothing to build. Add choices or use the template.</span>

@@ -126,8 +126,25 @@ describe('a login left signed in on the tablet (S809 ACCESS-1)', () => {
     localStorage.removeItem('pos_device_secret')
     mockAuth.session = { user: { id: 'owner' } }
     renderPin()
-    expect(await screen.findByText(/isn't set up yet/)).toBeTruthy()
+    expect(await screen.findByRole('heading', { level: 1, name: 'This device is not set up yet' })).toBeTruthy()
     expect(mockAuth.signOut).not.toHaveBeenCalled()
+  })
+
+  // S852: the steps in order, who can do them, and where to get help, not one run-on paragraph.
+  it('says how to set the tablet up as numbered steps, who can do it, and who to ask', async () => {
+    localStorage.removeItem('pos_device_client_id')
+    localStorage.removeItem('pos_device_secret')
+    renderPin()
+    await screen.findByRole('heading', { level: 1, name: 'This device is not set up yet' })
+    const steps = within(screen.getByRole('list')).getAllByRole('listitem').map(li => li.textContent)
+    expect(steps).toEqual([
+      'Sign in with the Owner account.',
+      'Open POS → Admin → Till Devices and press Activate.',
+      'Press Sign out and open the PIN screen. Your staff then show here.',
+    ])
+    expect(screen.getByText('Ask the Owner to do this. Staff PINs cannot set up a device.')).toBeTruthy()
+    expect(screen.getByText(/Crest support:/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Owner Login' })).toBeTruthy()
   })
 
   it('signs nobody out when nobody is signed in', async () => {

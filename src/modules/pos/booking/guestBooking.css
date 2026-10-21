@@ -251,11 +251,11 @@
 .gb-summary { margin: 14px 0 0; padding: 12px; border: 1px solid var(--theme-border-lt); background: var(--theme-bg); font-size: 14px; color: var(--theme-text1); line-height: 1.6; }
 
 .gb-empty { padding: 64px 0; color: var(--theme-text2); font-size: 15px; line-height: 1.6; }
-/* The failed-load card (S842), the guest menu's .gm-state shape: a heading, a sentence, Try again. */
+/* The failed-load card (S842), the guest menu's .gm-state shape: a heading, a sentence, Try again.
+   Booking switched off takes it too (S852), without the button. */
 .gb-state { padding-top: 64px; }
 .gb-state-title { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.25; color: var(--theme-text1); }
 .gb-state-text { margin: 8px 0 20px; font-size: 15px; line-height: 1.5; color: var(--theme-text2); }
-.gb-foot { font-size: 12px; color: var(--theme-text3); margin-top: 24px; }
 
 @media (prefers-reduced-motion: no-preference) {
   .gb-status { animation: gb-in var(--motion-slow, 260ms) var(--ease-entrance, cubic-bezier(0.16,1,0.3,1)); }

@@ -115,6 +115,33 @@ const MemberCards = memo(function MemberCards({ rows, typesById, todayIso, onEdi
   )
 })
 
+// The card types on a phone (S852, as MemberCards): the table is six columns wide with Switch off and
+// the ⋯ in the last, which ran past a phone's edge. One card per type from the same `types`, and the
+// same buttons (`actionsFor`, null for a login that cannot change types). A handful of rows, so no memo.
+function TypeCards({ types, holdersByType, bookError, actionsFor }) {
+  return (
+    <ul className="phone-cards phone-only phone-cards--no-fab" aria-label="Card types">
+      {types.map(t => {
+        const holding = holdersByType[t.id] || 0
+        return (
+          <li key={t.id} className="phone-card">
+            <div className="phone-card__top">
+              <span className="phone-card__title">{t.name}</span>
+              {t.is_active ? <span className="badge-green">On</span> : <span className="badge-gray">Switched off</span>}
+            </div>
+            <div className="phone-card__meta">
+              <span style={{ whiteSpace: 'nowrap' }}>{pctText(t.discount_pct)}% off</span>
+              {' · '}{t.valid_months ? `lasts ${t.valid_months} month${t.valid_months === 1 ? '' : 's'}` : 'never expires'}
+              {!bookError && <> · {holding} holder{holding === 1 ? '' : 's'}</>}
+            </div>
+            {actionsFor && <div className="phone-card__actions">{actionsFor(t)}</div>}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 // Add or change a card type. Writes nothing until Save; the tab asks first when a changed discount
 // reaches customers who already hold the card.
 function TypeModal({ type, types, holding = 0, onClose, onSave }) {
@@ -367,6 +394,20 @@ export default function MembershipTab({ book, typesState, canManage = false, onC
   }
 
   // ── Render ──
+  // A type's buttons, for the table and the phone list alike.
+  const typeActions = t => (
+    <>
+      {t.is_active
+        ? <button type="button" className="btn btn-ghost" onClick={() => { setMsg(null); askSwitchOff(t) }} aria-label={`Switch off ${t.name}`}>Switch off</button>
+        : <button type="button" className="btn btn-ghost" onClick={() => setActive(t, true)} aria-label={`Switch on ${t.name}`}>Switch on</button>}
+      <RowMenu label={`More for ${t.name}`} items={[
+        { key: 'edit', label: 'Change name, discount or length…', onSelect: () => { setMsg(null); setTypeDialog({ type: t }) } },
+        '-',
+        { key: 'delete', label: 'Delete…', danger: true, onSelect: () => askDelete(t) },
+      ]} />
+    </>
+  )
+
   const typeSection = (
     <div className="card" style={{ marginBottom: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
@@ -393,45 +434,39 @@ export default function MembershipTab({ book, typesState, canManage = false, onC
               No card types yet.{canManage ? ' Add one to start giving membership cards.' : ' A POS manager or the Owner adds them.'}
             </p>
           ) : (
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Card type</th>
-                    <th style={{ textAlign: 'right' }}>Discount</th>
-                    <th><Tip text="How long a card lasts from the day it is given. Changing it does not change cards already given." width={260}>Lasts</Tip></th>
-                    <th style={{ textAlign: 'right' }}><Tip text="Customers holding this card now, from the customer book on this page." width={240}>Holders</Tip></th>
-                    <th><Tip text="Only a switched-on type can be given, and only its holders get its discount at the till." width={260}>Status</Tip></th>
-                    {canManage && <th><span className="sr-only">Actions</span></th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {types.map(t => (
-                    <tr key={t.id}>
-                      <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{t.name}</td>
-                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{pctText(t.discount_pct)}%</td>
-                      <td style={{ whiteSpace: 'nowrap' }}>{t.valid_months ? `${t.valid_months} month${t.valid_months === 1 ? '' : 's'}` : 'Never expires'}</td>
-                      <td style={{ textAlign: 'right' }}>{bookError ? '—' : (holdersByType[t.id] || 0)}</td>
-                      <td>{t.is_active ? <span className="badge-green">On</span> : <span className="badge-gray">Switched off</span>}</td>
-                      {canManage && (
-                        <td style={{ textAlign: 'right' }}>
-                          <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-                            {t.is_active
-                              ? <button type="button" className="btn btn-ghost" onClick={() => { setMsg(null); askSwitchOff(t) }} aria-label={`Switch off ${t.name}`}>Switch off</button>
-                              : <button type="button" className="btn btn-ghost" onClick={() => setActive(t, true)} aria-label={`Switch on ${t.name}`}>Switch on</button>}
-                            <RowMenu label={`More for ${t.name}`} items={[
-                              { key: 'edit', label: 'Change name, discount or length…', onSelect: () => { setMsg(null); setTypeDialog({ type: t }) } },
-                              '-',
-                              { key: 'delete', label: 'Delete…', danger: true, onSelect: () => askDelete(t) },
-                            ]} />
-                          </span>
-                        </td>
-                      )}
+            <>
+              <div className="table-wrap phone-hide">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Card type</th>
+                      <th style={{ textAlign: 'right' }}>Discount</th>
+                      <th><Tip text="How long a card lasts from the day it is given. Changing it does not change cards already given." width={260}>Lasts</Tip></th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Customers holding this card now, from the customer book on this page." width={240}>Holders</Tip></th>
+                      <th><Tip text="Only a switched-on type can be given, and only its holders get its discount at the till." width={260}>Status</Tip></th>
+                      {canManage && <th><span className="sr-only">Actions</span></th>}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {types.map(t => (
+                      <tr key={t.id}>
+                        <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{t.name}</td>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{pctText(t.discount_pct)}%</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>{t.valid_months ? `${t.valid_months} month${t.valid_months === 1 ? '' : 's'}` : 'Never expires'}</td>
+                        <td style={{ textAlign: 'right' }}>{bookError ? '—' : (holdersByType[t.id] || 0)}</td>
+                        <td>{t.is_active ? <span className="badge-green">On</span> : <span className="badge-gray">Switched off</span>}</td>
+                        {canManage && (
+                          <td style={{ textAlign: 'right' }}>
+                            <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>{typeActions(t)}</span>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <TypeCards types={types} holdersByType={holdersByType} bookError={bookError} actionsFor={canManage ? typeActions : null} />
+            </>
           )}
         </>
       )}

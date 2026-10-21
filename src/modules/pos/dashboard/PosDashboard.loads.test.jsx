@@ -27,6 +27,10 @@ function mockBuilder(table, cols) {
 jest.mock('../../../shared/hooks/useScopedDb', () => ({
   useScopedDb: () => ({ scopedFrom: (table, cols) => mockBuilder(table, cols) }),
 }))
+// The outlet's VAT registration (settings, raw supabase.from) rides in the floor reads.
+jest.mock('../../../supabaseClient', () => ({
+  supabase: { from: table => ({ select: cols => mockBuilder(table, cols) }) },
+}))
 jest.mock('../../../context/AuthContext', () => ({
   useAuth: () => ({
     hasPosAccess: () => true, profile: { id: 'p1', clients: { name: 'Test Outlet' } }, isAdmin: false,
@@ -75,4 +79,8 @@ test("today's lines and Split legs come with the bills, in one round trip", asyn
   // Last week's bills carry neither: nothing on the page reads their lines or legs.
   const lastWeek = mockCalls.filter(c => c.table === 'pos_orders' && c.cols.includes('close_type') && !c.cols.includes('pos_order_items('))
   expect(lastWeek.length).toBeGreaterThan(0)
+  // The open bills carry each line's VAT and comp mark, and the VAT setting comes in the same wave.
+  const open = mockCalls.find(c => c.table === 'pos_orders' && !c.cols.includes('close_type'))
+  expect(open.cols).toContain('pos_order_items(qty, unit_price, vat_rate, comped)')
+  expect(mockCalls.some(c => c.table === 'settings' && c.cols === 'is_vat_registered')).toBe(true)
 })

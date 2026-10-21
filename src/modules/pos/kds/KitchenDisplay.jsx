@@ -153,9 +153,10 @@ const READY_VISIBLE_MS = 10 * 60 * 1000
 // for it. One stalled request on kitchen Wi-Fi froze that ticket's button until the page was reloaded.
 const KDS_READ_MS = 15000
 const KDS_TAP_MS = 15000
-// S846: how long after a one-tap Start another Start is ignored (see startNow). A double tap lands well
-// inside it; a cook starting two tickets on purpose moves a hand between them, which takes longer.
-const START_SETTLE_MS = 500
+// S846 for Start, S852 for the rest: how long after a one-tap move (Start, Ready, Served, Seen, Clear)
+// another one is ignored, on any card (see moveSettled). A double tap lands well inside it; a cook
+// moving two tickets on purpose moves a hand between them, which takes longer.
+const MOVE_SETTLE_MS = 500
 // Elapsed-time flag thresholds, matching the "flag the outlier" pattern used elsewhere in POS
 // (Sales Exceptions, KOT Reconciliation) — a ticket sitting too long gets visually called out.
 const WARN_MS = KDS_WARN_MS
@@ -582,15 +583,24 @@ export default function KitchenDisplay() {
   //
   // A double tap. The popup used to take the second tap; now nothing sits between the finger and the
   // board. A second tap on the SAME card does nothing: advance() refuses a ticket already in
-  // `advancing`, and the button is disabled ("…") until the write answers. But the card leaves New the
-  // moment it is tapped, so the next ticket's Start can slide up under the same finger: a Start within
-  // START_SETTLE_MS of the last one is ignored, on any card.
-  const lastStartAt = useRef(0)
-  function startNow(ticket) {
+  // `advancing`, and the button is disabled ("…") until the write answers. But the card leaves its
+  // column the moment it is tapped, so the next ticket's button can slide up under the same finger: a
+  // second Ready or Served lands on the next card as a second Start did (S852; it was Start only). So
+  // any one-tap move within MOVE_SETTLE_MS of the last one is ignored, on any card. The popup's own
+  // Start (confirmStart) is a deliberate second step and is not held.
+  const lastMoveAt = useRef(0)
+  function moveSettled() {
     const at = Date.now()
-    if (at - lastStartAt.current < START_SETTLE_MS) return
-    lastStartAt.current = at
-    advance(ticket, 'in_progress', DEFAULT_START_MINUTES)
+    if (at - lastMoveAt.current < MOVE_SETTLE_MS) return false
+    lastMoveAt.current = at
+    return true
+  }
+  function startNow(ticket) {
+    if (moveSettled()) advance(ticket, 'in_progress', DEFAULT_START_MINUTES)
+  }
+  // The card's other one-tap moves: Ready, Served, a CHANGE card's Seen, a pulled ticket's Clear.
+  function settledAdvance(ticket, nextStatus) {
+    if (moveSettled()) advance(ticket, nextStatus)
   }
   function requestEstimate(ticket) { setEstimateTicket(ticket) }
   function confirmStart(minutes) {
@@ -837,7 +847,7 @@ export default function KitchenDisplay() {
                   ))}
                   {colTickets.map(t => (
                     <TicketCard
-                      key={t.id} ticket={t} now={now} onAdvance={advance} onStart={startNow} onRequestEstimate={requestEstimate}
+                      key={t.id} ticket={t} now={now} onAdvance={settledAdvance} onStart={startNow} onRequestEstimate={requestEstimate}
                       action={col.action} next={col.next} isStartAction={col.status === 'new'} advancing={advancing.has(t.id)}
                     />
                   ))}

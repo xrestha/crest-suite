@@ -38,7 +38,7 @@ const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
 function refusalCopy(code, outlet, maxParty, lead) {
   const who = outlet || 'them'
   switch (code) {
-    case 'closed':   return `Online booking isn't available for ${who} right now. Please call or message directly.`
+    case 'closed':   return `Online booking is off for ${who} right now. Please contact ${who} to book a table.`
     case 'name':     return 'Please tell us your name.'
     case 'phone':    return 'Please enter a 10-digit mobile number.'
     case 'party':    return `Online bookings are for 1 to ${maxParty} guests. For a bigger group, please call or message ${who}.`
@@ -433,16 +433,22 @@ export default function GuestBooking() {
           {statusStale && <p className="gb-alert gb-alert--stale" style={{ marginTop: 12 }}>{STALE_TEXT}</p>}
           <button type="button" className="gb-linkbtn" onClick={bookAnother}>Make another booking</button>
         </div>
-        <p className="gb-foot">Powered by Crest POS</p>
       </BookingShell>
     )
   }
 
+  // Booking switched off, POS off, the account locked or a wrong link: get_booking_page answers no
+  // row for each, so there is no name or phone to show (S852, owner decision: words only). The
+  // failed-load card's shape, a heading and what to do. Neither state says Crest: the outlet page
+  // carries the outlet only, as the guest menu does.
   if (page === false) {
     return (
-      <BookingShell announcement={announcement}><div className="gb-empty">
-        Online booking isn't available here right now. Please call or message directly.
-      </div></BookingShell>
+      <BookingShell announcement={announcement}>
+        <div className="gb-state">
+          <h1 className="gb-state-title">Online booking is off</h1>
+          <p className="gb-state-text">Please contact the restaurant to book a table.</p>
+        </div>
+      </BookingShell>
     )
   }
 
@@ -566,7 +572,6 @@ export default function GuestBooking() {
           Your name and number go only to {outletName}, to confirm this booking. <a href="/legal/privacy" target="_blank" rel="noreferrer">Privacy</a>.
         </p>
       </form>
-      <p className="gb-foot">Powered by Crest POS</p>
     </BookingShell>
   )
 }

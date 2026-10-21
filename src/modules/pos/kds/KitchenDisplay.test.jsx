@@ -83,6 +83,12 @@ const servedAsks = () => mockUpdates.filter(p => p.status === 'served').length
 const okButton = () => screen.queryByRole('button', { name: /OK, take the voided ticket for Table 7/ })
 
 const renderBoard = () => render(<MemoryRouter><KitchenDisplay /></MemoryRouter>)
+// A tap, and the board's write and state updates after it: a few promise turns inside act, the
+// useBillQr.test.js flush, so the fake clock never moves (the settle window is measured on it).
+async function tap(button) {
+  fireEvent.click(button)
+  await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve() })
+}
 // S846: Start on a New ticket starts it at the default estimate in one tap; its name says so.
 const START = /^Start .+ with a 10-minute estimate$/
 
@@ -227,7 +233,7 @@ describe('one-tap Start', () => {
     expect(start).not.toHaveClass('btn-primary')
     expect(start).toHaveClass('till-hit--row')
 
-    await act(async () => { fireEvent.click(start) })
+    await tap(start)
     expect(startsSent()).toHaveLength(1)
     expect(startsSent()[0]).toMatchObject({ status: 'in_progress', estimated_prep_minutes: 10, status_updated_by: 'u1' })
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -247,7 +253,7 @@ describe('one-tap Start', () => {
     fireEvent.click(other)
     const dialog = screen.getByRole('dialog', { name: 'Estimated Prep Time' })
     expect(mockUpdates).toHaveLength(0)
-    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Start · 15m' })) })
+    await tap(within(dialog).getByRole('button', { name: 'Start · 15m' }))
     expect(startsSent()).toEqual([expect.objectContaining({ status: 'in_progress', estimated_prep_minutes: 15 })])
     expect(screen.queryByRole('dialog')).toBeNull()
   })
@@ -257,13 +263,13 @@ describe('one-tap Start', () => {
     mockTicketAnswer = () => ({ data: [ticket('t1', 'KOT', 'Table 5'), ticket('t2', 'KOT', 'Table 6')], error: null })
     renderBoard()
     const first = await screen.findByRole('button', { name: /^Start Table 5 #12/ })
-    await act(async () => { fireEvent.click(first) })
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Start Table 6 #12/ })) })
+    await tap(first)
+    await tap(screen.getByRole('button', { name: /^Start Table 6 #12/ }))
     expect(startsSent()).toHaveLength(1)
 
     // A cook starting the next ticket on purpose, a moment later, is not held up.
     await act(async () => { jest.advanceTimersByTime(600) })
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Start Table 6 #12/ })) })
+    await tap(screen.getByRole('button', { name: /^Start Table 6 #12/ }))
     expect(startsSent()).toHaveLength(2)
   })
 
@@ -274,5 +280,41 @@ describe('one-tap Start', () => {
     expect(await screen.findByRole('button', { name: 'Seen' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Other time/ })).toBeNull()
     expect(screen.queryByRole('button', { name: START })).toBeNull()
+  })
+})
+
+// S852: Ready and Served move a card out of its column as Start does, so the same settle holds them.
+describe('a one-tap move settles the next', () => {
+  test('a double tap on Ready moves one ticket, even when the next card slides up under the second tap', async () => {
+    jest.useFakeTimers()
+    const at = new Date().toISOString()
+    const cooking = id => ({ ...ticket(id, 'KOT', `Table ${id}`), status: 'in_progress', started_at: at, estimated_prep_minutes: 10 })
+    mockTicketAnswer = () => ({ data: [cooking('5'), cooking('6')], error: null })
+    renderBoard()
+    const readyAsks = () => mockUpdates.filter(p => p.status === 'ready')
+    await screen.findAllByRole('button', { name: 'Ready' })
+    await tap(screen.getAllByRole('button', { name: 'Ready' })[0])
+    await tap(screen.getByRole('button', { name: 'Ready' }))
+    expect(readyAsks()).toHaveLength(1)
+
+    await act(async () => { jest.advanceTimersByTime(600) })
+    await tap(screen.getByRole('button', { name: 'Ready' }))
+    expect(readyAsks()).toHaveLength(2)
+  })
+
+  test('a double tap on Served serves one ticket, even when the next card slides up under the second tap', async () => {
+    jest.useFakeTimers()
+    const at = new Date().toISOString()
+    const ready = id => ({ ...ticket(id, 'KOT', `Table ${id}`), status: 'ready', started_at: at, ready_at: at })
+    mockTicketAnswer = () => ({ data: [ready('5'), ready('6')], error: null })
+    renderBoard()
+    await screen.findAllByRole('button', { name: 'Served' })
+    await tap(screen.getAllByRole('button', { name: 'Served' })[0])
+    await tap(screen.getByRole('button', { name: 'Served' }))
+    expect(servedAsks()).toBe(1)
+
+    await act(async () => { jest.advanceTimersByTime(600) })
+    await tap(screen.getByRole('button', { name: 'Served' }))
+    expect(servedAsks()).toBe(2)
   })
 })

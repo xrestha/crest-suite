@@ -19,7 +19,7 @@ import { FLOOR_STATUSES, isDue, tableIdsOf, stampFor, windowOf, bookingToSeatOnT
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from '../reservations/reservationSettings'
 import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK } from './posRecipeBook'
 import { readHscMap, staffNameFor } from './billReprintData'
-import { noteImsMiss, pruneImsMisses, outletHasIms } from './posImsWaiting'
+import { noteImsMiss, pruneImsMisses, outletHasIms, countPhrase } from './posImsWaiting'
 import { buildDynamicQr } from '../../../utils/emvQr'
 import { randomUUID } from '../../../utils/uuid'
 import Modal from '../../../components/Modal'
@@ -45,6 +45,7 @@ import {
   swapComboDish, picksOfCombo, collapseCombosForMove, expandComboPicks, guestLineOf, guestRequestText, comboSharesOf,
 } from './comboCart'
 import { computeOrderAmounts, discountableSubtotal, isComboItem } from '../../../utils/posBillingMath'
+import { openBillTotal } from '../dashboard/posDashboardMath'
 import { loadOptionCatalog } from '../../customization/customizationData'
 import { groupsForDish, describeSelection, defaultSelection, selectionProblems } from '../../../shared/optionPricing'
 import { lineChoiceTrouble, choiceRefusalText, savedLineGoneNote } from './choiceRefusal'
@@ -157,6 +158,10 @@ const sameJson = v => JSON.stringify(v)
 // S842: how long after a cart line is removed the cart's − and × ignore a press. Removing a line moves
 // the lines below it up under the finger, so the second tap of a double tap landed on the next dish.
 const CART_REMOVE_GUARD_MS = 400
+
+// The fade of a disabled inline-styled till control: `.btn:disabled`'s 0.55 (Layout.css), so a till-hit
+// button that is off reads exactly like a `.btn` that is off.
+const DISABLED_FADE = 0.55
 
 // S809 ORDER-FLOW-7 (3f): the offline upload running on this page, whichever order screen started it.
 // Module-level, not a ref: the screen remounts (Orders ↔ Billing) while an upload runs, the unmounted
@@ -621,6 +626,8 @@ export default function PosOrders({ billingStation = false } = {}) {
   // { units, lines, where } while the ask is open.
   const [sendPrompt, setSendPrompt] = useState(null)
   const [floorMsg,        setFloorMsg]        = useState('') // transient floor-view banner (e.g. blocked-table message)
+  // The floor notices behind their one summary line (two or more at once, after an outage): shown or not.
+  const [floorNoticesOpen, setFloorNoticesOpen] = useState(false)
   // The till notice (TillNotice.jsx, 2026-10-15 audit): a refusal that stands until ✕, in every view and
   // above any dialog. `id` moves with each notice, so the same words raised again are announced again,
   // and a newer notice replaces the older one.
@@ -1631,7 +1638,8 @@ export default function PosOrders({ billingStation = false } = {}) {
     return {
       orderId:   q.order_id,
       itemCount: q.items.reduce((s, i) => s + i.qty, 0),
-      total:     q.items.reduce((s, i) => s + i.qty * i.unit_price * (1 + (vatReg ? (i.vat_rate ?? 0) : 0)), 0),
+      // A queued save's lines are the cart's, and a cart line is never comped (foldCompedSplits).
+      total:     openBillTotal(q.items, vatReg),
       covers:    q.covers,
       pending:   q.items.filter(i => !i.sent_to_kot).length,
       offlinePending: true,
@@ -1715,7 +1723,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const [tblRes, ordRes, joinRes, { count: unposted, error: unpostedErr }, { count: notesWaiting, error: notesErr }] = await Promise.all([
       scopedFrom('pos_tables')
         .order('sort_order').order('name'),
-      scopedFrom('pos_orders', 'id, order_no, table_id, table_name, covers, opened_at, part_of_order_id, pos_order_items(qty, unit_price, vat_rate, sent_to_kot)')
+      scopedFrom('pos_orders', 'id, order_no, table_id, table_name, covers, opened_at, part_of_order_id, pos_order_items(qty, unit_price, vat_rate, sent_to_kot, comped)')
         .eq('status', 'open'),
       // S836: tables joined to another table's bill. A handful of rows, one per joined table.
       scopedFrom('pos_table_joins', 'table_id, order_id'),
@@ -1768,7 +1776,11 @@ export default function PosOrders({ billingStation = false } = {}) {
         orderId:   o.id,
         openedAt:  o.opened_at || null,
         itemCount: items.reduce((s, i) => s + i.qty, 0),
-        total:     items.reduce((s, i) => s + i.qty * i.unit_price * (1 + (vatReg ? (i.vat_rate ?? 0) : 0)), 0),
+        // What the guest will pay (owner decision): VAT included, free dishes left out, before any
+        // discount. The POS Dashboard's Open bills figure is the same sum (openBillTotal). A comp is
+        // written only as a bill closes, so a comped row here is a close in flight, or one a cancelled
+        // close left (foldCompedSplits puts that back into its line on the order screen).
+        total:     openBillTotal(items, vatReg),
         covers:    o.covers,
         pending:   items.filter(i => !i.sent_to_kot).length,
       }
@@ -7108,17 +7120,20 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                   onClick={() => setCatTab(c)} style={{ flexShrink: 0 }}>{c}</button>
               ))}
             </div>
+            {/* It grows into the room the chips leave and never shrinks below its basis (the chips
+                scroll instead): a 128px sliver on a phone was too short for a dish name. On a phone
+                it is 16px, so iOS does not zoom the till on focus. */}
             <input
               type="text"
-              aria-label="Search menu by name or code"
+              aria-label="Search the menu by dish name or code"
               className="till-hit--row"
-              placeholder="🔍 Search name or code…"
+              placeholder="Search dishes or code…"
               value={menuSearch}
               onChange={e => setMenuSearch(e.target.value)}
               style={{
-                marginLeft: 'auto', flexShrink: 0, width: narrowTill ? 128 : 160,
+                marginLeft: 'auto', flex: `1 0 ${narrowTill ? 180 : 160}px`, maxWidth: narrowTill ? 'none' : 240,
                 background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
-                borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: 12,
+                borderRadius: 'var(--radius-sm)', padding: '6px 10px', fontSize: narrowTill ? 16 : 12,
                 color: 'var(--theme-text1)', outline: 'none',
               }}
             />
@@ -7409,9 +7424,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                       style={{
                         width: '100%', padding: '12px 0', fontSize: 16, justifyContent: 'center', display: 'flex',
                         fontWeight: 700, borderColor: 'var(--theme-text2)',
-                        // Same disabled treatment as the KOT/BOT ticket-btn class (opacity 0.5) — this
-                        // button uses inline styles instead of that class, so it needs its own dimming.
-                        opacity: saving ? 0.5 : payDisabled ? 0.6 : 1,
+                        // The fade is the class's: `.btn:disabled` while saving, `.btn[aria-disabled]` while blocked.
                         cursor: payDisabled ? 'default' : 'pointer',
                       }}
                       onClick={() => {
@@ -7891,14 +7904,14 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                         {/* S841: the discount type was shown by colour alone; aria-pressed and a spoken name. */}
                         <span role="group" aria-label="Discount type" style={{ display: 'flex', gap: 8 }}>
                         <button type="button" className="till-hit" aria-pressed={discountMode === 'amount'} aria-label="Discount in rupees" onClick={() => setDiscountMode('amount')} disabled={tendersLocked} style={{
-                          padding: '7px 12px', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: tendersLocked ? 'not-allowed' : 'pointer', opacity: tendersLocked ? 0.5 : 1,
+                          padding: '7px 12px', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: tendersLocked ? 'not-allowed' : 'pointer', opacity: tendersLocked ? DISABLED_FADE : 1,
                           fontWeight: discountMode === 'amount' ? 700 : 400,
                           background: discountMode === 'amount' ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
                           color: discountMode === 'amount' ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
                           border: `1px solid ${discountMode === 'amount' ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
                         }}>₨</button>
                         <button type="button" className="till-hit" aria-pressed={discountMode === 'percent'} aria-label="Discount in percent" onClick={() => setDiscountMode('percent')} disabled={tendersLocked} style={{
-                          padding: '7px 12px', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: tendersLocked ? 'not-allowed' : 'pointer', opacity: tendersLocked ? 0.5 : 1,
+                          padding: '7px 12px', borderRadius: 'var(--radius-sm)', fontSize: 13, cursor: tendersLocked ? 'not-allowed' : 'pointer', opacity: tendersLocked ? DISABLED_FADE : 1,
                           fontWeight: discountMode === 'percent' ? 700 : 400,
                           background: discountMode === 'percent' ? 'var(--theme-accent)' : 'var(--theme-input-bg)',
                           color: discountMode === 'percent' ? 'var(--theme-accent-text)' : 'var(--theme-text2)',
@@ -8074,12 +8087,12 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                                     <button type="button" className="till-hit" onClick={() => setQty(compQty - 1)} disabled={compQty <= 0 || tendersLocked}
                                       aria-label={`Comp one fewer ${i.name}`}
                                       title={tendersLocked ? tendersLockHint : undefined}
-                                      style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 0, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty <= 0 || tendersLocked ? 'not-allowed' : 'pointer', opacity: compQty <= 0 || tendersLocked ? 0.4 : 1 }}>−</button>
+                                      style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 0, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty <= 0 || tendersLocked ? 'not-allowed' : 'pointer', opacity: compQty <= 0 || tendersLocked ? DISABLED_FADE : 1 }}>−</button>
                                     <span style={{ minWidth: 14, textAlign: 'center' }}>{compQty}</span>
                                     <button type="button" className="till-hit" onClick={() => setQty(compQty + 1)} disabled={compQty >= i.qty || tendersLocked}
                                       aria-label={`Comp one more ${i.name}`}
                                       title={tendersLocked ? tendersLockHint : undefined}
-                                      style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 0, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty >= i.qty || tendersLocked ? 'not-allowed' : 'pointer', opacity: compQty >= i.qty || tendersLocked ? 0.4 : 1 }}>+</button>
+                                      style={{ width: 20, height: 20, lineHeight: '18px', padding: 0, borderRadius: 0, border: '1px solid var(--theme-border)', background: 'var(--theme-input-bg)', color: 'var(--theme-text2)', cursor: compQty >= i.qty || tendersLocked ? 'not-allowed' : 'pointer', opacity: compQty >= i.qty || tendersLocked ? DISABLED_FADE : 1 }}>+</button>
                                     <span style={{ fontSize: 10, minWidth: 44 }}>{comped ? `/${i.qty} comped` : 'comped'}</span>
                                   </div>
                                 </div>
@@ -8398,6 +8411,30 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
 
   /* ══════════════════════════════════════════ FLOOR VIEW */
 
+  // The floor notices that fold behind one summary line when two or more stand at once (S852), each as
+  // the line names it: the ones the cashier must act on first (an order not applied, an upload the
+  // server keeps refusing, a write that did not save, points that did not land), then the ones that
+  // only report. Each condition is its banner's own render condition below.
+  const imsWaitingBills = Math.max(unpostedCount, imsMisses.length)
+  const countOf = (n, one, many) => `${n} ${n === 1 ? one : many}`
+  const floorNotices = [
+    conflictOrders.length > 0 && countOf(conflictOrders.length, 'offline order not applied', 'offline orders not applied'),
+    isOnline && !linkDown && uploadTrouble.length > 0 && countOf(uploadTrouble.length, 'upload problem', 'upload problems'),
+    writeWarnings.length > 0 && countOf(writeWarnings.length, 'thing did not save', 'things did not save'),
+    loyaltyNote && !loyaltyNote.ok && '1 loyalty points problem',
+    canSeeImsPosting && (imsWaitingBills > 0 || unpostedNotes > 0) && `${countPhrase(imsWaitingBills, unpostedNotes)} not in Inventory yet`,
+    !syncingOffline && isOnline && !linkDown && waitingUploads > 0 && countOf(waitingUploads, 'order change waiting to upload', 'order changes waiting to upload'),
+    syncingOffline && !linkDown && `${countOf(pendingOrderIds.size, 'order', 'orders')} syncing`,
+    foreignQueued > 0 && countOf(foreignQueued, 'offline order for another outlet', 'offline orders for another outlet'),
+    loyaltyNote?.ok && '1 points note',
+  ].filter(Boolean)
+  // Down to one, the fold has nothing to hide, so the next pile-up starts folded again. Set during
+  // render on purpose (React re-renders at once, before anything is drawn): it flips only then.
+  if (floorNoticesOpen && floorNotices.length < 2) setFloorNoticesOpen(false)
+  const noticesFolded = floorNotices.length >= 2 && !floorNoticesOpen
+  // The summary takes the loudest colour it stands for: red while an offline order was not applied.
+  const noticeTone = conflictOrders.length > 0 ? 'red' : 'amber'
+
   return (
     <>
     {/* ── Covers modal ── */}
@@ -8612,34 +8649,6 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           <SupportContactLine variant="inline" />
         </div>
       )}
-      {syncingOffline && !linkDown && (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-green-text)' }}>
-          ⟳ Syncing {pendingOrderIds.size} {pendingOrderIds.size === 1 ? 'order' : 'orders'}…
-        </div>
-      )}
-      {/* S809 3f: kept on this till while the browser says online — the internet was down, or an upload
-          has yet to run. The upload retries by itself every 15 s; the button is for not waiting. */}
-      {!syncingOffline && isOnline && !linkDown && waitingUploads > 0 && (
-        <div role="status" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber-text)' }}>
-          <span>{waitingUploads} {waitingUploads === 1 ? 'order change is' : 'order changes are'} kept on this till and not uploaded yet — they upload by themselves.</span>
-          <Tip text="Sends the orders and kitchen tickets this till kept while the internet was down to the server now, instead of waiting for the next automatic try.">
-            <button type="button" className="btn btn-ghost btn-sm till-hit--row" style={{ marginLeft: 'auto', flexShrink: 0 }}
-              onClick={() => flushPosOrderQueue()}>Upload now</button>
-          </Tip>
-        </div>
-      )}
-      {/* S833 (B3): an entry kept try after try for a reason other than the connection says why. */}
-      {isOnline && !linkDown && uploadTrouble.length > 0 && (
-        <div role="alert" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, color: 'var(--theme-amber-text)' }}>
-          {uploadTrouble.map(t => <span key={t.orderId}>⚠ {uploadTroubleText(t)}</span>)}
-        </div>
-      )}
-      {/* ORDER-FLOW-15: another outlet's offline orders on this device are left for that outlet. */}
-      {foreignQueued > 0 && (
-        <div role="status" style={{ marginBottom: 16, fontSize: 13, color: 'var(--theme-text2)' }}>
-          {foreignQueued} offline {foreignQueued === 1 ? 'order' : 'orders'} on this device {foreignQueued === 1 ? 'was' : 'were'} taken for another outlet — {foreignQueued === 1 ? 'it uploads' : 'they upload'} when that outlet is open here.
-        </div>
-      )}
       {floorMsg && (
         <div role={floorMsg.startsWith('error:') ? 'alert' : 'status'} style={{
           background: floorMsg.startsWith('error:') ? 'color-mix(in srgb, var(--theme-red) 8%, transparent)' : 'color-mix(in srgb, var(--theme-green) 8%, transparent)',
@@ -8650,61 +8659,119 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           {floorMsg.replace(/^(error|ok):/, '')}
         </div>
       )}
-      {writeWarningsBanner}
-      {/* Bills whose revenue and stock never reached Inventory, because no BS period was open
-          for their date. The sale itself is fine and the bill is valid — but IMS has no record of
-          it, so MonthlySummary, Variance and stock levels are all short until it is backfilled.
-          Silently correct-looking was the worst available option here. */}
-      {loyaltyNoteBanner}
-
-      {/* Waiting till bills and credit notes (S809 3j, owner decision Q12 c) are for whoever can post
-          them: the Owner, the operator and a POS manager. The banner posts the open month's itself,
-          because Periods does not open for a POS manager, and says who posts the rest. An outlet
-          without Inventory has none (S809 4e, D6). This till's own misses show at once; the floor
-          load that follows a post prunes them against the database's count. */}
-      {canSeeImsPosting && (
-        <PosImsPostingBanner
-          bills={Math.max(unpostedCount, imsMisses.length)}
-          notes={unpostedNotes}
-          onPosted={() => { loadFloor({ quiet: true }) }}
-        />
-      )}
-      {conflictOrders.map(c => (
-        <div key={c.order_id} style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-red-text)' }}>
-          <span>⚠</span>
-          <span>
-            {/* Why the server refused the replay (S754) — each needs different words, the same recovery.
-                S840: dishes another tablet had sent too are not a refusal — the order holds them — so that
-                notice says only what staff must check (owner decision 2026-10-15, "Ask staff to check"). */}
-            {c.reason === 'sent_elsewhere' ? (
-              <><strong>{c.table_name || 'An order'}</strong>: {SENT_ELSEWHERE_TEXT}</>
-            ) : (<>
-              {c.reason === 'stale' ? (
-                <><strong>{c.table_name}</strong>'s order was changed on another device while you were offline — </>
-              ) : c.reason === 'table_taken' ? (
-                <><strong>{c.table_name}</strong> was opened on another device while you were offline — </>
-              ) : c.reason === 'off_menu' ? (
-                <><strong>{c.table_name}</strong>: a dish in your offline order is no longer on the till menu — </>
-              ) : c.reason === 'refused' ? (
-                <><strong>{c.table_name}</strong>: the server would not take your offline changes{c.refusal ? ` (${c.refusal})` : ''} — </>
-              ) : (
-                <><strong>{c.table_name}</strong>'s bill was closed on another device while you were offline — </>
-              )}
-              your queued changes ({c.items.length} item{c.items.length !== 1 ? 's' : ''}) were NOT applied.
-            </>)}
-            {/* S809 ORDER-FLOW-8: those tickets did print, so Discard is not "nothing happened". */}
-            {conflictPrintedNote(c)}
+      {/* S852: after an outage the notices below can all stand at once, and on a tablet they pushed the
+          tables below the fold. Two or more fold behind this one line, which names each of them (the
+          ones a cashier must act on first, so none is hidden silently); one shows as it always did.
+          The bookings strip, a guest order, the offline banner and floorMsg (the answer to the tap
+          just made) stay outside the fold. */}
+      {floorNotices.length >= 2 && (
+        <div style={{
+          background: `color-mix(in srgb, var(--theme-${noticeTone}) 8%, transparent)`,
+          border: `1px solid color-mix(in srgb, var(--theme-${noticeTone}) 28%, transparent)`,
+          borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 16, fontSize: 13,
+          display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, color: `var(--theme-${noticeTone}-text)`,
+        }}>
+          <span role="status" style={{ flex: '1 1 240px', minWidth: 0 }}>
+            <strong>⚠ {floorNotices.length} notices:</strong> {floorNotices.join(', ')}
           </span>
-          {/* S754: recover the lines rather than only throw them away. */}
-          <Tip text="Puts these items back as unsent lines: onto the order this table (or takeaway) has open now — only what that order does not already carry — or onto a new order if it has none. This notice goes away once that order is saved.">
-            <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, flexShrink: 0 }}
-              disabled={!isOnline}
-              onClick={() => startOrderFromConflict(c)}>Start new order with these</button>
-          </Tip>
-          <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', flexShrink: 0 }}
-            onClick={() => discardConflictOrder(c.order_id)}>Discard</button>
+          <button type="button" className="btn btn-ghost btn-sm till-hit--row" style={{ marginLeft: 'auto', flexShrink: 0 }}
+            aria-expanded={!noticesFolded} aria-controls="pos-floor-notices"
+            onClick={() => setFloorNoticesOpen(!floorNoticesOpen)}>
+            {noticesFolded ? 'Show all' : 'Hide'}
+          </button>
         </div>
-      ))}
+      )}
+      <div id="pos-floor-notices" hidden={noticesFolded}>
+        {syncingOffline && !linkDown && (
+          <div style={{ background: 'color-mix(in srgb, var(--theme-green) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-green-text)' }}>
+            ⟳ Syncing {pendingOrderIds.size} {pendingOrderIds.size === 1 ? 'order' : 'orders'}…
+          </div>
+        )}
+        {/* S809 3f: kept on this till while the browser says online — the internet was down, or an upload
+            has yet to run. The upload retries by itself every 15 s; the button is for not waiting. */}
+        {!syncingOffline && isOnline && !linkDown && waitingUploads > 0 && (
+          <div role="status" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--theme-amber-text)' }}>
+            <span>{waitingUploads} {waitingUploads === 1 ? 'order change is' : 'order changes are'} kept on this till and not uploaded yet — they upload by themselves.</span>
+            <Tip text="Sends the orders and kitchen tickets this till kept while the internet was down to the server now, instead of waiting for the next automatic try.">
+              <button type="button" className="btn btn-ghost btn-sm till-hit--row" style={{ marginLeft: 'auto', flexShrink: 0 }}
+                onClick={() => flushPosOrderQueue()}>Upload now</button>
+            </Tip>
+          </div>
+        )}
+        {/* S833 (B3): an entry kept try after try for a reason other than the connection says why. */}
+        {isOnline && !linkDown && uploadTrouble.length > 0 && (
+          <div role="alert" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, color: 'var(--theme-amber-text)' }}>
+            {uploadTrouble.map(t => <span key={t.orderId}>⚠ {uploadTroubleText(t)}</span>)}
+          </div>
+        )}
+        {/* ORDER-FLOW-15: another outlet's offline orders on this device are left for that outlet. */}
+        {foreignQueued > 0 && (
+          <div role="status" style={{ marginBottom: 16, fontSize: 13, color: 'var(--theme-text2)' }}>
+            {foreignQueued} offline {foreignQueued === 1 ? 'order' : 'orders'} on this device {foreignQueued === 1 ? 'was' : 'were'} taken for another outlet — {foreignQueued === 1 ? 'it uploads' : 'they upload'} when that outlet is open here.
+          </div>
+        )}
+        {writeWarningsBanner}
+        {/* Bills whose revenue and stock never reached Inventory, because no BS period was open
+            for their date. The sale itself is fine and the bill is valid — but IMS has no record of
+            it, so MonthlySummary, Variance and stock levels are all short until it is backfilled.
+            Silently correct-looking was the worst available option here. */}
+        {loyaltyNoteBanner}
+
+        {/* Waiting till bills and credit notes (S809 3j, owner decision Q12 c) are for whoever can post
+            them: the Owner, the operator and a POS manager. The banner posts the open month's itself,
+            because Periods does not open for a POS manager, and says who posts the rest. An outlet
+            without Inventory has none (S809 4e, D6). This till's own misses show at once; the floor
+            load that follows a post prunes them against the database's count. */}
+        {canSeeImsPosting && (
+          <PosImsPostingBanner
+            bills={Math.max(unpostedCount, imsMisses.length)}
+            notes={unpostedNotes}
+            onPosted={() => { loadFloor({ quiet: true }) }}
+          />
+        )}
+        {/* One box for every offline order the server would not take (S852): one heading, then each
+            order with its own recovery, rather than a red box per order stacked over the floor. */}
+        {conflictOrders.length > 0 && (
+          <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 16, fontSize: 13, color: 'var(--theme-red-text)' }}>
+            <strong>⚠ {conflictOrders.length === 1 ? '1 offline order was not applied' : `${conflictOrders.length} offline orders were not applied`}</strong>
+            {conflictOrders.map(c => (
+              <div key={c.order_id} style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginTop: 8, paddingTop: 8, borderTop: '1px solid color-mix(in srgb, var(--theme-red) 20%, transparent)' }}>
+                <span style={{ flex: '1 1 240px', minWidth: 0 }}>
+                  {/* Why the server refused the replay (S754) — each needs different words, the same recovery.
+                      S840: dishes another tablet had sent too are not a refusal — the order holds them — so that
+                      notice says only what staff must check (owner decision 2026-10-15, "Ask staff to check"). */}
+                  {c.reason === 'sent_elsewhere' ? (
+                    <><strong>{c.table_name || 'An order'}</strong>: {SENT_ELSEWHERE_TEXT}</>
+                  ) : (<>
+                    {c.reason === 'stale' ? (
+                      <><strong>{c.table_name}</strong>'s order was changed on another device while you were offline — </>
+                    ) : c.reason === 'table_taken' ? (
+                      <><strong>{c.table_name}</strong> was opened on another device while you were offline — </>
+                    ) : c.reason === 'off_menu' ? (
+                      <><strong>{c.table_name}</strong>: a dish in your offline order is no longer on the till menu — </>
+                    ) : c.reason === 'refused' ? (
+                      <><strong>{c.table_name}</strong>: the server would not take your offline changes{c.refusal ? ` (${c.refusal})` : ''} — </>
+                    ) : (
+                      <><strong>{c.table_name}</strong>'s bill was closed on another device while you were offline — </>
+                    )}
+                    your queued changes ({c.items.length} item{c.items.length !== 1 ? 's' : ''}) were NOT applied.
+                  </>)}
+                  {/* S809 ORDER-FLOW-8: those tickets did print, so Discard is not "nothing happened". */}
+                  {conflictPrintedNote(c)}
+                </span>
+                {/* S754: recover the lines rather than only throw them away. */}
+                <Tip text="Puts these items back as unsent lines: onto the order this table (or takeaway) has open now — only what that order does not already carry — or onto a new order if it has none. This notice goes away once that order is saved.">
+                  <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, flexShrink: 0 }}
+                    disabled={!isOnline}
+                    onClick={() => startOrderFromConflict(c)}>Start new order with these</button>
+                </Tip>
+                <button className="btn btn-ghost" style={{ fontSize: 12, color: 'var(--theme-red-text)', flexShrink: 0 }}
+                  onClick={() => discardConflictOrder(c.order_id)}>Discard</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {sections.length > 1 && (
         <div className="tab-bar" role="group" aria-label="Floor section" style={{ marginBottom: 20 }}>

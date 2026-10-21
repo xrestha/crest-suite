@@ -218,7 +218,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
                       <input type="checkbox" checked={on} onChange={() => toggle(g)} />
                       {on && <span style={{ fontSize: 11, color: 'var(--theme-text3)', minWidth: 14 }}>{pos + 1}.</span>}
                       <span style={{ fontWeight: 600 }}>{g.name}</span>
-                      <span className="badge-yellow">{KIND_LABEL[g.kind]}</span>
+                      <span className="badge-gray">{KIND_LABEL[g.kind]}</span>
                       {g.is_active === false && <span className="badge-gray">Hidden</span>}
                       <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--theme-text2)' }}>{ruleText(rule)}</span>
                     </label>

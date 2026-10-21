@@ -1,7 +1,8 @@
 import {
   summariseBills, compareToLastWeek, hourlySales, paymentMix, channelOf, channelMix,
-  topItems, openBillsSummary, ticketSummary, sameWeekdayLastWeek, returnsOf, countsAsSale, hourlyPeaks,
+  topItems, openBillsSummary, openBillTotal, ticketSummary, sameWeekdayLastWeek, returnsOf, countsAsSale, hourlyPeaks,
 } from './posDashboardMath'
+import { computeOrderAmounts } from '../../../utils/posBillingMath'
 
 const bill = (over) => ({ close_type: 'paid', credit_note_id: null, paid_amount: 1000, covers: 2, discount_amount: 0, table_id: 't1', ...over })
 // A credit note row as the dashboards read it: the bill it credits embedded.
@@ -216,12 +217,41 @@ describe('topItems', () => {
 
 describe('the floor band', () => {
   const now = Date.parse('2026-10-02T08:00:00Z')
-  test('open bills: count, the oldest one\'s age, and the value on them before VAT', () => {
+  test('open bills: the count, the age of the oldest, and the value on them with free dishes left out', () => {
     const s = openBillsSummary([
       { opened_at: '2026-10-02T07:20:00Z', pos_order_items: [{ qty: 2, unit_price: 150 }, { qty: 1, unit_price: 500, comped: true }] },
       { opened_at: '2026-10-02T07:50:00Z', pos_order_items: [] },
-    ], now)
+    ], now, false)
     expect(s).toEqual({ count: 2, oldestMins: 40, value: 300 })
+  })
+
+  // Owner decision: a running total is what the guest will pay, VAT included, free dishes left out,
+  // before any discount. The floor tiles and the Billing list sum the same openBillTotal.
+  test('open bills at a VAT-registered outlet carry the VAT of each line, rounded per bill as the bill is', () => {
+    const s = openBillsSummary([
+      { opened_at: '2026-10-02T07:20:00Z', pos_order_items: [
+        { qty: 2, unit_price: 150, vat_rate: 0.13 },               // 339
+        { qty: 1, unit_price: 100, vat_rate: 0 },                  // 100, no VAT on this line
+        { qty: 1, unit_price: 500, vat_rate: 0.13, comped: true }, // free: left out
+      ] },
+      { opened_at: '2026-10-02T07:50:00Z', pos_order_items: [{ qty: 1, unit_price: 99.5, vat_rate: 0.13 }] }, // 112.435 → 112
+    ], now, true)
+    expect(s.value).toBe(439 + 112)
+    // An outlet that is not VAT registered charges none, whatever the line says.
+    expect(openBillsSummary([{ opened_at: '2026-10-02T07:20:00Z', pos_order_items: [{ qty: 2, unit_price: 150, vat_rate: 0.13 }] }], now, false).value).toBe(300)
+  })
+
+  test('openBillTotal is the payment window total before a discount', () => {
+    const items = [
+      { qty: 3, unit_price: 180, vat_rate: 0.13 },
+      { qty: 1, unit_price: 180, vat_rate: 0.13, comped: true }, // a part comp is a comped row of its own
+      { qty: 2, unit_price: 60, vat_rate: null },
+    ]
+    const payable = items.filter(i => !i.comped)
+    expect(openBillTotal(items, true)).toBe(computeOrderAmounts({ discount_amount: 0 }, payable, true).net)
+    expect(openBillTotal(items, true)).toBe(Math.round(540 * 1.13 + 120))
+    expect(openBillTotal([], true)).toBe(0)
+    expect(openBillTotal(undefined, true)).toBe(0)
   })
 
   test('tickets past the late line, finished ones never counted', () => {

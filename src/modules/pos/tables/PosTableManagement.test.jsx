@@ -235,3 +235,15 @@ test('a list tab whose read failed says so under its disabled Save', async () =>
   expect(save).toBeDisabled()
   expect(await screen.findByRole('alert')).toHaveTextContent(/^Could not load the quick notes — Save is disabled until it loads\./)
 })
+
+// S852: the section row scrolls sideways rather than wrapping, and no tab hides its meaning in a
+// hover-only `title`: each panel opens with its own lead paragraph.
+test('the section tabs are one scrolling row with no hover-only hints', async () => {
+  render(<PosTableManagement />)
+  await screen.findByRole('button', { name: 'Table 1' })
+  const row = screen.getByRole('tablist', { name: 'POS Setup sections' })
+  expect(row).toHaveClass('tab-bar--scroll')
+  for (const tab of within(row).getAllByRole('tab')) expect(tab).not.toHaveAttribute('title')
+  fireEvent.click(within(row).getByRole('tab', { name: 'Ticket Routing' }))
+  expect(await screen.findByText(/Assign each menu category to a ticket station/)).toBeInTheDocument()
+})

@@ -4,6 +4,7 @@ import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Respons
 import { RefreshCw } from 'lucide-react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { supabase } from '../../../supabaseClient'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
@@ -157,7 +158,7 @@ export default function PosDashboard() {
     try {
       const floorReads = Promise.all([
         // Open bills are a handful at most, so no paging; the items ride along for the value.
-        scopedFrom('pos_orders', 'id, table_id, opened_at, pos_order_items(qty, unit_price, comped)').eq('status', 'open'),
+        scopedFrom('pos_orders', 'id, table_id, opened_at, pos_order_items(qty, unit_price, vat_rate, comped)').eq('status', 'open'),
         scopedFrom('pos_tables', 'status').neq('status', 'inactive'),
         // S834 (D34): one waiting past 30 minutes is turned away, so it is not counted.
         scopedFrom('pos_guest_order_requests', 'id, created_at').eq('status', 'pending').gt('created_at', staleGuestOrderCutoffIso(nowMs)),
@@ -167,6 +168,9 @@ export default function PosDashboard() {
         scopedFrom('pos_kot_log', 'status, sent_at').in('status', ['new', 'in_progress']).gte('sent_at', serviceDayStartIso(nowMs)).not('items', 'cs', KOT_CHANGE_ITEMS),
         canMoney ? scopedFrom('pos_shifts', 'opened_at').eq('status', 'open').maybeSingle() : Promise.resolve({ data: null, error: null }),
         scopedFrom('monthly_periods', 'id, bs_year, bs_month').eq('status', 'open').maybeSingle(),
+        // Whether the open bills carry VAT, as the till reads it (settings stays on raw supabase.from:
+        // its client_id is nullable). Only a supervisor sees that figure, so only they ask.
+        canMoney ? supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle() : Promise.resolve({ data: null, error: null }),
       ])
       // The two days are cut at the same clock time: today up to now, last week up to now − 7 days.
       // Each day's credit notes are read on the same cut (S814 4d, REPORTS-5): a note is a minus on
@@ -204,11 +208,13 @@ export default function PosDashboard() {
       }
       if (!latest.isCurrent(id)) return
 
-      const [openRes, tablesRes, guestRes, kotRes, shiftRes, periodRes] = floorRes
+      const [openRes, tablesRes, guestRes, kotRes, shiftRes, periodRes, settingsRes] = floorRes
+      const vatReg = settingsRes.data?.is_vat_registered ?? true
       const guest = guestRes.data || []
       const oldestGuest = guest.reduce((m, g) => Math.min(m, Date.parse(g.created_at)), Infinity)
       setFloor({
-        open: openBillsSummary(openRes.data, nowMs),
+        open: openBillsSummary(openRes.data, nowMs, vatReg),
+        vatReg,
         tablesOccupied: (tablesRes.data || []).filter(t => t.status === 'occupied').length,
         tablesTotal: (tablesRes.data || []).length,
         guestWaiting: guest.length,
@@ -296,11 +302,12 @@ export default function PosDashboard() {
           <div className="stat-grid stat-grid--compact dash-section">
             <Tile
               label="Open bills"
-              tip="Bills still running — food ordered, not yet paid. The oldest one's age is how long a table has been sitting with an open bill."
+              tip={'Bills still running — food ordered, not yet paid. The age of the oldest is how long a table has been sitting with an open bill.'
+                + (canMoney ? ` The amount is what the guests will pay${floor.vatReg ? ', VAT included' : ''}, free dishes left out, before any bill discount, worked out as the Billing list and the floor tiles do.` : '')}
               value={floor.open.count}
               sub={<div className="stat-sub">
                 {floor.open.count === 0 ? 'None open' : `Oldest ${floor.open.oldestMins} min`}
-                {canMoney && floor.open.count > 0 && <> · {npr(floor.open.value)} on them before VAT</>}
+                {canMoney && floor.open.count > 0 && <> · {npr(floor.open.value)} on them{floor.vatReg ? ', VAT included' : ''}</>}
               </div>}
               to={canMoney ? '/pos/billing' : '/pos/orders'}
             />

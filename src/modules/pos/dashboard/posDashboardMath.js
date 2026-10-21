@@ -9,6 +9,7 @@ import { paymentSharesOf } from '../reports/salesReportMath'
 import { coversTotals, isDineIn } from '../reports/coversMath'
 import { nepalHour } from '../../../shared/nepalTime'
 import { compareFigures } from '../../../shared/compareFigures'
+import { computeOrderAmounts } from '../../../utils/posBillingMath'
 
 const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0 }
 
@@ -181,17 +182,27 @@ export function topItems(items, n = 5) {
   return [...by.values()].filter(r => r.qty > 0).sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name)).slice(0, n)
 }
 
-/** The bills still running: how many, the oldest's age in minutes, and what is on them before
- *  discount and VAT (comped lines excluded). */
-export function openBillsSummary(openOrders, nowMs = Date.now()) {
+/** What a bill still running comes to, the way the guest will pay it (owner decision): VAT included
+ *  when the outlet is VAT registered (`vatReg`), comped (free) lines left out, before any bill
+ *  discount, to the rupee. It is the payment window's own total with no discount
+ *  (computeOrderAmounts' net over the payable lines), so the floor tiles, the Billing list and the
+ *  POS Dashboard all show the figure the bill will open on. A comp splits its line in two
+ *  (apply_pos_item_comps), so a part comp is a comped row of its own and needs no count here. */
+export function openBillTotal(items, vatReg) {
+  const payable = (items || []).filter(i => !i.comped)
+    .map(i => ({ ...i, qty: num(i.qty), unit_price: num(i.unit_price), vat_rate: num(i.vat_rate) }))
+  return computeOrderAmounts({ discount_amount: 0 }, payable, vatReg).net
+}
+
+/** The bills still running: how many, the oldest's age in minutes, and what is on them as the guests
+ *  will pay it (openBillTotal: VAT included when `vatReg`, comped lines left out, before discount). */
+export function openBillsSummary(openOrders, nowMs = Date.now(), vatReg = true) {
   const list = openOrders || []
   const oldest = list.reduce((m, o) => {
     const t = Date.parse(o.opened_at)
     return Number.isFinite(t) && (m == null || t < m) ? t : m
   }, null)
-  const value = list.reduce((s, o) => s + (o.pos_order_items || [])
-    .filter(i => !i.comped)
-    .reduce((t, i) => t + num(i.qty) * num(i.unit_price), 0), 0)
+  const value = list.reduce((s, o) => s + openBillTotal(o.pos_order_items, vatReg), 0)
   return { count: list.length, oldestMins: oldest == null ? null : Math.max(0, Math.floor((nowMs - oldest) / 60000)), value }
 }
 

@@ -248,7 +248,7 @@ export default function Combos() {
                   <h2 id={`combo-${c.id}`} style={{ margin: 0, fontSize: 16, color: c.is_active ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{c.name}</h2>
                   {setMeal && (
                     <Tip width={260} text="Every pick has one dish, so the till adds the whole combo in one tap." style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
-                      <span className="badge-yellow">Set meal</span>
+                      <span className="badge-gray">Set meal</span>
                     </Tip>
                   )}
                   {c.is_active

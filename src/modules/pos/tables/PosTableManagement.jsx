@@ -936,20 +936,22 @@ export default function PosTableManagement() {
       </div>
 
       {/* Main tab bar. `Tabs` since S841, so the open section is announced rather than shown by its
-          tint alone. A section's hint rides as its tab's `title`: a Tip around a tab is not the tab. */}
+          tint alone. One row that scrolls sideways (S852), rather than nine or ten tabs wrapping onto
+          more lines on a phone or tablet. The tabs carry no `title` hints any more, which only a
+          mouse could read; each panel opens with a lead paragraph saying what the section is for. */}
       <Tabs idBase="pos-setup" label="POS Setup sections" active={mainTab} style={{ marginBottom: 24 }}
-        onChange={openSection}
+        onChange={openSection} scroll
         tabs={[
           { key: 'tables', label: 'Tables' },
-          { key: 'routing', label: 'Ticket Routing', title: 'Assign each menu category to KOT (kitchen) or BOT (bar) — controls where the ticket prints when staff send an order' },
-          { key: 'notes', label: 'Quick Notes', title: "Preset instruction chips (e.g. 'No onion', 'Extra spicy') staff can tap on an order item instead of typing — prints under that item on the KOT/BOT" },
-          { key: 'hsc', label: 'HSC Codes', title: 'Harmonized System Code per menu item — only required (min. 4 digits) if the item is an imported good sold as-is (e.g. imported bottled drinks). Not needed for freshly prepared dishes. Printed on POS bills if set.' },
-          { key: 'discounts', label: 'Discounts', title: 'Preset reasons staff can pick when applying a discount at Charge — customize this list to match how your team actually discounts (e.g. Loyalty customer, Manager goodwill)' },
-          { key: 'delivery', label: 'Delivery Partners', title: "Foodmandu/Pathao commission % — never applied automatically at Charge (their orders close as Credit, not their own payment method). It's only a starting suggestion shown when you take the platform's payment in Customers → Credit, adjustable against what the platform actually remitted" },
-          { key: 'reservations', label: 'Reservations', title: 'How long a party of each size is expected to sit (prefilled from your own measured turn times), when a booking counts as late, the WhatsApp confirmation message, and the booking link / QR customers scan to request a table' },
-          { key: 'guestmenu', label: 'Guest Menu', title: "What guests see at the top of every table's QR menu and your online booking page — the restaurant name and logo (the owner sets these) — and the order of the menu's sections" },
-          { key: 'printers', label: 'Printers', title: 'The computers at the restaurant that print kitchen and bar tickets on their own printer, instead of each till opening a print window — pair one, test it, and see what it printed. When none is online, the tills print as before' },
-          ...(hasWeather ? [{ key: 'weather', label: 'Weather', title: "The town the outlet's weather is read for. Today's and the next three days' weather then show at the top of the Dashboard" }] : []),
+          { key: 'routing', label: 'Ticket Routing' },
+          { key: 'notes', label: 'Quick Notes' },
+          { key: 'hsc', label: 'HSC Codes' },
+          { key: 'discounts', label: 'Discounts' },
+          { key: 'delivery', label: 'Delivery Partners' },
+          { key: 'reservations', label: 'Reservations' },
+          { key: 'guestmenu', label: 'Guest Menu' },
+          { key: 'printers', label: 'Printers' },
+          ...(hasWeather ? [{ key: 'weather', label: 'Weather' }] : []),
         ]} />
 
       {/* ══ WEATHER TAB (S786) ══ — the city only: the rainy-day sales figure moves the Inventory
