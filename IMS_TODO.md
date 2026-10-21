@@ -8,7 +8,8 @@ them sits the S793 load-time backlog (PERF-n), from measuring the module on a sl
 
 **S852 whole-product audit (2026-10-21, 13/20): ✅ done** in one release (crest-v467); the report and its Resolution table are `.impeccable/audit/2026-10-20T15-06-02Z__crest-suite-all-modules.md`. Filed from it, not fixed:
 - ⚪ The live Menu Engineering page colours its quadrants green / purple / amber / red, while the Owner Report's quadrant names are ink since S852. Its scatter chart uses the hue as each quadrant's identity, so this needs a decision, not a sweep.
-- ⚪ `useFoodBeverageSplit` never clears `error` once the card stops asking for data (harmless today).
+- ✅ S853: `useFoodBeverageSplit` now clears `error` when the card stops asking for data and when a new load starts.
+- ⚪ The IMS stock-count login (`ImsCountLogin.jsx` ~200) still shows "This device isn't set up yet" as one centred paragraph; Crest POS's gate became numbered steps, "Ask the Owner" and the support line in S853 (`TillGate` in `PosLogin.jsx`).
 
 **Status key:** 🔴 Not started · 🟡 Partial · ✅ Done · 🔵 Deferred · ⚪ Known, open
 
@@ -302,7 +303,7 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
   across all four `hideValues` × `blindCount` combinations — not by signing in on a phone. Worth a
   real look on a storeroom handset before the next month-end count.
 - ✅ S756 stage 4 — Payroll labour cost includes OVERTIME everywhere (owner decision): gross + overtime + employer SSF on Overheads, ClientDashboard, ConsolidatedPnl, Group Dashboard and the group P&L (migration `20260918170000`, applied live), matching the Owner Report and Owner Dashboard. `payrollCashCost` (absence subtracted) stays the cash-paid figure.
-- ⚪ `purchaseTaxSplit.js` keeps a private `mergeFactors`; `billPayables` could take prior bill lines directly (tidy-up).
+- ✅ S853: `purchaseTaxSplit.js` imports the shared `mergeFactors`, and `billPayables` takes `{ priorBillLines }`; the Owner Dashboard Cash / Credit now uses it (it valued a return against an earlier bill at list price).
 - ⚪ Owner Report vendor section: cash/credit split is pre-discount, and its aging total is compared against payments that include VAT.
 
 - ✅ S756 stage 3 — D22 — ClientDashboard Fixed Costs % / Est. Net Margin use finalized payroll, and say "labour unreadable on this login" for an IMS staff login (Overheads does both now).
@@ -350,7 +351,7 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
   deploy-triggered chunk reload took 10–20 typed lines with it, silently. Reported live. Drafted to
   `localStorage` per bill per login (`purchaseBillDraft.js`), restored behind an amber notice,
   cleared on save and on cancel. Rule: `.claude/rules/offline-and-cache.md`.
-- ⚪ **`Sales.js`' bulk grid is the same shape and is not drafted.** A human legitimately spends
+- ✅ ~~**`Sales.js`' bulk grid is the same shape and is not drafted.**~~ Closed S853: `salesEntryDraft.js`, restored behind an amber notice, asked first when the month was saved since. A human legitimately spends
   minutes in it before Save and nothing survives the page dying. Stock Count is covered by the
   offline queue and per-row saves; Sales Entry is covered by neither.
 - ✅ S780 — Dashboard's Daily Purchases vs Sales Target was a least-squares line through the

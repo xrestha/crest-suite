@@ -55,7 +55,8 @@ screen (its own `period_id`/`bs_day`). The over-return cap reads every return ag
 month. Every reader values such a return at its own bill's discount through `readPriorBillLines.js`:
 VAT and Non-VAT directly, and Payment Report, Vendor Report, Supplier Contribution and
 `computeVendorPurchasingSection` through `applyPriorBillFactors` / `mergeFactors` in
-`supplierAttribution.js` (`vendorNetByItem({ priorFactors })`). A reader that only looks at this
+`supplierAttribution.js` (`vendorNetByItem({ priorFactors })`), and the Owner Dashboard's Purchases · Cash / Credit
+through `billPayables(..., { priorBillLines })` (S853; it was the fifth reader, at list price). A reader that only looks at this
 month's bills falls back to the list rate, which is the defect to watch for in a fifth reader. Vendor
 Report's drilldown lists earlier-bill and unlinked return rows. Purchase 1L+ joined them in S792
 (TAX-3); a cross-year return sits in the year it went back, and Help sends that question to the accountant.

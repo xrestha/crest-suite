@@ -57,7 +57,7 @@ from 120 days does not move in ten minutes.
 
 ## A cache outlives the session that filled it (S731)
 
-Three stores here survive a sign-out, and each had assumed it did not. A fourth — the purchase-bill draft (S779, below) — survives one **on purpose**, and pays this rule's price in its key.
+Three stores here survive a sign-out, and each had assumed it did not. A fourth and a fifth — the purchase-bill draft (S779, below) and the Sales Entry Bulk draft (`salesEntryDraft.js`, S853) — survive one **on purpose**, and pay this rule's price in their keys.
 
 **`sessionDataCache` keyed on `page_section_clientId` — no user id — and `sessionStorage` lives as
 long as the TAB, not the session.** (Since S849 GAPS-7 the key carries the user too: below.) So signing out and back in as a *different account of the same
@@ -146,8 +146,10 @@ decisions are load-bearing:
 **Which forms want this**: the ones a human legitimately spends minutes in before pressing Save —
 the same list `sessionKeepAlive.js` was written for (Purchases, Stock Count, Sales Entry), which is
 not a coincidence. Both files exist because this product's entry screens are long. Stock Count has
-the offline queue and saves per row, so it is already covered by a different mechanism; **Sales
-Entry's bulk grid is not, and has the same shape.**
+the offline queue and saves per row, so it is already covered by a different mechanism. Sales
+Entry's Bulk grid has the same shape and since S853 has its own draft (`salesEntryDraft.js`, key
+`bulk:<period>:<login>`, only the boxes that differ from the saved figures). Its writer stays off until the
+grid holds the selected month's figures, so the blank state of a month switch cannot delete a kept draft.
 
 ## A replay is a writer like any other, so it takes the same lock and the newest figure (S792)
 

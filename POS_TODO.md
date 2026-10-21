@@ -8,8 +8,8 @@ That file, not this one, is the record of what has already been considered.
 through in place, or this file goes back to being 92% history and stops being read as a to-do list.
 
 **S852 whole-product audit (2026-10-21, 13/20): ✅ done** in one release (crest-v467); the report and its Resolution table are `.impeccable/audit/2026-10-20T15-06-02Z__crest-suite-all-modules.md`. Filed from it, not fixed:
-- 🟡 Membership's Card types table (Switch off plus ⋯) still overflows a 390px phone; Members and transfers got phone cards in S852.
-- ⚪ `TillNotice.jsx` copies `Modal.js`'s `FOCUSABLE` selector for its Tab cycle; exporting it from Modal.js would remove the copy.
+- ✅ S853: Membership's Card types table (Switch off plus ⋯) overflowed a 390px phone; it now has phone cards like Members and transfers (S852).
+- ✅ S853: `TillNotice.jsx` (and `ChartCard.js`) copied `Modal.js`'s `FOCUSABLE` selector; Modal.js now exports it and both import it.
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
@@ -990,26 +990,30 @@ critique's minor list and persona flags, and were deliberately not in that batch
 - [ ] ⚪ **The vegetarian filter hides Egg dishes but not egg CHOICES inside a dish or a combo pick.** It
   never filtered the options inside a dish sheet; hiding egg choices too would be new behaviour, so it
   is the owner's call.
-- [ ] 🟡 **The Customization screens still use `badge-yellow`** (`Combos.jsx`, `OptionGroups.jsx`,
-  `AttachGroupsModal.jsx`): the S846 pass covered POS proper, not the add-on's setup screens.
-- [ ] 🟡 **KDS Ready and Served have the slide-under risk Start had.** A one-tap move takes the card out
-  of its column and the next card moves up under the finger; only Start has `START_SETTLE_MS`.
+- [x] ~~🟡 **The Customization screens still use `badge-yellow`**~~ — **closed S853**: every tag in
+  `Combos.jsx`, `OptionGroups.jsx` and `AttachGroupsModal.jsx` is `badge-gray`, as POS proper since S846.
+- [x] ~~🟡 **KDS Ready and Served have the slide-under risk Start had.**~~ — **closed S853**: every one-tap
+  move (Start, Ready, Served, Seen, Clear) shares `MOVE_SETTLE_MS`; the popup Start is not held.
 - [ ] 🟡 **The order screen still sends four ways** (Send, KOT, BOT, "Just save", which leaves dishes
   unfired), and a "+ Kitchen note" box sits on every cart line. The critique asked whether one "Send N
   to kitchen" and no save-without-sending would do.
 - [ ] 🟡 **Keyboard speed on the till**: Enter in the menu search adds nothing; no Send or Payment
   shortcut; only the last tender can be undone.
-- [ ] 🟡 **After an outage up to ~12 banners stack above the floor's tables**, pushing them below the fold
-  on a tablet.
-- [ ] 🟢 **Small copy and polish**: the booking page's unavailable state has no heading, can say "call or
-  message directly" with no number, and says "Powered by Crest POS" on a white-labelled page; the
-  device-not-set-up gate is a six-line centred paragraph on a phone and names no one to call; POS Setup's
-  tab help is native `title` tooltips across 9–10 tabs in one row; the menu search placeholder starts
-  with an emoji and is 128px wide on a phone; inline opacities 0.6/0.5/0.4 beside the class's 0.55; the
-  PIN dots' glow; Sales Report's 11 tabs; the discard dialog has no "Send and go back".
-- [ ] 🟢 **The dashboard's "open bills" is before VAT while the Billing list is VAT-inclusive.**
-- [ ] 🟢 **Three print placeholders use `#666`, off the print ramp (#555/#777)**, and its
-  `.impeccable/config.json` ignore has no `files:` scope, so it exempts `#666` across all of `src/`.
+- [x] ~~🟡 **After an outage up to ~12 banners stack above the floor's tables**~~ — **closed S853**: two or
+  more floor notices fold behind one summary line that names each, with Show all; offline conflicts are one
+  box; the offline banner, guest orders and the last tap's answer stay visible.
+- [ ] ⚪ **Small copy and polish, two left (owner's call)**: Sales Report's 11 tabs; the discard dialog has
+  no "Send and go back" (`useConfirm` has only confirm and cancel). **Closed S853:** the booking page's
+  unavailable state (a heading, "contact the restaurant", no "Powered by Crest POS"; no phone, by owner
+  decision, because the page has none without a migration); the device-not-set-up gate (numbered steps,
+  "Ask the Owner", the support line); POS Setup's tab row scrolls and lost its hover-only `title` help;
+  the menu search (no emoji, grows, 16px on a phone); one 0.55 fade; no glow on the PIN dots.
+- [x] ~~🟢 **The dashboard's "open bills" is before VAT while the Billing list is VAT-inclusive.**~~ —
+  **closed S853** (owner decision): the dashboard, floor tiles and Billing list all use `openBillTotal`,
+  VAT included and free dishes left out. Rare gap: a comped row left on an open order by a cancelled
+  close is charged again by the order screen until the next save, so for that moment the tile shows less.
+- [x] ~~🟢 **Three print placeholders use `#666`, off the print ramp (#555/#777)**~~ — **closed S853**: no
+  `#666` is left in `src/`, so its ignore (and the stale `#96700a` one) is gone; `3px` is scoped to its three files.
 - [ ] ⚪ **Should the floor be a map of the room** rather than a card grid sorted by name? (critique
   question 1)
 

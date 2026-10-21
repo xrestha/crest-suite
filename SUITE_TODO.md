@@ -84,9 +84,9 @@ there.
 
 ## S848.0 Index
 
-**S849 (2026-10-19, crest-v465): all 138 fixed** (✅), migrations `20261019100000`–`20261019100600`. One partial (◐):
-OWNER-DASHBOARD-9, where the Owner Dashboard's HR reads now start right after the month read rather than beside it
-(one extra round trip). Deferred, not a finding: the DATABASE-9 policy wording on `monthly_owner_reports` (cosmetic;
+**S849 (2026-10-19, crest-v465): all 138 fixed** (✅), migrations `20261019100000`–`20261019100600`. One partial (◐) until S853:
+OWNER-DASHBOARD-9, finished in S853 (the HR staff reads start beside the month read, and the month's sales pages after
+the first go out together: 11–13 serial levels down to 3–5). Deferred, not a finding: the DATABASE-9 policy wording on `monthly_owner_reports` (cosmetic;
 no access changes). Post-release support task: regenerate the seven newer frozen owner reports (SU answer, S849).
 
 Group: **A** = security, tenant boundaries and admin tools; **B** = money, tax and frozen records stored
@@ -218,7 +218,7 @@ area file's Fix line says). Decision = the SU question in S848.1.
 | ✅ GROUP-13 | A refused outlet switch from the Console wipes every figure and calls it a failed read | D |  |  |
 | ✅ GROUP-14 | Two quick outlet links race: the window shows one outlet while the login is in the other | D |  |  |
 | ✅ GROUP-16 | Smaller items: docs drift and hygiene (free bill lines in "Same item, different price") | D | SU22 |  |
-| ◐ OWNER-DASHBOARD-9 | About 13 serial round trips on a busy till outlet; five tables read twice | D |  |  |
+| ✅ OWNER-DASHBOARD-9 | About 13 serial round trips on a busy till outlet; five tables read twice (S853: 3–5 levels; `recipes` is still read twice and the trend payload is PERF-5) | D |  |  |
 | ✅ OWNER-DASHBOARD-10 | With no open period, Items Below Par counts every item; a failed read reads as "No open period" | D |  |  |
 | ✅ OWNER-DASHBOARD-11 | The trend card reads a failed load as "no history yet" and names only Food Cost's step (+ DOCS-M7) | D |  |  |
 | ✅ OWNER-DASHBOARD-12 | Revenue does not say before VAT and after discounts; always green | D |  |  |
