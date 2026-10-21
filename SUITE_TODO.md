@@ -11,7 +11,10 @@ session number** (or move it to a decisions record if one is started), so this f
 
 **S855 (2026-10-21, crest-v470):** the Owner Report supplier table now splits Net Spend into Cash, Credit and FonePay
 after discount (schema version 19). **Owner decision: once crest-v470 is live, Crest support presses Regenerate Snapshot
-again on the same eight reports** listed below; CASA ACAI CAFE Jestha 2083 stays as made.
+again on the same eight reports** listed below; CASA ACAI CAFE Jestha 2083 stays as made. ✅ **Done 2026-10-21** on the
+live app as Crest support (schema version 19); Net Margin unchanged on all eight (BLOOM CAFE Shrawan 19.7%, Bhadra 18.0%;
+PKR 15.0%, 13.1%; CASA Ashadh −65.5%, Shrawan −23.0%, Bhadra −32.8%, Ashwin −34.4%), and every supplier row and Total
+reads Cash + Credit + FonePay = Net Spend.
 
 **S853 owner decisions (2026-10-21, asked in plain words):**
 - **Decided, no change:** the Fixed Assets Disposal Report keeps gain green / loss red.
