@@ -5,6 +5,7 @@ import { supabase } from '../../../supabaseClient'
 import { useTheme } from '../../../context/ThemeContext'
 import { getInitials, avatarColorFor, relativeLuminance } from '../../../utils/avatarColor'
 import { withTimeout } from '../../../utils/withTimeout'
+import { useDocumentTitle, pageTitle } from '../../../shared/hooks/useDocumentTitle'
 import { listLockedCarts } from '../posLockedCart'
 import { useReleaseReload } from '../../../shared/releaseWatch'
 import { prefetchTillPages } from '../../../shared/prefetchPosPages'
@@ -44,6 +45,9 @@ export default function PosLogin() {
   // activated before holds only the restaurant's shared secret, which is off at every client (S809 1j)
   // and no longer read at all (S809 3h): that tablet is activated again, like a revoked one.
   const deviceId     = localStorage.getItem('pos_device_id')
+  // The tab names the PIN screen and the restaurant it is set up for (S852); it said "Crest Suite"
+  // on every till.
+  useDocumentTitle(pageTitle('Staff sign in', clientName))
 
   const [staff,     setStaff]     = useState([])
   const [loading,   setLoading]   = useState(true)
@@ -298,10 +302,7 @@ const pinDots = Math.max(4, pin.length)
   // this tablet again in /pos.
   if (deviceDead) {
     return (
-      <main style={{
-        minHeight: '100vh', background: 'var(--theme-bg)',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24,
-      }}>
+      <main className="pos-login-state">
         <div className="card" role="alert" style={{ padding: 32, maxWidth: 380, textAlign: 'center' }}>
           <h1 style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', margin: '0 0 8px' }}>
             This till needs to be activated again by the Owner
@@ -322,10 +323,7 @@ const pinDots = Math.max(4, pin.length)
 
   if (!clientId || !deviceSecret) {
     return (
-      <main style={{
-        minHeight: '100vh', background: 'var(--theme-bg)',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24,
-      }}>
+      <main className="pos-login-state">
         <div className="card" style={{ padding: 32, maxWidth: 380, textAlign: 'center' }}>
           <div aria-hidden="true" style={{ fontSize: 32, marginBottom: 12 }}>📱</div>
           <h1 style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', margin: '0 0 8px' }}>

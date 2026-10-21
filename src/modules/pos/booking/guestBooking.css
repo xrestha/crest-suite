@@ -27,10 +27,16 @@
 
 .guest-booking * { box-sizing: border-box; }
 
+/* Plus the safe-area insets (S852): a booking page saved to a home screen opens standalone and
+   draws under the status bar and the home indicator. env() is 0 in a browser tab. */
 .gb-wrap {
   max-width: 560px;
   margin: 0 auto;
-  padding: 28px 16px 48px;
+  padding:
+    calc(28px + env(safe-area-inset-top, 0px))
+    calc(16px + env(safe-area-inset-right, 0px))
+    calc(48px + env(safe-area-inset-bottom, 0px))
+    calc(16px + env(safe-area-inset-left, 0px));
 }
 
 /* The same masthead as the guest menu: the restaurant's name, flush left, over a 2px section rule. */

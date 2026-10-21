@@ -3,10 +3,43 @@ import { useNavigate } from 'react-router-dom'
 import { Hexagon } from 'lucide-react'
 import { useSettings } from '../context/SettingsContext'
 import { useCapsLock } from '../shared/hooks/useCapsLock'
+import { useDocumentTitle, pageTitle } from '../shared/hooks/useDocumentTitle'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../utils/weakPasswords'
 import { supabase } from '../supabaseClient'
 import FieldError, { fieldAria } from '../components/FieldError'
+import ActionError, { asActionError } from '../components/ActionError'
 import './Login.css'
+
+// updateUser's failure, as ActionError's { text, detail } (S852). It rendered GoTrue's message
+// raw ("Auth session missing!", "New password should be different from the old password."). The
+// failures a reader can act on get a sentence of their own; anything else goes through the shared
+// error table, and the raw message stays as fine print. /auth/v1/ is bounded at the client level
+// (authFetchTimeout.js), so a hang arrives here as AuthRetryableFetchError.
+export function passwordUpdateError(err) {
+  const status = err?.status
+  const code   = String(err?.code || '')
+  const name   = String(err?.name || '')
+  const msg    = String(err?.message || '')
+  const detail = [status && `HTTP ${status}`, code, msg].filter(Boolean).join(' · ')
+  if (code === 'same_password' || /different from the old/i.test(msg)) {
+    return { text: 'Your new password must be different from the old one.', detail }
+  }
+  if (code === 'weak_password' || name === 'AuthWeakPasswordError') {
+    return /pwned|breach|leaked/i.test(msg + ' ' + JSON.stringify(err?.reasons || []))
+      ? { text: 'This password has appeared in a known data breach. Choose a different one.', detail }
+      : { text: 'This password is not strong enough. Choose a longer one.', detail }
+  }
+  if (status === 429 || /rate|too many/i.test(code + ' ' + msg)) {
+    return { text: 'Too many attempts. Please wait a minute and try again.', detail }
+  }
+  if (name === 'AuthSessionMissingError' || /session/i.test(code + ' ' + msg) || status === 401 || status === 403) {
+    return { text: 'This reset link has expired or was already used. Request a new one from the sign-in page.', detail }
+  }
+  if (name === 'AuthRetryableFetchError' || status === 0 || status >= 500) {
+    return { text: 'Could not reach the server, so it is not known whether your password changed. Try signing in with the new one first.', detail }
+  }
+  return asActionError(err, 'operator')
+}
 
 // Landing page for the link in a Supabase password-reset email. Supabase redirects here with a
 // recovery token in the URL hash; supabase-js parses it automatically and fires a PASSWORD_RECOVERY
@@ -18,13 +51,14 @@ export default function ResetPassword() {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState(null)
   // Per-field validation, keyed by control id. See handleSubmit for why.
   const [fieldErr, setFieldErr] = useState({})
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
   const [linkFailed, setLinkFailed] = useState(false)
   const [capsOn, capsHandlers] = useCapsLock()
+  useDocumentTitle(pageTitle('Reset password', settings?.app_name))
 
   useEffect(() => {
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
@@ -45,7 +79,7 @@ export default function ResetPassword() {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    setError('')
+    setError(null)
     // Three of these four rules name a specific box, so they belong under it — this page was
     // reporting "Passwords do not match" in one strip below BOTH password fields, which says the
     // form failed without saying which of the two the user should retype (S603). Only a rejected
@@ -62,7 +96,7 @@ export default function ResetPassword() {
     setLoading(true)
     const { error } = await supabase.auth.updateUser({ password })
     setLoading(false)
-    if (error) { setError(error.message || 'Could not update password. The link may have expired — request a new one from the sign-in page.'); return }
+    if (error) { setError(passwordUpdateError(error)); return }
     setDone(true)
   }
 
@@ -139,7 +173,7 @@ export default function ResetPassword() {
                     Show password
                   </label>
                 </div>
-                {error && <p className="login-error" role="alert">{error}</p>}
+                <ActionError error={error} className="login-error" />
                 <button type="submit" className="login-btn" disabled={loading}>
                   {loading ? 'Updating…' : 'Update Password'}
                 </button>

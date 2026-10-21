@@ -50,24 +50,42 @@
 }
 
 /* ── Shell ────────────────────────────────────────────────────────────────────────────────── */
+/* The app is its own scrollport (S852). index.css's `html, body { overflow-x: hidden }` makes the
+   body a scroll container sized to its content, so a sticky child of the body never sticks (S604),
+   and this page rendered straight into the body: the top bar, and with it the ⋯ account and
+   sign-out menu, scrolled away with the content, and in the installed app the content then ran up
+   under the status bar. A fixed height plus overflow-y gives .ss-topbar a scrollport that scrolls.
+   The min-height it replaces had to go: 100dvh as a MINIMUM lets the root grow past the screen and
+   hands the scroll back to the body, which is the original bug.
+
+   dvh, not vh: a mobile browser's chrome collapses on scroll and vh does not follow it, which
+   leaves a fixed bottom bar floating above the real bottom edge. No overscroll-behavior here, on
+   purpose: an employee on a browser tab can still pull down to refresh. */
 .ss-page {
   display: flex;
   flex-direction: column;
-  /* dvh, not vh: a mobile browser's chrome collapses on scroll and vh does not follow it, which
-     leaves a fixed bottom bar floating above the real bottom edge. */
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow-y: auto;
   background: var(--theme-bg);
 }
 
+@supports not (height: 100dvh) {
+  .ss-page { height: 100vh; }
+}
+
+/* Sticks now, at the top of .ss-page. The top inset is its own padding, so in the installed app
+   the bar's opaque ground sits behind the clock and nothing scrolls under the status bar; the side
+   insets clear a landscape notch. flex-shrink: 0 so a long screen never squeezes it. */
 .ss-topbar {
   position: sticky;
   top: 0;
   z-index: 20;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
   min-height: 56px;
-  padding: 0 16px;
+  padding: 0 calc(16px + env(safe-area-inset-right, 0px)) 0 calc(16px + env(safe-area-inset-left, 0px));
   /* Opaque, because content scrolls underneath it. */
   background: var(--theme-bg);
   border-bottom: 1px solid var(--theme-border);
@@ -322,8 +340,78 @@
   .ss-login { padding-left: 12px !important; padding-right: 12px !important; }
 }
 
-/* Saving a payslip prints it alone: the app's bars and screens step aside for the one sheet. */
+/* The PIN keys (S852). They were inline-styled, a copy of PosLogin's keypad from before S844:
+   no press state a finger could see, no hover for a mouse, and no focus indicator at all for a
+   keyboard. The same three states as .pos-pin-key in posLogin.css: the press is :active (a
+   touch never sends mouse-leave, so a JS hover left the last key tinted), the hover is only for a
+   pointer that can hover, and a keyboard gets the product's focus pair. */
+.ss-pin-key {
+  width: 72px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--theme-card);
+  border: 1px solid var(--theme-border);
+  border-radius: 0;
+  color: var(--theme-text1);
+  font-family: inherit;
+  font-size: 22px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, transform 0.08s, box-shadow 0.12s;
+}
+
+.ss-pin-key--clear {
+  color: var(--theme-text2);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.ss-pin-key--delete {
+  font-size: 20px;
+}
+
+.ss-pin-key:disabled {
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .ss-pin-key:hover:not(:disabled) {
+    background: var(--theme-table-hover);
+  }
+}
+
+.ss-pin-key:active:not(:disabled) {
+  background: var(--theme-table-hover);
+  transform: scale(0.92);
+  box-shadow: 0 0 0 4px var(--theme-focus-ring), 0 0 14px var(--theme-accent);
+}
+
+.ss-pin-key:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+  border-color: var(--theme-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ss-pin-key {
+    transition: none;
+  }
+  .ss-pin-key:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* Saving a payslip prints it alone: the app's bars and screens step aside for the one sheet.
+   The scrollport goes too: a fixed-height overflow box prints one screenful (S778). */
 @media print {
+  .ss-page {
+    height: auto;
+    overflow: visible;
+  }
+
   body.ss-printing .ss-topbar,
   body.ss-printing .ss-tabbar,
   body.ss-printing .ss-content > :not(.print-only) {

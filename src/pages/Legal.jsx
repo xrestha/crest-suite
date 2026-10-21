@@ -19,6 +19,7 @@ import { useParams, Link } from 'react-router-dom'
 import { Hexagon, Printer, Check, Copy, ChevronDown, Download, ShieldCheck } from 'lucide-react'
 
 import { printWithTitle } from '../utils/printTitle'
+import { useDocumentTitle, pageTitle as composeTitle } from '../shared/hooks/useDocumentTitle'
 import LegalMarkdown, { stripDocFrontMatter } from '../legal/LegalMarkdown'
 // The one support address (src/shared/supportContact.js re-exports legal's own COMPANY.supportEmail)
 // — this used to be a hardcoded mailto: link to "support@" the crestsuite .com domain, which the
@@ -119,14 +120,9 @@ export default function Legal() {
   // in the product — were indistinguishable from each other and from the app, and a screen reader
   // announced nothing on arrival (WCAG 2.4.2, Level A). Same save-and-restore shape as GuestMenu's.
   // printWithTitle composes with it: that swaps in its own title and restores on `afterprint`.
-  const pageTitle = doc ? `${doc.title} — ${PRODUCT_NAME}` : `Document not found — ${PRODUCT_NAME}`
-  useEffect(() => {
-    const previous = document.title
-    document.title = pageTitle
-    return () => {
-      document.title = previous
-    }
-  }, [pageTitle])
+  // Through the shared hook since S852, in the same "Page · Brand" form as every other signed-out
+  // page. PRODUCT_NAME, never app_name: these pages do not white-label (S678).
+  useDocumentTitle(composeTitle(doc ? doc.title : 'Document not found', PRODUCT_NAME))
 
   const toc = useMemo(() => buildToc(text), [text])
 

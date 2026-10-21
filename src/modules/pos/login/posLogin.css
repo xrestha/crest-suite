@@ -6,7 +6,10 @@
    covers the status bar and publishes a height that already includes the inset (ArrivalAlert.css),
    so the top takes the larger of the two rather than adding them. */
 .pos-login {
+  /* 100vh first for a browser without dvh, then 100dvh (S852): on a phone or a tablet with a URL
+     bar, 100vh is the tallest the viewport ever gets, so a centred keypad sat partly under it. */
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--theme-bg);
   display: flex;
   flex-direction: column;
@@ -14,6 +17,23 @@
   justify-content: center;
   padding:
     calc(24px + max(var(--arrival-alert-h, 0px), env(safe-area-inset-top, 0px)))
+    calc(24px + env(safe-area-inset-right, 0px))
+    calc(24px + env(safe-area-inset-bottom, 0px))
+    calc(24px + env(safe-area-inset-left, 0px));
+}
+
+/* The two "this till cannot sign anyone in" screens (never activated, key refused). They were the
+   same inline object twice, which no 100dvh fallback could reach. */
+.pos-login-state {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--theme-bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding:
+    calc(24px + env(safe-area-inset-top, 0px))
     calc(24px + env(safe-area-inset-right, 0px))
     calc(24px + env(safe-area-inset-bottom, 0px))
     calc(24px + env(safe-area-inset-left, 0px));

@@ -572,14 +572,15 @@ export default function GuestBooking() {
 }
 
 // The page's scrollport, shared by every state, with the announcer first in it (S841): mounted from
-// the very first render, it never moves or remounts when the page's state changes.
+// the very first render, it never moves or remounts when the page's state changes. The content is
+// the page's <main> (S852), so a screen reader has a landmark to jump to in every state.
 function BookingShell({ announcement, children }) {
   return (
     <div className="guest-booking">
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {announcement.text && <span key={announcement.n}>{announcement.text}</span>}
       </div>
-      <div className="gb-wrap">{children}</div>
+      <main className="gb-wrap">{children}</main>
     </div>
   )
 }

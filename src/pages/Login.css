@@ -31,6 +31,14 @@
   color: var(--theme-text1, #f3f2f2);
   display: flex;
   flex-direction: column;
+  /* The installed app draws under the status bar (index.html: viewport-fit=cover plus a
+     black-translucent bar), which put the clock over the brand and the trial button (S852). A
+     scroll container's BORDER sits outside its scrollport, so a top border the height of the
+     inset is a status-bar backing that never scrolls: the sticky header sticks below it, and
+     nothing scrolls under the clock once the header is static on a phone. env() is 0 in a
+     browser tab, so the border is too. border-box keeps the root at exactly 100dvh. */
+  box-sizing: border-box;
+  border-top: env(safe-area-inset-top, 0px) solid var(--theme-card, #242221);
 
   /* ── Brass as a range, not one value ──────────────────────────────────────────────────────
      Every colour on this page is derived from `--theme-accent` by mixing, so the whole surface
@@ -114,10 +122,11 @@
 /* The gradient rule that used to live here - neutral on the left, brightening to brass under the
    key light on the right - went with the rig. The 2px border-bottom above replaces it. */
 
+/* The left and right insets clear a landscape notch; both are 0 everywhere else. */
 .login-nav-inner {
   max-width: 1240px;
   margin: 0 auto;
-  padding: 0 32px;
+  padding: 0 calc(32px + env(safe-area-inset-right, 0px)) 0 calc(32px + env(safe-area-inset-left, 0px));
   height: clamp(58px, 7vh, 68px);
   display: flex;
   align-items: center;
@@ -436,7 +445,9 @@
   max-width: 1240px;
   width: 100%;
   margin: 0 auto;
-  padding: clamp(9px, 1.6vh, 22px) 32px clamp(11px, 1.8vh, 24px);
+  /* The bottom inset keeps the legal links and the support line above an iPhone's home
+     indicator in the installed app. */
+  padding: clamp(9px, 1.6vh, 22px) 32px calc(clamp(11px, 1.8vh, 24px) + env(safe-area-inset-bottom, 0px));
   box-sizing: border-box;
   text-align: center;
   font-size: 13px;
@@ -558,7 +569,17 @@
 
 .login-field input:focus {
   border-color: var(--theme-accent, #ff563c);
-  box-shadow: 0 0 0 3px var(--theme-focus-ring, rgba(201,168,76,0.15));
+  box-shadow: 0 0 0 3px var(--theme-focus-ring);
+}
+
+/* The solid indicator (S852). The :focus rule above is (0,2,1) and beat the global
+   input:focus-visible pair, so a keyboard user got a 1px border and the faint ring alone,
+   while the card's own note promised every field the 2px --theme-focus-outline. Same pair as
+   .form-input:focus-visible in Layout.css. A text field matches :focus-visible on a click too,
+   so mouse users see it as well, as they do on every .form-input. */
+.login-field input:focus-visible {
+  border-color: var(--theme-accent, #ff563c);
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
 }
 
 .login-field input::placeholder {
@@ -618,6 +639,17 @@
 
 .login-field input[aria-invalid="true"] {
   border-color: var(--theme-red, #f87171);
+}
+
+/* A failed reset request or password update is an ActionError worn inside the same panel
+   (S852), so the sentence keeps this panel's size and the technical detail rides beneath it.
+   The detail steps up to text2: text3 on a red tint is the shape that fails AA on Light (S794). */
+.login-error .action-error-text {
+  font-size: 14px;
+}
+
+.login-error .action-error-detail {
+  color: var(--theme-text2, #bab6b6);
 }
 
 /* Caps Lock is the most common cause of a password that's typed correctly and still rejected.
@@ -886,8 +918,26 @@
 .login-staff-btn:focus-visible,
 .login-footer-link:focus-visible,
 .login-forgot:focus-visible {
-  outline: 2px solid var(--theme-accent);
+  /* --theme-focus-outline, not the base accent (S852): on Light the outline token is the
+     accent INK, the one that clears 3:1 against the page. */
+  outline: 2px solid var(--theme-focus-outline);
   outline-offset: 2px;
+}
+
+/* The header links, the band CTA and Staff Login are router <Link>s now (S852), so they can be
+   middle-clicked or opened in a new tab. An <a> is inline by default, which ignores min-height,
+   and carries the UA underline; these give it the box the <button> had. */
+a.login-btn,
+a.login-staff-btn {
+  text-decoration: none;
+  box-sizing: border-box;
+  line-height: normal;
+}
+
+a.login-btn--pricing {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* ── Touch devices ──────────────────────────────────────────────────────────────────────────
@@ -1039,7 +1089,7 @@
   }
 
   .login-footer {
-    padding: 22px 18px 30px;
+    padding: 22px 18px calc(30px + env(safe-area-inset-bottom, 0px));
   }
 
   /* "Start free trial" and a long white-label app_name were colliding at 390px. Let the header
@@ -1049,7 +1099,18 @@
     height: auto;
     padding-top: 12px;
     padding-bottom: 12px;
+    padding-left: calc(18px + env(safe-area-inset-left, 0px));
+    padding-right: calc(18px + env(safe-area-inset-right, 0px));
     row-gap: 10px;
+  }
+
+  /* Wrapped, the header stands about 104px, and stuck to the top it sat over the field a phone
+     user had just focused, with the keyboard taking the bottom half of the screen. Static at this
+     width, the way Legal.css's header is (S852): it scrolls away with the page, so the fields
+     keep the whole screen above the keyboard. The status-bar strip on .login-page still covers
+     the clock in the installed app. */
+  .login-nav {
+    position: static;
   }
 }
 
@@ -1065,7 +1126,13 @@
 .login-root {
   min-height: 100dvh;
   box-sizing: border-box;
-  padding: clamp(24px, 6vh, 72px) 20px;
+  /* Plus the safe-area insets (S852): opened from the reset email inside an installed app, the
+     card's brand row sat under the status bar. env() is 0 in a browser tab. */
+  padding:
+    calc(clamp(24px, 6vh, 72px) + env(safe-area-inset-top, 0px))
+    calc(20px + env(safe-area-inset-right, 0px))
+    calc(clamp(24px, 6vh, 72px) + env(safe-area-inset-bottom, 0px))
+    calc(20px + env(safe-area-inset-left, 0px));
   display: flex;
   align-items: center;
   justify-content: center;

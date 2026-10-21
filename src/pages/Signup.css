@@ -12,10 +12,16 @@
 
 /* One column, flush left, max ~720px. Not a `.login-hero` grid: there is no second column to
    balance against, and a form centred in a wide field reads as a modal rather than as a page. */
+/* The side insets clear a landscape notch in the installed app (0 everywhere else). The status
+   bar is covered by .login-page's top strip, and the footer carries the bottom inset. */
 .signup-main {
   flex: 1;
   width: 100%;
-  padding: clamp(32px, 6vh, 64px) 24px 48px;
+  padding:
+    clamp(32px, 6vh, 64px)
+    calc(24px + env(safe-area-inset-right, 0px))
+    48px
+    calc(24px + env(safe-area-inset-left, 0px));
   box-sizing: border-box;
 }
 
@@ -38,6 +44,22 @@
   line-height: 1.08;
   letter-spacing: -0.02em;
   color: var(--theme-text1, #f3f2f2);
+}
+
+/* "Sign in" in the account-created notice (S852). A bare <a> is the browser's blue, about 2:1 on
+   the green-tinted panel; accent-ink is the token for a link that IS the next action, and the
+   underline keeps it a link without leaning on the hue. */
+.signup-notice-link {
+  color: var(--theme-accent-ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.signup-notice-link:focus-visible {
+  outline: 2px solid var(--theme-focus-outline);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
 .signup-sub {
@@ -125,8 +147,14 @@
 
 @media (max-width: 640px) {
   .signup-main {
-    padding-left: 16px;
-    padding-right: 16px;
+    padding-left: calc(16px + env(safe-area-inset-left, 0px));
+    padding-right: calc(16px + env(safe-area-inset-right, 0px));
+  }
+  /* One column on a phone (S852). The two-track override above outranks Login.css's own
+     800px collapse, so at 390px every field was about 170px wide and "you@restaurant.com"
+     clipped in its own box. */
+  .signup-page .login-trial-grid {
+    grid-template-columns: 1fr;
   }
   .signup-sub {
     margin-bottom: 24px;

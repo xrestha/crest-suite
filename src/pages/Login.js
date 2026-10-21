@@ -4,10 +4,12 @@ import { Hexagon } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { useCapsLock } from '../shared/hooks/useCapsLock'
+import { useDocumentTitle, pageTitle } from '../shared/hooks/useDocumentTitle'
 import { TRIAL_DAYS } from '../data/pricingPlans'
 import { legalPath } from '../legal'
 import { supabase } from '../supabaseClient'
 import SupportContactLine from '../components/SupportContactLine'
+import ActionError, { asActionError } from '../components/ActionError'
 import './Login.css'
 
 // Every sign-in failure used to collapse into "Invalid email or password." That generic string is
@@ -39,6 +41,27 @@ function signInErrorMessage(err) {
   return 'Invalid email or password.'
 }
 
+// The forgot-password request's failure, as ActionError's { text, detail } (S852). It rendered
+// error.message raw, so a reader saw GoTrue's own words ("email rate limit exceeded",
+// "For security purposes, you can only request this after 47 seconds."). The same split as
+// signInErrorMessage: a rate limit says wait, an unreachable server (including the 15s auth-fetch
+// abort) says the link may not have gone, everything else goes through the shared error table,
+// and the raw text stays as fine print.
+// Supabase answers success for an unregistered address, so no branch here can enumerate accounts.
+export function resetRequestError(err) {
+  const status = err?.status
+  const code   = String(err?.code || '')
+  const msg    = String(err?.message || '')
+  const detail = [status && `HTTP ${status}`, code, msg].filter(Boolean).join(' · ')
+  if (status === 429 || /rate|too many|for security purposes/i.test(code + ' ' + msg)) {
+    return { text: 'Too many reset requests. Please wait a minute, then send the link again.', detail }
+  }
+  if (err?.name === 'AuthRetryableFetchError' || status === 0 || status >= 500) {
+    return { text: 'Could not reach the server, so the reset link may not have been sent. Check your connection and try again.', detail }
+  }
+  return asActionError(err, 'operator')
+}
+
 // The signed-out pitch. Ordered POS → IMS → HR, and kept in that structure here even though the
 // module headings are no longer RENDERED: the order is the argument (POS leads because it is the
 // lead product — the previous six lines gave it one indirect mention, and three of the six restated
@@ -68,14 +91,14 @@ const HIGHLIGHT_GROUPS = [
   {
     module: 'POS',
     lines: [
-      'One free plate looks small. Crest shows what they add up to.',
-      'Guests spend more when the suggestion is right. Crest shows your staff what sells together.',
+      'Free plates look small one at a time. Crest adds them up.',
+      'The right suggestion sells more. Crest shows staff what sells together.',
     ],
   },
   {
     module: 'IMS',
     lines: [
-      "Ingredient prices move every month. Your menu prices don't. Crest shows the gap.",
+      'Ingredient costs rise faster than menu prices. Crest shows the gap.',
       'You know what a plate sells for. Crest shows what it costs you to make.',
     ],
   },
@@ -114,13 +137,14 @@ export default function Login() {
   // Forgot-password state
   const [forgotMode, setForgotMode]     = useState(false)
   const [forgotEmail, setForgotEmail]   = useState('')
-  const [forgotError, setForgotError]   = useState('')
+  const [forgotError, setForgotError]   = useState(null)
   const [forgotLoading, setForgotLoading] = useState(false)
   const [forgotSent, setForgotSent]     = useState(false)
 
   const { signIn, session, ready, profile } = useAuth()
   const { settings } = useSettings()
   const navigate = useNavigate()
+  useDocumentTitle(pageTitle('Sign in', settings?.app_name))
 
   async function handleSignIn(e) {
     e.preventDefault()
@@ -137,7 +161,7 @@ export default function Login() {
 
   async function handleForgotPassword(e) {
     e.preventDefault()
-    setForgotError('')
+    setForgotError(null)
     setForgotLoading(true)
     // Supabase itself returns success (no error) even for an unregistered email, specifically to
     // prevent using this form to enumerate which addresses have accounts — so surfacing `error`
@@ -146,7 +170,7 @@ export default function Login() {
       redirectTo: `${window.location.origin}/reset-password`,
     })
     setForgotLoading(false)
-    if (error) { setForgotError(error.message || 'Could not send reset email. Please try again.'); return }
+    if (error) { setForgotError(resetRequestError(error)); return }
     setForgotSent(true)
   }
 
@@ -192,23 +216,16 @@ export default function Login() {
             <span className="login-brand-name">{settings?.app_name || 'Crest Suite'}</span>
           </div>
           <nav className="login-nav-actions" aria-label="Site">
-            {/* type="button" explicitly — a <button> with no type defaults to submit, which is
-                harmless only for as long as these stay outside a <form>. */}
-            <button
-              type="button"
-              onClick={() => navigate('/pricing')}
-              className="login-btn login-btn--pricing">
+            {/* Router links, not buttons that call navigate() (S852): a link can be
+                middle-clicked or opened in a new tab, and a screen reader announces where it
+                goes. Login.css gives an <a>.login-btn the box and the no-underline the
+                <button> had. */}
+            <Link to="/pricing" className="login-btn login-btn--pricing">
               Pricing
-            </button>
-            {/* A router navigation, not the `<a href="#start-trial">` in-page jump this was:
-                the band it jumped to is a route now. As a button it also stops being the one
-                underlined blue-ish thing in the header on a preset that styles links. */}
-            <button
-              type="button"
-              onClick={() => navigate('/signup')}
-              className="login-btn login-btn--trial login-btn--nav">
+            </Link>
+            <Link to="/signup" className="login-btn login-btn--trial login-btn--nav">
               <span>Start free trial</span><span aria-hidden="true">→</span>
-            </button>
+            </Link>
           </nav>
         </div>
       </header>
@@ -277,13 +294,13 @@ export default function Login() {
                       <label htmlFor="forgot-email">Email</label>
                       <input id="forgot-email" type="email" autoComplete="username" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)} placeholder="you@restaurant.com" required autoFocus />
                     </div>
-                    {forgotError && <p className="login-error" role="alert">{forgotError}</p>}
+                    <ActionError error={forgotError} className="login-error" />
                     <button type="submit" className="login-btn" disabled={forgotLoading}>
                       {forgotLoading ? 'Sending…' : 'Send Reset Link'}
                     </button>
                   </form>
                 )}
-                <button type="button" className="login-staff-btn" onClick={() => { setForgotMode(false); setForgotSent(false); setForgotError('') }}>
+                <button type="button" className="login-staff-btn" onClick={() => { setForgotMode(false); setForgotSent(false); setForgotError(null) }}>
                   ← Back to sign in
                 </button>
               </>
@@ -325,8 +342,9 @@ export default function Login() {
                   {/* Sign in and Staff Login share a row rather than stacking. Staff Login stays
                       inside the card — it is a login alternative and belongs where someone looks
                       for a way in, not in the header among the marketing links — and paired like
-                      this it costs the page a column instead of a whole row. type="button" keeps
-                      it from submitting the form it now sits inside. */}
+                      this it costs the page a column instead of a whole row. It is a router link
+                      since S852, so it cannot submit the form it sits inside and a manager can
+                      open the PIN screen in a new tab. */}
                   {/* Stacked and full-width, not side by side. Two 50% buttons made Staff Login
                       read as the equal-weight alternative to signing in, which it is not — it is
                       the way in for a till, and most visitors here are not one. Stacked, the
@@ -336,9 +354,9 @@ export default function Login() {
                     <button type="submit" className="login-btn login-btn--flush" disabled={loading}>
                       <span>{loading ? 'Signing in…' : 'Sign in'}</span><span aria-hidden="true">→</span>
                     </button>
-                    <button type="button" className="login-staff-btn login-btn--flush" onClick={() => navigate('/pos/login')}>
+                    <Link to="/pos/login" className="login-staff-btn login-btn--flush">
                       <span>Staff Login</span><span aria-hidden="true">→</span>
-                    </button>
+                    </Link>
                   </div>
                 </form>
               </>
@@ -363,12 +381,9 @@ export default function Login() {
               All three modules at the Growth tier, free for {TRIAL_DAYS} days · No credit card · Nothing to install
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => navigate('/signup')}
-            className="login-btn login-btn--trial login-btn--flush login-signup-cta">
+          <Link to="/signup" className="login-btn login-btn--trial login-btn--flush login-signup-cta">
             <span>Start your free trial</span><span aria-hidden="true">→</span>
-          </button>
+          </Link>
         </section>
       </main>
 

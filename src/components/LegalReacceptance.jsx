@@ -18,7 +18,16 @@ import { useAuth } from '../context/AuthContext'
 import { adminOp } from '../shared/adminOp'
 import { withTimeout } from '../utils/withTimeout'
 import ActionError, { asActionError } from './ActionError'
-import { docsRequiringReacceptance, acceptancePayload, legalPath } from '../legal'
+import { docsRequiringReacceptance, acceptancePayload, legalPath, PRIOR_VERSIONS } from '../legal'
+
+// Whether any pending document has an earlier published version (S852). With none, nobody can
+// have accepted a previous one, so the gate is a first acceptance, and "We've updated our terms"
+// told every Owner held at v1.0 about a change to documents they had never been shown.
+// PRIOR_VERSIONS is keyed `${docType}-${version}` and is empty until a second version ships.
+export function isFirstAcceptance(docs, priorVersions = PRIOR_VERSIONS) {
+  const prior = Object.keys(priorVersions || {})
+  return !docs.some(d => prior.some(k => k.startsWith(`${d.docType}-`)))
+}
 
 export default function LegalReacceptance() {
   const { signOut, refreshProfile } = useAuth()
@@ -28,6 +37,8 @@ export default function LegalReacceptance() {
   const [recorded, setRecorded] = useState(false)
 
   const pending = docsRequiringReacceptance()
+  const firstTime = isFirstAcceptance(pending)
+  const many = pending.length > 1
 
   async function accept() {
     if (!checked || busy) return
@@ -77,7 +88,9 @@ export default function LegalReacceptance() {
   }
 
   return (
-    <div
+    // <main> (S852): the gate replaces the whole app, so it is the page's main region; a screen
+    // reader had no landmark to land on.
+    <main
       style={{
         // dvh, not vh: on a phone 100vh is the tallest the viewport ever gets, so with two pending
         // documents and a change summary the Accept button lands under the URL bar on a screen
@@ -94,7 +107,7 @@ export default function LegalReacceptance() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
           <ScrollText size={26} aria-hidden="true" style={{ color: 'var(--theme-accent)' }} />
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: 'var(--theme-text1)' }}>
-            We&apos;ve updated our terms
+            {firstTime ? 'Please accept our terms' : <>We&apos;ve updated our terms</>}
           </h1>
         </div>
 
@@ -106,9 +119,13 @@ export default function LegalReacceptance() {
             color: 'var(--theme-text2)',
           }}
         >
-          {pending.length > 1
-            ? 'These documents have changed since you last accepted them. Please review and accept them to continue using Crest Suite.'
-            : 'This document has changed since you last accepted it. Please review and accept it to continue using Crest Suite.'}
+          {firstTime
+            ? (many
+              ? 'Please review and accept these documents to continue using Crest Suite.'
+              : 'Please review and accept this document to continue using Crest Suite.')
+            : (many
+              ? 'These documents have changed since you last accepted them. Please review and accept them to continue using Crest Suite.'
+              : 'This document has changed since you last accepted it. Please review and accept it to continue using Crest Suite.')}
         </p>
 
         <ul style={{ listStyle: 'none', margin: '0 0 20px', padding: 0 }}>
@@ -173,7 +190,7 @@ export default function LegalReacceptance() {
             style={{ width: 16, height: 16, flexShrink: 0, marginTop: 2, accentColor: 'var(--theme-accent)', cursor: 'pointer' }}
           />
           <span>
-            I have read and agree to {pending.length > 1 ? 'these documents' : 'this document'} on
+            I have read and agree to {many ? 'these documents' : 'this document'} on
             behalf of my business.
           </span>
         </label>
@@ -218,6 +235,6 @@ export default function LegalReacceptance() {
           outstanding.
         </p>
       </div>
-    </div>
+    </main>
   )
 }

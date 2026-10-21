@@ -4,12 +4,16 @@ import { Hexagon } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { useCapsLock } from '../shared/hooks/useCapsLock'
+import { useDocumentTitle, pageTitle } from '../shared/hooks/useDocumentTitle'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../utils/weakPasswords'
 import { TRIAL_DAYS } from '../data/pricingPlans'
 import { acceptancePayload, legalPath } from '../legal'
 import { supabase } from '../supabaseClient'
+import { settleWithin, isTimeout } from '../utils/withTimeout'
+import { edgeFunctionFailure } from '../shared/edgeFunctionError'
 import FieldError, { fieldAria } from '../components/FieldError'
 import SupportContactLine from '../components/SupportContactLine'
+import ActionError, { asActionError } from '../components/ActionError'
 import './Login.css'
 import './Signup.css'
 
@@ -24,17 +28,34 @@ import './Signup.css'
 // than duplicated: Login.css is already a three-consumer file (ResetPassword.js imports it too),
 // and a second copy of `.login-field` is how the two pages start diverging.
 
-async function edgeOp(action, params = {}) {
-  const { data, error } = await supabase.functions.invoke('admin-user-ops', {
-    body: { action, ...params },
-  })
-  if (error) {
-    let detail = error.message || 'Error'
-    try { const b = await error.context.json(); detail = b?.error?.message || b?.error || b?.message || detail } catch (_) {}
-    throw new Error(detail)
+// register_trial, bounded and answered in words (S852). It had no time limit, so a stalled call
+// left "Creating your account…" on screen for good, and a failure showed the function's raw
+// string: "Failed to send a request to the Edge Function" on a dropped connection.
+//
+// What each answer may claim: register_trial refuses before it writes, or rolls the auth user and
+// the client back when a later step fails, so an ANSWER from it means no account was made. A
+// timeout or no answer at all proves nothing either way, so those two say so and point at the
+// safe retry: pressing again either creates the account or is refused as "already exists".
+const TRIAL_TIMEOUT_MS = 30000
+const TRIAL_REFUSED = 'Your trial account was not created.'
+const TRIAL_UNKNOWN_TIMEOUT = 'The server took too long to answer, so it is not known whether your account was created. Press Start Free Trial again: if it was created, you will be asked to sign in instead.'
+const TRIAL_UNKNOWN_NETWORK = 'Could not reach the server, so your account may or may not have been created. Check your connection and press Start Free Trial again: if it was created, you will be asked to sign in instead.'
+const ALREADY_REGISTERED = 'An account with this email already exists. Sign in instead.'
+
+// → null on success, else what ActionError renders.
+async function registerTrial(params) {
+  const { data, error } = await settleWithin(
+    supabase.functions.invoke('admin-user-ops', { body: { action: 'register_trial', ...params } }),
+    TRIAL_TIMEOUT_MS, 'Creating your account'
+  )
+  if (!error && !data?.error) return null
+  if (isTimeout(error)) return { text: TRIAL_UNKNOWN_TIMEOUT, detail: error.message }
+  const info = await edgeFunctionFailure(data, error, TRIAL_REFUSED)
+  if (/already exists|already (been )?registered|email_exists|profiles_pkey/i.test(`${info.serverText} ${info.detail}`)) {
+    return ALREADY_REGISTERED
   }
-  if (data?.error) throw new Error(data.error.message || data.error || 'Failed')
-  return data
+  if (info.network) return { text: TRIAL_UNKNOWN_NETWORK, detail: info.detail }
+  return { text: info.text, detail: info.detail }
 }
 
 // Mirrors the `register_trial` Edge Function's own check exactly, so the form never accepts an
@@ -50,7 +71,7 @@ export default function Signup() {
   const [tEmail, setTEmail]     = useState('')
   const [tPass, setTPass]       = useState('')
   const [tShowPass, setTShowPass] = useState(false)
-  const [tError, setTError]     = useState('')
+  const [tError, setTError]     = useState(null)
   const [tFieldErr, setTFieldErr] = useState({})
   const [tLoading, setTLoading] = useState(false)
   // Unchecked by default and required, which is the whole difference between a clickwrap and
@@ -63,10 +84,11 @@ export default function Signup() {
   const { signIn, session, ready, profile } = useAuth()
   const { settings } = useSettings()
   const navigate = useNavigate()
+  useDocumentTitle(pageTitle('Start your free trial', settings?.app_name))
 
   async function handleTrialSignup(e) {
     e.preventDefault()
-    setTError('')
+    setTError(null)
 
     // Validated per field rather than as one message at the bottom of the form: a single shared
     // error line means someone who missed Phone reads about it nowhere near Phone. The first
@@ -93,7 +115,7 @@ export default function Signup() {
 
     setTLoading(true)
     try {
-      await edgeOp('register_trial', {
+      const refused = await registerTrial({
         business_name: tBiz.trim(),
         full_name:     tName.trim() || tBiz.trim(),
         phone:         tPhone.trim(),
@@ -110,6 +132,7 @@ export default function Signup() {
         // has not been attributed.
         accepted_legal: acceptancePayload(),
       })
+      if (refused) { setTError(refused); return }
       const { error: signInErr } = await signIn(tEmail.trim().toLowerCase(), tPass)
       if (signInErr) {
         // The account EXISTS; only the automatic sign-in failed. On /login this used to pre-fill
@@ -121,11 +144,8 @@ export default function Signup() {
         navigate('/dashboard')
       }
     } catch (err) {
-      const msg = err.message || 'Something went wrong. Please try again.'
-      const isAlreadyRegistered = msg.includes('already exists') || msg.includes('already registered') || msg.includes('profiles_pkey')
-      setTError(isAlreadyRegistered
-        ? 'An account with this email already exists. Sign in instead.'
-        : msg)
+      // Only an unexpected throw lands here; the call itself answers in registerTrial().
+      setTError(asActionError(err, 'operator'))
     } finally {
       setTLoading(false)
     }
@@ -152,20 +172,15 @@ export default function Signup() {
             <span className="login-brand-name">{settings?.app_name || 'Crest Suite'}</span>
           </div>
           <nav className="login-nav-actions" aria-label="Site">
-            <button
-              type="button"
-              onClick={() => navigate('/pricing')}
-              className="login-btn login-btn--pricing">
+            {/* Router links, as on /login (S852), so either can open in a new tab. */}
+            <Link to="/pricing" className="login-btn login-btn--pricing">
               Pricing
-            </button>
+            </Link>
             {/* The mirror of /login's "Start your free trial": from here the way out is back to
                 sign-in, so the header CTA points there rather than at the page you are on. */}
-            <button
-              type="button"
-              onClick={() => navigate('/login')}
-              className="login-btn login-btn--trial login-btn--nav">
+            <Link to="/login" className="login-btn login-btn--trial login-btn--nav">
               <span>Sign in</span><span aria-hidden="true">→</span>
-            </button>
+            </Link>
           </nav>
         </div>
       </header>
@@ -182,7 +197,7 @@ export default function Signup() {
 
           {trialSuccess ? (
             <div className="login-notice" role="status">
-              Account created. <Link to={`/login?email=${encodeURIComponent(tEmail.trim().toLowerCase())}`}>Sign in</Link> with
+              Account created. <Link className="signup-notice-link" to={`/login?email=${encodeURIComponent(tEmail.trim().toLowerCase())}`}>Sign in</Link> with
               the email and password you just chose.
             </div>
           ) : (
@@ -202,7 +217,7 @@ export default function Signup() {
                       when ?trial=1 said the visitor came to sign up. On a page that is nothing but
                       this form there is no competition and no condition. /signup?trial=1 still
                       works; the parameter simply no longer decides anything. */}
-                  <input id="trial-biz" value={tBiz} onChange={e => setTBiz(e.target.value)} placeholder="e.g. Sunrise Café" required {...trialFieldAria('trial-biz')} autoFocus />
+                  <input id="trial-biz" autoComplete="organization" value={tBiz} onChange={e => setTBiz(e.target.value)} placeholder="e.g. Sunrise Café" required {...trialFieldAria('trial-biz')} autoFocus />
                   {trialFieldError('trial-biz')}
                 </div>
                 <div className="login-field">
@@ -222,11 +237,11 @@ export default function Signup() {
                 </label>
                 <div className="login-field">
                   <label htmlFor="trial-name">Your Name <span className="login-optional">(optional)</span></label>
-                  <input id="trial-name" value={tName} onChange={e => setTName(e.target.value)} placeholder="e.g. Ramesh Shrestha" />
+                  <input id="trial-name" autoComplete="name" value={tName} onChange={e => setTName(e.target.value)} placeholder="e.g. Ramesh Shrestha" />
                 </div>
                 <div className="login-field">
                   <label htmlFor="trial-phone">Phone *</label>
-                  <input id="trial-phone" type="tel" value={tPhone} onChange={e => setTPhone(e.target.value)} placeholder="98XXXXXXXX" required {...trialFieldAria('trial-phone')} />
+                  <input id="trial-phone" type="tel" autoComplete="tel" value={tPhone} onChange={e => setTPhone(e.target.value)} placeholder="98XXXXXXXX" required {...trialFieldAria('trial-phone')} />
                   {trialFieldError('trial-phone')}
                 </div>
                 <div className="login-field">
@@ -235,7 +250,7 @@ export default function Signup() {
                 </div>
                 <div className="login-field login-field--address">
                   <label htmlFor="trial-address">Outlet address *</label>
-                  <input id="trial-address" value={tAddress} onChange={e => setTAddress(e.target.value)} placeholder="e.g. Jhamsikhel, Lalitpur" required {...trialFieldAria('trial-address')} />
+                  <input id="trial-address" autoComplete="street-address" value={tAddress} onChange={e => setTAddress(e.target.value)} placeholder="e.g. Jhamsikhel, Lalitpur" required {...trialFieldAria('trial-address')} />
                   {trialFieldError('trial-address')}
                 </div>
                 <button type="submit" className="login-btn login-btn--trial login-btn--inline login-btn--flush" disabled={tLoading}>
@@ -243,7 +258,7 @@ export default function Signup() {
                   <span aria-hidden="true">→</span>
                 </button>
               </div>
-              {tError && <p className="login-error" role="alert">{tError}</p>}
+              <ActionError error={tError} className="login-error" />
 
               {/* This was a passive sentence — "By starting a trial you agree to our Terms of
                   Service and Privacy Policy" — naming two documents that did not exist, as plain

@@ -5,6 +5,7 @@ import { useTheme } from '../../../context/ThemeContext'
 import { getInitials, avatarColorFor, relativeLuminance } from '../../../utils/avatarColor'
 import { withTimeout } from '../../../utils/withTimeout'
 import { useStaffAppManifest } from './useStaffApp'
+import { useDocumentTitle, pageTitle } from '../../../shared/hooks/useDocumentTitle'
 import { employeeErrorText } from './employeeError'
 import { rememberStaffClient } from './staffClient'
 import './selfService.css'
@@ -35,6 +36,9 @@ export default function SelfServiceLogin() {
   const { colors } = useTheme()
   const isDark = relativeLuminance(colors.bg) < 0.5
   useStaffAppManifest(colors.bg)
+  // "Sign in · Crest Staff" over the manifest hook's plain "Crest Staff" (S852), so the tab and a
+  // screen reader say this is the sign-in pad. After that hook on purpose; the restore is guarded.
+  useDocumentTitle(pageTitle('Sign in', 'Crest Staff'))
   const linkOk = UUID_RE.test(clientId || '')
 
   const [staff,     setStaff]     = useState([])
@@ -263,18 +267,12 @@ export default function SelfServiceLogin() {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 72px)', gap: 12 }}>
             {KEYS.flat().map((k, i) => (
+              // .ss-pin-key (selfService.css, S852): the press, hover and focus states PosLogin's
+              // keys got in S844, which this copy of the keypad had missed.
               <button
                 key={i} type="button" onClick={() => pressKey(k)} disabled={!k || signingIn}
                 aria-label={KEY_LABEL[k]}
-                style={{
-                  width: 72, height: 72, background: k ? 'var(--theme-card)' : 'transparent',
-                  border: k ? '1px solid var(--theme-border)' : 'none', borderRadius: 0,
-                  color: k === 'C' ? 'var(--theme-text2)' : 'var(--theme-text1)',
-                  fontSize: k === '⌫' ? 20 : k === 'C' ? 15 : 22,
-                  fontWeight: k === 'C' ? 600 : 500,
-                  letterSpacing: k === 'C' ? '0.04em' : 'normal',
-                  cursor: k ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}
+                className={`ss-pin-key${k === 'C' ? ' ss-pin-key--clear' : k === '⌫' ? ' ss-pin-key--delete' : ''}`}
               >
                 {k}
               </button>
