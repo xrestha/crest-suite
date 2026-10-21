@@ -163,7 +163,7 @@ function openCreditNoteWindow() {
   const w = window.open('', '_blank', 'width=340,height=480,left=200,top=100')
   if (!w) return null
   w.opener = null
-  w.document.write('<p style="font-family:sans-serif;color:#666;padding:24px">Printing…</p>')
+  w.document.write('<p style="font-family:sans-serif;color:#555;padding:24px">Printing…</p>')
   return w
 }
 

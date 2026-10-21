@@ -240,7 +240,7 @@ export function openPrintWindow({ wide = false } = {}) {
   const w = window.open('', '_blank', wide ? 'width=900,height=700,left=120,top=60' : 'width=340,height=480,left=200,top=100')
   if (!w) return null
   w.opener = null
-  w.document.write('<p style="font-family:sans-serif;color:#666;padding:24px">Preparing…</p>')
+  w.document.write('<p style="font-family:sans-serif;color:#555;padding:24px">Preparing…</p>')
   return w
 }
 

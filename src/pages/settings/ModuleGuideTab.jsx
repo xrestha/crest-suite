@@ -266,7 +266,7 @@ function buildGuidePrintHtml(guideGroups, docTitle, docSubtitle) {
       * { box-sizing: border-box; }
       body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #111; max-width: 760px; margin: 0 auto; padding: 24px; line-height: 1.5; orphans: 3; widows: 3; }
       .doc-title { font-size: 22px; font-weight: 800; margin: 0 0 4px; }
-      .doc-sub { font-size: 12px; color: #666; margin: 0 0 24px; }
+      .doc-sub { font-size: 12px; color: #555; margin: 0 0 24px; }
       .group { margin-bottom: 8px; }
       /* break-after: avoid keeps a heading glued to the content right after it, so a group/section
          title can never print alone at the bottom of a page with its content stranded on the next. */
@@ -283,7 +283,7 @@ function buildGuidePrintHtml(guideGroups, docTitle, docSubtitle) {
       .meta { display: inline-block; font-size: 10px; font-family: monospace; color: #555; border: 1px solid #ccc; border-radius: 3px; padding: 1px 6px; margin-right: 4px; }
       .summary { font-size: 13px; margin: 0 0 12px; break-inside: avoid; page-break-inside: avoid; }
       .block { margin-bottom: 10px; }
-      .block-h { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #666; margin-bottom: 4px; break-after: avoid; page-break-after: avoid; }
+      .block-h { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #777; margin-bottom: 4px; break-after: avoid; page-break-after: avoid; }
       ol, ul { margin: 0; padding-left: 20px; }
       li { font-size: 12.5px; margin-bottom: 4px; break-inside: avoid; page-break-inside: avoid; }
       p { font-size: 12.5px; margin: 0 0 6px; }

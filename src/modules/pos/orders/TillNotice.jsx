@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { FOCUSABLE } from '../../../components/Modal'
 
 // The till's notice bar (owner decision, 2026-10-15 audit): what the floor's refusals used to say in a
 // window.alert. A browser pop-up froze the whole page until OK was tapped, so the guest-order chime and
@@ -15,8 +16,8 @@ import { createPortal } from 'react-dom'
 // the guest-order banner (3000), and it starts below that banner, which publishes its own height.
 export const TILL_NOTICE_Z = 2200
 
-// What Modal's Tab trap counts as focusable (Modal.js FOCUSABLE), so the edges found here are its edges.
-const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+// FOCUSABLE is Modal's own Tab-trap selector, imported rather than copied, so the edges found here are
+// its edges.
 const OPEN_DIALOG = '[role="dialog"][aria-modal="true"]'
 const focusablesIn = el => Array.from(el.querySelectorAll(FOCUSABLE)).filter(n => n.offsetParent !== null)
 

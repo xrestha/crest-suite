@@ -4,22 +4,15 @@
     "ignoreFiles": [],
     "ignoreValues": [
       {
-        "rule": "design-system-color",
-        "value": "#666",
-        "createdAt": "2026-08-19T10:10:41.841Z",
-        "reason": "print-only stylesheet in buildGuidePrintHtml; in-file comment: print doc never depends on live theme"
-      },
-      {
-        "rule": "design-system-color",
-        "value": "#96700a",
-        "createdAt": "2026-08-19T10:10:41.942Z",
-        "reason": "print-only stylesheet heading accent in buildGuidePrintHtml; theme-independent by design"
-      },
-      {
         "rule": "design-system-radius",
         "value": "3px",
+        "files": [
+          "src/pages/settings/ModuleGuideTab.jsx",
+          "src/modules/hr/employees/EmployeeJoiningForm.jsx",
+          "src/modules/ims/recipes/RecipeCostCardPrint.jsx"
+        ],
         "createdAt": "2026-08-19T10:10:42.042Z",
-        "reason": "print-only stylesheet meta chip in buildGuidePrintHtml; theme-independent by design"
+        "reason": "print-only stylesheet meta chip in buildGuidePrintHtml (ModuleGuideTab.jsx); theme-independent by design. Scoped to the files that print a 3px corner (the guide printout, the printed HR joining form, the recipe cost card print) rather than exempting 3px product-wide (the S765 rule). The #666 and #96700a entries that sat beside this one were removed: the guide printout moved its greys onto the print ramp (#555 secondary meta, #777 labels) and #96700a survives only in a comment."
       },
       {
         "rule": "design-system-color",

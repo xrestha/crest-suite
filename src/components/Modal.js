@@ -1,6 +1,9 @@
 import { useEffect, useId, useRef } from 'react'
 
-const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+// What the Tab trap counts as focusable. Exported so a layer that has to agree with this trap about
+// where its edges are (TillNotice joining a dialog's Tab cycle, ChartCard's own expanded trap) reads
+// this one string rather than a copy that can drift.
+export const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 // Stack of currently-open modals, outermost first. Both Escape and the Tab trap listen on
 // `document`, so with two Modals open (e.g. a typed-name confirm inside ClientDrawer) BOTH

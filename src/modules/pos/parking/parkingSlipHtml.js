@@ -82,7 +82,7 @@ export function openSlipWindow() {
   // close the popup) — sever window.opener manually instead, on the reference we keep, for the
   // same "can't reach back into the live app" protection without losing that reference.
   w.opener = null
-  w.document.write('<p style="font-family:sans-serif;color:#666;padding:24px">Printing…</p>')
+  w.document.write('<p style="font-family:sans-serif;color:#555;padding:24px">Printing…</p>')
   return w
 }
 

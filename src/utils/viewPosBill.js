@@ -31,7 +31,7 @@ function writeLoadFailure(w) {
 function writeCostsRefused(w) {
   if (!w) return
   w.document.open()
-  w.document.write('<p style="font-family:sans-serif;color:#666;padding:24px">This Complimentary Slip shows what the food cost, which only a POS supervisor, a POS manager or the Owner can see. Ask one of them to open it.</p>')
+  w.document.write('<p style="font-family:sans-serif;color:#555;padding:24px">This Complimentary Slip shows what the food cost, which only a POS supervisor, a POS manager or the Owner can see. Ask one of them to open it.</p>')
   w.document.close()
 }
 
@@ -48,7 +48,7 @@ export async function viewPosBill(clientId, row) {
   // popup-blocked on Safari/iPad (no gesture left to point to) and often on Chrome too on a
   // slow connection. A tab open on a blank/loading page beats no tab at all.
   const w = window.open('', '_blank')
-  if (w) w.document.write('<p style="font-family:sans-serif;color:#666;padding:24px">Loading…</p>')
+  if (w) w.document.write('<p style="font-family:sans-serif;color:#555;padding:24px">Loading…</p>')
 
   const [{ data: order, error: orderErr }, { data: settings, error: settingsErr }, { data: client, error: clientErr }] = await Promise.all([
     within(scopedFrom('pos_orders', clientId).eq('id', orderId).single(), 'Reading the bill'),
