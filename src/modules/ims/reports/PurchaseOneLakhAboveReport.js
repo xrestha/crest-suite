@@ -1,5 +1,5 @@
 import { npr } from '../../../shared/nepalMoney'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -19,6 +19,8 @@ import {
 } from './purchaseTaxSplit'
 import { readPriorBillLines } from './readPriorBillLines'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { Navigate } from 'react-router-dom'
 
 const fmtNpr = npr
@@ -28,25 +30,26 @@ const ONE_LAKH_READ_MAX_ROWS = 200000
 
 const periodName = p => `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}`
 
+// The fiscal years a month list spans, newest first.
+const fysOf = list => [...new Set(list.map(p => getBsFiscalYear(p.bs_year, p.bs_month)))]
+  .sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
+
+// What a fiscal year's load reads off the month list: the months and their status (S855). A load
+// started from the list in memory is kept only while the fresh list still matches it.
+const listSig = list => (list || []).map(p => `${p.id}:${p.bs_year}:${p.bs_month}:${p.status}`).join(',')
+
 export default function PurchaseOneLakhAboveReport() {
   const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const biz = useBizInfo()
   const fyReq = useLatestRequest()
+  const periodList = usePeriodList()
 
   const [periods, setPeriods] = useState([])
   // S756: "have the periods been read yet" is its own fact. Without it a client with no periods
   // left `loading` at its initial true for ever — load() returned before ever clearing it.
   const [periodsLoaded, setPeriodsLoaded] = useState(false)
-  // S792 (TAX-6): WHICH client `periods` was read for. On a client switch `load` is re-created with
-  // the new client id at once, while `periods` and `selectedFy` still hold the previous client's
-  // until the new read lands — so it read the OLD client's purchase lines (raw `.in('period_id')`,
-  // which an admin's RLS returns) under the new client's key. Both clients share the current FY
-  // label, so when the new periods landed the second run kept the SAME key, both in-flight loads
-  // passed `isCurrent`, and whichever resolved last won the page, letterhead and workbook. `load`
-  // now runs only over periods read for the client on screen.
-  const [periodsFor, setPeriodsFor] = useState(null)
   const [fyOptions, setFyOptions] = useState([])
   const [selectedFy, setSelectedFy] = useState('')
   const [vendors, setVendors] = useState([])
@@ -54,32 +57,48 @@ export default function PurchaseOneLakhAboveReport() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
 
-  useEffect(() => {
-    if (!effectiveClientId) return
-    let stale = false
+  useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keyed on client AND fiscal year: an admin switching client keeps the same FY label, and the
+  // previous client's read must not land on the new one's page (the S721 rule).
+  const fyKeyOf = fy => `${effectiveClientId}:${fy}`
+
+  async function init() {
     // Claim the page for this client before any await, so a fiscal-year load still in flight for
     // the client just left can no longer set anything (TAX-6) — and drop that client's periods,
     // year and rows rather than leave them on screen under the new client's name meanwhile.
-    fyReq.begin(`${effectiveClientId}:periods`)
-    setPeriods([]); setFyOptions([]); setSelectedFy(''); setPeriodsFor(null)
+    const initKey = fyReq.begin(`${effectiveClientId}:periods`)
+    setPeriods([]); setFyOptions([]); setSelectedFy('')
     setVendors([]); setUnlinked({ count: 0, value: 0, examples: [], more: 0 })
     setPeriodsLoaded(false); setLoadError(null); setLoading(true)
-    scopedFrom('monthly_periods')
-      .then(({ data, error }) => {
-        if (stale) return   // a response for a client we have already left
-        if (error) { setLoadError(error); setLoading(false); return }
-        const list = data || []
-        setPeriods(list)
-        const fys = [...new Set(list.map(p => getBsFiscalYear(p.bs_year, p.bs_month)))]
-          .sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
-        setFyOptions(fys)
-        setSelectedFy(fys.length > 0 ? fys[0] : '')
-        setPeriodsFor(effectiveClientId)
-        setPeriodsLoaded(true)
-        if (list.length === 0) setLoading(false)
-      })
-    return () => { stale = true }
-  }, [effectiveClientId, scopedFrom, fyReq])
+    // The month list is the shared one, and the newest fiscal year's load starts beside it (S855,
+    // src/shared/periodList.js). The pick is that year, keyed as a year load is (fyKeyOf).
+    let list = null, fy = '', builtFrom = null
+    const out = await initPeriodLoad({
+      req: fyReq, initKey, periodList,
+      pick: l => { const top = fysOf(l)[0]; return top ? { id: fyKeyOf(top), fy: top } : null },
+      setPeriods: l => { list = l; setPeriods(l); setFyOptions(fysOf(l)) },
+      select: c => { fy = c ? c.fy : ''; setSelectedFy(fy) },
+      load: () => { builtFrom = list; return load(fy, list) },
+    })
+    if (out.superseded) return   // a newer client switch or FY pick owns the page
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    setPeriodsLoaded(true)
+    // A fiscal year reaches past one month, so a load kept from the guessed list is run again when
+    // the fresh list moved a month in it (a close or a new month on another device).
+    if (out.chosen && fyReq.isCurrent(out.chosen.id) && listSig(builtFrom) !== listSig(list)) {
+      await load(fy, list)
+    }
+    if (!out.chosen || fyReq.isCurrent(out.chosen.id)) setLoading(false)
+  }
+
+  async function changeFy(fy) {
+    setSelectedFy(fy)
+    setLoading(true)
+    await load(fy, periods)
+    // Only the load that still owns the page may clear the flag: a superseded one returned early.
+    if (fyReq.isCurrent(fyKeyOf(fy))) setLoading(false)
+  }
 
   // The periods of the selected fiscal year, in calendar order — they are the report's scope, so
   // they are named on screen and in the workbook rather than implied by an FY label (S756).
@@ -88,19 +107,18 @@ export default function PurchaseOneLakhAboveReport() {
     .sort((a, b) => (a.bs_year - b.bs_year) || (a.bs_month - b.bs_month))
   const openPeriods = fyPeriods.filter(p => p.status === 'open')
 
-  const load = useCallback(async () => {
-    // `periodsFor` (TAX-6): never read with another client's period ids — see its declaration.
-    if (!effectiveClientId || periodsFor !== effectiveClientId || !selectedFy || periods.length === 0) return
-    // Keyed on client AND fiscal year: an admin switching client keeps the same FY label, and the
-    // previous client's read must not land on the new one's page (the S721 rule).
-    const key = fyReq.begin(`${effectiveClientId}:${selectedFy}`)   // claim the page before any await (S601)
-    setLoading(true)
-    const periodIds = periods
-      .filter(p => getBsFiscalYear(p.bs_year, p.bs_month) === selectedFy)
+  // The reads alone: the caller owns `loading`, so a guessed year never paints before its list lands.
+  // `list` is the month list read for the client on screen, handed in by the caller (S792, TAX-6):
+  // a load that read `periods` from state once read the PREVIOUS client's purchase lines under the
+  // new client's key while the new list was still in flight.
+  async function load(fy, list) {
+    const key = fyReq.begin(fyKeyOf(fy))   // claim the page before any await (S601)
+    const periodIds = list
+      .filter(p => getBsFiscalYear(p.bs_year, p.bs_month) === fy)
       .map(p => p.id)
 
     setLoadError(null)
-    if (periodIds.length === 0) { setVendors([]); setLoading(false); return }
+    if (periodIds.length === 0) { setVendors([]); return }
 
     const results = await Promise.all([
       // Paged: this spans a whole BS fiscal year (12 periods), so it is one of the largest
@@ -123,7 +141,7 @@ export default function PurchaseOneLakhAboveReport() {
     if (!fyReq.isCurrent(key)) return   // superseded by a newer FY / client selection
     // A statutory disclosure must not render a failed read as "no vendors" (S612 silent-zero rule).
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setVendors([]); setLoading(false); return }
+    if (failed) { setLoadError(failed); setVendors([]); return }
     const [{ data: entData }, { data: retData }] = results
     const entries = entData || []
     const returns = retData || []
@@ -148,24 +166,21 @@ export default function PurchaseOneLakhAboveReport() {
     if (outsideIds.length > 0) {
       const prior = await readPriorBillLines(outsideIds)
       if (!fyReq.isCurrent(key)) return
-      if (prior.error) { setLoadError(prior.error); setVendors([]); setLoading(false); return }
+      if (prior.error) { setLoadError(prior.error); setVendors([]); return }
       factors = mergeFactors(factors, priorBillFactors(prior.data))
     }
     setVendors(buildVendorSummary(allocated, returns, factors))
     // Unlinked returns (their bill was deleted or re-saved) still come off their supplier here —
     // a return is a return whichever half it was — but at list rate and with no VAT reversed, since
     // nothing records either. Named, so the reader knows those two figures are approximate (S756).
-    const periodById = new Map(periods.map(p => [p.id, p]))
+    const periodById = new Map(list.map(p => [p.id, p]))
     setUnlinked(summariseUnlinkedReturns(returns, {
       dayLabel: r => {
         const p = periodById.get(r.period_id)
         return p ? `${r.bs_day ? `${r.bs_day} ` : ''}${periodName(p)}` : null
       },
     }))
-    setLoading(false)
-  }, [effectiveClientId, periodsFor, selectedFy, periods, scopedFrom, fyReq])
-
-  useEffect(() => { load() }, [load])
+  }
 
   // One row per SUPPLIER, keyed on a normalised PAN (S756, owner decision D12). Two vendor cards for
   // one PAN each under one lakh used to be two undisclosed rows. A vendor crosses the threshold on
@@ -281,7 +296,7 @@ export default function PurchaseOneLakhAboveReport() {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end', marginBottom: 20 }}>
         <div>
           <label style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'block', marginBottom: 4 }} htmlFor="purcha-f1">Fiscal Year (BS)</label>
-          <select id="purcha-f1" className="form-select" value={selectedFy} onChange={e => setSelectedFy(e.target.value)}>
+          <select id="purcha-f1" className="form-select" value={selectedFy} onChange={e => changeFy(e.target.value)}>
             {fyOptions.map(fy => <option key={fy} value={fy}>{fy}</option>)}
           </select>
         </div>

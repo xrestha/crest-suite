@@ -14,6 +14,8 @@ import { useSettings } from '../../../context/SettingsContext'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { findUncountedItems, mergeGaps, gapNote, unjudgedFcFigure } from '../../../shared/uncountedItems'
@@ -34,12 +36,30 @@ function getFiscalYear(bs_year, bs_month) {
 // "the report for what the header says" from "a report".
 const yearKeyOf = (clientId, fiscal, year) => `${clientId}:${fiscal ? 'fy' : 'cal'}:${year}`
 
+// The year options a month list offers in a mode, newest first.
+function yearOptionsFor(list, fiscal) {
+  if (fiscal) {
+    const fySet = new Set(list.map(p => getFiscalYear(p.bs_year, p.bs_month)))
+    return [...fySet].sort((a, b) => b - a).map(fy => ({
+      value: fy,
+      label: `FY ${fy}/${(fy + 1).toString().slice(-2)}`
+    }))
+  }
+  const yearSet = new Set(list.map(p => p.bs_year))
+  return [...yearSet].sort((a, b) => b - a).map(y => ({ value: y, label: `${y} BS` }))
+}
+
+// What a year's build reads off the month list: the months and their status (S855). A build started
+// from the list in memory is kept only while the fresh list still matches it.
+const listSig = list => (list || []).map(p => `${p.id}:${p.bs_year}:${p.bs_month}:${p.status}`).join(',')
+
 export default function AnnualSummary() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const { settings } = useSettings()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const yearReq = useLatestRequest()
+  const periodList = usePeriodList()
   const biz = useBizInfo()
 
   const [allPeriods, setAllPeriods]     = useState([])
@@ -51,16 +71,11 @@ export default function AnnualSummary() {
   const [loadError, setLoadError]       = useState(null)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
-  useEffect(() => { if (allPeriods.length) rebuildYearOptions() }, [allPeriods, fiscalMode]) // eslint-disable-line
-  // `fiscalMode` is a dependency too (S756): toggling Calendar ↔ Fiscal usually leaves selectedYear
-  // at the same NUMBER (2082 BS → FY 2082/83), so without it no rebuild ran and the calendar
-  // year's figures stayed on screen under the fiscal year's label.
-  useEffect(() => { if (selectedYear !== null && allPeriods.length) buildReport() }, [selectedYear, allPeriods, fiscalMode]) // eslint-disable-line
 
   async function init() {
     // A client switch starts from nothing (S792, FIGURES-7/11). Claiming the page supersedes a year
-    // load still in flight for the previous outlet, and clearing the periods keeps both effects
-    // above idle until THIS client's periods land — so no year is built from the last client's list.
+    // load still in flight for the previous outlet, and clearing the periods means no year is built
+    // from the last client's list.
     const initKey = yearReq.begin(`${effectiveClientId}:init`)
     setLoading(true)
     setLoadError(null)
@@ -68,51 +83,73 @@ export default function AnnualSummary() {
     setAllPeriods([])
     setYearOptions([])
     setSelectedYear(null)
-    const { data: p, error } = await scopedFrom('monthly_periods')
-      .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-    if (!yearReq.isCurrent(initKey)) return   // a newer client switch owns the page
-    if (error) { setLoadError(error); setLoading(false); return }
-    setAllPeriods(p || [])
-    // `loading` stays TRUE while there are periods (FIGURES-11): clearing it here painted a frame of
-    // "No periods found for —." before a year had been chosen, let alone read. rebuildYearOptions
-    // picks the year and buildReport clears the flag. With no periods nothing will, so it goes here.
-    if (!(p || []).length) setLoading(false)
-  }
-
-  function rebuildYearOptions() {
-    if (fiscalMode) {
-      const fySet = new Set(allPeriods.map(p => getFiscalYear(p.bs_year, p.bs_month)))
-      const opts = [...fySet].sort((a, b) => b - a).map(fy => ({
-        value: fy,
-        label: `FY ${fy}/${(fy + 1).toString().slice(-2)}`
-      }))
-      setYearOptions(opts)
-      setSelectedYear(opts[0]?.value ?? null)
-    } else {
-      const yearSet = new Set(allPeriods.map(p => p.bs_year))
-      const opts = [...yearSet].sort((a, b) => b - a).map(y => ({ value: y, label: `${y} BS` }))
-      setYearOptions(opts)
-      setSelectedYear(opts[0]?.value ?? null)
+    // The month list is the shared one, and the newest year's build starts beside it (S855,
+    // src/shared/periodList.js). The pick is that year in the current mode, keyed as a year load is
+    // (yearKeyOf), so a year or mode picked meanwhile supersedes it.
+    const fiscal = fiscalMode
+    let list = null, year = null, builtFrom = null
+    const out = await initPeriodLoad({
+      req: yearReq, initKey, periodList,
+      pick: l => {
+        const y = yearOptionsFor(l, fiscal)[0]?.value
+        return y == null ? null : { id: yearKeyOf(effectiveClientId, fiscal, y), year: y }
+      },
+      setPeriods: l => { list = l; setAllPeriods(l); setYearOptions(yearOptionsFor(l, fiscal)) },
+      select: y => { year = y ? y.year : null; setSelectedYear(year) },
+      load: () => { builtFrom = list; return buildReport(year, fiscal, list) },
+    })
+    if (out.superseded) return   // a newer client switch, year or mode owns the page
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    // A year reaches past one month, so a build kept from the guessed list is run again when the
+    // fresh list moved a month in it (a close or a new month on another device).
+    if (out.chosen && yearReq.isCurrent(out.chosen.id) && listSig(builtFrom) !== listSig(list)) {
+      await buildReport(year, fiscal, list)
     }
+    // `loading` stays TRUE until a year has been read (FIGURES-11): clearing it on the list painted
+    // a frame of "No periods found for —." before a year had been chosen, let alone read.
+    if (!out.chosen || yearReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
-  async function buildReport() {
-    if (selectedYear === null) return
-    // Client, mode and year (yearKeyOf, above).
-    const key = yearReq.begin(yearKeyOf(effectiveClientId, fiscalMode, selectedYear))   // claim the page before any await (S601)
+  // A year or a mode picked on the page loads at once. The mode toggle picks that mode's newest year:
+  // Calendar ↔ Fiscal usually leaves the year at the same NUMBER (2082 BS → FY 2082/83), and a page
+  // that did not reload on the toggle kept the calendar year's figures under the fiscal label (S756).
+  function changeYear(year) {
+    setSelectedYear(year)
+    loadYear(year, fiscalMode, allPeriods)
+  }
+
+  function changeMode(fiscal) {
+    if (fiscal === fiscalMode) return
+    setFiscalMode(fiscal)
+    const opts = yearOptionsFor(allPeriods, fiscal)
+    setYearOptions(opts)
+    const year = opts[0]?.value ?? null
+    setSelectedYear(year)
+    if (year !== null) loadYear(year, fiscal, allPeriods)
+  }
+
+  async function loadYear(year, fiscal, list) {
     setLoading(true)
+    await buildReport(year, fiscal, list)
+    // Only the load that still owns the page may clear the flag: a superseded one returned early.
+    if (yearReq.isCurrent(yearKeyOf(effectiveClientId, fiscal, year))) setLoading(false)
+  }
+
+  // The reads alone: the caller owns `loading`, so a guessed year never paints before its list lands.
+  async function buildReport(year, fiscal, list) {
+    // Client, mode and year (yearKeyOf, above).
+    const key = yearReq.begin(yearKeyOf(effectiveClientId, fiscal, year))   // claim the page before any await (S601)
     setLoadError(null)
 
-    const yearPeriods = allPeriods.filter(p =>
-      fiscalMode
-        ? getFiscalYear(p.bs_year, p.bs_month) === selectedYear
-        : p.bs_year === selectedYear
+    const yearPeriods = list.filter(p =>
+      fiscal
+        ? getFiscalYear(p.bs_year, p.bs_month) === year
+        : p.bs_year === year
     ).sort((a, b) => a.bs_year - b.bs_year || a.bs_month - b.bs_month)
 
-    // Reached only in passing — a mode toggle runs this once with the previous mode's year before
-    // rebuildYearOptions' pick lands — and the empty report carries its key, so it renders only if
-    // it is the year the header names.
-    if (!yearPeriods.length) { setReport({ key, rows: [] }); setLoading(false); return }
+    // A year with no months cannot be picked from the list it came from; the empty report carries
+    // its key, so it renders only if it is the year the header names.
+    if (!yearPeriods.length) { setReport({ key, rows: [] }); return }
     const periodIds = yearPeriods.map(p => p.id)
 
     // EVERY read here is paged, and the multiplier is what makes it urgent: each of these tables
@@ -154,7 +191,7 @@ export default function AnnualSummary() {
     // A failed read must not render as a quiet year of NPR 0 (S612 silent-zero rule).
     if (!yearReq.isCurrent(key)) return   // superseded by a newer year selection
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setReport(null); setLoading(false); return }
+    if (failed) { setLoadError(failed); setReport(null); return }
     const [
       { data: items }, { data: opening }, { data: closing },
       { data: purchases }, { data: returns }, { data: wastages },
@@ -264,7 +301,6 @@ export default function AnnualSummary() {
     const totGap     = mergeGaps(rows.map(r => r.gap))
 
     setReport({ key, rows, totRevenue, totCogs, totPurch, totDisc, totRet, totTIn, totTOut, totNetPurch, totWaste, totFcPct, totGap })
-    setLoading(false)
   }
 
   function fmt(v) { return `NPR ${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` }
@@ -342,9 +378,9 @@ export default function AnnualSummary() {
   }
 
   const selectedLabel = yearOptions.find(y => y.value === selectedYear)?.label ?? '—'
-  // The report on screen must be the one the header names (S792, FIGURES-11). Between a mode toggle
-  // and rebuildYearOptions' pick, or between a client's periods landing and its first year load,
-  // `report` is another selection's; until the matching one lands the page is still building.
+  // The report on screen must be the one the header names (S792, FIGURES-11). Between a year or mode
+  // pick and its load landing, `report` is another selection's; until the matching one lands the
+  // page is still building.
   const viewKey = selectedYear === null ? null : yearKeyOf(effectiveClientId, fiscalMode, selectedYear)
   const current = !!report && report.key === viewKey
   const busy = loading || (!loadError && !current)
@@ -371,7 +407,7 @@ export default function AnnualSummary() {
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
               {[false, true].map(fm => (
-                <button key={String(fm)} onClick={() => setFiscalMode(fm)}
+                <button key={String(fm)} onClick={() => changeMode(fm)}
                   style={{ padding: '7px 14px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
                     background: fiscalMode === fm ? 'color-mix(in srgb, var(--theme-accent) 15%, transparent)' : 'transparent',
                     color: fiscalMode === fm ? 'var(--theme-accent-ink)' : 'var(--theme-text2)' }}>
@@ -379,7 +415,7 @@ export default function AnnualSummary() {
                 </button>
               ))}
             </div>
-            <select aria-label="Fiscal year" className="form-select" value={selectedYear ?? ''} onChange={e => setSelectedYear(Number(e.target.value))}>
+            <select aria-label="Fiscal year" className="form-select" value={selectedYear ?? ''} onChange={e => changeYear(Number(e.target.value))}>
               {yearOptions.map(y => <option key={y.value} value={y.value}>{y.label}</option>)}
             </select>
           </div>

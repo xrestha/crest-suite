@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -14,6 +14,8 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { BS_MONTHS, daysInBsMonth } from '../../../utils/bsCalendar'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { useSettings } from '../../../context/SettingsContext'
 import { fcFigure, fcThresholds } from '../../../shared/imsFormulas'
 import { bandFigure, lcBand, LABOR_WARN } from '../../../shared/operatingBands'
@@ -91,6 +93,11 @@ const LABOR_PLACEHOLDERS_HR = {
 
 const emptyRow = (category = '') => ({ id: null, category, description: '', amount: '', _dirty: true })
 const emptyRows = () => ({ overhead: [], labor: [], tax_fees: [] })
+const withLabels = list => list.map(p => ({ ...p, label: `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` }))
+// What a month's load reads off the month list beyond the month itself: the months before it, for
+// the carry-forward (S855). A load started from the list in memory is kept only while the fresh list
+// still matches it.
+const listSig = list => (list || []).map(p => `${p.id}:${p.bs_year}:${p.bs_month}:${p.status}`).join(',')
 
 // Fill tokens for the shared bands (S756). fcFigure()/bandFigure() hand back the TEXT colour and
 // the ✓/△/▲ mark; the P&L bars need the base token of the same verdict. lcBand's middle step is
@@ -150,32 +157,46 @@ export default function Overheads() {
   // Keyed on the period id (and the client, for an admin switching client), never a counter.
   const periodReq = useLatestRequest()
   const clientReq = useLatestRequest()
+  const periodList = usePeriodList()
+  // The month and inputs the latest load ran for, so the effect below does not run one twice.
+  const loadedFor = useRef(null)
+  const loadSig = pid => `${pid}:${hrOn}:${payrollFenced}:${assetsOn}`
 
   useEffect(() => { if (effectiveClientId) loadPeriods(effectiveClientId) }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
   // `hrOn` is a dependency, not just an input: for an ADMIN viewing a client it comes from
   // `viewModules`, which resolves on its own schedule — so the first load can run with hrOn=false
   // and silently fall back to the Labor bucket on a client who does run payroll. Re-run when it
-  // settles. It is memoized in AuthContext, so this cannot loop.
-  useEffect(() => { if (periodId) loadAll(periodId) }, [periodId, hrOn, payrollFenced, assetsOn]) // eslint-disable-line react-hooks/exhaustive-deps
+  // settles. It is memoized in AuthContext, so this cannot loop. The first month's load is started
+  // by loadPeriods (S855), so a month already loaded with the same inputs is skipped here.
+  useEffect(() => { if (periodId && loadedFor.current !== loadSig(periodId)) loadAll(periodId) }, [periodId, hrOn, payrollFenced, assetsOn]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadPeriods(cid) {
     clientReq.begin(cid)
+    const initKey = periodReq.begin(`init:${cid}`)
     // An admin switching client: the previous client's period and rows leave the screen before
     // anything else happens. Left up, Save would delete-and-insert that old period's figures under
     // the NEW client's scope while the new client's period list was still loading.
     setLoading(true); setLoadError(null); setSaveError(null)
     setPeriodId(''); setPeriods([]); setRows(emptyRows()); setPeriodData(null); setCarriedFrom(null); setSavedEmpty(false); setDeprMemo(null)
-    const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
-      .order('bs_year', { ascending: false })
-      .order('bs_month', { ascending: false })
-    if (!clientReq.isCurrent(cid)) return
+    // The month list is the shared one, and the first month's load starts beside it (S855,
+    // src/shared/periodList.js): the open month, else the latest. `loading` (and so Save) stays on
+    // until the fresh list has confirmed the month and its status.
+    let list = [], builtFrom = null
+    const out = await initPeriodLoad({
+      req: periodReq, initKey, periodList,
+      setPeriods: l => { list = withLabels(l); setPeriods(list) },
+      select: p => setPeriodId(p ? p.id : ''),
+      load: id => { builtFrom = list; return loadPeriod(id, list) },
+    })
+    if (!clientReq.isCurrent(cid) || out.superseded) return
     // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
-    if (error) { setLoadError(error); setLoading(false); return }
-    const withLabel = (data || []).map(p => ({ ...p, label: `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` }))
-    setPeriods(withLabel)
-    const open = withLabel.find(p => p.status === 'open') || withLabel[0]
-    if (open) setPeriodId(open.id)
-    else setLoading(false)
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    // The carry-forward reads the months before this one, so a load kept from the guessed list is
+    // run again when the fresh list moved a month (a close, a rename or a new month elsewhere).
+    if (out.chosen && periodReq.isCurrent(out.chosen.id) && listSig(builtFrom) !== listSig(list)) {
+      await loadPeriod(out.chosen.id, list)
+    }
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   function handlePeriodChange(id) {
@@ -188,14 +209,21 @@ export default function Overheads() {
   async function loadAll(pid) {
     periodReq.begin(pid)
     setLoading(true)
-    setLoadError(null)
-    setRows(emptyRows()); setCarriedFrom(null); setSavedEmpty(false)
-    await Promise.all([loadOverheads(pid), loadPeriodData(pid)])
+    await loadPeriod(pid, periods)
     if (!periodReq.isCurrent(pid)) return
     setLoading(false)
   }
 
-  async function loadOverheads(pid) {
+  // The reads alone: the caller owns `loading`, so a guessed month never paints (or saves) before its
+  // list lands. `list` is the month list the month came from, for the carry-forward and the labour.
+  async function loadPeriod(pid, list) {
+    loadedFor.current = loadSig(pid)
+    setLoadError(null)
+    setRows(emptyRows()); setCarriedFrom(null); setSavedEmpty(false)
+    await Promise.all([loadOverheads(pid, list), loadPeriodData(pid, list)])
+  }
+
+  async function loadOverheads(pid, list = periods) {
     const { data, error } = await scopedFrom('overheads')
       .eq('period_id', pid)
       .order('created_at')
@@ -224,8 +252,8 @@ export default function Overheads() {
     // user to re-type the same numbers. Carry forward the nearest prior period's own saved rows
     // as an editable draft instead (_dirty: true, so nothing is written to the DB — and Save
     // stays disabled on a closed period — until the user actually hits Save).
-    const currentIdx = periods.findIndex(p => p.id === pid)
-    const priorPeriods = currentIdx >= 0 ? periods.slice(currentIdx + 1) : []
+    const currentIdx = list.findIndex(p => p.id === pid)
+    const priorPeriods = currentIdx >= 0 ? list.slice(currentIdx + 1) : []
     const prior = await findMostRecentOverheads(priorPeriods)
     if (!periodReq.isCurrent(pid)) return
     if (prior.error) { setLoadError(prior.error); return }
@@ -272,8 +300,8 @@ export default function Overheads() {
     return { ...nearestPeriodWithFigures(candidatePeriods, data), error: null }
   }
 
-  async function loadPeriodData(pid) {
-    const periodObj = periods.find(p => p.id === pid)
+  async function loadPeriodData(pid, list = periods) {
+    const periodObj = list.find(p => p.id === pid)
     // D23: a memo only. Its own promise, outside the batch below: a failed or fenced depreciation
     // read must never block the statement, it only changes what the memo line says.
     const deprPromise = assetsOn && periodObj ? loadDepreciationMemo((t, c) => scopedFrom(t, c), periodObj) : Promise.resolve(null)

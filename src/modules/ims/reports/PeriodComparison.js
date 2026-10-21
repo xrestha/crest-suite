@@ -20,6 +20,8 @@ import { chartMotion } from '../../../shared/chartMotion'
 import { COGS_FORMULA, computeUsed, fcBand, fcThresholds } from '../../../shared/imsFormulas'
 import { allocateBillDiscounts, returnCostValue } from './supplierAttribution'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { useSettings } from '../../../context/SettingsContext'
 import { BS_MONTHS, BS_MONTHS_SHORT } from '../../../utils/bsCalendar'
 import { nprOrDash } from '../../../shared/nepalMoney'
@@ -39,6 +41,10 @@ import { readPeriodTransfers, lineValue } from '../transfers/transferFlows'
 function periodLabel(p, short) {
   return `${short ? BS_MONTHS_SHORT[p.bs_month - 1] : BS_MONTHS[p.bs_month - 1]} ${p.bs_year}`
 }
+
+// What a range's load reads off the month list: the months and their status (S855). A load started
+// from the list in memory is kept only while the fresh list still matches it.
+const listSig = list => (list || []).map(p => `${p.id}:${p.bs_year}:${p.bs_month}:${p.status}`).join(',')
 
 // curr vs prev as a % change — null when there's no meaningful baseline to compare against
 // (no prior period, or the prior value was zero, where a % change is undefined/infinite).
@@ -107,50 +113,72 @@ export default function PeriodComparison() {
   // periods, only 6 of them have figures, and the other 18 render a full row of — that reads as
   // "nothing happened in those months" rather than as a load that was cancelled (S601).
   const limitReq = useLatestRequest()
+  const periodList = usePeriodList()
 
-  useEffect(() => {
-    if (!effectiveClientId) return
+  useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function init() {
     // A client switch starts from nothing (S792, FIGURES-7/11). Claiming the page supersedes a range
-    // load still in flight for the previous outlet; clearing `periods` keeps fetchData idle until
-    // THIS client's list lands, so no range is read from the last client's period ids.
-    const key = limitReq.begin(`${effectiveClientId}:periods`)
+    // load still in flight for the previous outlet; clearing `periods` means no range is read from
+    // the last client's period ids.
+    const initKey = limitReq.begin(`${effectiveClientId}:periods`)
     setLoading(true)
     setLoadError(null)
     setStats({})
     setPeriods([])
-    scopedFrom('monthly_periods')
-      .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      .then(({ data, error }) => {
-        if (!limitReq.isCurrent(key)) return   // a newer client switch owns the page
-        // It used to set the error and leave `loading` wherever it was.
-        if (error) { setLoadError(error); setLoading(false); return }
-        setPeriods(data || [])
-        if (!(data || []).length) setLoading(false)   // nothing will call fetchData, so nothing else will clear it
-      })
-  }, [effectiveClientId, scopedFrom, limitReq])   // limitReq is one stable object; listed for the lint rule
-
-  useEffect(() => {
-    if (periods.length > 0) fetchData()
-  }, [periods, limit]) // eslint-disable-line
-
-  function findYoy(p) {
-    return periods.find(x => x.bs_year === p.bs_year - 1 && x.bs_month === p.bs_month) || null
+    // The month list is the shared one, and the range's load starts beside it (S855,
+    // src/shared/periodList.js). The pick is the range on screen, keyed as a range load is.
+    const lim = limit
+    let list = null, builtFrom = null
+    const out = await initPeriodLoad({
+      req: limitReq, initKey, periodList,
+      pick: l => (l.length ? { id: rangeKeyOf(lim) } : null),
+      setPeriods: l => { list = l; setPeriods(l) },
+      select: () => {},
+      load: () => { builtFrom = list; return fetchData(list, lim) },
+    })
+    if (out.superseded) return   // a newer client switch or range pick owns the page
+    // It used to set the error and leave `loading` wherever it was.
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    // A load kept from the guessed list is run again when the fresh list moved a month in it.
+    if (out.chosen && limitReq.isCurrent(out.chosen.id) && listSig(builtFrom) !== listSig(list)) {
+      await fetchData(list, lim)
+    }
+    if (!out.chosen || limitReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
-  async function fetchData() {
-    // Keyed on the CLIENT as well as the range (S792, FIGURES-7): the page stays mounted across an
-    // admin's view-as switch and a group Owner's outlet switch, and a key of `limit` alone let a slow
-    // load for the previous outlet pass isCurrent and land its figures under the new one.
-    const key = limitReq.begin(`${effectiveClientId}:${limit}`)   // claim the page before any await (S601)
+  // Keyed on the CLIENT as well as the range (S792, FIGURES-7): the page stays mounted across an
+  // admin's view-as switch and a group Owner's outlet switch, and a key of `limit` alone let a slow
+  // load for the previous outlet pass isCurrent and land its figures under the new one.
+  function rangeKeyOf(lim) { return `${effectiveClientId}:${lim}` }
+
+  function changeLimit(lim) {
+    setLimit(lim)
+    if (periods.length > 0) loadRange(periods, lim)
+  }
+
+  async function loadRange(list, lim) {
     setLoading(true)
+    await fetchData(list, lim)
+    // Only the load that still owns the page may clear the flag: a superseded one returned early.
+    if (limitReq.isCurrent(rangeKeyOf(lim))) setLoading(false)
+  }
+
+  function findYoy(p, list = periods) {
+    return list.find(x => x.bs_year === p.bs_year - 1 && x.bs_month === p.bs_month) || null
+  }
+
+  // The reads alone: the caller owns `loading`, so a guessed range never paints before its list lands.
+  async function fetchData(list, lim) {
+    const key = limitReq.begin(rangeKeyOf(lim))   // claim the page before any await (S601)
     setLoadError(null)
-    const shownList = periods.slice(0, limit)
+    const shownList = list.slice(0, lim)
     // Always pull each shown period's same-month-last-year twin too (if it exists) so toggling
     // "Compare vs last year" on doesn't need a re-fetch — it's the same bulk .in() queries either
     // way, just a few more ids in the IN list.
-    const yoyList = shownList.map(findYoy).filter(Boolean)
+    const yoyList = shownList.map(p => findYoy(p, list)).filter(Boolean)
     const ids = Array.from(new Set([...shownList.map(p => p.id), ...yoyList.map(p => p.id)]))
-    if (!ids.length) { setLoading(false); return }
+    if (!ids.length) return
 
     // The sales read below carries a comment naming PostgREST's silent 1000-row cap "across up to
     // 24 periods" — and opening_stock, closing_stock and staff_meals, one row per item per period
@@ -195,7 +223,7 @@ export default function PeriodComparison() {
     if (!limitReq.isCurrent(key)) return   // superseded — a stale load's failure must not clobber the current view either
     // A failed read must not render as a quiet run of NPR 0 periods (S612 silent-zero rule).
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setStats({}); setLoading(false); return }
+    if (failed) { setLoadError(failed); setStats({}); return }
     const [
       { data: trackedItems },
       { data: purchases },
@@ -290,7 +318,6 @@ export default function PeriodComparison() {
     }
     if (!limitReq.isCurrent(key)) return   // superseded by a newer range selection
     setStats(result)
-    setLoading(false)
   }
 
   const shown        = periods.slice(0, limit)
@@ -494,7 +521,7 @@ export default function PeriodComparison() {
                 Compare vs last year
               </Tip>
             </label>
-            <select id="period-f1" className="form-select" aria-label="How many periods to compare" value={limit} onChange={e => setLimit(Number(e.target.value))}>
+            <select id="period-f1" className="form-select" aria-label="How many periods to compare" value={limit} onChange={e => changeLimit(Number(e.target.value))}>
               <option value={6}>Last 6 periods</option>
               <option value={12}>Last 12 periods</option>
               <option value={24}>Last 24 periods</option>

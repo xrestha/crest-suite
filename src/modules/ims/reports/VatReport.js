@@ -6,6 +6,8 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { supabase } from '../../../supabaseClient'
 import { readPriorBillLines } from './readPriorBillLines'
 import Tip from '../../../components/Tip'
@@ -24,6 +26,9 @@ function fmtNPR(n) {
   return `NPR ${Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+// The month this page opens on: the newest one, open or closed.
+const latestMonth = list => list[0] || null
+
 export default function VatReport() {
   const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
@@ -35,35 +40,44 @@ export default function VatReport() {
   const { scopedFrom } = useScopedDb()
   const biz = useBizInfo()
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [periods, setPeriods]         = useState([])
   const [selectedPeriod, setSelected] = useState(null)
   const [entries, setEntries]         = useState([])
   const [returns, setReturns]         = useState([])
   const [priorBillLines, setPriorBillLines] = useState([])   // earlier-month bills a return points at (S756, D10)
-  const [loading, setLoading]         = useState(false)
+  const [loading, setLoading]         = useState(true)
   const [loadError, setLoadError]     = useState(null)
   const [tab, setTab]                 = useState('entries')
 
-  useEffect(() => {
-    if (!effectiveClientId) return
-    scopedFrom('monthly_periods')
-      .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      .then(({ data, error }) => {
-        // A statutory report must never mistake a failed read for "no periods yet" — the figures
-        // on this page are what gets filed with the IRD (S612, the silent-NPR-0 class).
-        if (error) { setLoadError(error); return }
-        setPeriods(data || [])
-        if (data && data.length > 0) setSelected(data[0])
-      })
-  }, [effectiveClientId, scopedFrom])
+  useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    if (selectedPeriod) fetchData(selectedPeriod.id)
-  }, [selectedPeriod]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function fetchData(periodId) {
-    periodReq.begin(periodId)   // claim the page before any await (S601)
+  async function init() {
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
+    setLoadError(null)
+    // The month list is the shared one, and the first load starts beside it (S855, src/shared/periodList.js).
+    const out = await initPeriodLoad({
+      req: periodReq, initKey, periodList, pick: latestMonth,
+      setPeriods, select: setSelected, load: fetchData,
+    })
+    if (out.superseded) return   // a newer client switch or period pick owns the page
+    // A statutory report must never mistake a failed read for "no periods yet" — the figures
+    // on this page are what gets filed with the IRD (S612, the silent-NPR-0 class).
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
+  }
+
+  async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await (S601)
+    setSelected(periods.find(p => p.id === periodId))
+    setLoading(true)
+    await fetchData(periodId)
+    if (periodReq.isCurrent(periodId)) setLoading(false)   // only the load that owns the page un-gates it
+  }
+
+  // The reads alone: the caller owns `loading`, so a guessed month never paints before its list lands.
+  async function fetchData(periodId) {
     setLoadError(null)
     const results = await Promise.all([
       fetchAllRows(() => supabase
@@ -85,7 +99,7 @@ export default function VatReport() {
     // and this is a figure an accountant files on. See shared/queryError.js.
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setEntries([]); setReturns([]); setLoading(false); return }
+    if (failed) { setLoadError(failed); setEntries([]); setReturns([]); return }
     const [{ data: entData }, { data: retData }] = results
 
     // A return sits in the month the goods went back, and may be against a bill from an EARLIER
@@ -99,7 +113,7 @@ export default function VatReport() {
     if (outsideIds.length > 0) {
       const prior = await readPriorBillLines(outsideIds)
       if (!periodReq.isCurrent(periodId)) return
-      if (prior.error) { setLoadError(prior.error); setEntries([]); setReturns([]); setPriorBillLines([]); setLoading(false); return }
+      if (prior.error) { setLoadError(prior.error); setEntries([]); setReturns([]); setPriorBillLines([]); return }
       priorLines = prior.data
     }
 
@@ -109,7 +123,6 @@ export default function VatReport() {
     setEntries(entData || [])
     setReturns(retData || [])
     setPriorBillLines(priorLines)
-    setLoading(false)
   }
 
   // One split for the whole period. Non-VAT Report runs the same function over the same rows, so
@@ -357,7 +370,7 @@ export default function VatReport() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => setSelected(periods.find(p => p.id === e.target.value))}>
+          <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{periodLabel(p)}</option>)}
           </select>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

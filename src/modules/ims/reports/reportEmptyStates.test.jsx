@@ -38,8 +38,12 @@ jest.mock('../../../shared/hooks/useBizInfo', () => ({ useBizInfo: () => ({ name
 import PaymentReport from './PaymentReport'
 // eslint-disable-next-line import/first
 import BudgetVsActual from './BudgetVsActual'
+// eslint-disable-next-line import/first
+import { clearPeriodLists, readPeriodList } from '../../../shared/periodList'
 
 const BHADRA = { id: 'p1', bs_year: 2083, bs_month: 5, status: 'open' }
+const SHRAWAN_OPEN = { id: 'p0', bs_year: 2083, bs_month: 4, status: 'open' }
+const SHRAWAN_CLOSED = { ...SHRAWAN_OPEN, status: 'closed' }
 const FAILED = { data: null, error: { message: 'TypeError: Failed to fetch' } }
 
 const oneBill = {
@@ -52,7 +56,13 @@ function renderPage(Page) {
   return render(<MemoryRouter><Page /></MemoryRouter>)
 }
 
-beforeEach(() => { mockAnswers = { monthly_periods: { data: [BHADRA], error: null } } })
+// The month list is shared and kept between pages (S855, periodList.js): each test starts with none
+// in memory, so the page waits for its own read of `monthly_periods` (answered through the mocked
+// supabase client, which scopedDb reads on).
+beforeEach(() => {
+  clearPeriodLists()
+  mockAnswers = { monthly_periods: { data: [BHADRA], error: null } }
+})
 
 describe('Payment Summary', () => {
   test('a loaded month with no bills and no returns says so, and draws no NPR 0 cards', async () => {
@@ -108,5 +118,48 @@ describe('Budget vs Actual', () => {
     expect(await screen.findByText('Could not load this report')).toBeTruthy()
     expect(screen.queryByText(/No budget set/)).toBeNull()
     expect(screen.queryByText(/No item categories yet/)).toBeNull()
+  })
+})
+
+// S855 (PERF-2): with a month list already in memory the first load starts from it, beside a fresh
+// read. When the fresh list has moved on (Shrawan closed and Bhadra opened on another device), the
+// page re-picks and the guessed month never paints.
+describe('the month list in memory is a guess the fresh read confirms', () => {
+  async function seedList(rows) {
+    mockAnswers.monthly_periods = { data: rows, error: null }
+    await readPeriodList('c1')
+  }
+
+  test('Payment Summary re-picks the open month when the fresh list moved it', async () => {
+    await seedList([SHRAWAN_OPEN])
+    mockAnswers.monthly_periods = { data: [BHADRA, SHRAWAN_CLOSED], error: null }
+    renderPage(PaymentReport)
+    expect(await screen.findByText(/No purchase bills or supplier returns recorded for Bhadra 2083/)).toBeTruthy()
+    expect(screen.queryByText(/recorded for Shrawan 2083/)).toBeNull()
+  })
+
+  test('a failed fresh read shows the error card, never the guessed month as loaded', async () => {
+    await seedList([BHADRA])
+    mockAnswers.monthly_periods = FAILED
+    renderPage(PaymentReport)
+    expect(await screen.findByText('Could not load this report')).toBeTruthy()
+    expect(screen.queryByText(/No purchase bills or supplier returns recorded/)).toBeNull()
+  })
+
+  test('Budget vs Actual: a failed categories read beside the guessed load fails the page', async () => {
+    await seedList([BHADRA])
+    mockAnswers.categories = FAILED
+    renderPage(BudgetVsActual)
+    expect(await screen.findByText('Could not load this report')).toBeTruthy()
+    expect(screen.queryByText(/No item categories yet/)).toBeNull()
+    expect(screen.queryByRole('table')).toBeNull()
+  })
+
+  test('Budget vs Actual: the guessed load waits for the categories it splits the actuals by', async () => {
+    await seedList([BHADRA])
+    mockAnswers.categories = { data: [{ id: 'cat1', name: 'Dairy', sort_order: 0 }], error: null }
+    renderPage(BudgetVsActual)
+    expect(await screen.findByText(/No budget set and no purchases recorded for Bhadra 2083 yet/)).toBeTruthy()
+    expect(screen.getByRole('spinbutton', { name: 'Budget for Dairy' })).toBeTruthy()
   })
 })

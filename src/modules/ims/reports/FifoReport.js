@@ -25,6 +25,8 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import {
   BS_MONTHS, bsToAd, daysInBsMonth, formatBsDay,
 } from '../../../utils/bsCalendar'
@@ -36,6 +38,10 @@ const monthLabel = p => (p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : '—'
 // Shared word-for-word with Stock Ageing (S756, D19): on screen, in print and in the workbook.
 const BASIS = 'Quantities follow your stock counts; ages are estimated from purchase dates, oldest used first.'
 const WINDOW_MONTHS = 12
+
+// What the window's build reads off the month list: the months and their status (S855). A build
+// started from the list in memory is kept only while the fresh list still matches it.
+const listSig = list => (list || []).map(p => `${p.id}:${p.bs_year}:${p.bs_month}:${p.status}`).join(',')
 
 // The date every batch's expiry is measured AGAINST.
 //
@@ -59,6 +65,7 @@ export default function FifoReport() {
   const { scopedFrom } = useScopedDb()
   const biz = useBizInfo()
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [rows, setRows] = useState([])
@@ -81,27 +88,39 @@ export default function FifoReport() {
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
-    const initResults = await Promise.all([
-      scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
-      scopedFrom('categories').order('sort_order')
+    // The month list is the shared one, and the first build starts beside it and the categories read
+    // (S855, src/shared/periodList.js). Fall back to the latest period when none is open (openOrLatest)
+    // — between closing one month and opening the next this page loaded nothing at all and showed its
+    // "add expiry dates" empty state instead. The pick claims the page inside `initPeriodLoad`, as
+    // the S695 rule says init() should.
+    let list = null, builtFrom = null
+    const [out, catRead] = await Promise.all([
+      initPeriodLoad({
+        req: periodReq, initKey, periodList,
+        setPeriods: l => { list = l; setPeriods(l) },
+        select: setSelectedPeriod,
+        load: id => { builtFrom = list; return buildReport(id, list) },
+      }),
+      scopedFrom('categories').order('sort_order'),
     ])
     // A failed read must never render as NoPeriodState or an empty report (S612 silent-zero rule).
-    const initFailed = firstError(initResults)
-    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
-    const [{ data: p }, { data: c }] = initResults
-    setPeriods(p || [])
-    setCategories(c || [])
-    // Fall back to the latest period when none is open — between closing one month and opening the
-    // next this page loaded nothing at all and showed its "add expiry dates" empty state instead.
-    const initial = (p || []).find(x => x.status === 'open') || (p || [])[0]
-    if (initial) {
-      periodReq.begin(initial.id)   // claim the page, as the S695 rule says init() should
-      setSelectedPeriod(initial)
-      await buildReport(initial.id, p || [])
+    if (catRead.error) {
+      periodReq.begin(`${initKey}:failed`)
+      setLoadError(catRead.error); setPeriods([]); setSelectedPeriod(null); setLoading(false)
+      return
     }
-    setLoading(false)
+    setCategories(catRead.data || [])
+    if (out.superseded) return   // a newer client switch or period pick owns the page
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    // The window reaches back past the picked month, so a build kept from the guessed list is run
+    // again when the fresh list moved a month (a close or a new month on another device).
+    if (out.chosen && periodReq.isCurrent(out.chosen.id) && listSig(builtFrom) !== listSig(list)) {
+      await buildReport(out.chosen.id, list)
+    }
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {

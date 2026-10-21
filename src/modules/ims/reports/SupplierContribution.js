@@ -37,6 +37,8 @@ import {
 import { returnLinesOutsidePeriod, priorBillFactors } from './purchaseTaxSplit'
 import { readPriorBillLines } from './readPriorBillLines'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 
 const npr = n => `NPR ${(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
@@ -55,6 +57,7 @@ export default function SupplierContribution() {
   const biz = useBizInfo()
 
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [rows, setRows] = useState([])
@@ -82,31 +85,30 @@ export default function SupplierContribution() {
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
+    // `init()` claims the page too (S721) — the fifth instance after S698/S709/S718/S721, and
+    // fixed on Vendor Report in S725 while this sibling was left. Once `handlePeriodChange` has
+    // run even once the ref is permanently non-null, so `isCurrent` stops failing open — and an
+    // ADMIN SWITCHING CLIENT re-runs `init()` on a still-mounted component with the PREVIOUS
+    // client's period id in the ref. Every setter in `loadReport` is then skipped and the new
+    // tenant reads the old one's supplier figures, in the table and in the Excel export. The
+    // month it picks is claimed inside `initPeriodLoad`.
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
-    const { data: p, error } = await scopedFrom('monthly_periods')
-      .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-    if (error) { setLoadError(error); setPeriods([]); setLoading(false); return }
-    setPeriods(p || [])
+    // The month list is the shared one, and the first load starts beside it (S855, src/shared/periodList.js).
     // No closed-period default here, unlike Variance/Shrinkage: nothing on this page subtracts a
     // closing count, so an open period gives a truthful partial-month answer rather than a
-    // structurally impossible one.
-    const target = (p || []).find(x => x.status === 'open') || (p || [])[0]
-    if (target) {
-      // `init()` claims the page too (S721) — the fifth instance after S698/S709/S718/S721, and
-      // fixed on Vendor Report in S725 while this sibling was left. Once `handlePeriodChange` has
-      // run even once the ref is permanently non-null, so `isCurrent` stops failing open — and an
-      // ADMIN SWITCHING CLIENT re-runs `init()` on a still-mounted component with the PREVIOUS
-      // client's period id in the ref. Every setter in `loadReport` is then skipped and the new
-      // tenant reads the old one's supplier figures, in the table and in the Excel export.
-      periodReq.begin(target.id)
-      setSelectedPeriod(target)
-      await loadReport(target.id)
-    }
+    // structurally impossible one (openOrLatest).
+    const out = await initPeriodLoad({
+      req: periodReq, initKey, periodList,
+      setPeriods, select: setSelectedPeriod, load: loadReport,
+    })
+    if (out.superseded) return   // a newer client switch or period pick owns the page
+    if (out.error) { setLoadError(out.error); setPeriods([]); setLoading(false); return }
     // Only the load that still owns the page may un-gate it. Without this a superseded load
     // clears `loading`, so one period's rows render — and Export re-enables — under another
     // period's label, subtitle, print title, scopeLine and filename (S601).
-    if (periodReq.isCurrent(target ? target.id : null) || !target) setLoading(false)
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {

@@ -153,7 +153,14 @@ export async function initPeriodLoad({ req, initKey, periodList, pick = openOrLa
   }
   const owner = guess ? guess.id : initKey
   const { data, error } = await fresh
-  if (!req.isCurrent(owner)) return { superseded: true }
+  if (!req.isCurrent(owner)) {
+    // A month picked from the guessed list while the fresh read was out still gets the fresh rows,
+    // so the dropdown and the picked month's open/closed status are not left as guessed. Only when
+    // the claim is one of THIS list's months: a client switch claims a key no row of it carries.
+    const picked = !error && (data || []).find(p => req.isCurrent(p.id))
+    if (picked) { setPeriods(data); select(picked) }
+    return { superseded: true }
+  }
   if (error) {
     if (guess) req.begin(`${initKey}:failed`)
     return { error }

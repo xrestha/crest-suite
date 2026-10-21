@@ -4,6 +4,8 @@ import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
@@ -33,6 +35,13 @@ const STALE_FROM_DAYS = 91
 // How far back the window reaches (S756, D19). See `rollingWindow` for why it is no longer the
 // fiscal year.
 const WINDOW_MONTHS = 12
+
+// The newest period — the report's default is "as at today" (asOfForWindow).
+const latestMonth = list => list[0] || null
+
+// What the window's build reads off the month list: the months and their status (S855). A build
+// started from the list in memory is kept only while the fresh list still matches it.
+const listSig = list => (list || []).map(p => `${p.id}:${p.bs_year}:${p.bs_month}:${p.status}`).join(',')
 
 // The basis, in the owner's words. It goes on screen, in print and into the workbook verbatim
 // (S756, D19): a reader has to know that the quantities are counted and the ages are estimated
@@ -87,6 +96,7 @@ export default function StockAgeing() {
   // keypress, and the last response to land would win the figures while the label — subtitle,
   // print title, workbook scopeLine and filename — is whatever was picked last.
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
 
   // authLoading is a real dependency: a hard load lands here while auth is still resolving (S594).
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -96,26 +106,36 @@ export default function StockAgeing() {
   }
 
   async function init() {
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
-    const results = await Promise.all([
-      scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
+    // The month list is the shared one, and the first build starts beside it and the categories read
+    // (S855, src/shared/periodList.js). init() claims the page too — it sets the label, which no
+    // guard covers (S698/S709/S718); the pick is claimed inside `initPeriodLoad`.
+    let list = null, builtFrom = null
+    const [out, catRead] = await Promise.all([
+      initPeriodLoad({
+        req: periodReq, initKey, periodList, pick: latestMonth,
+        setPeriods: l => { list = l; setPeriods(l) },
+        select: setSelectedPeriod,
+        load: id => { builtFrom = list; return buildReport(id, list) },
+      }),
       scopedFrom('categories').order('sort_order'),
     ])
-    const failed = firstError(results)
-    if (failed) { setLoadError(failed); setPeriods([]); setLoading(false); return }
-    const [{ data: p }, { data: c }] = results
-    setPeriods(p || [])
-    setCategories(c || [])
-    // The newest period — the report's default is "as at today" (asOfForWindow).
-    const initial = (p || [])[0]
-    if (initial) {
-      // init() claims the page too — it sets the label, which no guard covers (S698/S709/S718).
-      periodReq.begin(initial.id)
-      setSelectedPeriod(initial)
-      await buildReport(initial.id, p || [])
+    if (catRead.error) {
+      periodReq.begin(`${initKey}:failed`)
+      setLoadError(catRead.error); setPeriods([]); setSelectedPeriod(null); setLoading(false)
+      return
     }
-    setLoading(false)
+    setCategories(catRead.data || [])
+    if (out.superseded) return   // a newer client switch or period pick owns the page
+    if (out.error) { setLoadError(out.error); setPeriods([]); setLoading(false); return }
+    // The window reaches back past the picked month, so a build kept from the guessed list is run
+    // again when the fresh list moved a month (a close or a new month on another device).
+    if (out.chosen && periodReq.isCurrent(out.chosen.id) && listSig(builtFrom) !== listSig(list)) {
+      await buildReport(out.chosen.id, list)
+    }
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {

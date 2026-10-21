@@ -232,7 +232,21 @@ describe('initPeriodLoad', () => {
     req.begin('p-shrawan')   // the reader chose Shrawan from the guessed list
     resolveFresh()
     expect(await run).toEqual({ superseded: true })
-    expect(calls.selected).toEqual([BHADRA])
+    // The fresh rows still land, with the picked month's own row selected.
+    expect(calls.periods).toEqual([[BHADRA, SHRAWAN], [BHADRA, SHRAWAN]])
+    expect(calls.selected).toEqual([BHADRA, SHRAWAN])
+    expect(calls.loads).toEqual(['p-bhadra'])
     await flush()
+  })
+
+  test('a client switch while the list is in flight leaves the page alone', async () => {
+    const { run, calls, req, resolveFresh } = setup({
+      cached: [BHADRA], freshResult: { data: [BHADRA], error: null },
+    })
+    req.begin('init:c2')
+    resolveFresh()
+    expect(await run).toEqual({ superseded: true })
+    expect(calls.periods).toEqual([[BHADRA]])
+    expect(calls.selected).toEqual([BHADRA])
   })
 })

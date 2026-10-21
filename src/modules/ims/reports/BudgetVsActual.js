@@ -1,5 +1,5 @@
 import { npr2 } from '../../../shared/nepalMoney'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -11,6 +11,8 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { Link, Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { budgetActuals } from './budgetActuals'
 import { readPeriodTransfers } from '../transfers/transferFlows'
@@ -22,6 +24,9 @@ export default function BudgetVsActual() {
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
+  // init()'s categories read, as the list (null when it failed): a load can start before it lands.
+  const catsRef = useRef(null)
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [categories, setCategories] = useState([])
@@ -40,37 +45,43 @@ export default function BudgetVsActual() {
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
+    // init() claims the page too (S756), or an admin client switch after any period change leaves
+    // the ref on the old client's period and loadData skips every setter. The month it picks is
+    // claimed inside `initPeriodLoad`.
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
-    const initResults = await Promise.all([
-      scopedFrom('monthly_periods')
-        .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
-      scopedFrom('categories').order('sort_order'),
+    // The month list is the shared one, and the first load starts beside it and the categories read
+    // (S855, src/shared/periodList.js).
+    const catRead = Promise.resolve(scopedFrom('categories').order('sort_order'))
+    const catList = catRead.then(r => (r.error ? null : r.data || []))
+    catsRef.current = catList
+    // Falls back to the latest period when none is open (S722 rule, S756; openOrLatest). With every
+    // period closed this selected nothing: the budget inputs still rendered, and saveBudget silently
+    // returned on `!selectedPeriod` — a figure typed, tabbed away from, and never written, with no message.
+    const [out, cats] = await Promise.all([
+      initPeriodLoad({
+        req: periodReq, initKey, periodList,
+        setPeriods, select: setSelectedPeriod, load: id => loadData(id, catList),
+      }),
+      catRead,
     ])
     // A failed read must not wear NoPeriodState or an empty budget sheet (S612 silent-zero rule).
-    const initFailed = firstError(initResults)
-    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
-    const [{ data: p }, { data: cats }] = initResults
-    setPeriods(p || [])
-    setCategories(cats || [])
-    // Falls back to the latest period when none is open (S722 rule, S756). With every period closed
-    // this selected nothing: the budget inputs still rendered, and saveBudget silently returned on
-    // `!selectedPeriod` — a figure typed, tabbed away from, and never written, with no message.
-    const chosen = (p || []).find(x => x.status === 'open') || (p || [])[0]
-    if (chosen) {
-      // init() claims the page too (S756), or an admin client switch after any period change leaves
-      // the ref on the old client's period and loadData skips every setter.
-      periodReq.begin(chosen.id)
-      setSelectedPeriod(chosen)
-      await loadData(chosen.id, cats || [])
-      if (periodReq.isCurrent(chosen.id)) setLoading(false)
+    // Without the categories no actual can be split, so any load in flight is cancelled too.
+    if (cats.error) {
+      periodReq.begin(`${initKey}:failed`)
+      setLoadError(cats.error); setPeriods([]); setSelectedPeriod(null); setLoading(false)
       return
     }
-    setLoading(false)
+    setCategories(cats.data || [])
+    if (out.superseded) return   // a newer client switch or period pick owns the page
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
+  // `cats` is the category list, or init()'s read of it still in flight: the reads below do not wait
+  // for it. It resolves to null when that read failed, which init() reports.
   async function loadData(periodId, cats) {
-    const catList = cats || categories
     setLoadError(null)
     const results = await Promise.all([
       // Monthly Summary's item population exactly (S792, FIGURES-9): every non-sub-recipe item,
@@ -91,7 +102,9 @@ export default function BudgetVsActual() {
       // stock sent away is not, exactly as Monthly Summary's Net Purchases counts them.
       readPeriodTransfers(scopedFrom, periodId),
     ])
+    const catList = await (cats || categories)
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
+    if (!catList) return   // the categories read failed; init() shows it
     // A failed read must not render NPR-0 actuals beside real budgets — or blank budget boxes a
     // save would then write zeros over (S612).
     const failed = firstError(results)
@@ -126,7 +139,7 @@ export default function BudgetVsActual() {
     setSaveError(null)
     setDirty({})   // an unsaved draft belongs to the period it was typed in, not the next one
     setLoading(true)
-    await loadData(periodId, categories)
+    await loadData(periodId, catsRef.current || categories)
     // Only the load that still owns the page may clear the flag (S756): a superseded load returns
     // early from loadData, and clearing here would show the previous period's actuals and budgets
     // — editable — under the new period's label.
@@ -242,7 +255,7 @@ export default function BudgetVsActual() {
 
       {!loading && !loadError && provisional && (
         <div role="status" className="card" style={{ marginBottom: 16, padding: '12px 16px', fontSize: 13, color: 'var(--theme-text2)', borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)' }}>
-          <strong style={{ color: 'var(--theme-amber-text)' }}>△ Provisional</strong> — this month is still open and its bills are still being entered, so spend reads low. Over / under budget is not judged until the month is closed.
+          <strong style={{ color: 'var(--theme-amber-text)' }}>△ Provisional</strong> — this month is still open and its bills are still being entered, so actual net purchases read low until every bill is in. Over / under budget is judged once the month is closed.
         </div>
       )}
 

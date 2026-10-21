@@ -7,8 +7,9 @@ import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { calcBillTotals, methodOf, aging } from '../purchases/purchasesHelpers'
 import { billOwedAfterReturns } from './payablesAllocation'
-import { allocateBillDiscounts, mergeFactors, vatCostFactor, returnCostFactor } from './supplierAttribution'
-import { netFactors, returnBase, returnLinesOutsidePeriod, priorBillFactors } from './purchaseTaxSplit'
+import { vatCostFactor } from './supplierAttribution'
+import { returnLinesOutsidePeriod } from './purchaseTaxSplit'
+import { vendorNetBasis, netForMethod } from './vendorNetBasis'
 import { readPriorBillLines } from './readPriorBillLines'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
@@ -22,6 +23,8 @@ import { BS_MONTHS, bsToAd, formatBsDay } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { CHART_COLORS } from '../../../shared/chartColors'
 
 const EPS = 0.001
@@ -48,6 +51,7 @@ export default function VendorReport() {
   const { scopedFrom } = useScopedDb()
   const biz = useBizInfo()
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [purchases, setPurchases] = useState([])
@@ -70,10 +74,22 @@ export default function VendorReport() {
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
-    const initResults = await Promise.all([
-      scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
+    // The month list is the shared one, and the first load starts beside it and the vendor read
+    // (S855, src/shared/periodList.js).
+    // Defaulting to the open period is not a default (S722, Payment Summary). Close the month and
+    // `find` returns undefined — the page then selected nothing, loaded nothing, and still rendered
+    // the whole stat grid at NPR 0 with a footer reading 100% and a period chip reading "—", over a
+    // dropdown still listing every period. `openOrLatest` falls back to the newest month, which is
+    // the month just closed, the one an owner opens this page to reconcile. The auto-select claims
+    // the page too (S721), inside `initPeriodLoad`.
+    const [out, vendorRead] = await Promise.all([
+      initPeriodLoad({
+        req: periodReq, initKey, periodList,
+        setPeriods, select: setSelectedPeriod, load: loadData,
+      }),
       // Every vendor, ACTIVE OR NOT. This list is not a picker — it is the row set of a historical
       // report, and `.eq('is_active', true)` was the picker convention applied one file too far.
       // `vendorSummary` below already drops anything with no activity in the period, so an inactive
@@ -84,30 +100,24 @@ export default function VendorReport() {
       // the total with no row above it — the rows visibly failing to sum to their own footer, which
       // discredits the rows that were right (S594). S671's archive forces `is_active = false`, so
       // it turned an occasional divergence into the guaranteed outcome of using the feature.
-      scopedFrom('vendors').order('name')
+      scopedFrom('vendors').order('name'),
     ])
     // A failed read must never render as an empty period or NoPeriodState (S612 silent-zero rule).
-    const initFailed = firstError(initResults)
-    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
-    const [{ data: p }, { data: v }] = initResults
-    setPeriods(p || [])
-    setVendors(v || [])
-    // Defaulting to the open period is not a default (S722, Payment Summary). Close the month and
-    // `find` returns undefined — the page then selected nothing, loaded nothing, and still rendered
-    // the whole stat grid at NPR 0 with a footer reading 100% and a period chip reading "—", over a
-    // dropdown still listing every period. `periods` is ordered newest-first, so [0] is the month
-    // just closed, which is the one an owner opens this page to reconcile.
-    const target = (p || []).find(x => x.status === 'open') || (p || [])[0]
-    if (target) {
-      periodReq.begin(target.id)   // the auto-select claims the page too (S721): once ANY claim has
-      setSelectedPeriod(target)    // been made the ref stops failing open, and an admin switching
-      await loadData(target.id)    // client re-runs init() with the previous client's id in the ref
+    // The vendor list is the report's row set, so its failure fails the page whoever owns it by now:
+    // any load in flight is cancelled and no month is left to pick.
+    if (vendorRead.error) {
+      periodReq.begin(`${initKey}:failed`)
+      setLoadError(vendorRead.error); setPeriods([]); setSelectedPeriod(null); setLoading(false)
+      return
     }
+    setVendors(vendorRead.data || [])
+    if (out.superseded) return   // a newer client switch or period pick owns the page
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
     // Only the load that still owns the page may un-gate it (S792, TAX-4). A period picked while
-    // this first load was in flight leaves `loadData(target)` returning early; clearing `loading`
+    // this first load was in flight leaves its `loadData` returning early; clearing `loading`
     // here anyway re-enabled the KPI strip, the tables and the loading-gated Export over the
     // previous month's rows under the new month's chip, scope line and filename.
-    if (!target || periodReq.isCurrent(target.id)) setLoading(false)
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {
@@ -214,23 +224,19 @@ export default function VendorReport() {
     // subtracting it from a base that has already lost the discount drives a fully-returned
     // discounted bill negative by exactly that discount. Returning all of the 10,000 bill above
     // used to leave this vendor at Net Spend −1,000; it nets to 0.
-    const allocated = allocateBillDiscounts(purchases)
+    //
     // S756 (D10): plus the factors of earlier-month bills this month's returns point at, so a return
     // against last month's discounted bill is credited at that bill's price — the same Map Supplier
     // Contribution merges (supplierAttribution.test.js pins the tie-out) and VAT Report uses.
-    const factors = mergeFactors(netFactors(allocated), priorBillFactors(priorBillLines))
     //
     // Purchasing figures are on the COST basis (S792, D32): `lineCost`, and a return × its line's
     // `returnCostFactor` (read off the return's `purchase_entries` embed). On a PAN-bill outlet the
     // 13% on a `vat_is_cost` bill is spend it cannot claim back; everywhere else both are ex-VAT as
-    // before. The name `lineNetOf` is kept — every consumer below reads it. Supplier Contribution's
-    // `vendorNetByItem` takes the same basis, which keeps the S727 tie-out.
-    const netById = new Map(allocated.map(r => [r.id, r.lineCost]))
-    const lineNetOf = p => {
-      const v = netById.get(p.id)
-      return v === undefined ? (parseFloat(p.qty) || 0) * (parseFloat(p.rate) || 0) * vatCostFactor(p) : v
-    }
-    const retValueOf = r => returnBase(r, factors) * returnCostFactor(r)
+    // before. Supplier Contribution's `vendorNetByItem` takes the same basis (the S727 tie-out).
+    //
+    // The two lookups live in `vendorNetBasis.js` since S855, so the Monthly Owner Report's supplier
+    // table reads them rather than a copy that had kept the Cash / Credit split before discount.
+    const { lineNetOf, retValueOf } = vendorNetBasis(purchases, priorBillLines)
 
     const purByVendor = new Map()     // vendor_id (or null) -> purchase entries
     const retByVendor = new Map()
@@ -306,9 +312,7 @@ export default function VendorReport() {
     // raw test put every bill written before that column existed into NONE of these three, so the
     // trio could not sum to the Net Spend two cells to its left. Net of the allocated discount for
     // the same reason — the header says "(Net)".
-    const byMethod = m =>
-      vPurchases.filter(p => methodOf(p) === m).reduce((s, p) => s + ix.lineNetOf(p), 0)
-      - vReturns.filter(r => methodOf(r) === m).reduce((s, r) => s + ix.retValueOf(r), 0)
+    const byMethod = m => netForMethod(vPurchases, vReturns, m, ix)
     const cash    = byMethod('Cash')
     const credit  = byMethod('Credit')
     const fonepay = byMethod('FonePay')
@@ -326,9 +330,7 @@ export default function VendorReport() {
   const unassignedReturned = unassignedReturns.reduce((s, r) => s + ix.retValueOf(r), 0)
   const unassignedNet = unassignedNetPurch - unassignedReturned
   const unassignedTotal = unassignedGross
-  const unassignedByMethod = m =>
-    unassigned.filter(p => methodOf(p) === m).reduce((s, p) => s + ix.lineNetOf(p), 0)
-    - unassignedReturns.filter(r => methodOf(r) === m).reduce((s, r) => s + ix.retValueOf(r), 0)
+  const unassignedByMethod = m => netForMethod(unassigned, unassignedReturns, m, ix)
   const unassignedRow = {
     count: new Set(unassigned.map(p => ix.billKey(p))).size, lineCount: unassigned.length,
     gross: unassignedGross, discount: unassignedDiscount,

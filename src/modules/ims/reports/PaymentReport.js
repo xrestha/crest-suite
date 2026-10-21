@@ -10,6 +10,8 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { Link, Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { BS_MONTHS, formatBsDay } from '../../../utils/bsCalendar'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
@@ -40,6 +42,7 @@ export default function PaymentReport() {
   const { scopedFrom } = useScopedDb()
   const biz = useBizInfo()
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [purchases, setPurchases] = useState([])
@@ -52,26 +55,25 @@ export default function PaymentReport() {
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
-    const { data: p, error } = await scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-    if (error) { setLoadError(error); setLoading(false); return }
-    const list = p || []
-    setPeriods(list)
-    // Prefer the open period, but FALL BACK to the most recent one. With only closed periods this
-    // selected nothing, loaded nothing, and still rendered the full stat grid and summary table —
-    // every figure NPR 0, the total row confidently reading 100%, and PeriodScope showing "—".
-    // A client between periods saw a complete report of a month that was never chosen.
-    const chosen = list.find(x => x.status === 'open') || list[0]
-    if (chosen) {
-      periodReq.begin(chosen.id)   // an init() that auto-selects must claim the page too
-      setSelectedPeriod(chosen)
-      await loadData(chosen.id)
-    }
+    // The month list is the shared one, and the first load starts beside it (S855, src/shared/periodList.js).
+    // Prefer the open period, but FALL BACK to the most recent one (openOrLatest). With only closed
+    // periods this selected nothing, loaded nothing, and still rendered the full stat grid and summary
+    // table — every figure NPR 0, the total row confidently reading 100%, and PeriodScope showing "—".
+    // A client between periods saw a complete report of a month that was never chosen. The auto-select
+    // claims the page too, inside `initPeriodLoad`.
+    const out = await initPeriodLoad({
+      req: periodReq, initKey, periodList,
+      setPeriods, select: setSelectedPeriod, load: loadData,
+    })
+    if (out.superseded) return   // a newer client switch or period pick owns the page
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
     // Only the load that still owns the page may un-gate it (S792, TAX-4). A period picked while
     // this first load was in flight leaves `loadData(chosen)` returning early; clearing `loading`
     // here anyway drew the previous month's figures under the new month's chip and filename.
-    if (!chosen || periodReq.isCurrent(chosen.id)) setLoading(false)
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {
