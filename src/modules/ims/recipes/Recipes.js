@@ -26,7 +26,7 @@ import RecipeCostCardPrint, { costPerYieldTile } from './RecipeCostCardPrint'
 import { unitRateText, unitRateCell } from '../../../shared/unitRate'
 import RecipeImportButton from './RecipeImportButton'
 import NutritionEditorModal from './NutritionEditorModal'
-import DishPhotoField from './DishPhotoField'
+import DishPhotoField, { useUnsavedDishPhotos } from './DishPhotoField'
 import { Link, Navigate } from 'react-router-dom'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { fcBand, fcThresholds, fcFigure, recipeCostOf, menuFcPct, unratedReason } from '../../../shared/imsFormulas'
@@ -96,6 +96,11 @@ export default function Recipes() {
   const vatMode = vatModeOf(settingsCtx, clientId)
   const { scopedFrom, scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
+  // Dish photos a NEW recipe's form uploaded that no saved row names yet (S855). The upload happens
+  // when the file is picked (DishPhotoField's note says why), so closing the form unsaved must take
+  // them back out of the bucket: leaveForm() does it for Cancel and Back, leaving the page does it
+  // by itself, and save() clears the list once the row is written.
+  const unsavedPhotos = useUnsavedDishPhotos(clientId)
   // Seeded from a short-lived per-tab cache (sessionDataCache.js) so revisiting this page shows
   // the last-known recipes/items/overhead figures instantly instead of a blank skeleton. Safe
   // here (unlike Sales Entry/Stock Count) because saving a recipe only ever writes that one
@@ -457,6 +462,15 @@ export default function Recipes() {
     setError('')
     setNameErr('')
     setView('edit')
+  }
+
+  // Cancel and ← Back on the edit form. Releases the photos a new recipe uploaded and never saved
+  // (useUnsavedDishPhotos), in the background: leaving is never held up by it. Not while a save is
+  // in flight, because its row may yet name the photo; the list then waits for the save to clear it
+  // or for the page to close.
+  function leaveForm() {
+    if (!saving) unsavedPhotos.release(selectedRecipe?.image_url || null)
+    setView('list')
   }
 
   function openDetail(recipe) {
@@ -1025,6 +1039,9 @@ export default function Recipes() {
         recipeId = data.id
         committed = { ...payload, ...data, linked_item_id: null }
       }
+      // The recipe row names the form's photo now (image_url is in every payload), so a photo
+      // uploaded while the recipe was unsaved is no longer the form's to release (S855).
+      unsavedPhotos.clear()
 
       const ingPayload = validIngs.map(ing => ({
         recipe_id: recipeId,
@@ -1649,7 +1666,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
           )}
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          {view === 'edit' && <button className="btn btn-ghost" onClick={() => setView('list')}>← Back</button>}
+          {view === 'edit' && <button className="btn btn-ghost" onClick={leaveForm}>← Back</button>}
           <Fab onClick={openNew} label="+ New Recipe" show={view === 'list'} />
         </div>
       </div>
@@ -2240,6 +2257,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
                   value={recipeForm.image_url}
                   onChange={url => setRecipeForm(f => ({ ...f, image_url: url }))}
                   persist={selectedRecipe?.id ? persistDishPhoto : null}
+                  onUploaded={unsavedPhotos.track}
+                  onReleased={unsavedPhotos.untrack}
                 />
                 <div className="form-field">
                   <label htmlFor="recipe-f8"><Tip text="Optional. Shows a food mark beside the dish on the guest QR menu and the till: Veg (a dot), Egg (an E) or Non-veg (a triangle). Egg means it has egg but no meat or fish; guests filtering for vegetarian dishes won't see it. Leave it unset to show no mark.">Veg / Egg / Non-veg</Tip></label>
@@ -2486,7 +2505,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
 
           <ActionError error={error} className="action-error--top" />
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-            <button className="btn btn-ghost" onClick={() => setView('list')}>Cancel</button>
+            <button className="btn btn-ghost" onClick={leaveForm}>Cancel</button>
             <button className="btn btn-primary" onClick={save} disabled={saving}>
               {saving ? 'Saving…' : selectedRecipe ? 'Update Recipe' : 'Save Recipe'}
             </button>

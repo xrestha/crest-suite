@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import ActionError, { asActionError } from '../../../components/ActionError'
@@ -36,9 +36,96 @@ import {
 // `<path>.thumb.<ext>` and the stored URL gains `thumb=1`, which is what tells the guest menu to load
 // the small file. Best effort: a thumb that fails to upload leaves the photo and no mark, and the
 // guest menu loads the full photo as it always has. A delete takes the thumb with the photo.
+//
+// A NEW RECIPE THAT IS NEVER SAVED TAKES ITS PHOTOS WITH IT (S855). The upload cannot wait for Save
+// Recipe (above), so a photo picked on a new recipe is already a public file when the form opens
+// the choice to walk away. Replace and Remove inside the form already let go of the file they
+// replace; Cancel, Back and leaving the page did not, and every abandoned new dish left a file in
+// the bucket. `onUploaded` hands each such path to the page's useUnsavedDishPhotos(), which releases
+// the ones no saved row names when the form closes unsaved, through the same check every release
+// here makes (no other dish may name it). A photo still on its way when the field goes away is
+// removed by the field itself: nothing will ever save its URL.
 
 const UPLOAD_TIMEOUT_MS = 60000
 const WRITE_TIMEOUT_MS = 20000
+
+const bucket = () => supabase.storage.from(DISH_PHOTO_BUCKET)
+
+// Best effort, and quiet by design: by the time this runs nothing points at the file any more, so a
+// failure leaves an unused file rather than a wrong screen, and there is nothing the person editing
+// a recipe could do about it. Only a path inside THIS client's folder is attempted — anything else
+// the storage policy would refuse anyway (a restored copy of another outlet's link).
+async function removeObjectsQuietly(paths, clientId) {
+  const mine = (paths || []).filter(p => p && clientId && p.startsWith(`${clientId}/`))
+  if (mine.length === 0) return
+  try {
+    const { error: rmErr } = await withTimeout(bucket().remove(mine), WRITE_TIMEOUT_MS, 'Delete photo')
+    if (rmErr) console.error('Dish photo file not deleted from storage:', rmErr.message)
+  } catch (e) {
+    console.error('Dish photo file not deleted from storage:', e?.message)
+  }
+}
+
+// The files a dish let go of (Replace, Remove, or a new recipe closed unsaved) are deleted only when
+// no OTHER dish still shows them (S792, RECIPES-8). "Paste a link instead" lets two dishes share one
+// stored photo, and replacing it on one used to delete the other's picture from the guest menu
+// without a word. The check reads every dish's link fresh rather than trusting the page's list, and
+// anything it cannot settle — a failed read, the guest-menu logo, a file this field did not name —
+// keeps the file: an unused file costs nothing, a missing photo costs the other dish its picture.
+// Each photo's `.thumb` copy goes in the same request (S842, photoPathsToRelease). One read and one
+// remove for any number of paths. Never throws.
+async function releaseObjects(paths, { clientId, recipeId = null, scopedFrom, supabaseUrl }) {
+  const mine = (paths || []).filter(p => p && clientId && p.startsWith(`${clientId}/`))
+  if (mine.length === 0) return
+  let others
+  try {
+    const { data, error: readErr } = await withTimeout(
+      fetchAllRows(() => scopedFrom('recipes', 'id, image_url').not('image_url', 'is', null).order('id')),
+      WRITE_TIMEOUT_MS, 'Check photo'
+    )
+    if (readErr) { console.error('Dish photo kept: could not check which dishes use it:', readErr.message); return }
+    others = data || []
+  } catch (e) {
+    console.error('Dish photo kept: could not check which dishes use it:', e?.message)
+    return
+  }
+  const doomed = [...new Set(mine.flatMap(p => photoPathsToRelease(p, { clientId, recipeId, others, supabaseUrl })))]
+  await removeObjectsQuietly(doomed, clientId)
+}
+
+/**
+ * The photos a NEW recipe's form uploaded that no saved row names yet (S855), for the page that
+ * owns the form. Pass `track` as DishPhotoField's `onUploaded` and `untrack` as its `onReleased`;
+ * call `clear()` once the recipe row is written (its image_url names the photo now), and
+ * `release(savedUrl)` when the form closes without saving (Cancel, Back). Leaving the page releases
+ * whatever is still tracked. `release` is fire-and-forget: it never blocks the person leaving, a
+ * failure goes to console.error, and a file that any dish names (a save that landed after all) is
+ * kept, because releaseObjects reads every dish fresh first.
+ */
+export function useUnsavedDishPhotos(clientId, supabaseUrl = process.env.REACT_APP_SUPABASE_URL) {
+  const { scopedFrom } = useScopedDb()
+  const pathsRef = useRef(new Set())
+  const ctxRef = useRef(null)
+  ctxRef.current = { clientId, scopedFrom, supabaseUrl }
+  const tracker = useMemo(() => ({
+    track: path => { if (path) pathsRef.current.add(path) },
+    untrack: path => { pathsRef.current.delete(path) },
+    clear: () => { pathsRef.current.clear() },
+    release: (savedUrl = null) => {
+      const ctx = ctxRef.current
+      const saved = objectPathFromUrl(savedUrl, ctx.supabaseUrl)
+      const paths = [...pathsRef.current].filter(p => p !== saved)
+      pathsRef.current.clear()
+      if (paths.length === 0) return
+      void releaseObjects(paths, { ...ctx, recipeId: null }).then(
+        () => {},
+        e => console.error('Unsaved dish photos not released:', e?.message),
+      )
+    },
+  }), [])
+  useEffect(() => () => tracker.release(), [tracker])
+  return tracker
+}
 
 function describe(err, lead = '') {
   const own = storageRefusal(err)
@@ -56,10 +143,12 @@ function describe(err, lead = '') {
  * @param {function} persist   (url: string|null) => Promise<{ data, error }> for a saved recipe; null otherwise
  * @param {boolean}  disabled
  * @param {string}   supabaseUrl  project URL, to recognise our own files (defaults to the env)
+ * @param {function} onUploaded  (path) => void — a file now in the form of a recipe not yet saved (S855)
+ * @param {function} onReleased  (path) => void — a file this field has let go of (Replace or Remove)
  */
 export default function DishPhotoField({
   id = 'dish-photo', clientId, recipeId = null, value = '', onChange, persist = null, disabled = false,
-  supabaseUrl = process.env.REACT_APP_SUPABASE_URL,
+  supabaseUrl = process.env.REACT_APP_SUPABASE_URL, onUploaded = null, onReleased = null,
 }) {
   const fileRef = useRef(null)
   const [busy, setBusy] = useState('')          // '' | 'upload' | 'remove'
@@ -72,45 +161,20 @@ export default function DishPhotoField({
 
   useEffect(() => { setImgFailed(false) }, [value])
 
-  const bucket = () => supabase.storage.from(DISH_PHOTO_BUCKET)
+  // Whether the field is still on screen when an upload lands (S855): a new recipe's form can be
+  // closed while its photo is on the way.
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
-  // Best effort, and quiet by design: by the time this runs nothing points at the file any more,
-  // so a failure leaves an unused file rather than a wrong screen, and there is nothing the person
-  // editing a recipe could do about it. Only a path inside THIS client's folder is attempted —
-  // anything else the storage policy would refuse anyway (a restored copy of another outlet's link).
-  async function removeObjectsQuietly(paths) {
-    const mine = (paths || []).filter(p => p && clientId && p.startsWith(`${clientId}/`))
-    if (mine.length === 0) return
-    try {
-      const { error: rmErr } = await withTimeout(bucket().remove(mine), WRITE_TIMEOUT_MS, 'Delete photo')
-      if (rmErr) console.error('Dish photo file not deleted from storage:', rmErr.message)
-    } catch (e) {
-      console.error('Dish photo file not deleted from storage:', e?.message)
-    }
-  }
-
-  // The file this dish just let go of (Replace or Remove) is deleted only when no OTHER dish still
-  // shows it (S792, RECIPES-8). "Paste a link instead" lets two dishes share one stored photo, and
-  // replacing it on one used to delete the other's picture from the guest menu without a word. The
-  // check reads every dish's link fresh rather than trusting the page's list, and anything it cannot
-  // settle — a failed read, the guest-menu logo, a file this field did not name — keeps the file:
-  // an unused file costs nothing, a missing photo costs the other dish its picture. Its `.thumb` copy
-  // goes in the same request (S842, photoPathsToRelease).
+  // The file this dish just let go of (Replace or Remove): releaseObjects keeps it while any other
+  // dish names it.
   async function releaseObject(path) {
-    if (!path || !clientId || !path.startsWith(`${clientId}/`)) return
-    let paths
-    try {
-      const { data, error: readErr } = await withTimeout(
-        fetchAllRows(() => scopedFrom('recipes', 'id, image_url').not('image_url', 'is', null).order('id')),
-        WRITE_TIMEOUT_MS, 'Check photo'
-      )
-      if (readErr) { console.error('Dish photo kept: could not check which dishes use it:', readErr.message); return }
-      paths = photoPathsToRelease(path, { clientId, recipeId, others: data || [], supabaseUrl })
-    } catch (e) {
-      console.error('Dish photo kept: could not check which dishes use it:', e?.message)
-      return
-    }
-    await removeObjectsQuietly(paths)
+    if (!path) return
+    await releaseObjects([path], { clientId, recipeId, scopedFrom, supabaseUrl })
+    onReleased?.(path)
   }
 
   // The small copy (S842), after the photo itself has landed. True only when one was stored. Made
@@ -178,17 +242,24 @@ export default function DishPhotoField({
       if (upErr) { setError(describe(upErr, 'The photo was not uploaded. ')); return }
 
       const hasThumb = await uploadThumb(file, path)
+      const stored = hasThumb ? [path, thumbPathOf(path)] : [path]
+      // A recipe not saved yet whose form closed while the photo was on its way (Cancel, Back,
+      // leaving the page): nothing will ever save this URL, and nothing else can name a file that
+      // landed a moment ago, so it goes straight away.
+      if (!persist && !mountedRef.current) { await removeObjectsQuietly(stored, clientId); return }
       const { data: { publicUrl } } = bucket().getPublicUrl(path)
       const url = hasThumb ? markThumbUrl(versionedUrl(publicUrl)) : versionedUrl(publicUrl)
       const previousPath = ownPath
 
       const rowErr = await writeRow(url)
       if (rowErr) {
-        await removeObjectsQuietly(hasThumb ? [path, thumbPathOf(path)] : [path])
+        await removeObjectsQuietly(stored, clientId)
         setError(describe(rowErr, 'The photo uploaded, but the recipe could not be updated, so it still shows the previous photo. '))
         return
       }
       onChange(url)
+      // A recipe not saved yet: the page releases this file if the form closes without saving.
+      if (!persist) onUploaded?.(path)
       setShowLink(false)
       // Only once this dish no longer points at it, and only if no other dish does (releaseObject).
       // On a recipe not yet saved the previous file may be a link pasted from another dish, which

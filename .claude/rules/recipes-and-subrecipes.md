@@ -30,6 +30,7 @@ paths:
 - **Dish photos upload to the `dish-photos` bucket** (D16, `20260918150000`) — never with `upsert`, and
   the bucket carries a scoped SELECT policy because Storage's remove runs `DELETE … RETURNING`
   (`settings-row.md` has the rule). `image_url` stores the public URL with `?v=`, plus `&thumb=1` when a 256px `<name>.thumb.<ext>` copy was stored beside it (S842, `photoThumbUrl`; the guest list shows it and falls back to the full file); releasing a photo removes its thumb too.
+- **A new recipe closed unsaved releases the photos it uploaded (S855).** The upload stays at pick time; `useUnsavedDishPhotos` (`DishPhotoField.jsx`) holds them, Cancel and Back (`leaveForm`) and leaving the page release them through the same fresh every-dish check, and `save()` clears the list once the row is written. A new way out of the edit form calls `leaveForm`.
 - **Duplicate (S795) seeds a NEW form and never writes.** `openCopy` fills it through `formFromRecipe`
   / `ingredientRowsOf` (shared with `openEdit`) with `selectedRecipe` null, so the copy takes `save()`'s
   insert path and every guard on it. Never make it a bulk copier that inserts rows itself: that is the

@@ -5,6 +5,7 @@ import { useTheme } from '../../../context/ThemeContext'
 import { errorText } from '../../../shared/errorText'
 import { getInitials, avatarColorFor, relativeLuminance } from '../../../utils/avatarColor'
 import { IMS_COUNT_HOME } from '../../../shared/imsCountAccess'
+import DeviceGate from '../../../components/DeviceGate'
 
 // The stock-count tablet's front door (S737). Structural mirror of PosLogin.jsx — same roster, same
 // keypad, same server-side sign-in — with one deliberate difference: enrolment.
@@ -190,23 +191,30 @@ export default function ImsCountLogin() {
 
   const pinDots = Math.max(4, pin.length)
 
-  // Not set up yet — explain, rather than bouncing to /login with no indication of why.
+  // Not set up yet — explain, rather than bouncing to /login with no indication of why. The same
+  // screen as the POS till's (DeviceGate, S855): the steps in order, who can do them, and Crest
+  // support. The QR comes from Stock Count → Settings, which only the Owner or an IMS manager
+  // reaches, and issue_ims_enrol_token refuses anyone else (ims_can_manage_counts); the code it
+  // shows lasts 15 minutes. On this screen `loadError` is always a device that was signed out or a
+  // code that had expired, so it is announced.
   if (!enrolling && (!device.clientId || !device.secret)) {
     return (
-      <div style={{ minHeight: '100dvh', background: 'var(--theme-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <div className="card" style={{ padding: 32, maxWidth: 380, textAlign: 'center' }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>📋</div>
-          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', marginBottom: 8 }}>
-            This device isn't set up yet
-          </div>
-          <p style={{ fontSize: 13, color: 'var(--theme-text3)', lineHeight: 1.6, marginBottom: 24 }}>
-            Ask your manager to open <strong>Stock Count → Settings</strong> and show the setup code,
-            then scan it with this device's camera.
-          </p>
-          {loadError && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 13, marginBottom: 16 }}>{loadError}</p>}
-          <button className="btn btn-ghost" onClick={() => navigate('/login')}>Sign in with an email instead</button>
-        </div>
-      </div>
+      <DeviceGate
+        alert={!!loadError}
+        icon="📋"
+        title="This device is not set up yet"
+        notice={loadError || null}
+        lead="Counters sign in with a PIN only on a device the Owner or an IMS manager has set up."
+        steps={[
+          <>On your own phone or computer, sign in with the Owner account or an IMS manager login.</>,
+          <>Open <strong>Stock Count → Settings</strong> and press <strong>Show setup QR</strong>.</>,
+          <>Scan the code with this device camera within 15 minutes. Your counters then show here.</>,
+        ]}
+        ask="Ask the Owner or an IMS manager to do this. A counting PIN cannot set up a device."
+        actionLabel="Sign in with an email instead"
+        actionVariant="ghost"
+        onAction={() => navigate('/login')}
+      />
     )
   }
 

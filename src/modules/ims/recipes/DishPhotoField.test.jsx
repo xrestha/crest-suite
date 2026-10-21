@@ -1,6 +1,6 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { useState } from 'react'
-import DishPhotoField from './DishPhotoField'
+import DishPhotoField, { useUnsavedDishPhotos } from './DishPhotoField'
 import { supabase } from '../../../supabaseClient'
 import { downscalePhoto } from './dishPhoto'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -128,6 +128,160 @@ it('an unsaved recipe keeps the URL in the form only', async () => {
   await waitFor(() => expect(onValue).toHaveBeenCalledWith(expect.stringMatching(/dish-photos\/client-1\/new-/)))
   expect(mockUpload.mock.calls[0][0]).toMatch(/^client-1\/new-\d+\.jpg$/)
   expect(screen.queryByText(/saves straight away/)).toBeNull()
+})
+
+// S855: a new recipe's photo is uploaded when it is picked, so a form closed without saving must
+// take it back out of the bucket. The page (Recipes.js) holds the list in useUnsavedDishPhotos;
+// this stands in for it: Cancel and Back release, a written row clears, leaving the page releases.
+describe('photos a new recipe uploaded and never saved', () => {
+  function NewRecipeForm({ onValue }) {
+    const photos = useUnsavedDishPhotos('client-1', BASE)
+    const [open, setOpen] = useState(true)
+    const [v, setV] = useState('')
+    return (
+      <>
+        {open && (
+          <DishPhotoField
+            id="photo" clientId="client-1" recipeId={null} value={v} supabaseUrl={BASE}
+            onChange={x => { setV(x); onValue?.(x) }}
+            onUploaded={photos.track} onReleased={photos.untrack}
+          />
+        )}
+        <button type="button" onClick={() => { photos.release(null); setOpen(false) }}>Cancel</button>
+        <button type="button" onClick={() => { photos.clear(); setOpen(false) }}>Save Recipe</button>
+      </>
+    )
+  }
+  const NEW_PATH = /^client-1\/new-\d+\.jpg$/
+  const thumbOf = p => p.replace(/\.jpg$/, '.thumb.jpg')
+  const settle = () => act(async () => { await new Promise(r => setTimeout(r, 0)) })
+
+  it('Cancel deletes the photo the form uploaded, with its thumb, after checking no dish uses it', async () => {
+    const onValue = jest.fn()
+    render(<NewRecipeForm onValue={onValue} />)
+    pick(jpg())
+    await waitFor(() => expect(onValue).toHaveBeenCalled())
+    const path = mockUpload.mock.calls[0][0]
+    expect(path).toMatch(NEW_PATH)
+    expect(mockRemove).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(mockRemove).toHaveBeenCalledWith([path, thumbOf(path)]))
+    expect(mockScopedFrom).toHaveBeenCalledWith('recipes', 'id, image_url')
+    expect(mockRemove).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaving the page with the form open releases it too', async () => {
+    const onValue = jest.fn()
+    const { unmount } = render(<NewRecipeForm onValue={onValue} />)
+    pick(jpg())
+    await waitFor(() => expect(onValue).toHaveBeenCalled())
+    const path = mockUpload.mock.calls[0][0]
+
+    unmount()
+
+    await waitFor(() => expect(mockRemove).toHaveBeenCalledWith([path, thumbOf(path)]))
+  })
+
+  it('a saved recipe keeps its photo: the written row clears the list', async () => {
+    const onValue = jest.fn()
+    const { unmount } = render(<NewRecipeForm onValue={onValue} />)
+    pick(jpg())
+    await waitFor(() => expect(onValue).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Recipe' }))
+    unmount()
+    await settle()
+
+    expect(fetchAllRows).not.toHaveBeenCalled()
+    expect(mockRemove).not.toHaveBeenCalled()
+  })
+
+  it('keeps the photo when a dish names it after all (a save that landed after it timed out)', async () => {
+    const onValue = jest.fn()
+    render(<NewRecipeForm onValue={onValue} />)
+    pick(jpg())
+    await waitFor(() => expect(onValue).toHaveBeenCalled())
+    dishes = [...dishes, { id: 'rec-9', image_url: onValue.mock.calls[0][0] }]
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(fetchAllRows).toHaveBeenCalled())
+    await settle()
+    expect(mockRemove).not.toHaveBeenCalled()
+  })
+
+  it('keeps the photo, and says so in the console, when it cannot check which dishes use it', async () => {
+    const onValue = jest.fn()
+    render(<NewRecipeForm onValue={onValue} />)
+    pick(jpg())
+    await waitFor(() => expect(onValue).toHaveBeenCalled())
+    fetchAllRows.mockImplementation(async () => ({ data: null, error: { message: 'Failed to fetch' } }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(console.error).toHaveBeenCalledWith(expect.stringMatching(/Dish photo kept/), 'Failed to fetch'))
+    expect(mockRemove).not.toHaveBeenCalled()
+    // Leaving never waits on the clean-up.
+    expect(screen.queryByLabelText('Photo (guest menu)')).toBeNull()
+  })
+
+  it('Replace inside the form releases the first photo once, and Cancel only the second', async () => {
+    let t = 1000
+    jest.spyOn(Date, 'now').mockImplementation(() => (t += 1))
+    try {
+      const onValue = jest.fn()
+      render(<NewRecipeForm onValue={onValue} />)
+      pick(jpg())
+      await waitFor(() => expect(onValue).toHaveBeenCalledTimes(1))
+      const first = mockUpload.mock.calls[0][0]
+
+      pick(jpg())
+      await waitFor(() => expect(mockRemove).toHaveBeenCalledWith([first, thumbOf(first)]))
+      const second = mockUpload.mock.calls[1][0]
+      expect(second).not.toBe(first)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+      await waitFor(() => expect(mockRemove).toHaveBeenCalledTimes(2))
+      expect(mockRemove.mock.calls[1][0]).toEqual([second, thumbOf(second)])
+    } finally {
+      Date.now.mockRestore()
+    }
+  })
+
+  it('a photo that lands after the form closed is deleted, not put in the form', async () => {
+    let finish
+    mockUpload.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const onValue = jest.fn()
+    render(<NewRecipeForm onValue={onValue} />)
+    pick(jpg())
+    await waitFor(() => expect(mockUpload).toHaveBeenCalled())
+    const path = mockUpload.mock.calls[0][0]
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await act(async () => { finish({ data: { path: 'x' }, error: null }) })
+
+    await waitFor(() => expect(mockRemove).toHaveBeenCalledWith([path]))
+    expect(onValue).not.toHaveBeenCalled()
+    // Nothing else can name a file that landed a moment ago, so there is nothing to check first.
+    expect(fetchAllRows).not.toHaveBeenCalled()
+  })
+
+  it('a saved recipe never hands its photo to the list', async () => {
+    const onUploaded = jest.fn()
+    const persist = jest.fn(async () => ({ data: [{ id: 'rec-1' }], error: null }))
+    render(
+      <DishPhotoField
+        id="photo" clientId="client-1" recipeId="rec-1" value="" supabaseUrl={BASE}
+        onChange={() => {}} persist={persist} onUploaded={onUploaded}
+      />
+    )
+    pick(jpg())
+    await waitFor(() => expect(persist).toHaveBeenCalled())
+    expect(onUploaded).not.toHaveBeenCalled()
+  })
 })
 
 it('Remove clears the row and the form, then deletes the stored file', async () => {
