@@ -158,6 +158,12 @@ are load-bearing, each with the reason it exists:
   `useNavBadgeCounts` must keep counting from the SAME stamp with the SAME predicate, or the
   nav chip and the tab disagree.
 
+## The walk-in waitlist (S854, `20261021100000`)
+
+**`pos_waitlist`, never `pos_reservations`** (those checks assume a booked time); a seated party counts
+as a walk-in. Seat arms `seatReservationRef` as `{ kind: 'waitlist' }`, so a booking's seat refusals
+apply. The minute clock lives in the panel, never the floor's hook.
+
 ## The alert that repeats, and the AudioContext that silenced it (S763)
 
 `src/modules/pos/posChime.js` now has two exports and they are not interchangeable.

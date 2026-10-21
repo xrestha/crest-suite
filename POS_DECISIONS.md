@@ -20,6 +20,24 @@ Last updated: 2026-08-30 (S654)
 
 ## A. Core feature gaps (Nepal-market research, 2026-07-04)
 
+- [x] ~~Walk-in waitlist~~ — **shipped S854, 2026-10-21** (owner decision S853 "build next", planned first). Its own
+  table, `pos_waitlist` (`20261021100000`, applied live), never `pos_reservations`: holds, conflicts, Full counts and
+  the Covers split assume a booked time. Owner decisions in plain words: it lives ON THE FLOOR (a "Waitlist (n)" button
+  beside + Takeaway); staff pick the quoted wait (10/20/30/45/60) and a row turns amber once it runs over; WhatsApp or
+  Call (no SMS rail), then Seat arms the party for the next free table tapped (it rides the booking seat hand-off, so
+  every refusal a booking meets applies). Any POS login, staff rank and up; status moves forward only and the server
+  stamps the times. A seated party whose bill is deleted goes back on the list; `join_pos_tables` re-points a party with
+  its bill (owner approved). A party seated from the list counts as a walk-in on the Covers Report.
+- [x] ~~Deposits / advances for party bookings~~ — **shipped S854, 2026-10-21** (planned first). `pos_booking_deposits`
+  (`20261021110000`, applied live): a numbered receipt `DP-n` per outlet and fiscal year with NO VAT. Owner decisions in
+  plain words: VAT is charged on the final bill only (the deposit is a TENDER, the `Deposit` Split leg, never a
+  discount; an accountant line before the first real deposit is advised); a deposit is ALWAYS refunded, never kept
+  (cancel, no-show and money left after the bill), the way it came. Supervisor+ takes, uses and refunds;
+  `apply_booking_deposit` writes the leg at Charge time and `guard_pos_order_close` hands it back on any close that is
+  not a Split charge. Cash goes in and out as `deposit` / `deposit_refund` on the open shift (Expected Cash unchanged,
+  by direction). A credit note does not give the deposit back (handed back by hand as a Cash Out, as for card). The till
+  floor goes to 469 (`20261021120000`) once crest-v469 is live.
+
 - [x] ~~Guest-facing QR digital menu~~ — shipped S288, 2026-07-07 as **view-only**; **self-ordering has since shipped too.** `submit_guest_order` is live — **one** function today, the 4-arg overload: the accidental 3-arg duplicate that `20260707230000` created (CREATE OR REPLACE keys on the full argument signature, so appending a defaulted parameter made a second function rather than replacing the first) was anon-executable from 2026-07-07 until `20260829120000` dropped it, and that migration asserts exactly one survives. Rate-limited S373, hardened S604 (table-binding at commit, an order-status stepper, and the VAT fix below). S632 settled the entitlement: Guest QR Ordering comes **with the POS module**, and `pos_enabled` is its only gate — `POS_MODULE_KEYS` grants it on `posEnabled` alone, both server functions return/raise at that same gate, and `feature_flags.guest_ordering` now gates nothing. **S746 (2026-09-14) added two narrower refusals inside that gate, decided with Aashish:** a table marked `inactive` still serves the menu but takes no guest order (the floor cannot open an inactive table, so the order stranded), and a dish with no selling price is left off the guest menu and refused in an order (it showed as NPR 0). The Admin → Guest Menu preview frame also cannot place an order. Migration `20260914130000`, applied and self-verified. Crest's other QR use (payment) is unaffected. **Corrected 2026-09-01 (DOCS-REMEDIATION T5c):** this entry read "self-order deferred" for months after self-ordering shipped — wrong, in the file whose whole purpose is to stop ground being re-walked.
 - [x] ~~Multi-branch/multi-outlet management~~ — **shipped S548, 2026-08-12.** A group of outlets is several `clients` rows joined by `clients.group_id → client_groups`; an Owner switches between them from the sidebar and the Group Console (`/group-dashboard`, Suite Pro) rolls them up. Done as **selected-outlet indirection, not policy rewriting** — `profiles.active_client_id` was added and only `my_client_id()` changed, to `coalesce(active_client_id, client_id)`, so all ~151 policy sites kept their exact shape. This item said the architecture change was infeasible; it wasn't, because it never needed a set-returning `my_client_ids()`. Both follow-ups are now **shipped S617, 2026-08-27**. Per-branch privileges landed as `profile_outlet_access`, an allowlist of which outlets an account may switch into — it grants reach, never rank, deliberately narrower than the full per-outlet role matrix the S517 competitor screenshot showed, because a per-outlet rank would need a second rank rule in `AuthContext`, all three `hasXAccess` helpers and `is_client_owner()`. HQ→branch master-data push landed as `push_master_data`, matching on the `master_id` this item specified, previewing every record before writing, and refusing to overwrite a branch's own purchase rates. Building on the feature also turned up three latent defects in it, none reachable because no client has ever had a `group_id` — see README S617.
 - [x] ~~Delivery aggregator integration (Foodmandu/Pathao-style) — tagging only~~ — shipped S290, reworked S291, 2026-07-07 (see Shipped section). Real order-injection/menu-sync is still 🔵 deferred — that needs API partner access from Foodmandu/Pathao (a business relationship, not just engineering, same shape of blocker as QR payment auto-confirmation's merchant onboarding).
@@ -85,6 +103,19 @@ by design, so an admin session proves nothing about them.
   path, checks Supervisor rank, and derives `comped_by` from `auth.uid()`.
 
 ## B3. Quality passes on POS itself (added S652–S654, 2026-08-30)
+
+- [x] ~~The order screen sends four ways; a note box on every line; the discard dialog; keyboard speed; Sales Report's
+  11 tabs (the S846 critique leftovers)~~ — **shipped S854, 2026-10-21** (owner decisions S853/S854): ONE Send (food to
+  the kitchen, drinks to the bar by Ticket Routing; "Send N new", the old Send / Just save ask gone) with "Save, do not
+  send yet" in the ⋯ menu beside it; the KOT and BOT buttons removed; "+ Note" opens the note box on a tap; ← over
+  unsaved changes asks Send and go back / Leave without saving / Stay; Enter in the menu search adds the first dish
+  shown, Alt+S sends, Alt+P opens Payment; ✕ Remove on every payment line (not only the last); Sales Report under four
+  headings (Over time, Bills & payments, Menu, Customers & tax), a heading reopening its last view.
+- [x] ~~Payment window at 390px and its discount heading (S853 live check)~~ — **fixed S854**: the buyer details are
+  `.buyer-grid` (`minmax(0, 1fr)`, one column under 520px), and the heading reads "NPR 600 (NPR 667 − NPR 67 off, VAT
+  included)", one discount figure with its VAT, over the lines being paid (owner decision).
+- [x] ~~The tile after a cancelled close~~ — **fixed S854** (owner decision: the tile matches the order screen):
+  `openBillTotal` counts a comped row a cancelled close left, as `foldCompedSplits` charges it on the order screen.
 
 Not competitor-derived — like B2, these came out of critiques of our own code. Recorded here so the
 same ground is not re-walked; full detail in README S652/S653/S654.

@@ -7,6 +7,14 @@ That file, not this one, is the record of what has already been considered.
 **When an item here ships, move it to `POS_DECISIONS.md` in the same commit** rather than striking it
 through in place, or this file goes back to being 92% history and stops being read as a to-do list.
 
+**S854 (2026-10-21): every "Build next" item below shipped in one release (crest-v469), moved to
+[POS_DECISIONS.md](POS_DECISIONS.md) A and B3:** one Send with "Save, do not send yet", the kitchen note on
+tap, "Send and go back", the till keys (Enter, Alt+S, Alt+P) and Remove on any payment line, Sales Report's
+four headings, the tile after a cancelled close, the two payment-window findings below (phone width and the
+heading), deposits for party bookings (`20261021110000`) and the walk-in waitlist (`20261021100000`), both
+applied live. Left from that list: the room map (its own project). Raise the till floor to 469
+(`20261021120000`) only once crest-v469 is live.
+
 **S853 owner decisions (2026-10-21, asked in plain words) on the open items below:**
 - **Build next:** one Send on the order screen (food to the kitchen, drinks to the bar), with holding a course
   behind a small menu and the kitchen note opening only on tap; "Send and go back" on the discard dialog; till
@@ -32,7 +40,7 @@ through in place, or this file goes back to being 92% history and stops being re
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-15 (S846 — the 2026-10-15 POS critique closed in one release: food marks by shape and Egg dishes (migration `20261015160000`, applied live), the payment window money-first, one button per floor tile, Close Shift neutral until counted, POS's accent calmed like IMS and HR, one-tap kitchen Start; crest-v462; leftovers filed under B3). Before that, 2026-10-15 (S845 — B3's two shared-code leftovers closed: Excel waits for the letterhead's `ready` on the four POS reports and every IMS export, and the letterhead's blank row reaches the sheet; crest-v461). Before that, 2026-10-15 (S844 — the 2026-10-15 POS audit closed: P0/P1 in S841, P2 in S842, the P3 list and the Bill Register phone cards in S844, crest-v460; two shared-code leftovers filed under B3). Before that, 2026-10-15 (S840 — the combo leftovers and four parked items closed; migration `20261015100000`, crest-v456). Before that, 2026-10-14 (S839 — combos shipped, moved to POS_DECISIONS.md A; migration `20261014160000`). Before that, 2026-10-14 (S838 — Crest Customization's code follow-ups shipped, moved to POS_DECISIONS.md A; migration `20261014150000`). Before that, 2026-10-14 (S837 — kitchen and bar printers shipped, moved to POS_DECISIONS.md A; migration `20261014140000` applied live, crest-v453, admin-user-ops v70). Before that, 2026-10-14 (S836 — table move, join and split shipped, moved to POS_DECISIONS.md A; migration `20261014120000`, admin-user-ops v69, crest-v452, then `20261014130000` with the till floor at 452). Before that, 2026-10-14 (S835 — the S809.4 found-while-fixing lists closed in one pass: D37–D43, migration `20261014110000`, pos-payment-webhook redeployed, crest-v451; S834 was the first pass, D34–D36). Before that, 2026-10-13 (S832 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c shipped (S823: `20261013100000`, crest-v438, then the till floor `20261013100100` = 438 after the deploy); 5d shipped (S828, `20261013140000`, crest-v443); 5e shipped (S829, `20261013150000` then `20261013150100`, admin-user-ops v67, pos-staff-login v11, crest-v444); 5f designed and Q30–Q32 answered (S828); 5f-1 shipped (S830, `20261013160000`, crest-v445); 5f-2 shipped (S830, `20261013170000`, crest-v446, then `20261013180000` with the till floor at 446); 5f-3 shipped (S831, `20261013190000`, crest-v447); 5f-4 shipped (S832, `20261013200000`, crest-v448, then `20261013210000` with the till floor at 448); stages 6–7 outlined)
+Last updated: 2026-10-21 (S854 — the S853 "Build next" list shipped in one release: one Send, the leave ask, the till keys, Remove on any payment, Sales Report headings, the tile after a cancelled close, the payment window on a phone and its heading, deposits for party bookings and the walk-in waitlist; migrations `20261021100000` and `20261021110000` applied live, admin-user-ops v74, crest-v469; the till floor 469 waits for the deploy). Before that, 2026-10-15 (S846 — the 2026-10-15 POS critique closed in one release: food marks by shape and Egg dishes (migration `20261015160000`, applied live), the payment window money-first, one button per floor tile, Close Shift neutral until counted, POS's accent calmed like IMS and HR, one-tap kitchen Start; crest-v462; leftovers filed under B3). Before that, 2026-10-15 (S845 — B3's two shared-code leftovers closed: Excel waits for the letterhead's `ready` on the four POS reports and every IMS export, and the letterhead's blank row reaches the sheet; crest-v461). Before that, 2026-10-15 (S844 — the 2026-10-15 POS audit closed: P0/P1 in S841, P2 in S842, the P3 list and the Bill Register phone cards in S844, crest-v460; two shared-code leftovers filed under B3). Before that, 2026-10-15 (S840 — the combo leftovers and four parked items closed; migration `20261015100000`, crest-v456). Before that, 2026-10-14 (S839 — combos shipped, moved to POS_DECISIONS.md A; migration `20261014160000`). Before that, 2026-10-14 (S838 — Crest Customization's code follow-ups shipped, moved to POS_DECISIONS.md A; migration `20261014150000`). Before that, 2026-10-14 (S837 — kitchen and bar printers shipped, moved to POS_DECISIONS.md A; migration `20261014140000` applied live, crest-v453, admin-user-ops v70). Before that, 2026-10-14 (S836 — table move, join and split shipped, moved to POS_DECISIONS.md A; migration `20261014120000`, admin-user-ops v69, crest-v452, then `20261014130000` with the till floor at 452). Before that, 2026-10-14 (S835 — the S809.4 found-while-fixing lists closed in one pass: D37–D43, migration `20261014110000`, pos-payment-webhook redeployed, crest-v451; S834 was the first pass, D34–D36). Before that, 2026-10-13 (S832 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c shipped (S823: `20261013100000`, crest-v438, then the till floor `20261013100100` = 438 after the deploy); 5d shipped (S828, `20261013140000`, crest-v443); 5e shipped (S829, `20261013150000` then `20261013150100`, admin-user-ops v67, pos-staff-login v11, crest-v444); 5f designed and Q30–Q32 answered (S828); 5f-1 shipped (S830, `20261013160000`, crest-v445); 5f-2 shipped (S830, `20261013170000`, crest-v446, then `20261013180000` with the till floor at 446); 5f-3 shipped (S831, `20261013190000`, crest-v447); 5f-4 shipped (S832, `20261013200000`, crest-v448, then `20261013210000` with the till floor at 448); stages 6–7 outlined)
 
 ---
 
@@ -1013,20 +1021,9 @@ critique's minor list and persona flags, and were deliberately not in that batch
   `Combos.jsx`, `OptionGroups.jsx` and `AttachGroupsModal.jsx` is `badge-gray`, as POS proper since S846.
 - [x] ~~🟡 **KDS Ready and Served have the slide-under risk Start had.**~~ — **closed S853**: every one-tap
   move (Start, Ready, Served, Seen, Clear) shares `MOVE_SETTLE_MS`; the popup Start is not held.
-- [ ] 🟡 **The order screen still sends four ways** (Send, KOT, BOT, "Just save", which leaves dishes
-  unfired), and a "+ Kitchen note" box sits on every cart line. The critique asked whether one "Send N
-  to kitchen" and no save-without-sending would do.
-- [ ] 🟡 **Keyboard speed on the till**: Enter in the menu search adds nothing; no Send or Payment
-  shortcut; only the last tender can be undone.
 - [x] ~~🟡 **After an outage up to ~12 banners stack above the floor's tables**~~ — **closed S853**: two or
   more floor notices fold behind one summary line that names each, with Show all; offline conflicts are one
   box; the offline banner, guest orders and the last tap's answer stay visible.
-- [ ] ⚪ **Small copy and polish, two left (owner's call)**: Sales Report's 11 tabs; the discard dialog has
-  no "Send and go back" (`useConfirm` has only confirm and cancel). **Closed S853:** the booking page's
-  unavailable state (a heading, "contact the restaurant", no "Powered by Crest POS"; no phone, by owner
-  decision, because the page has none without a migration); the device-not-set-up gate (numbered steps,
-  "Ask the Owner", the support line); POS Setup's tab row scrolls and lost its hover-only `title` help;
-  the menu search (no emoji, grows, 16px on a phone); one 0.55 fade; no glow on the PIN dots.
 - [x] ~~🟢 **The dashboard's "open bills" is before VAT while the Billing list is VAT-inclusive.**~~ —
   **closed S853** (owner decision): the dashboard, floor tiles and Billing list all use `openBillTotal`,
   VAT included and free dishes left out. Rare gap: a comped row left on an open order by a cancelled
@@ -1055,12 +1052,6 @@ by the till — were closed by S754 and moved to `POS_DECISIONS.md`.
   client; the client must first register a sender ID with the telcos under NTA rules (business
   documents, generic IDs prohibited). Build as an Edge Function `pos-sms` holding the token in
   `client_secrets` (privilege invariant 4). Not before a client with a registered sender ID asks.
-- [ ] 🔵 **Deposits / advances for party bookings.** Two things settle the shape before it is built:
-  it must be a TENDER, never a discount (`payment_method` CHECKs on two tables plus the two display
-  lists — the S618 loyalty rule), and Nepal VAT Act s.16 arguably makes an advance taxable when
-  RECEIVED, which needs an accountant's answer and its own receipt document.
-- [ ] 🔵 **Walk-in waitlist** (quote a wait, notify when ready). Shares `pos_reservations`
-  (`source='walk_in'`, no fixed time); needs a notify channel, which is the SMS item above.
 - [ ] ⚪ **Phone verification on the public booking page** — impossible without an SMS rail; today
   the staff WhatsApp/call IS the verification. Revisit with the SMS item.
 

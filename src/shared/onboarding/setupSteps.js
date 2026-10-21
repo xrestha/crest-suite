@@ -169,7 +169,7 @@ export const STEPS = [
     access: { pos: 'manager' }, route: '/pos/sales-report', where: 'POS → Reports → Sales Report',
     label: "Check today's sales",
     hint: 'See what sold today and how you were paid — cash, QR or card.',
-    strip: "This is your Sales Report. Today's total is on the Daily tab; press the Payment Summary tab to see cash, QR and card." },
+    strip: 'This is your Sales Report. The total for today is under Over time → Daily; open Bills & payments → Payment Summary to see cash, QR and card.' },
 
   // ── Staff & payroll ──
   { key: 'hr.employees', group: 'hr', phase: 'setup', tick: 'data', signal: 'employees', module: 'hr',
