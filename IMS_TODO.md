@@ -6,8 +6,16 @@ them sits the S793 load-time backlog (PERF-n), from measuring the module on a sl
 
 **When an item here ships, strike it in the same commit and move it to the CHANGELOG entry.**
 
+**S853 owner decisions (2026-10-21, asked in plain words):**
+- **Build next:** PERF-2, PERF-3 and PERF-4 together (PERF-4 touches the service worker, so it is planned with
+  extra care); the stock-count login gate in the till's new shape; Budget vs Actual's provisional wording;
+  unused dish photos left when a new recipe is cancelled; the Owner Report vendor section's pre-discount
+  cash/credit split and its aging-vs-payments VAT mismatch.
+- **Decided, no change:** Menu Engineering keeps its quadrant colours (on a scatter chart the hue is the group);
+  a festival Demand Multiplier stays a Holiday Calendar (HR) setting, since the forecast learns festivals (S851).
+
 **S852 whole-product audit (2026-10-21, 13/20): ✅ done** in one release (crest-v467); the report and its Resolution table are `.impeccable/audit/2026-10-20T15-06-02Z__crest-suite-all-modules.md`. Filed from it, not fixed:
-- ⚪ The live Menu Engineering page colours its quadrants green / purple / amber / red, while the Owner Report's quadrant names are ink since S852. Its scatter chart uses the hue as each quadrant's identity, so this needs a decision, not a sweep.
+- ✅ Decided S853, no change: The live Menu Engineering page colours its quadrants green / purple / amber / red, while the Owner Report's quadrant names are ink since S852. Its scatter chart uses the hue as each quadrant's identity, so this needs a decision, not a sweep.
 - ✅ S853: `useFoodBeverageSplit` now clears `error` when the card stops asking for data and when a new load starts.
 - ⚪ The IMS stock-count login (`ImsCountLogin.jsx` ~200) still shows "This device isn't set up yet" as one centred paragraph; Crest POS's gate became numbered steps, "Ask the Owner" and the support line in S853 (`TillGate` in `PosLogin.jsx`).
 
@@ -383,7 +391,7 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
   finished days sold (owner decision: trust it fully). Same pass: today is a hollow dot apart from
   the actual line, the Targets paint above the forecasts (the footer says when they coincide), and
   the footer figures carry their line colour instead of purple and red.
-- ⚪ **A festival can still only get a Demand Multiplier from Holiday Calendar, an HR page.** An
+- ✅ Decided S853, no change: **A festival can still only get a Demand Multiplier from Holiday Calendar, an HR page.** An
   outlet without Crest HR cannot set one; since S851 its forecast learns from the festival itself,
   but its Target stays a usual day.
 - ✅ S756 — `Stock.js:709-727` Save All writes/deletes every visible row (parallel tablets wipe each other; restamps counted_by; recount guard refuses) → send changed cells only.

@@ -7,6 +7,16 @@ That file, not this one, is the record of what has already been considered.
 **When an item here ships, move it to `POS_DECISIONS.md` in the same commit** rather than striking it
 through in place, or this file goes back to being 92% history and stops being read as a to-do list.
 
+**S853 owner decisions (2026-10-21, asked in plain words) on the open items below:**
+- **Build next:** one Send on the order screen (food to the kitchen, drinks to the bar), with holding a course
+  behind a small menu and the kitchen note opening only on tap; "Send and go back" on the discard dialog; till
+  keyboard shortcuts (Enter adds the top search match, keys for Send and Payment, any tender line removable);
+  Sales Report's 11 tabs grouped under three or four headings; the tile after a cancelled close matching the
+  order screen; **deposits for party bookings** and a **walk-in waitlist** (section C, each planned first).
+- **Build, as its own project:** a room map for the floor (owner chose it over the card grid).
+- **Decided, no change:** the Vegetarian filter keeps showing egg choices inside a dish and in combo picks.
+- **Still parked:** the tablet re-activation code (ACCESS-10), paid SMS, phone verification, QR auto-confirmation, barcode.
+
 **S852 whole-product audit (2026-10-21, 13/20): ✅ done** in one release (crest-v467); the report and its Resolution table are `.impeccable/audit/2026-10-20T15-06-02Z__crest-suite-all-modules.md`. Filed from it, not fixed:
 - ✅ S853: Membership's Card types table (Switch off plus ⋯) overflowed a 390px phone; it now has phone cards like Members and transfers (S852).
 - ✅ S853: `TillNotice.jsx` (and `ChartCard.js`) copied `Modal.js`'s `FOCUSABLE` selector; Modal.js now exports it and both import it.
@@ -987,7 +997,7 @@ critique's minor list and persona flags, and were deliberately not in that batch
   pass on a real till: the payment window's new order and its "Adjust this bill" line on a phone and a
   tablet, a floor tile's one-button focus ring, the KDS "Start · 10m" / "Other time" pair, Close Shift
   before and after the first note, and the guest menu's mark key.
-- [ ] ⚪ **The vegetarian filter hides Egg dishes but not egg CHOICES inside a dish or a combo pick.** It
+- [x] ~~⚪ **The vegetarian filter hides Egg dishes but not egg CHOICES inside a dish or a combo pick.**~~ Decided S853: keep showing them. It
   never filtered the options inside a dish sheet; hiding egg choices too would be new behaviour, so it
   is the owner's call.
 - [x] ~~🟡 **The Customization screens still use `badge-yellow`**~~ — **closed S853**: every tag in

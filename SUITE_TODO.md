@@ -9,8 +9,17 @@ Suite Pro gate and its billing. Until S848, Suite items were filed in `IMS_TODO.
 **When an item here ships, record it in that session's CHANGELOG entry and mark the row ✅ with the
 session number** (or move it to a decisions record if one is started), so this file stays a to-do list.
 
+**S853 owner decisions (2026-10-21, asked in plain words):**
+- **Decided, no change:** the Fixed Assets Disposal Report keeps gain green / loss red.
+- **Build next:** `LegalReacceptance` telling a first acceptance from a repeat one exactly.
+- **Frozen owner reports to Regenerate (live read 2026-10-21):** 9 reports exist, all made before the S849
+  release (current version 18). Crest support presses Regenerate Snapshot on the eight newer ones: BLOOM CAFE
+  Shrawan and Bhadra 2083 (v14); BLOOM CAFE - PKR Shrawan and Bhadra 2083 (v14, no Owner login, so support);
+  CASA ACAI CAFE Ashadh, Shrawan and Bhadra 2083 (v16) and Ashwin 2083 (v17, made 2026-10-18, which is why the
+  S849 note said seven). CASA ACAI CAFE Jestha 2083 (v1, the July backfill) stays as made, per that decision.
+
 **S852 whole-product audit (2026-10-21, 13/20): ✅ done** in one release (crest-v467); the report and its Resolution table are `.impeccable/audit/2026-10-20T15-06-02Z__crest-suite-all-modules.md`. Filed from it, not fixed:
-- ⚪ Fixed Assets' Disposal Report colours gain / loss green / red by sign, a verdict on a plain fact.
+- ✅ Decided S853, no change: Fixed Assets' Disposal Report colours gain / loss green / red by sign, a verdict on a plain fact.
 - ⚪ `LegalReacceptance` tells a first acceptance from a re-acceptance by `PRIOR_VERSIONS`; it is exact only once `AuthContext` exposes `legalAccepted`.
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
