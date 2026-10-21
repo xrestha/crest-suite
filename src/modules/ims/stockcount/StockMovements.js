@@ -15,6 +15,8 @@ import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad, openOrLatest } from '../../../shared/periodList'
 import Tabs from '../../../components/Tabs'
 import { movementFigures } from './stockMovementRows'
 import { isCostedByBuild } from '../recipes/buildYourOwnRating'
@@ -66,6 +68,7 @@ export default function StockMovements() {
   const [searchParams] = useSearchParams()
 
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [rows, setRows] = useState([])
@@ -102,14 +105,10 @@ export default function StockMovements() {
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
     recipeBook()   // start it now, so it lands alongside the period list rather than after it
-    const { data: p, error: pErr } = await scopedFrom('monthly_periods')
-      .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-    // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
-    if (pErr) { setLoadError(pErr); setLoading(false); return }
-    setPeriods(p || [])
 
     // Arriving from Reorder Report's "Book Stock" link (?period=&item=) lands on that same
     // period instead of always defaulting to open — the item name pre-fills the search box
@@ -119,22 +118,17 @@ export default function StockMovements() {
     // Falls back to the LATEST period when none is open (S720) — between closing one month and
     // opening the next this page loaded nothing at all and rendered a full ledger of zeros. Same
     // fix ReorderReport got in S696 and FifoReport in S717.
-    const target = (p || []).find(x => x.id === periodParam)
-      || (p || []).find(x => x.status === 'open')
-      || (p || [])[0]
-    if (target) {
-      // init() must claim the page too (S720). It is not about THIS load's data — loadReport's own
-      // isCurrent check covers that — it is that once handlePeriodChange has run even once the ref
-      // is permanently non-null, so `isCurrent` stops failing open. An admin switching client in
-      // the top bar re-runs init() on a still-mounted component with the ref holding the PREVIOUS
-      // client's period id, and every setter in loadReport is then skipped: the new tenant's page
-      // renders the old period chip over an empty ledger. The hook's own contract says init()
-      // claims; S698, S709 and S718 each fixed the same omission elsewhere.
-      periodReq.begin(target.id)
-      setSelectedPeriod(target)
-      await loadReport(target.id, itemParam)
-    }
-    setLoading(false)
+    const pick = list => list.find(x => x.id === periodParam) || openOrLatest(list)
+    // The month comes from the shared list, the ledger starting beside it (S855, periodList.js);
+    // init() claims the month it loads (S720) inside initPeriodLoad.
+    const out = await initPeriodLoad({
+      req: periodReq, initKey, periodList, pick,
+      setPeriods, select: setSelectedPeriod, load: id => loadReport(id, itemParam),
+    })
+    if (out.superseded) return   // a period picked meanwhile owns the page and its loading flag
+    // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {

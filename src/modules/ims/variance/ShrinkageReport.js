@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -13,6 +13,7 @@ import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
 import { Navigate } from 'react-router-dom'
 
 // How each verdict from shrinkageCalc.js is drawn. The verdict, the observation loop and the
@@ -35,9 +36,13 @@ export default function ShrinkageReport() {
   const { settings } = useSettings()
   const windowReq = useLatestRequest()
   const initReq = useLatestRequest()
+  const periodList = usePeriodList()
 
   const [periods, setPeriods]         = useState([])
   const [periodCount, setPeriodCount] = useState(6)
+  // The window init() loads is the one selected when its month list lands, not when it started.
+  const countRef = useRef(periodCount)
+  countRef.current = periodCount
   const [categories, setCategories]   = useState([])
   const [filterCat, setFilterCat]     = useState('all')
   const [filterStatus, setFilterStatus] = useState('flagged')
@@ -53,7 +58,8 @@ export default function ShrinkageReport() {
   const [noClosed, setNoClosed] = useState(false)
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
-  useEffect(() => { if (periods.length) buildReport() }, [periodCount, periods]) // eslint-disable-line
+  // A window picked on the page; the first load is init's, started from the month list (S855).
+  useEffect(() => { if (periods.length) loadWindow(periods, periodCount) }, [periodCount]) // eslint-disable-line
 
   async function init() {
     // The page stays mounted across an admin's view-as switch and a group Owner's outlet switch, so
@@ -64,34 +70,63 @@ export default function ShrinkageReport() {
     // starts after the periods read: until then its key was still the current one.
     windowReq.begin(`${effectiveClientId}:init`)
     setLoadError(null)
-    const initResults = await Promise.all([
-      scopedFrom('monthly_periods')
-        .eq('status', 'closed')
-        .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
-      scopedFrom('categories').order('sort_order'),
-    ])
+    // The closed months come from the shared list (S855, periodList.js). This page loads a WINDOW
+    // of them, not one month, so it applies initPeriodLoad's rule itself: the window guessed from
+    // the list in memory loads beside the fresh read, which loads again only if it moved the window.
+    const closedOf = list => (list || []).filter(p => p.status === 'closed')
+    const { cached, fresh } = periodList()
+    const guessed = closedOf(cached)
+    let guess = null
+    if (guessed.length) {
+      setPeriods(guessed)
+      guess = buildReport(guessed, countRef.current)
+      guess.catch(() => {})   // awaited below on the path that keeps it
+    }
+    const initResults = await Promise.all([fresh, scopedFrom('categories').order('sort_order')])
     if (!initReq.isCurrent(key)) return   // superseded by a client switch
     // A failed read is not "no closed periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
     const initFailed = firstError(initResults)
-    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
-    const [{ data: p }, { data: c }] = initResults
+    if (initFailed) {
+      windowReq.begin(`${effectiveClientId}:failed`)   // a guessed window must not paint over the error
+      setLoadError(initFailed); setLoading(false); return
+    }
+    const [{ data: all }, { data: c }] = initResults
+    const p = closedOf(all)
     setCategories(c || [])
-    setPeriods(p || [])
-    const none = !(p || []).length
+    setPeriods(p)
+    const none = !p.length
     setNoClosed(none)
-    if (none) { setRawRows([]); setReady(false); setPeriodsUsed(0); setLoading(false) }
+    if (none) {
+      windowReq.begin(`${effectiveClientId}:none`)
+      setRawRows([]); setReady(false); setPeriodsUsed(0); setLoading(false); return
+    }
+    const count = countRef.current
+    const done = guess && windowReq.isCurrent(windowKey(p, count)) ? await guess : await buildReport(p, count)
+    // Only the load that still owns the page may clear the flag.
+    if (windowReq.isCurrent(done)) setLoading(false)
   }
 
-  async function buildReport() {
-    // Claim the page before any await (S601). The key carries the CLIENT as well as the window
-    // (S792, FIGURES-7): keyed on `periodCount` alone, the new outlet's load began with the SAME key
-    // as a slow one still in flight for the previous outlet, which then passed isCurrent and,
-    // landing last, painted its shrinkage under the new outlet's name.
-    const key = windowReq.begin(`${effectiveClientId}:${periodCount}`)
+  async function loadWindow(list, count) {
+    const key = await buildReport(list, count)
+    if (windowReq.isCurrent(key)) setLoading(false)
+  }
+
+  // The claim for one window of months. It carries the CLIENT as well as the window (S792,
+  // FIGURES-7): keyed on `periodCount` alone, the new outlet's load began with the SAME key as a
+  // slow one still in flight for the previous outlet, which then passed isCurrent and, landing
+  // last, painted its shrinkage under the new outlet's name. And the months themselves (S855), so a
+  // window guessed from the list in memory loses the page when the fresh list moves it.
+  function windowKey(list, count) {
+    return `${effectiveClientId}:${count}:${list.slice(0, count).map(p => p.id).join(',')}`
+  }
+
+  // Loads the window and returns its claim; the caller clears `loading` while it still owns the page.
+  async function buildReport(list, count) {
+    const key = windowReq.begin(windowKey(list, count))   // claim the page before any await (S601)
     setLoading(true)
     setLoadError(null)
-    const selected = periods.slice(0, periodCount)
-    if (!selected.length) { setRawRows([]); setReady(false); setLoading(false); return }
+    const selected = list.slice(0, count)
+    if (!selected.length) { setRawRows([]); setReady(false); return key }
     const periodIds = selected.map(p => p.id)
     setPeriodsUsed(selected.length)
 
@@ -123,9 +158,9 @@ export default function ShrinkageReport() {
       readPeriodTransfers(scopedFrom, periodIds, { select: 'id, period_id, item_id, qty, direction' }),
     ])
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
-    if (!windowReq.isCurrent(key)) return   // superseded by a newer window selection
+    if (!windowReq.isCurrent(key)) return key   // superseded by a newer window selection
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setRawRows([]); setReady(false); setLoading(false); return }
+    if (failed) { setLoadError(failed); setRawRows([]); setReady(false); return key }
     const [
       { data: items },
       { data: opening },
@@ -161,8 +196,8 @@ export default function ShrinkageReport() {
     } catch (err) {
       // The isCurrent guard belongs on the failure path too: without it a superseded load's
       // error replaces the report the reader is actually looking at with a red banner (S719).
-      if (!windowReq.isCurrent(key)) return
-      setLoadError(err); setRawRows([]); setReady(false); setLoading(false); return
+      if (!windowReq.isCurrent(key)) return key
+      setLoadError(err); setRawRows([]); setReady(false); return key
     }
 
     // Per-item observations, through the loop the frozen Owner Report's Shrinkage Trend calls too
@@ -177,11 +212,11 @@ export default function ShrinkageReport() {
     })
     const rows = observed.map(r => ({ ...r, category: r.item.categories?.name || 'Uncategorised' }))
 
-    if (!windowReq.isCurrent(key)) return   // a second await (recipe explosion) sits above this
+    if (!windowReq.isCurrent(key)) return key   // a second await (recipe explosion) sits above this
     setUncountedInfo({ items: uncountedItems, itemPeriods: uncountedItemPeriods })
     setRawRows(rows)
     setReady(true)
-    setLoading(false)
+    return key
   }
 
   // Verdicts are derived from the stored observations against the CURRENT settings, so a tolerance

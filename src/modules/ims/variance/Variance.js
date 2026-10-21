@@ -20,6 +20,8 @@ import NoPeriodState from '../../../components/NoPeriodState'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { readPeriodTransfers, transferNetQtyByItem } from '../transfers/transferFlows'
 
@@ -56,6 +58,7 @@ export default function Variance() {
   // no round trips, where fetching it level by level added two or three to every period's load.
   const recipeBook = useRecipeBook()
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [report, setReport] = useState([])
@@ -85,37 +88,31 @@ export default function Variance() {
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
     recipeBook()   // start it now, so it lands alongside the period list rather than after it
-    const initResults = await Promise.all([
-      scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
-      scopedFrom('categories').order('sort_order')
-    ])
-    // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
-    const initFailed = firstError(initResults)
-    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
-    const [{ data: p }, { data: c }] = initResults
-    setPeriods(p || [])
-    setCategories(c || [])
+    // The month comes from the shared list, the report starting beside it (S855, periodList.js).
     // Default to the most recent CLOSED period, not the open one. Closing stock is counted at
     // month-end, so mid-month `closeQty` is 0 for every item — actual usage then reads as
     // "everything on the shelf plus everything bought", every row flags Over, and the page paints
     // a red "potential loss" figure on a month that structurally cannot have one yet.
     // ShrinkageReport.js already restricts itself this way; this page never did.
-    const chosen = (p || []).find(x => x.status === 'closed') || (p || []).find(x => x.status === 'open')
-    if (chosen) {
-      // init() claims the page too (S756). Without it an admin switching client re-runs init on a
-      // mounted page whose ref still holds the previous client's period id, and every setter in
-      // buildReport is skipped (the S721 StockMovements shape).
-      periodReq.begin(chosen.id)
-      setSelectedPeriod(chosen)
-      await buildReport(chosen.id)
-      // A period picked mid-load owns the loading flag now; only it may clear it.
-      if (periodReq.isCurrent(chosen.id)) setLoading(false)
-      return
-    }
-    setLoading(false)
+    const pick = list => list.find(x => x.status === 'closed') || list.find(x => x.status === 'open') || null
+    const [out, cats] = await Promise.all([
+      initPeriodLoad({
+        req: periodReq, initKey, periodList, pick,
+        setPeriods, select: setSelectedPeriod, load: buildReport,
+      }),
+      scopedFrom('categories').order('sort_order'),
+    ])
+    // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
+    if (cats.error) { setLoadError(cats.error); setLoading(false); return }
+    setCategories(cats.data || [])
+    if (out.superseded) return   // a period picked meanwhile owns the page and its loading flag
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    // A period picked mid-load owns the loading flag now; only it may clear it.
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {

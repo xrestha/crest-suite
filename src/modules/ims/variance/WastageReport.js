@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
-import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
@@ -14,15 +13,17 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { Navigate } from 'react-router-dom'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { FilterChips } from '../../../components/Tabs'
 import { wastageRowValue } from '../reports/periodCost'
 
 export default function WastageReport() {
   const { clientId, profile, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
-  const { scopedFrom } = useScopedDb()
   const biz = useBizInfo()
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [periods, setPeriods]           = useState([])
   const [selectedPeriod, setSelected]   = useState(null)
   const [rows, setRows]                 = useState([])
@@ -33,26 +34,33 @@ export default function WastageReport() {
   const [loading, setLoading]           = useState(true)
   const [loadError, setLoadError]       = useState(null)
 
-  useEffect(() => {
-    if (!effectiveClientId) return
-    scopedFrom('monthly_periods')
-      .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      .then(({ data, error }) => {
-        // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
-        if (error) { setLoadError(error); setLoading(false); return }
-        setPeriods(data || [])
-        if (data?.length) setSelected(data[0])
-        else setLoading(false)   // nothing will call fetchData, so nothing else clears it
-      })
-  }, [effectiveClientId, scopedFrom])
+  useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    if (selectedPeriod) fetchData(selectedPeriod.id)
-  }, [selectedPeriod]) // eslint-disable-line
+  async function init() {
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    setLoading(true)
+    setLoadError(null)
+    // The latest month, from the shared list, the report starting beside it (S855, periodList.js).
+    const out = await initPeriodLoad({
+      req: periodReq, initKey, periodList, pick: list => list[0] || null,
+      setPeriods, select: setSelected, load: fetchData,
+    })
+    if (out.superseded) return   // a period picked meanwhile owns the page and its loading flag
+    // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
+  }
+
+  async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await (S601)
+    setSelected(periods.find(p => p.id === periodId))
+    setLoading(true)
+    await fetchData(periodId)
+    // Only the load that still owns the page may clear the flag.
+    if (periodReq.isCurrent(periodId)) setLoading(false)
+  }
 
   async function fetchData(periodId) {
-    periodReq.begin(periodId)   // claim the page before any await (S601)
-    setLoading(true)
     setLoadError(null)
     // PAGED (S719). `wastages` is one row per item per DAY once Daily Wastage is used, which the
     // rules file names as the realistic 1000-crosser — and every OTHER page that reads this table
@@ -66,7 +74,7 @@ export default function WastageReport() {
       .order('id'))
     // A failed read must never flow through the `|| []` below into a confident NPR-0 report (S612 silent-zero rule).
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
-    if (error) { setLoadError(error); setRows([]); setReasons([]); setLoading(false); return }
+    if (error) { setLoadError(error); setRows([]); setReasons([]); return }
 
     // Aggregate by item — an item can now have many rows (monthly catch-all + dated daily entries).
     const byItem = {}
@@ -97,7 +105,6 @@ export default function WastageReport() {
     setRows(Object.values(byItem).sort((a, b) => b.value - a.value))
     setReasons(Object.values(byReason).sort((a, b) => b.value - a.value))
     setCatFilter('All')
-    setLoading(false)
   }
 
   const totalValue  = rows.reduce((s, r) => s + r.value, 0)
@@ -177,7 +184,7 @@ export default function WastageReport() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => setSelected(periods.find(p => p.id === e.target.value))}>
+          <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => (
               <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year}</option>
             ))}

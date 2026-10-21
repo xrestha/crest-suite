@@ -96,9 +96,11 @@ describe('ShrinkageReport.js calls the shared code and keeps no copy', () => {
     expect(src).not.toMatch(/observations\.push\(/)
   })
 
-  // S792 (FIGURES-7): the page stays mounted across a client switch, so its load key names the client.
+  // S792 (FIGURES-7): the page stays mounted across a client switch, so its load key names the client
+  // (and since S855 the window's months, after the count).
   test('the report load key carries the client', () => {
-    expect(src).toMatch(/windowReq\.begin\(`\$\{effectiveClientId\}:\$\{periodCount\}`\)/)
+    expect(src).toMatch(/windowReq\.begin\(windowKey\(list, count\)\)/)
+    expect(src).toMatch(/return `\$\{effectiveClientId\}:\$\{count\}:/)
     expect(src).toMatch(/initReq\.begin\(effectiveClientId\)/)
   })
 })

@@ -17,6 +17,8 @@ import NoPeriodState from '../../../components/NoPeriodState'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
@@ -28,16 +30,19 @@ export default function TheoreticalVariance() {
   const { scopedFrom } = useScopedDb()
   const { settings } = useSettings()
   const biz = useBizInfo()
-  // item_id -> yield_pct for EVERY item, unfiltered. A ref rather than state because init() must
-  // populate it and then call computeVariance() in the same tick, before a state update lands.
+  // item_id -> yield_pct for EVERY item, unfiltered. A ref rather than state because loadBase()
+  // populates it for computeVariance() to read at once, before a state update would land.
   const yieldMapRef = useRef({})
+  // The item list and recipe book every month is computed against, as a promise (S855): a month's
+  // own reads start beside it rather than after it, and a period picked before it lands waits for
+  // it instead of computing against an empty book.
+  const baseRef = useRef(null)
 
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [periods,         setPeriods]         = useState([])
   const [selectedPeriod,  setSelectedPeriod]  = useState(null)
-  const [items,           setItems]           = useState([])
   const [categories,      setCategories]      = useState([])
-  const [recipes,         setRecipes]         = useState([])
   const [rows,            setRows]            = useState([])
   const [loading,         setLoading]         = useState(true)
   const [loadError,       setLoadError]       = useState(null)
@@ -50,18 +55,41 @@ export default function TheoreticalVariance() {
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
 
   async function init() {
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
-    const initResults = await Promise.all([
-      scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
+    const base = loadBase().catch(error => ({ error }))
+    baseRef.current = base
+    // The month comes from the shared list, its reads starting beside the list and the book (S855,
+    // periodList.js). Most recent CLOSED period by default — the "Actual" side of this comparison
+    // subtracts a closing stock count that does not exist until month-end, so opening on the live
+    // month made every item read as massively over-consumed. Same fix as Variance.js.
+    const out = await initPeriodLoad({
+      req: periodReq, initKey, periodList,
+      pick: list => list.find(x => x.status === 'closed') || list.find(x => x.status === 'open') || null,
+      setPeriods, select: setSelectedPeriod, load: id => computeVariance(id, base),
+    })
+    const b = await base
+    // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
+    if (b.error) { setLoadError(b.error); setLoading(false); return }
+    setCategories(b.categories)
+    if (!out.superseded && out.error) { setLoadError(out.error); setLoading(false); return }
+    // Unconditional on purpose: a period picked mid-init runs under its own `computing` flag, and
+    // the table shows "Computing variance…" until THAT load clears it.
+    setLoading(false)
+  }
+
+  // Items, categories and the recipe book with its ingredient rows: the same for every month.
+  // Resolves { itemList, allRecipes, categories }, or { error } when a read failed.
+  async function loadBase() {
+    const baseResults = await Promise.all([
       fetchAllRows(() => scopedFrom('items', '*, categories(name)').eq('is_active', true).eq('is_sub_recipe', false).order('id')),
       scopedFrom('categories').order('sort_order'),
       scopedFrom('recipes', 'id, name, yield_qty'),
     ])
-    // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
-    const initFailed = firstError(initResults)
-    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
-    const [{ data: p }, { data: i }, { data: c }, { data: r }] = initResults
+    const baseFailed = firstError(baseResults)
+    if (baseFailed) return { error: baseFailed }
+    const [{ data: i }, { data: c }, { data: r }] = baseResults
 
     const tvRecipeIds = (r || []).map(x => x.id)
     const ingResults = await Promise.all([
@@ -94,15 +122,11 @@ export default function TheoreticalVariance() {
     ])
     // S612: a failed ingredient/yield read silently understates theoretical usage — surface it.
     const ingFailed = firstError(ingResults)
-    if (ingFailed) { setLoadError(ingFailed); setLoading(false); return }
+    if (ingFailed) return { error: ingFailed }
     const [{ data: ri }, { data: allItems }] = ingResults
     const ym = {}
     ;(allItems || []).forEach(x => { ym[x.id] = x.yield_pct })
     yieldMapRef.current = ym
-
-    setPeriods(p || [])
-    setItems(i || [])
-    setCategories(c || [])
 
     // Attach ingredients to recipes — grouped in one pass, as Recipes.js does. A filter per
     // recipe is O(recipes x ingredient rows), which only became worth caring about once the read
@@ -123,23 +147,7 @@ export default function TheoreticalVariance() {
         if (ing.sub_recipe_id) ing.sub_recipe = allRecipes.find(x => x.id === ing.sub_recipe_id) || null
       })
     })
-    setRecipes(allRecipes)
-
-    // Most recent CLOSED period by default — the "Actual" side of this comparison subtracts a
-    // closing stock count that does not exist until month-end, so opening on the live month made
-    // every item read as massively over-consumed. Same fix as Variance.js.
-    const chosen = (p || []).find(x => x.status === 'closed') || (p || []).find(x => x.status === 'open')
-    if (chosen) {
-      // init() claims the page too (S756) — otherwise, once a period change has ever run, an admin
-      // client switch re-runs init against a ref still holding the old client's period id and
-      // computeVariance's isCurrent checks skip every setter (the S721 shape).
-      periodReq.begin(chosen.id)
-      setSelectedPeriod(chosen)
-      await computeVariance(chosen.id, i || [], allRecipes)
-    }
-    // Unconditional on purpose: a period picked mid-init runs under its own `computing` flag, and
-    // the table shows "Computing variance…" until THAT load clears it.
-    setLoading(false)
+    return { itemList: i || [], allRecipes, categories: c || [], error: null }
   }
 
   async function handlePeriodChange(periodId) {
@@ -147,7 +155,7 @@ export default function TheoreticalVariance() {
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setComputing(true)
-    await computeVariance(periodId, items, recipes)
+    await computeVariance(periodId, baseRef.current)
     // Only the load that still owns the page may clear the flag (S756) — a superseded one returns
     // early from computeVariance and would otherwise un-gate the newer load's half-built view.
     if (periodReq.isCurrent(periodId)) setComputing(false)
@@ -184,9 +192,10 @@ export default function TheoreticalVariance() {
     return result
   }
 
-  async function computeVariance(periodId, itemList, allRecipes) {
+  // `base` is loadBase()'s result or its promise, awaited beside this month's reads (S855).
+  async function computeVariance(periodId, base) {
     setLoadError(null)
-    const results = await Promise.all([
+    const reads = Promise.all([
       // source + bs_day feed selectDepletingSales' POS-supersedes-manual dedup; paged so a busy
       // POS period's sales_entries can't truncate theoretical usage at 1000 rows.
       // ingredient_deltas: a customized plate also consumes (or spares) its options' stock lines (S758).
@@ -209,7 +218,10 @@ export default function TheoreticalVariance() {
       // as on Variance.js — stock sent to a branch is not a loss here. A failed read fails the page.
       readPeriodTransfers(scopedFrom, periodId),
     ])
+    const [results, b] = await Promise.all([reads, base])
     if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
+    if (b.error) { setLoadError(b.error); setRows([]); return }
+    const { itemList, allRecipes } = b
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setRows([]); return }

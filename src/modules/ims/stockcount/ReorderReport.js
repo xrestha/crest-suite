@@ -15,6 +15,8 @@ import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalBsLong, nepalDateAd } from '../../../shared/nepalTime'
 import ActionError, { asActionError } from '../../../components/ActionError'
@@ -48,6 +50,7 @@ export default function ReorderReport() {
   const navigate = useNavigate()
 
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [rows, setRows] = useState([])
@@ -89,28 +92,26 @@ export default function ReorderReport() {
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
-    const initResults = await Promise.all([
-      scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
-      scopedFrom('categories').order('sort_order')
-    ])
-    // A failed read must not wear NoPeriodState (S612 silent-zero rule).
-    const initFailed = firstError(initResults)
-    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
-    const [{ data: p }, { data: c }] = initResults
-    setPeriods(p || [])
-    setCategories(c || [])
-    // Fall back to the latest period when none is open (the gap between closing one month and
+    // The month comes from the shared list, the report starting beside it (S855, periodList.js).
+    // Falls back to the latest period when none is open (the gap between closing one month and
     // opening the next). Before S696 this page loaded nothing then, and the empty state said
     // "Stock is healthy" over a report it had never built.
-    const initial = (p || []).find(x => x.status === 'open') || (p || [])[0]
-    if (initial) {
-      periodReq.begin(initial.id)   // claim the page, as the S695 rule says init() should
-      setSelectedPeriod(initial)
-      await loadReport(initial.id)
-    }
-    setLoading(false)
+    const [out, cats] = await Promise.all([
+      initPeriodLoad({
+        req: periodReq, initKey, periodList,
+        setPeriods, select: setSelectedPeriod, load: loadReport,
+      }),
+      scopedFrom('categories').order('sort_order'),
+    ])
+    // A failed read must not wear NoPeriodState (S612 silent-zero rule).
+    if (cats.error) { setLoadError(cats.error); setLoading(false); return }
+    setCategories(cats.data || [])
+    if (out.superseded) return   // a period picked meanwhile owns the page and its loading flag
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {

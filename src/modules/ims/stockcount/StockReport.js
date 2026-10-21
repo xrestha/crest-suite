@@ -15,6 +15,8 @@ import NoPeriodState from '../../../components/NoPeriodState'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { buildStockRows } from './stockReportCalc'
 import { unitRateCell } from '../../../shared/unitRate'
@@ -32,6 +34,7 @@ export default function StockReport() {
   const biz = useBizInfo()
 
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
   const [rows, setRows] = useState([])
@@ -45,25 +48,24 @@ export default function StockReport() {
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function init() {
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
-    const initResults = await Promise.all([
-      scopedFrom('monthly_periods').order('bs_year', { ascending: false }).order('bs_month', { ascending: false }),
-      scopedFrom('categories').order('sort_order')
+    // The month comes from the shared list, the report starting beside it (S855, periodList.js);
+    // the open month, else the latest, claimed like a chosen one (S756).
+    const [out, cats] = await Promise.all([
+      initPeriodLoad({
+        req: periodReq, initKey, periodList,
+        setPeriods, select: setSelectedPeriod, load: loadReport,
+      }),
+      scopedFrom('categories').order('sort_order'),
     ])
     // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
-    const initFailed = firstError(initResults)
-    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
-    const [{ data: p }, { data: c }] = initResults
-    setPeriods(p || [])
-    setCategories(c || [])
-    const open = (p || []).find(x => x.status === 'open') || (p || [])[0]
-    // The auto-selected period claims the page like a chosen one (S756, useLatestRequest's own
-    // contract). Without it, once handlePeriodChange has run the ref is never null again — so an
-    // admin switching client re-ran this with the previous client's period id still current, and
-    // loadReport's isCurrent check skipped every setter: the new tenant's chip over no report.
-    if (open) { periodReq.begin(open.id); setSelectedPeriod(open); await loadReport(open.id) }
-    setLoading(false)
+    if (cats.error) { setLoadError(cats.error); setLoading(false); return }
+    setCategories(cats.data || [])
+    if (out.superseded) return   // a period picked meanwhile owns the page and its loading flag
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {

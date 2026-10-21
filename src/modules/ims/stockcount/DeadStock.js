@@ -7,6 +7,8 @@ import { firstError } from '../../../shared/queryError'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { npr, NPR_LOCALE } from '../../../shared/nepalMoney'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
@@ -50,6 +52,14 @@ function sumByPeriodItem(rows, field) {
   return out
 }
 const monthLabel = p => (p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : '')
+// Everything a load takes from the month list besides the month itself: the twelve months it reads
+// and whether the month is the newest (the as-of date). Compared when the fresh list confirms a
+// guessed month (S855), since the guess read its window off the list in memory.
+function windowKey(list, periodId) {
+  const at = list.findIndex(p => p.id === periodId)
+  const history = at >= 0 ? list.slice(at, at + HISTORY_MONTHS) : []
+  return `${list[0]?.id}|${history.map(p => `${p.id}:${p.bs_year}-${p.bs_month}`).join(',')}`
+}
 
 export default function DeadStock() {
   const { clientId, profile, hasImsAccess } = useAuth()
@@ -57,6 +67,7 @@ export default function DeadStock() {
   const { scopedFrom } = useScopedDb()
   const biz = useBizInfo()
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [periods, setPeriods]           = useState([])
   const [selectedPeriod, setSelected]   = useState(null)
   const [rows, setRows]                 = useState([])
@@ -72,34 +83,49 @@ export default function DeadStock() {
   // How many months the history actually covered — a client with two periods cannot show Dead.
   const [historyLength, setHistoryLength] = useState(0)
 
-  useEffect(() => {
-    if (!effectiveClientId) return
-    scopedFrom('monthly_periods')
-      .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
-      .then(({ data, error }) => {
-        // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
-        if (error) { setLoadError(error); setLoading(false); return }
-        setPeriods(data || [])
-        // The most recent CLOSED period, else the latest (S756) — this report cannot judge without
-        // a closing count, and the open month is almost never counted yet.
-        const initial = (data || []).find(p => p.status === 'closed') || data?.[0]
-        if (initial) setSelected(initial)
-        else setLoading(false)   // nothing will call fetchData, so nothing else will clear it
-      })
-  }, [effectiveClientId, scopedFrom])
+  useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    if (selectedPeriod) fetchData(selectedPeriod.id)
-  }, [selectedPeriod]) // eslint-disable-line
-
-  async function fetchData(periodId) {
-    periodReq.begin(periodId)   // claim the page before any await (S601)
+  async function init() {
+    const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
-    // The selected month and up to eleven before it, newest first (S756, D20). `periods` is
-    // newest-first from the load above.
-    const at = periods.findIndex(p => p.id === periodId)
-    const history = at >= 0 ? periods.slice(at, at + HISTORY_MONTHS) : []
+    // The month comes from the shared list, the report starting beside it (S855, periodList.js).
+    // The most recent CLOSED period, else the latest (S756) — this report cannot judge without
+    // a closing count, and the open month is almost never counted yet.
+    let list = []
+    let loadedWindow = null
+    const out = await initPeriodLoad({
+      req: periodReq, initKey, periodList,
+      pick: l => l.find(p => p.status === 'closed') || l[0] || null,
+      setPeriods: l => { list = l; setPeriods(l) },
+      select: setSelected,
+      load: id => { loadedWindow = windowKey(list, id); return fetchData(id, list) },
+    })
+    if (out.superseded) return   // a period picked meanwhile owns the page and its loading flag
+    // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    // A guessed month the fresh list kept, but whose window it moved, loads again.
+    if (out.chosen && periodReq.isCurrent(out.chosen.id) && windowKey(list, out.chosen.id) !== loadedWindow) {
+      await fetchData(out.chosen.id, list)
+    }
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
+  }
+
+  async function handlePeriodChange(periodId) {
+    periodReq.begin(periodId)   // claim the page before any await (S601)
+    setSelected(periods.find(p => p.id === periodId))
+    setLoading(true)
+    await fetchData(periodId, periods)
+    // Only the load that still owns the page may clear the flag.
+    if (periodReq.isCurrent(periodId)) setLoading(false)
+  }
+
+  async function fetchData(periodId, list) {
+    setLoadError(null)
+    // The selected month and up to eleven before it, newest first (S756, D20). `list` is
+    // newest-first, as the month list is.
+    const at = list.findIndex(p => p.id === periodId)
+    const history = at >= 0 ? list.slice(at, at + HISTORY_MONTHS) : []
     const ids = history.map(p => p.id)
     const byMonth = (table, cols) => fetchAllRowsChunked(ids, c =>
       supabase.from(table).select(cols).in('period_id', c).order('id'))
@@ -130,7 +156,7 @@ export default function DeadStock() {
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     // A failed read must never flow through the `|| []`s below (S612 silent-zero rule).
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setRows([]); setLoading(false); return }
+    if (failed) { setLoadError(failed); setRows([]); return }
     const [
       { data: itemsData }, { data: openings }, { data: purchases }, { data: rets },
       { data: wastes }, { data: staffMealRows }, { data: closings }, { data: vendors },
@@ -164,7 +190,7 @@ export default function DeadStock() {
     }
 
     const selected = history[0]
-    const asOf = asOfForWindow(selected, { isNewest: periods[0]?.id === periodId }).date
+    const asOf = asOfForWindow(selected, { isNewest: list[0]?.id === periodId }).date
 
     const built = []
     let uncountedCount = 0
@@ -238,7 +264,6 @@ export default function DeadStock() {
     setHistoryLength(history.length)
     setStatusFilter('All')
     setCatFilter('All')
-    setLoading(false)
   }
 
   const deadCount        = rows.filter(r => r.status === 'Dead').length
@@ -339,7 +364,7 @@ export default function DeadStock() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => setSelected(periods.find(p => p.id === e.target.value))}>
+          <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => (
               <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year}</option>
             ))}
