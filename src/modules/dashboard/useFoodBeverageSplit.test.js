@@ -42,6 +42,31 @@ test('a POS-only Home reads the till bills, so an outlet without Inventory still
   expect(result.current.buckets).toEqual({ Beverage: 1130, Uncategorized: 226 })
 })
 
+test('when the card stops asking, the old failure clears and a late answer does not repaint it', async () => {
+  loadFromPos.mockRejectedValueOnce(new Error('boom'))
+  const { result, rerender } = renderHook(props => useFoodBeverageSplit(props), {
+    initialProps: { activePeriod: PERIOD, includeManual: false, includePos: true },
+  })
+  await waitFor(() => expect(result.current.error).toBe('boom'))
+
+  // A second load starts and is still in flight when the card stops asking for a mix.
+  let settle
+  loadFromPos.mockImplementationOnce(() => new Promise(resolve => { settle = resolve }))
+  rerender({ activePeriod: { ...PERIOD, id: 'p2' }, includeManual: false, includePos: true })
+  await waitFor(() => expect(result.current.loading).toBe(true))
+  expect(result.current.error).toBeNull()
+
+  rerender({ activePeriod: { ...PERIOD, id: 'p2' }, includeManual: false, includePos: false })
+  await waitFor(() => expect(result.current.loading).toBe(false))
+  expect(result.current.error).toBeNull()
+  expect(result.current.buckets).toEqual({})
+
+  settle([{ category: 'Beverage', amount: 500 }])
+  await new Promise(r => setTimeout(r, 0))
+  expect(result.current.buckets).toEqual({})
+  expect(result.current.error).toBeNull()
+})
+
 test('a failed read is an error, not an empty mix', async () => {
   loadFromPos.mockRejectedValue(new Error('boom'))
   const { result } = renderHook(() => useFoodBeverageSplit({ activePeriod: PERIOD, includeManual: false, includePos: true }))

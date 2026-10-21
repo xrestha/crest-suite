@@ -31,12 +31,17 @@ export function useFoodBeverageSplit({ activePeriod, includeManual, includePos }
 
   useEffect(() => {
     if (!clientId || !activePeriod || (!includeManual && !includePos)) {
+      // The card stopped asking: a load still in flight must not land after this, and an earlier
+      // failure is no longer this card's state, so it does not wait to greet the next load.
+      loadIdRef.current++
       setBuckets({})
+      setError(null)
       setLoading(false)
       return
     }
     const myId = ++loadIdRef.current
     setLoading(true)
+    setError(null)   // a new load is not the last one's failure
     const load = includeManual
       ? loadFromSalesEntries(activePeriod, scopedFrom, { sources: 'revenue' })
       : loadFromPos(activePeriod, scopedFrom, clientId)

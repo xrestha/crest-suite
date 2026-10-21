@@ -26,6 +26,8 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
 import { nprPaisa } from '../../../shared/nepalMoney'
+import { nepalTime, nepalBsLong } from '../../../shared/nepalTime'
+import { salesDraftId, salesDraftSignature, readSalesDraft, saveSalesDraft, clearSalesDraft, draftBaseMoved } from './salesEntryDraft'
 
 // S454 added a pre-save `getSession()` probe on an 8s clock to diagnose a hang. It served its
 // purpose and is deliberately GONE (S458): an 8s gate is *tighter* than the 15s cap that
@@ -121,6 +123,11 @@ export default function Sales() {
   // 20260727180000) now scopes every one of its deletes to source='manual', so an admin save can
   // no longer damage POS rows even on a client running both.
   const posOwnsSales = !isAdmin && !!clientModules?.pos
+  // Bulk Entry keeps no draft where nobody can type into it (salesEntryDraft.js): a month locked to
+  // this login, or a client whose sales POS owns (the tab is closed to them). Takes the period
+  // explicitly, because loadSales asks it of the period it loaded, from a closure whose
+  // `selectedPeriod` can be the one being left.
+  const bulkDraftOffFor = period => posOwnsSales || (!canEditClosedPeriods && period?.status === 'closed')
   const { scopedFrom } = useScopedDb()
   // periods/recipes only (the menu + period list) are cached for an instant revisit — deliberately
   // NOT the entered-quantity maps (sales/dailySales/etc. below), which a Save reads as the
@@ -159,6 +166,16 @@ export default function Sales() {
   const [loadErrors, setLoadErrors] = useState({})
   const noteLoad = (key, err) => setLoadErrors(prev => ({ ...prev, [key]: err || null }))
   const [bulkForm, setBulkForm]     = useState({})
+  // Bulk figures this login typed and never saved, kept in localStorage against the page dying
+  // (salesEntryDraft.js, the S779 purchase-bill pattern). The notice is null, `{ kind: 'restored',
+  // savedAt }` once they are back in the boxes, or `{ kind: 'stale', draft }` when the month was
+  // saved since they were typed and the reader has to choose.
+  const bulkDraftId = salesDraftId({ periodId: selectedPeriod?.id, profileId: profile?.id })
+  const [bulkDraftNotice, setBulkDraftNotice] = useState(null)
+  // On from the moment a Bulk save lands until the reloaded figures do. In between, the boxes still
+  // hold what was just saved, measured against the OLD baseline, and a straggling debounce or a tab
+  // switch would write it straight back as a draft that the next load calls "saved since".
+  const bulkDraftHold = useRef(false)
   const [bulkSaving, setBulkSaving] = useState(false)
   const [bulkSaved, setBulkSaved]   = useState(false)
   const [bulkSaveError, setBulkSaveError] = useState('')
@@ -289,14 +306,15 @@ export default function Sales() {
   // A month entered day by day has nothing on Bulk Entry, and opening there showed a column of
   // empty boxes under "Items Sold 274" (S796). Until someone picks a tab, a period whose sales are
   // all daily opens on Daily Entry instead. A click sets `tabPicked`, so this never moves anyone
-  // off a tab they chose.
+  // off a tab they chose. Bulk figures brought back from a kept draft (or waiting on the "saved
+  // since" question) hold the page on Bulk Entry, where their notice is.
   const tabPicked = useRef(false)
   useEffect(() => {
-    if (tabPicked.current || loading || posOwnsSales || viewMode !== 'bulk') return
+    if (tabPicked.current || loading || posOwnsSales || viewMode !== 'bulk' || bulkDraftNotice) return
     const hasBulk = Object.values(sales).some(q => (parseFloat(q) || 0) !== 0)
     const hasAny = Object.values(allDaySums).some(q => (q || 0) !== 0)
     if (!hasBulk && hasAny) setViewMode('daily')
-  }, [loading, posOwnsSales, viewMode, sales, allDaySums])
+  }, [loading, posOwnsSales, viewMode, sales, allDaySums, bulkDraftNotice])
 
   async function init() {
     setLoading(true)
@@ -329,12 +347,12 @@ export default function Sales() {
       periodReq.begin(open.id)   // claim the page, as useLatestRequest's own docs require of init()
       setSelectedPeriod(open)
       // `open` handed over: setPeriods has not re-rendered yet, so `periods` is still the old list.
-      await Promise.all([loadSales(open.id), loadAllDaySums(open.id, open)])
+      await Promise.all([loadSales(open.id, open), loadAllDaySums(open.id, open)])
     }
     setLoading(false)
   }
 
-  async function loadSales(periodId) {
+  async function loadSales(periodId, period = periods.find(p => p.id === periodId)) {
     // Save is refused until this lands (see bulkBaselineFor) — but only if this load is for the
     // period on screen; a post-save reload of a period the page has left must not disable the
     // baseline of the one it is now on.
@@ -354,8 +372,30 @@ export default function Sales() {
     if (!periodReq.isCurrent(periodId)) return   // superseded by a newer period selection
     setSales(map)
     setSalesPrices(storedPriceMap((data || []).filter(s => isManualSource(s.source))))
-    setBulkForm({}) // reset form so it reads from DB
+    // Reset the form so it reads from the DB, or to the figures this login typed over it and never
+    // saved, when they were kept. Same render as the baseline, so the draft writer below never sees
+    // the restored boxes measured against the previous period's figures.
+    setBulkForm(restoreBulkDraft(periodId, period, map))
     setBulkBaselineFor(periodId)
+  }
+
+  // What Bulk Entry opens with once a period's saved figures land. Done where loadSales resets the
+  // form rather than in a useState initialiser (the S779 rule), because the baseline arrives here:
+  // the grid is not on screen while a period loads, and a post-save reload resets the form either
+  // way, so restoring here loses no keystroke the reset would not already have dropped. Never
+  // silent: the notice above the grid says what came back. A draft typed over figures that were
+  // saved since is not applied at all, since Save would then write the older typing over the newer
+  // figures; the form stays on the saved figures and the reader is asked (draftBaseMoved).
+  function restoreBulkDraft(periodId, period, savedMap) {
+    bulkDraftHold.current = false   // the reloaded figures have landed (see bulkDraftHold)
+    const kept = bulkDraftOffFor(period) ? null : readSalesDraft(salesDraftId({ periodId, profileId: profile?.id }))
+    if (!kept) { setBulkDraftNotice(null); return {} }
+    if (draftBaseMoved(kept, salesDraftSignature(savedMap))) {
+      setBulkDraftNotice({ kind: 'stale', draft: kept })
+      return {}
+    }
+    setBulkDraftNotice({ kind: 'restored', savedAt: kept.savedAt })
+    return kept.form
   }
 
   async function loadDailySales(periodId, day) {
@@ -831,6 +871,11 @@ export default function Sales() {
       if (!saveSucceeded) setSaving(false)
     }
     if (!saveSucceeded) return false
+    // The Bulk figures are on the server now, so the copy kept against the page dying goes at once:
+    // before the stock update below, which can take as long as the wall clock, and before the reload
+    // after it. Left until then, a page that died in between would offer the saved figures back as
+    // unsaved typing over a month "saved since".
+    if (isBulk) settleBulkDraft(periodId)
     // Manual-sales stock depletion, AWAITED since S792 (SALES-4). It used to be fired and
     // forgotten, and the button came back as soon as the RPC did — so "save, spot a typo, save
     // again" started a second depletion of the same day while the first was still exploding
@@ -899,6 +944,38 @@ export default function Sales() {
     }
   }
 
+  // A Bulk save landed: forget the kept draft for that period, and hold the writer off until the
+  // reloaded figures arrive (bulkDraftHold). Keyed by the save's own period, not the selection.
+  function settleBulkDraft(periodId) {
+    bulkDraftHold.current = true
+    clearSalesDraft(salesDraftId({ periodId, profileId: profile?.id }))
+    setBulkDraftNotice(null)
+  }
+
+  // The answers to the Bulk draft notices. Discard goes back to the saved figures and forgets the
+  // draft. Keep the saved figures (a draft typed over an older save) forgets it and leaves the boxes
+  // alone. Using an older draft is a deliberate choice: it puts that typing back in place of the
+  // saved figures for the dishes it names, and nothing is written until Save. Answering the notice
+  // counts as choosing Bulk Entry (`tabPicked`), so the page does not then jump to Daily Entry.
+  function discardBulkDraft() {
+    tabPicked.current = true
+    clearSalesDraft(bulkDraftId)
+    setBulkForm({})
+    setBulkDraftNotice(null)
+  }
+  function keepSavedBulkFigures() {
+    tabPicked.current = true
+    clearSalesDraft(bulkDraftId)
+    setBulkDraftNotice(null)
+  }
+  function applyStaleBulkDraft() {
+    const draft = bulkDraftNotice?.draft
+    if (!draft) return
+    tabPicked.current = true
+    setBulkForm(draft.form)
+    setBulkDraftNotice({ kind: 'restored', savedAt: draft.savedAt })
+  }
+
   async function confirmPendingSave() {
     const pending = pendingSave
     setPendingSave(null)
@@ -927,6 +1004,10 @@ export default function Sales() {
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    // Keep what was typed for the month being left: the reset below blanks the boxes, and the
+    // draft writer's debounce may not have fired for the last keystrokes. Coming back to that month
+    // then brings the figures back (with the notice) rather than an empty grid.
+    if (bulkDraftLive && !bulkDraftHold.current) saveSalesDraft(bulkDraftId, { form: bulkForm, baseline: sales })
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     // S756: the previous period's grids used to stay on screen, under the new period's label and a
@@ -936,7 +1017,7 @@ export default function Sales() {
     // checks; `loading` is what the reader sees.
     setLoading(true)
     setBulkBaselineFor(null); setDailyBaselineFor(null)
-    setSales({}); setSalesPrices({}); setBulkForm({})
+    setSales({}); setSalesPrices({}); setBulkForm({}); setBulkDraftNotice(null)
     setDailySales({}); setDailyPrices({}); setDailyForm({})
     setDailyDiscounts({}); setDiscountForm({})
     setPosDaySales({}); setPosDayDiscounts({}); setPosDayPricedRev({}); setPosDayUnpricedQty({})
@@ -944,7 +1025,7 @@ export default function Sales() {
     setTillHandover(null)
     setMonthlyEntries([])
     setBulkSaveError(''); setDailySaveError('')
-    await Promise.all([loadSales(periodId), loadAllDaySums(periodId, p)])
+    await Promise.all([loadSales(periodId, p), loadAllDaySums(periodId, p)])
     if (periodReq.isCurrent(periodId)) setLoading(false)
   }
 
@@ -1119,6 +1200,30 @@ export default function Sales() {
   // iterate `recipes`, and save_sales_day reads an empty payload as "clear this day".
   const noMenu = recipes.length === 0
   const tabPrintLabel = `${TAB_LABELS[viewMode]} — ${periodLabel}${viewMode === 'daily' ? `, Day ${selectedDay}` : ''}`
+
+  // Mirror the Bulk grid into localStorage as it is typed (salesEntryDraft.js). Two triggers, as on
+  // the purchase bill: a 400 ms debounce for ordinary typing, and visibilitychange/pagehide write at
+  // once, because hidden is the last event a page is sure to see before the browser discards it or
+  // restarts itself. Off until the grid on screen is the selected period's own (`bulkReady`): during
+  // a period change the boxes are blank, and a write then would read as "nothing typed" and delete
+  // the month's kept draft. Off while a stale draft waits for an answer, for the same reason.
+  const bulkDraftLive = !!bulkDraftId && bulkReady && !bulkDraftOffFor(selectedPeriod) && bulkDraftNotice?.kind !== 'stale'
+  useEffect(() => {
+    if (!bulkDraftLive) return undefined
+    const flush = () => {
+      if (!bulkDraftHold.current) saveSalesDraft(bulkDraftId, { form: bulkForm, baseline: sales })
+    }
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush() }
+    const t = setTimeout(flush, 400)
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', flush)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', flush)
+    }
+  }, [bulkDraftLive, bulkDraftId, bulkForm, sales])
+  const bulkDraftWhen = at => (at ? ` on ${nepalBsLong(at)}, ${nepalTime(at)}` : '')
 
   // 'staff' is the floor tier every other IMS page's guard is measured against — this page had no
   // guard at all, so ModuleGate's client-level ims_enabled check was the only thing in front of
@@ -1395,6 +1500,30 @@ export default function Sales() {
                     asActionError — ActionError renders both, keeping the code as fine print (S756). */}
                 <ActionError error={bulkSaveError} className="action-error--top no-print" />
                 {stockWaitNotes('bulk')}
+                {/* Figures kept from an earlier visit (salesEntryDraft.js). Never silent: the reader
+                    left expecting to have lost them, so boxes filled unannounced are figures they did
+                    not knowingly type, on a form that writes the month's revenue. Same amber shape as
+                    the purchase bill's draft notice. */}
+                {bulkDraftNotice?.kind === 'stale' && (
+                  <div role="alert" className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16, padding: '10px 14px', fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', borderRadius: 'var(--radius-sm)' }}>
+                    <span style={{ flex: '1 1 340px' }}>
+                      <strong style={{ color: 'var(--theme-amber-text)' }}>This month was saved again after you typed these figures.</strong>{' '}
+                      You had Bulk Entry figures for {periodLabel} that were never saved{bulkDraftWhen(bulkDraftNotice.draft.savedAt)}, and the saved figures have changed since: another screen, another login, or a Daily Entry save.
+                      The table below shows the figures as they are saved now. Using yours would put your typing back in place of them for the dishes you typed.
+                    </span>
+                    <button className="btn btn-ghost" onClick={applyStaleBulkDraft} style={{ flex: '0 0 auto' }}>Use my unsaved figures</button>
+                    <button className="btn btn-primary" onClick={keepSavedBulkFigures} style={{ flex: '0 0 auto' }}>Keep the saved figures</button>
+                  </div>
+                )}
+                {bulkDraftNotice?.kind === 'restored' && (
+                  <div role="status" className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16, padding: '10px 14px', fontSize: 12, lineHeight: 1.55, color: 'var(--theme-text2)', border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', borderRadius: 'var(--radius-sm)' }}>
+                    <span style={{ flex: '1 1 340px' }}>
+                      <strong style={{ color: 'var(--theme-amber-text)' }}>↺ Brought back figures you typed earlier.</strong>{' '}
+                      They were kept on this device{bulkDraftWhen(bulkDraftNotice.savedAt)} and are not saved yet. Check them over and Save, or discard them to go back to the saved figures.
+                    </span>
+                    <button className="btn btn-ghost" onClick={discardBulkDraft} style={{ flex: '0 0 auto' }}>Discard these figures</button>
+                  </div>
+                )}
                 {recipes.length === 0 ? (
                   <div className="empty-state">
                     <p className="empty-state-text">No active recipes. Add recipes in Recipe Costing first.</p>
