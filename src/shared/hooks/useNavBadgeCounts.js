@@ -4,6 +4,22 @@ import { readSeenStamp, waitingRequests } from '../reservationSeen'
 
 const POLL_MS = 60000
 
+// Runs `load` now and every POLL_MS, but only while this tab is visible (S852). The counts were
+// polled every minute from hidden tabs as well: up to seven queries a minute per open tab, all day,
+// from a dot nobody could see. Coming back to the tab refreshes at once, so the dot is never a
+// minute stale on return. A tab opened in the background loads when it is first shown.
+export function pollWhileVisible(load, ms = POLL_MS) {
+  const visible = () => !document.hidden
+  if (visible()) load()
+  const id = setInterval(() => { if (visible()) load() }, ms)
+  const onVisibility = () => { if (visible()) load() }
+  document.addEventListener('visibilitychange', onVisibility)
+  return () => {
+    clearInterval(id)
+    document.removeEventListener('visibilitychange', onVisibility)
+  }
+}
+
 // Rail badge counts for the HR and POS module icons — reuses the exact same "pending" filters
 // HrDashboard.jsx and PosOrders.jsx already query for their own KPI cards/floor-view banner, just
 // as lightweight count-only (HR) / minimal-column (POS) polls so a rail dot can show up without
@@ -42,9 +58,8 @@ export function useNavBadgeCounts(hrVisible, posVisible) {
       if (cancelled || results.some(r => r.error || typeof r.count !== 'number')) return
       setHrPending(results.reduce((s, r) => s + r.count, 0))
     }
-    load()
-    const id = setInterval(load, POLL_MS)
-    return () => { cancelled = true; clearInterval(id) }
+    const stop = pollWhileVisible(load)
+    return () => { cancelled = true; stop() }
   }, [clientId, hrVisible, scopedFrom])
 
   useEffect(() => {
@@ -67,9 +82,8 @@ export function useNavBadgeCounts(hrVisible, posVisible) {
       if (!reqErr) setPosRequests(count || 0)
       if (!newErr) setPosNew(changed || 0)
     }
-    load()
-    const id = setInterval(load, POLL_MS)
-    return () => { cancelled = true; clearInterval(id) }
+    const stop = pollWhileVisible(load)
+    return () => { cancelled = true; stop() }
   }, [clientId, posVisible, scopedFrom])
 
   return { hrPending, posPending, posRequests, posNew }

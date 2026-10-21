@@ -311,7 +311,7 @@ export default function BsCalendarPicker({
     >
       {/* Month/year navigation (locked mode keeps the plain label, no controls to jump around) */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: 6 }}>
-        <button style={navBtn(!locked)} onClick={prevMonth} disabled={locked} aria-label="Previous month">‹</button>
+        <button type="button" className="picker-btn" style={navBtn(!locked)} onClick={prevMonth} disabled={locked} aria-label="Previous month">‹</button>
         {locked ? (
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text1)' }}>
             {BS_MONTHS[navMonth - 1]} {navYear}
@@ -322,7 +322,7 @@ export default function BsCalendarPicker({
               value={navMonth}
               onChange={e => { setNavMonth(parseInt(e.target.value, 10)); setActiveDay(null) }}
               style={{
-                flex: 1.3, minWidth: 0, background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
+                flex: 1.3, minWidth: 0, background: 'var(--theme-input-bg)', border: '1px solid var(--theme-input-border)',
                 borderRadius: 0, padding: touch ? '10px 8px' : '4px 4px',
                 // 16px on touch: below it iOS zooms the viewport the moment this select is opened.
                 fontSize: touch ? 16 : 11, minHeight: touch ? 44 : undefined,
@@ -347,13 +347,13 @@ export default function BsCalendarPicker({
             />
           </div>
         )}
-        <button style={navBtn(!locked)} onClick={nextMonth} disabled={locked} aria-label="Next month">›</button>
+        <button type="button" className="picker-btn" style={navBtn(!locked)} onClick={nextMonth} disabled={locked} aria-label="Next month">›</button>
       </div>
 
-      {/* Day-of-week headers */}
+      {/* Day-of-week headers. 10px, the floor for text: 9px is the chevron step, for a glyph (S852). */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, marginBottom: 2 }}>
         {DAY_LABELS.map(d => (
-          <div key={d} style={{ textAlign: 'center', fontSize: 9, fontWeight: 700, color: 'var(--theme-text3)', padding: '1px 0' }}>
+          <div key={d} style={{ textAlign: 'center', fontSize: 10, fontWeight: 700, color: 'var(--theme-text3)', padding: '1px 0' }}>
             {d}
           </div>
         ))}
@@ -418,6 +418,7 @@ export default function BsCalendarPicker({
         {todayInView ? (
           <button
             type="button"
+            className="picker-btn"
             onClick={goToday}
             style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: touch ? 14 : 11, color: 'var(--theme-accent-ink)', fontWeight: 600, padding: touch ? '10px 8px' : '2px 4px', minHeight: touch ? 44 : undefined, fontFamily: 'inherit' }}
           >
@@ -427,6 +428,7 @@ export default function BsCalendarPicker({
         {clearable && value && (
           <button
             type="button"
+            className="picker-btn"
             onClick={() => { onChange(''); closePicker() }}
             style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: touch ? 14 : 11, color: 'var(--theme-text3)', padding: touch ? '10px 8px' : '2px 4px', minHeight: touch ? 44 : undefined, fontFamily: 'inherit' }}
           >
@@ -446,10 +448,15 @@ export default function BsCalendarPicker({
           <FieldError> beside it is what actually reaches a screen-reader user; the red border below
           is the sighted half. Making this a real combobox, the way SearchableSelect became one in
           S521, would earn aria-invalid properly — a larger change than the one this belongs to. */}
+      {/* `picker-trigger` carries the keyboard focus pair (Layout.css), which an inline style cannot
+          express; the inline `boxShadow: 'none'` here had cancelled the browser ring and put nothing
+          in its place (S852). So the inline shadow is set only while open, and left to the class
+          otherwise. */}
       <button
         ref={buttonRef}
         type="button"
         id={id}
+        className="picker-trigger"
         aria-label={ariaLabel}
         aria-describedby={invalid && id ? `${id}-err` : undefined}
         aria-haspopup="dialog"
@@ -459,16 +466,20 @@ export default function BsCalendarPicker({
         onClick={() => { if (disabled) return; if (open) setOpen(false); else openPicker() }}
         style={{
           width: '100%', textAlign: 'left', cursor: disabled ? 'not-allowed' : 'pointer',
-          background: 'var(--theme-input-bg)',
+          // Disabled steps the surface DOWN, as a disabled .form-input does: the well goes and the
+          // border drops to border-lt, while the date stays as readable as it was (S852). It had
+          // kept the full field look, and with the stronger input border it would read as editable.
+          background: disabled ? 'transparent' : 'var(--theme-input-bg)',
           // Invalid outranks open: focusing the field the user has to fix is exactly when the
           // signal must not disappear.
-          border: `1px solid ${invalid ? 'var(--theme-red)' : open ? 'var(--theme-accent)' : 'var(--theme-border)'}`,
+          border: `1px solid ${invalid ? 'var(--theme-red)' : open ? 'var(--theme-accent)' : disabled ? 'var(--theme-border-lt)' : 'var(--theme-input-border)'}`,
           borderRadius: 'var(--radius-md)', padding: touch ? '11px 12px' : '8px 10px',
           minHeight: touch ? 44 : undefined, fontSize: touch ? 16 : 13,
           color: displayValue ? 'var(--theme-text1)' : 'var(--theme-text3)',
-          boxShadow: open ? '0 0 0 3px var(--theme-focus-ring)' : 'none',
+          boxShadow: open ? '0 0 0 3px var(--theme-focus-ring)' : undefined,
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          fontFamily: 'inherit', transition: 'border-color 0.15s',
+          // The motion token, so the reduced-motion block (which zeroes it) reaches this too.
+          fontFamily: 'inherit', transition: 'border-color var(--motion-fast) var(--ease-standard)',
         }}
       >
         <span>{displayValue || placeholder}</span>

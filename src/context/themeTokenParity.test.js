@@ -36,6 +36,7 @@ const TOKEN_OF = {
   accentText: '--theme-accent-text',
   accentInk: '--theme-accent-ink',
   inputBg: '--theme-input-bg',
+  inputBorder: '--theme-input-border',
   tableHover: '--theme-table-hover',
   focusRing: '--theme-focus-ring',
   green: '--theme-green',

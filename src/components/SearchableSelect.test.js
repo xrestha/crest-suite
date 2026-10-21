@@ -110,6 +110,26 @@ test('keyboard selection and Escape still work', () => {
   expect(onChange).toHaveBeenCalledTimes(2)
 })
 
+// S852: a pick and an Escape unmounted the focused filter box and never refocused, so focus fell to
+// <body>; inside a dialog the next Tab left the dialog.
+test('a pick by keyboard or by click, and Escape, hand focus back to the trigger', () => {
+  render(<Form />)
+  let trigger = openList()
+  fireEvent.change(search(), { target: { value: 'ch' } })
+  fireEvent.keyDown(search(), { key: 'Enter' })
+  expect(listbox()).toBeNull()
+  expect(trigger).toHaveFocus()
+
+  trigger = openList()
+  fireEvent.click(screen.getByRole('option', { name: 'Apple' }))
+  expect(trigger).toHaveFocus()
+
+  trigger = openList()
+  fireEvent.keyDown(search(), { key: 'Escape' })
+  expect(listbox()).toBeNull()
+  expect(trigger).toHaveFocus()
+})
+
 test('a mousedown outside still closes the list', () => {
   render(<Form />)
   openList()

@@ -1,4 +1,4 @@
-import { render, screen, act, fireEvent } from '@testing-library/react'
+import { render, screen, act, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom'
 import { useConfirm } from './useConfirm'
 
@@ -44,7 +44,8 @@ describe('useConfirm time limit', () => {
     const onTimeout = jest.fn()
     render(<Harness options={{ timeoutMs: 1000, onTimeout }} run={() => Promise.resolve()} />)
     fireEvent.click(screen.getByText('open'))
-    await act(async () => { fireEvent.click(screen.getByText('Delete')) })
+    fireEvent.click(screen.getByText('Delete'))
+    await act(() => Promise.resolve())
     await act(async () => { jest.advanceTimersByTime(5000) })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(onTimeout).not.toHaveBeenCalled()
@@ -59,5 +60,45 @@ describe('useConfirm time limit', () => {
     await act(async () => { jest.advanceTimersByTime(1000) })
     expect(own).toHaveBeenCalledTimes(1)
     expect(pageDefault).not.toHaveBeenCalled()
+  })
+})
+
+// S852: Confirm was `disabled` while busy, which dropped the focus of the keyboard user who had just
+// pressed it to <body> for as long as the write took. It stays focusable now, marked busy, and a
+// second press must not start a second run.
+describe('useConfirm while busy', () => {
+  it('keeps focus on Confirm, marks it busy, says so, and ignores a second press', async () => {
+    const run = jest.fn(never)
+    render(<Harness run={run} />)
+    fireEvent.click(screen.getByText('open'))
+    const confirm = screen.getByRole('button', { name: 'Delete' })
+    act(() => { confirm.focus() })
+    fireEvent.click(confirm)
+    // The run starts on the next microtask.
+    await act(() => Promise.resolve())
+    expect(run).toHaveBeenCalledTimes(1)
+    const busy = screen.getByRole('button', { name: 'Working…' })
+    expect(busy).toBe(confirm)
+    expect(busy).not.toBeDisabled()
+    expect(busy).toHaveAttribute('aria-busy', 'true')
+    expect(busy).toHaveAttribute('aria-disabled', 'true')
+    expect(busy).toHaveFocus()
+    expect(screen.getByRole('status')).toHaveTextContent('Working… Please wait.')
+    fireEvent.click(busy)
+    await act(() => Promise.resolve())
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+
+  it('a double press in the same tick still runs once', async () => {
+    const run = jest.fn(() => Promise.resolve())
+    render(<Harness run={run} />)
+    fireEvent.click(screen.getByText('open'))
+    const confirm = screen.getByRole('button', { name: 'Delete' })
+    // Both presses inside one act, so the second lands before the re-render that would show the
+    // dialog busy: this is the case only the run guard can catch.
+    act(() => { confirm.click(); confirm.click() })
+    await act(() => Promise.resolve())
+    expect(run).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 })

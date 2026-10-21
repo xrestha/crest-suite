@@ -14,7 +14,8 @@ import { Ellipsis } from 'lucide-react'
  *
  * It is a real menu, not a dropdown of divs: the trigger carries `aria-haspopup="menu"` and
  * `aria-expanded`; the panel is `role="menu"` of `role="menuitem"` buttons; arrows cycle, Home/End
- * jump, Escape and Tab close and return focus to the trigger; a click outside closes. The panel is
+ * jump, Escape and Tab close and return focus to the trigger (Tab then carries on from the trigger
+ * to the next control, S852); a click outside closes. The panel is
  * portalled and `position: fixed`, because every table on this product sits inside a `.table-wrap`
  * with `overflow-x: auto`, which would clip an in-flow panel at the row's edge.
  *
@@ -69,7 +70,6 @@ export default function RowMenu({ label, items, disabled = false, busy = false, 
       const els = itemsEl()
       const i = els.indexOf(document.activeElement)
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return }
-      if (e.key === 'Tab') { close(false); return }
       if (e.key === 'ArrowDown') { e.preventDefault(); els[(i + 1) % els.length]?.focus(); return }
       if (e.key === 'ArrowUp') { e.preventDefault(); els[(i - 1 + els.length) % els.length]?.focus(); return }
       if (e.key === 'Home') { e.preventDefault(); els[0]?.focus(); return }
@@ -79,7 +79,15 @@ export default function RowMenu({ label, items, disabled = false, busy = false, 
       if (panel?.contains(e.target) || btnRef.current?.contains(e.target)) return
       close(false)
     }
+    // Tab closes and hands focus to the trigger WITHOUT preventDefault (S852), so the browser's own
+    // Tab then moves on from the trigger: to the control after the row's ⋯, or before it on
+    // Shift+Tab. It used to close and leave focus where it was, on a menu item about to unmount,
+    // so focus fell to <body>, and the portal sits at the end of the page anyway. Capture phase so
+    // a Modal's Tab trap, which listens in the bubble phase, sees focus already on the trigger and
+    // can keep it inside the dialog.
+    const onTab = e => { if (e.key === 'Tab') close() }
     const onScroll = () => close(false)
+    document.addEventListener('keydown', onTab, true)
     document.addEventListener('keydown', onKey)
     document.addEventListener('mousedown', onDown)
     document.addEventListener('touchstart', onDown, { passive: true })
@@ -87,6 +95,7 @@ export default function RowMenu({ label, items, disabled = false, busy = false, 
     // Capture phase: the table-wrap's own horizontal scroll never bubbles to document.
     document.addEventListener('scroll', onScroll, true)
     return () => {
+      document.removeEventListener('keydown', onTab, true)
       document.removeEventListener('keydown', onKey)
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('touchstart', onDown)

@@ -918,7 +918,7 @@ export default function Layout() {
                 accent-tinted categorical tag (there is no badge-gold) — this is a tier label, not
                 a warning, so badge-amber would be the wrong signal. */}
             {group.badge
-              ? <span className="badge-yellow" style={{ fontSize: 9, letterSpacing: '0.06em' }}>{group.badge}</span>
+              ? <span className="badge-yellow" style={{ fontSize: 10, letterSpacing: '0.06em' }}>{group.badge}</span>
               : <span style={{ fontSize: 'var(--font-size-micro)', color: 'var(--theme-text3)', fontWeight: 600 }}>{items.length}</span>}
             <span aria-hidden="true" style={{ fontSize: 'var(--font-size-chevron)', color: 'var(--theme-text3)', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform var(--motion-fast) var(--ease-standard)' }}>▶</span>
           </span>
@@ -974,7 +974,7 @@ export default function Layout() {
               reader needs from this trigger, and a number alongside it only says how many things
               they cannot use yet. */}
           {group.badge
-            ? <span className="badge-yellow" style={{ fontSize: 9, letterSpacing: '0.06em' }}>{group.badge}</span>
+            ? <span className="badge-yellow" style={{ fontSize: 10, letterSpacing: '0.06em' }}>{group.badge}</span>
             : count > 0 && (
               <span className="badge-amber badge-sentence" style={{ fontSize: 10, padding: '1px 7px', lineHeight: 1.4 }}>
                 {count > 99 ? '99+' : count}
@@ -1136,8 +1136,13 @@ export default function Layout() {
     return all.filter(item => isItemVisible(item) && !seen.has(item.to) && seen.add(item.to))
   // isOwner and outlets gate the Suite block above; suitePlan is deliberately absent, because the
   // palette lists Suite destinations regardless of entitlement, exactly as the sidebar does.
+  // Everything isItemVisible reads is listed too (S852): without hasFeature, the rank helpers,
+  // canReachPosPath, imsCountOnly, groupId and clientId, an outlet switch that changed none of the
+  // other keys kept offering the PREVIOUS outlet's pages — the S638 class of bug. Each of those is
+  // rebuilt when the session it describes changes, which is exactly when this must recompute.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hrVisible, posVisible, customizationVisible, isAdmin, isOwner, outlets, plan, dashLabel, homeIsOverview])
+  }, [hrVisible, posVisible, customizationVisible, isAdmin, isOwner, outlets, plan, dashLabel, homeIsOverview,
+      hasFeature, hasPosAccess, hasImsAccess, hasHrAccess, canReachPosPath, imsCountOnly, groupId, clientId])
 
   const [calcOpen, setCalcOpen] = useState(false)
 
@@ -1268,8 +1273,7 @@ export default function Layout() {
     return switchableOutlets.map(o => (
       <button
         key={o.id}
-        role="option"
-        aria-selected={o.id === clientId}
+        aria-current={o.id === clientId ? 'true' : undefined}
         className={`sidebar-dropdown-item${o.id === clientId ? ' sidebar-dropdown-item--active' : ''}`}
         onClick={() => handleSwitchOutlet(o.id)}
       >
@@ -1315,8 +1319,8 @@ export default function Layout() {
     return (
       <div style={{ margin: '4px 8px 2px', border: `1px solid ${tierTint(15)}`, borderRadius: 'var(--radius-lg)', padding: '10px 12px', background: tierTint(4) }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
-          <span style={{ fontSize: 9, fontWeight: 800, color: tierColor, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{tierLabel} Plan</span>
-          <span style={{ fontSize: 9, color: 'var(--theme-text3)' }}>{locked.length} features</span>
+          <span style={{ fontSize: 10, fontWeight: 800, color: tierColor, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{tierLabel} Plan</span>
+          <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{locked.length} features</span>
         </div>
         {shown.map(item => (
           <div key={item.to} style={{ fontSize: 11, color: 'var(--theme-text3)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
@@ -1466,8 +1470,13 @@ export default function Layout() {
           @media (pointer: coarse) target bumps and the @media print hide-rule all target
           `.sidebar-wrap`, and `display` for it lives in Layout.css rather than inline here — an
           inline declaration beats an external rule at any specificity, so a component that sets
-          its own display can never be hidden by a media query. */}
-      <div ref={sidebarRef} className={`sidebar-wrap${mobileSidebarOpen ? ' mobile-open' : ''}`} inert={tillLayerUp}>
+          its own display can never be hidden by a media query.
+
+          Inert while closed (S852): below 768px a closed drawer is only translated off screen, so
+          a keyboard user tabbed through ~41 invisible links and a screen reader swiped the whole
+          hidden menu before reaching the page. Above 768px it is display:none, where inert changes
+          nothing. */}
+      <div ref={sidebarRef} className={`sidebar-wrap${mobileSidebarOpen ? ' mobile-open' : ''}`} inert={tillLayerUp || !mobileSidebarOpen}>
         <div className="sidebar-shell">
 
           {/* Brand — logo + wordmark + search trigger. Always visible; text hides when collapsed
@@ -1653,18 +1662,19 @@ export default function Layout() {
                 )
               })()}
               {outletDropdownOpen && canSwitchOutlet && (
-                <div className="sidebar-dropdown-panel" ref={outletDropdownRef} role="listbox">
+                <div className="sidebar-dropdown-panel" ref={outletDropdownRef} role="group" aria-label="Outlets">
                   {/* switchableOutlets, not outlets: an allowlisted manager may reach two of the
                       group's five branches, and offering the other three would fail server-side
-                      inside set_active_outlet() with an error rather than a closed door (S617). */}
+                      inside set_active_outlet() with an error rather than a closed door (S617).
+                      Plain buttons with aria-current, not a listbox (S852): a listbox promises
+                      arrow keys and one Tab stop, and these are separately tabbable buttons. */}
                   {switchableOutlets.map(o => {
                     const s = getSubStatus(o)
                     const active = o.id === clientId
                     return (
                       <button
                         key={o.id}
-                        role="option"
-                        aria-selected={active}
+                        aria-current={active ? 'true' : undefined}
                         className={`sidebar-dropdown-item${active ? ' sidebar-dropdown-item--active' : ''}`}
                         onClick={() => handleSwitchOutlet(o.id)}
                       >
@@ -1841,19 +1851,22 @@ export default function Layout() {
               and "where do I find support?" was the first thing asked once it became editable.
               No active state — it lands on /help, which the Help button already claims. */}
           <RailTip label="Support">
-            <NavLink to="/help?section=support" title="Support" className="rail-btn"
-              onClick={() => setMobileSidebarOpen(false)}><LifeBuoy size={18} strokeWidth={1.75} /></NavLink>
+            <NavLink to="/help?section=support" title="Support" aria-label="Support" className="rail-btn"
+              onClick={() => setMobileSidebarOpen(false)}><LifeBuoy size={18} strokeWidth={1.75} aria-hidden="true" /></NavLink>
           </RailTip>
           <RailTip label="Help">
-            <NavLink to="/help" title="Help"
+            <NavLink to="/help" title="Help" aria-label="Help"
               className={({ isActive }) => `rail-btn${isActive ? ' rail-btn--active' : ''}`}
-              onClick={() => setMobileSidebarOpen(false)}><HelpCircle size={18} strokeWidth={1.75} /></NavLink>
+              onClick={() => setMobileSidebarOpen(false)}><HelpCircle size={18} strokeWidth={1.75} aria-hidden="true" /></NavLink>
           </RailTip>
           {/* The collapse toggle that used to sit here is gone with the desktop rail: this nav
               renders only inside the phone drawer now, where there is nothing to collapse TO. */}
           <RailTip label={isPinStaff ? 'Lock POS' : 'Sign out'}>
+            {/* aria-label as well as title (S852): title is only a fallback name, and some screen
+                readers announce an icon-only control with nothing else as an unnamed button. */}
             <button className="rail-btn rail-btn--signout" title={isPinStaff ? 'Lock POS' : 'Sign out'}
-              onClick={handleSignOut}><LogOut size={18} strokeWidth={1.75} /></button>
+              aria-label={isPinStaff ? 'Lock POS' : 'Sign out'}
+              onClick={handleSignOut}><LogOut size={18} strokeWidth={1.75} aria-hidden="true" /></button>
           </RailTip>
         </nav>
         </div>{/* /sidebar-shell */}
@@ -1931,7 +1944,7 @@ export default function Layout() {
                   <ChevronDown size={13} strokeWidth={2.25} aria-hidden="true" style={{ opacity: 0.75, flexShrink: 0 }} />
                 </>}
               >
-                <div role="listbox">{renderOutletOptions()}</div>
+                <div role="group" aria-label="Outlets">{renderOutletOptions()}</div>
                 {/* The refusal renders INSIDE the panel it belongs to, which is also why
                     handleSwitchOutlet leaves the panel open on error — in the bar there is nowhere
                     else for it to go, and dropping it would lose the only report of the failure. */}

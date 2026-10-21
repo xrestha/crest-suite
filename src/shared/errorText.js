@@ -27,10 +27,17 @@
 const NETWORK_ERROR_RE = /failed to fetch|networkerror|load failed|network request failed/i
 
 /** True when the failure was the connection, not the server's answer. */
+/** True for withTimeout giving up (S776). One predicate, shared with ReportLoadError (S852). */
+export function isTimeoutError(err) {
+  if (!err) return false
+  const e = typeof err === 'string' ? { message: err } : err
+  return e.name === 'TimeoutError' || /timed out after \d+s/i.test(e.message || '')
+}
+
 export function isNetworkError(err) {
   if (!err) return false
   const e = typeof err === 'string' ? { message: err } : err
-  return NETWORK_ERROR_RE.test(e.message || '')
+  return e.name === 'FunctionsFetchError' || NETWORK_ERROR_RE.test(e.message || '')
 }
 
 // A stable machine code raised by a guard (S754). The POS guards put it in the Postgres HINT, which
@@ -50,9 +57,10 @@ const onTable = (e, table) => new RegExp(`^${table}:`, 'i').test(e.message || ''
 
 const rules = [
   // Offline / DNS / CORS — supabase-js surfaces these as a bare TypeError from fetch, stringified
-  // into `error.message` by PostgrestBuilder rather than thrown.
+  // into `error.message` by PostgrestBuilder rather than thrown. An Edge Function call that got no
+  // answer is a FunctionsFetchError, and adminOp keeps that name on what it rethrows (S852).
   {
-    test: e => NETWORK_ERROR_RE.test(e.message || ''),
+    test: e => isNetworkError(e),
     staff: "You're offline, or the connection dropped. Check your signal and try again.",
     operator: "Couldn't reach the server — you're offline, or the connection dropped. Check your internet and try again.",
   },
@@ -60,7 +68,7 @@ const rules = [
   // withTimeout gave up (S776). The request may still land after the clock ran out, so neither
   // wording says it did not happen.
   {
-    test: e => e.name === 'TimeoutError' || /timed out after \d+s/i.test(e.message || ''),
+    test: e => isTimeoutError(e),
     staff: 'The server took too long to answer. Check your signal, then check whether it went through before trying again.',
     operator: "The server took too long to answer, so it isn't known whether this went through. Check your connection, then check before trying again.",
   },

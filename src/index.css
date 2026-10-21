@@ -2,9 +2,17 @@ html, body {
   overflow-x: hidden;
 }
 
+/* index.html paints the html ground Night (#191817) for the first frame, before any theme is known.
+   Once this stylesheet loads it follows the theme, so overscroll and the area behind the browser
+   bars on Light are paper, not ink (S852). */
+html {
+  background: var(--theme-bg, #191817);
+}
+
 body {
   margin: 0;
-  font-family: 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
+  /* 'Archivo Variable' is the bundled face (src/index.js); 'Archivo' still catches an installed copy. */
+  font-family: 'Archivo Variable', 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
     'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;

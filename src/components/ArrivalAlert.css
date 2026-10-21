@@ -33,8 +33,23 @@
 .arrival-alert--urgent {
   background: color-mix(in srgb, var(--theme-red) 24%, var(--theme-card));
   border-bottom-color: var(--theme-red);
-  animation: arrival-alert-in var(--motion-slow) var(--ease-entrance),
-             arrival-alert-pulse 1.1s ease-in-out var(--motion-slow) infinite;
+}
+
+/* The urgent pulse is a red layer that only FADES (S852). The keyframe used to animate the
+   banner's own background, which repaints the whole bar every frame for as long as an order sits
+   unaccepted; opacity runs on the compositor. Solid red at 0.26 over the 24% fill composites to the
+   same 44% peak the old keyframe reached, so the escalation reads exactly as loud. z-index -1 inside
+   the banner's own stacking context (it is fixed with a z-index) puts the layer above the banner's
+   fill and under its text and buttons. */
+.arrival-alert--urgent::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--theme-red);
+  opacity: 0;
+  pointer-events: none;
+  animation: arrival-alert-pulse 1.1s ease-in-out var(--motion-slow) infinite;
 }
 
 .arrival-alert__icon {
@@ -55,11 +70,14 @@
   letter-spacing: 0.01em;
 }
 
-.arrival-alert--urgent .arrival-alert__title { color: var(--theme-red-text); }
-
+/* Title and detail are both text1, on the amber and the red banner alike (S852). The urgent title
+   was --theme-red-text on its own red fill: 3.87:1 on Night at rest and 2.65:1 at the pulse peak,
+   and the detail line (text2) measured 3.77:1 on Light's urgent fill. The fill, the 3px rule, the
+   icon and the pulse already carry the red; the words only have to be read, mid-service, and they
+   now clear 6.5:1 at the peak. */
 .arrival-alert__detail {
   font-size: 13px;
-  color: var(--theme-text2);
+  color: var(--theme-text1);
   margin-top: 2px;
 }
 
@@ -84,8 +102,8 @@
 }
 
 @keyframes arrival-alert-pulse {
-  0%, 100% { background: color-mix(in srgb, var(--theme-red) 24%, var(--theme-card)); }
-  50%      { background: color-mix(in srgb, var(--theme-red) 44%, var(--theme-card)); }
+  0%, 100% { opacity: 0; }
+  50%      { opacity: 0.26; }
 }
 
 @keyframes arrival-alert-ring {
@@ -99,6 +117,7 @@
 @media (prefers-reduced-motion: reduce) {
   .arrival-alert,
   .arrival-alert--urgent,
+  .arrival-alert--urgent::before,
   .arrival-alert__icon {
     animation: none !important;
   }

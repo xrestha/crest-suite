@@ -203,7 +203,9 @@ export default function Calculator({ open, onClose }) {
       ref={panelRef}
       // A floating tool has no business in a printed report, and without a scrim it is much
       // easier to leave one open over a page someone then prints.
-      className="no-print"
+      // `calc-panel` carries the height cap: never taller than the viewport, so clampPos always
+      // has somewhere to put it. It is a class so it can say 100vh and then 100dvh (S852).
+      className="no-print calc-panel"
       // role="dialog" WITHOUT aria-modal: nothing behind it is inert, and claiming otherwise
       // would tell a screen reader the rest of the page is unavailable when it is exactly as
       // available as it was before.
@@ -212,8 +214,7 @@ export default function Calculator({ open, onClose }) {
       style={{
         position: 'fixed', left: pos.left, top: pos.top, zIndex: Z,
         width: 'min(380px, calc(100vw - 24px))',
-        // Never taller than the viewport, so clampPos always has somewhere to put it.
-        maxHeight: 'calc(100vh - 24px)', overflowY: 'auto', overflowX: 'hidden',
+        overflowY: 'auto', overflowX: 'hidden',
         background: 'var(--theme-card)', border: '1px solid var(--theme-border)',
         borderRadius: 0,
         // Carries the whole job of lifting the panel off the page now that there is no scrim
@@ -273,36 +274,49 @@ export default function Calculator({ open, onClose }) {
           inputMode="decimal"
           autoComplete="off"
           style={{
-            width: '100%', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)',
+            width: '100%', background: 'var(--theme-input-bg)', border: '1px solid var(--theme-input-border)',
             borderRadius: 0, padding: '10px 12px', fontSize: 18, color: 'var(--theme-text1)',
             outline: 'none', textAlign: 'right', fontFamily: 'inherit',
           }}
         />
-        <div
-          onClick={() => live !== null && copy(live)}
-          title={live !== null ? 'Click to copy' : undefined}
-          style={{
-            marginTop: 10, textAlign: 'right', fontSize: 32, fontWeight: 700, minHeight: 40,
-            color: live === null ? 'var(--theme-text3)' : 'var(--theme-accent-ink)',
-            cursor: live !== null ? 'pointer' : 'default',
-          }}
-        >
-          {live === null ? (expr.trim() ? '—' : '') : (copied === live ? '✓ copied' : live.toLocaleString('en-IN'))}
-        </div>
+        {/* A real button when there is a result to copy (S852). It was a clickable div: no Tab
+            stop, no name, so the copy was mouse-only. With nothing to copy it is plain text. */}
+        {live === null ? (
+          <div style={{ marginTop: 10, textAlign: 'right', fontSize: 32, fontWeight: 700, minHeight: 40, color: 'var(--theme-text3)' }}>
+            {expr.trim() ? '—' : ''}
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="calc-text-btn"
+            onClick={() => copy(live)}
+            title="Click to copy"
+            aria-label={copied === live ? 'Copied' : `Copy ${live.toLocaleString('en-IN')}`}
+            style={{
+              display: 'block', width: '100%', marginTop: 10, textAlign: 'right', fontSize: 32, fontWeight: 700,
+              minHeight: 40, color: 'var(--theme-accent-ink)',
+            }}
+          >
+            {copied === live ? '✓ copied' : live.toLocaleString('en-IN')}
+          </button>
+        )}
       </div>
 
       {/* Keypad */}
       <div style={{ padding: '0 14px 12px', display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+        {/* `calc-key` carries the focus pair, which an inline style cannot express (S852). C and ⌫
+            are named, because a screen reader read the first as the letter and the second as
+            nothing at all. */}
         {KEYS.map((row, ri) => (
           row.map(k => (
-            <button key={k} onClick={() => press(k)} style={'0123456789.'.includes(k) ? keyBtn : opBtn}>
+            <button key={k} type="button" className="calc-key" onClick={() => press(k)} style={'0123456789.'.includes(k) ? keyBtn : opBtn}>
               {k === '*' ? '×' : k === '/' ? '÷' : k}
             </button>
           )).concat(
-            ri === 0 ? [<button key="clr" onClick={() => setExpr('')} style={{ ...keyBtn, color: 'var(--theme-red-text)', fontSize: 15 }}>C</button>]
-            : ri === 1 ? [<button key="del" onClick={() => setExpr(e => e.slice(0, -1))} style={{ ...keyBtn, fontSize: 15 }}>⌫</button>]
-            : ri === 2 ? [<button key="plus" onClick={() => press('+')} style={opBtn}>+</button>]
-            : [<button key="eq" onClick={commit} disabled={live === null} style={{ ...keyBtn, background: 'var(--theme-accent)', borderColor: 'var(--theme-accent)', color: 'var(--theme-accent-text)', opacity: live === null ? 0.4 : 1 }}>=</button>]
+            ri === 0 ? [<button key="clr" type="button" className="calc-key" aria-label="Clear" title="Clear" onClick={() => setExpr('')} style={{ ...keyBtn, color: 'var(--theme-red-text)', fontSize: 15 }}>C</button>]
+            : ri === 1 ? [<button key="del" type="button" className="calc-key" aria-label="Delete last character" title="Delete last character" onClick={() => setExpr(e => e.slice(0, -1))} style={{ ...keyBtn, fontSize: 15 }}>⌫</button>]
+            : ri === 2 ? [<button key="plus" type="button" className="calc-key" onClick={() => press('+')} style={opBtn}>+</button>]
+            : [<button key="eq" type="button" className="calc-key" onClick={commit} disabled={live === null} style={{ ...keyBtn, background: 'var(--theme-accent)', borderColor: 'var(--theme-accent)', color: 'var(--theme-accent-text)', opacity: live === null ? 0.4 : 1 }}>=</button>]
           )
         ))}
       </div>
@@ -310,26 +324,34 @@ export default function Calculator({ open, onClose }) {
       {/* Tape */}
       {tape.length > 0 && (
         <div style={{ borderTop: '1px solid var(--theme-border)', maxHeight: '26vh', overflowY: 'auto' }}>
+          {/* Two real buttons per line (S852): the expression reuses it, the result copies it. The
+              row was a clickable div holding a clickable span, so neither could be reached from the
+              keyboard, and a nested control is invalid inside a clickable container anyway. */}
           {tape.map(t => (
-            <div
-              key={t.id}
-              onClick={() => { setExpr(t.expr); inputRef.current?.focus() }}
-              title="Click to reuse this expression"
-              style={{
-                display: 'flex', alignItems: 'baseline', gap: 10, padding: '8px 14px',
-                cursor: 'pointer', fontSize: 14,
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'var(--theme-table-hover)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
-            >
-              <span style={{ flex: 1, color: 'var(--theme-text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.expr}</span>
-              <span
-                onClick={e => { e.stopPropagation(); copy(t.result) }}
+            <div key={t.id} className="calc-tape-row">
+              <button
+                type="button"
+                className="calc-text-btn"
+                onClick={() => { setExpr(t.expr); inputRef.current?.focus() }}
+                title="Click to reuse this expression"
+                aria-label={`Reuse ${t.expr}`}
+                style={{
+                  flex: 1, minWidth: 0, padding: '8px 6px 8px 14px', textAlign: 'left', fontSize: 14,
+                  color: 'var(--theme-text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}
+              >
+                {t.expr}
+              </button>
+              <button
+                type="button"
+                className="calc-text-btn"
+                onClick={() => copy(t.result)}
                 title="Click to copy"
-                style={{ color: 'var(--theme-text1)', fontWeight: 600 }}
+                aria-label={copied === t.result ? 'Copied' : `Copy ${t.result.toLocaleString('en-IN')}`}
+                style={{ padding: '8px 14px 8px 6px', fontSize: 14, color: 'var(--theme-text1)', fontWeight: 600 }}
               >
                 {copied === t.result ? '✓' : t.result.toLocaleString('en-IN')}
-              </span>
+              </button>
             </div>
           ))}
         </div>
@@ -341,8 +363,11 @@ export default function Calculator({ open, onClose }) {
           <span style={{ flex: 1, color: 'var(--theme-text3)' }}>Sum of tape</span>
           <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>{tapeSum.toLocaleString('en-IN')}</span>
           <button
+            type="button"
+            className="calc-text-btn"
             onClick={() => setTape([])}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--theme-text3)', fontSize: 12, fontFamily: 'inherit', padding: 0 }}
+            aria-label="Clear tape"
+            style={{ color: 'var(--theme-text3)', fontSize: 12 }}
           >
             Clear
           </button>

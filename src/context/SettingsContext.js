@@ -4,6 +4,7 @@ import { useAuth } from './AuthContext'
 import { DEFAULT_PLAN_PRICES, resolvePricing } from '../data/pricingPlans'
 import { errorLine } from '../shared/errorText'
 import { platformSupportFromRow } from '../shared/supportContact'
+import { isPinnedGuestSurface } from './ThemeContext'
 
 const SettingsContext = createContext({})
 
@@ -117,6 +118,10 @@ export function SettingsProvider({ children }) {
   const loadSeqRef = useRef(0)
 
   useEffect(() => {
+    // The guest QR menu and the booking page read only their own RPCs, so the platform row this
+    // would fetch for a signed-out visitor was a wasted round trip on every guest page load (S852).
+    // They never navigate into the app in the same tab, so the defaults stand until a full load.
+    if (isPinnedGuestSurface()) { setLoading(false); return }
     const cid = isAdmin && !clientId ? null : clientId
     wantedCidRef.current = cid ?? null
     loadSettings(cid)

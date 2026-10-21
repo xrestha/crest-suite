@@ -11,13 +11,16 @@
 // a 6px graphic tied to the chart beside it and correctly keeps the series colour; the value is
 // text and defaults to text1. A caller that genuinely wants a coloured value passes `textColor`,
 // which should be a -text variant.
+//
+// The label is 10px, the floor for text (S852). It was 9px, which is the chevron step: a size for a
+// glyph like the ▾ on a select, not for words someone has to read.
 export default function StatPill({ label, value, color, textColor }) {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 2, padding: '7px 14px',
       background: 'var(--theme-input-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)',
     }}>
-      <span style={{ fontSize: 9, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 5 }}>
+      <span style={{ fontSize: 10, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 5 }}>
         {color && <span style={{ width: 6, height: 6, borderRadius: 0, background: color, flexShrink: 0 }} />}
         {label}
       </span>

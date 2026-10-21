@@ -1,5 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+// Self-hosted Archivo, one variable file per style covering every weight in use (S852).
+import '@fontsource-variable/archivo/wght.css';
+import '@fontsource-variable/archivo/wght-italic.css';
 import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';

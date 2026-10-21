@@ -62,3 +62,18 @@ test('className is appended to the trigger, and the default classes are unchange
   rerender(<Row />)
   expect(trigger()).toHaveAttribute('class', 'btn btn-ghost btn-sm btn-icon')
 })
+
+// S852: Tab closed the menu and left focus on a menu item that was about to unmount, so it fell to
+// <body> (the portal sits at the end of the page). It now hands focus to the trigger without
+// preventDefault, so the browser's own Tab carries on from there; jsdom does not move focus on Tab.
+test('Tab closes the menu and puts focus back on the trigger, leaving the Tab itself to the browser', () => {
+  render(<Row />)
+  const btn = trigger()
+  btn.focus()
+  fireEvent.click(btn)
+  expect(screen.getByRole('menuitem', { name: 'Adjust points' })).toHaveFocus()
+  const notCancelled = fireEvent.keyDown(focused(), { key: 'Tab' })
+  expect(notCancelled).toBe(true)
+  expect(screen.queryByRole('menu')).toBeNull()
+  expect(btn).toHaveFocus()
+})

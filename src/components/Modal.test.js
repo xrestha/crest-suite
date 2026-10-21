@@ -178,11 +178,31 @@ test('an unstyled dialog passed dirty ignores a backdrop click too', () => {
   expect(close).toHaveBeenCalledTimes(1)
 })
 
-test('a card dialog without dirty still closes on a backdrop click, even after typing', () => {
+// S852 (owner decision): S842 left a card dialog closing on the backdrop after typing unless its
+// caller opted in, and ~38 IMS and HR forms never did. Typing now guards every variant.
+test('a card dialog without dirty closes on an untouched backdrop click and ignores one after typing', () => {
   const close = jest.fn()
   render(<Modal title="Edit vendor" onClose={close}><input aria-label="Name" /></Modal>)
   fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Ram' } })
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ram Traders' } })
+  fireEvent.click(backdrop())
+  expect(close).not.toHaveBeenCalled()
+  pressEscape()
+  expect(close).toHaveBeenCalledTimes(1)
+})
+
+test('an untouched card dialog still closes on a backdrop click', () => {
+  const close = jest.fn()
+  render(<Modal title="Edit vendor" onClose={close}><input aria-label="Name" /></Modal>)
+  fireEvent.click(backdrop())
+  expect(close).toHaveBeenCalledTimes(1)
+})
+
+test('a card caller whose own dirty says clean wins over typing that was undone', () => {
+  const close = jest.fn()
+  render(<Modal title="Booking" onClose={close} dirty={false}><input aria-label="Guest name" /></Modal>)
+  fireEvent.input(screen.getByLabelText('Guest name'), { target: { value: 'Sita' } })
+  fireEvent.change(screen.getByLabelText('Guest name'), { target: { value: '' } })
   fireEvent.click(backdrop())
   expect(close).toHaveBeenCalledTimes(1)
 })

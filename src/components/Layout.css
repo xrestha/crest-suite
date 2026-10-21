@@ -7,12 +7,31 @@
 /* The halo is currentColor, not a literal — the dot's own colour is set by whatever renders it
    (var(--theme-amber) for HR/POS pending, var(--theme-red) for a pending trial), and the keyframe
    previously hardcoded the red, so an amber dot pulsed inside a red ring. Setting `color` on the
-   element now drives both the fill and the ring. */
+   element now drives both the fill and the ring.
+
+   The ring is a pseudo-element that only SCALES and FADES (S852). The keyframe used to animate
+   box-shadow, which repaints every frame for as long as the dot is on screen: the sidebar's
+   pending badge sits there all day. Transform and opacity run on the compositor. The ring's own
+   box-shadow is static and paints outside its box, so it never covers the dot or the cut-out
+   border around it. */
 @keyframes pulse-dot {
-  0%   { box-shadow: 0 0 0 0 currentColor; }
-  70%  { box-shadow: 0 0 0 6px transparent; }
-  100% { box-shadow: 0 0 0 0 transparent;   }
+  0%        { transform: scale(1);    opacity: 0; }
+  10%       { transform: scale(1);    opacity: 0.8; }
+  70%, 100% { transform: scale(1.45); opacity: 0; }
 }
+.module-tab-dot::after,
+.pulse-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 3px currentColor;
+  opacity: 0;
+  pointer-events: none;
+  animation: pulse-dot 1.5s infinite;
+}
+/* The badge's box starts outside its 2px cut-out border, so the ring does too. */
+.module-tab-dot::after { inset: -2px; }
 
 /* Applied as a CLASS, never as an inline `style={{ animation }}` — an inline animation cannot be
    reached by the prefers-reduced-motion guard at the foot of this block, and this is the only
@@ -25,10 +44,9 @@
   height: 13px;
   border-radius: var(--radius-full);
   background: currentColor;
-  /* A border, not a box-shadow ring: the pulse animation animates box-shadow, so an animated
-     element cannot also carry a static one. box-sizing:border-box keeps the visible fill at 9px. */
+  /* A border, not a box-shadow ring: the cut-out that separates the badge from the icon under it.
+     box-sizing:border-box keeps the visible fill at 9px. The pulse is the ::after above. */
   border: 2px solid var(--theme-sidebar);
-  animation: pulse-dot 1.5s infinite;
 }
 
 /* The same pulse without the sidebar's cut-out border, for a dot sitting on an ordinary card —
@@ -36,12 +54,12 @@
    until S682, which no media query can reach, so it pulsed forever for a reader who had asked
    their OS for less motion. `color` on the element drives the fill and the ring together. */
 .pulse-dot {
+  position: relative;
   display: inline-block;
   width: 10px;
   height: 10px;
   border-radius: var(--radius-full);
   background: currentColor;
-  animation: pulse-dot 1.5s infinite;
 }
 
 /* ChartCard (src/components/ChartCard.js) — the expand sequence.
@@ -143,19 +161,29 @@
   color: var(--theme-accent);
   background: var(--theme-table-hover);
 }
+/* The solid pair, not the ring alone (S852): the ring is a TINT and measured 1.19:1 on Light and
+   1.22:1 on Night, so a keyboard user could not see which chart's expand button had focus. */
 .chart-icon-btn:focus-visible {
   outline: none;
   color: var(--theme-accent);
-  box-shadow: 0 0 0 3px var(--theme-focus-ring);
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
 }
 
 /* Both of these set their resting background here rather than inline in ChartCard.js. That is
    not a style preference: an inline `background:'none'` outranks any class rule, so the hover
    tint silently never applied while the hover color did — measured, not assumed. */
+/* The border, padding and size live here too since S852. They were inline, and an inline border
+   beat this class's hover and focus border-color, so the Close of every expanded chart had no
+   visible focus at all. */
 .chart-close-btn {
   color: var(--theme-text2);
   background: transparent;
+  border: 1px solid var(--theme-border);
   border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
   transition: color var(--motion-fast) var(--ease-standard),
               background var(--motion-fast) var(--ease-standard),
               border-color var(--motion-fast) var(--ease-standard);
@@ -168,7 +196,27 @@
 .chart-close-btn:focus-visible {
   outline: none;
   border-color: var(--theme-accent);
-  box-shadow: 0 0 0 3px var(--theme-focus-ring);
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
+
+/* The expanded chart's backdrop and panel (S852). No backdrop-filter: a blur over the whole
+   dashboard repaints everything under the scrim on every frame of the open animation, for a dim the
+   scrim already gives. The panel's height cap is here so it can say 100vh and then 100dvh: a
+   browser without dvh keeps the first, and on a phone dvh follows the browser toolbar. */
+.chart-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.chart-modal-panel {
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -182,9 +230,10 @@
   .modal-sheet,
   /* Both attention dots. `.module-tab-dot` predates this block and was never added to it, so the
      sidebar's own badge pulsed indefinitely under reduced motion (found S682); its resting state
-     is a plain visible dot, so killing the animation costs nothing. */
-  .module-tab-dot,
-  .pulse-dot {
+     is a plain visible dot, so killing the animation costs nothing. The pulse is the ::after ring
+     since S852, which rests at opacity 0, so with no animation only the dot shows. */
+  .module-tab-dot::after,
+  .pulse-dot::after {
     animation: none !important;
   }
   .chart-icon-btn,
@@ -280,6 +329,12 @@ textarea,
   --theme-accent-hover: #ff9783;
   --theme-accent-text:  #201e1d;
   --theme-input-bg:     #1e1d1c;
+  /* The resting border of a text-entry control (S852), a step stronger than --theme-border. A field
+     has to be findable: WCAG 1.4.11 asks 3:1 for the edge that identifies a control, and the shared
+     border measured ~1.4:1 against the well on both presets. Measured: Night 3.5 card, 3.8 well,
+     4.0 page, 3.1 a hovered row; Light (#807c7b) 3.4 card, 4.1 well, 3.7 page, 3.3 a hovered row. Disabled and
+     read-only still step DOWN to --theme-border-lt, because the state is carried by the surface. */
+  --theme-input-border: #7a7675;
   --theme-table-hover:  rgba(255,255,255,0.04);
   --theme-focus-ring:   rgba(255,86,60,0.15);
   /* The accent used AS text, rather than as a fill under text. Declared here as well as in
@@ -360,16 +415,26 @@ textarea,
      desktop rail — there is no width to animate any more. The top bar's own transitions
      (.topbar-pill, .topbar-context-trigger, .topbar-account-trigger, .topbar-upgrade) joined it in
      their place: a new hover transition needs adding here, not just to the rule that declares it. */
+  /* .sidebar-wrap is the phone drawer's slide and .sidebar-dropdown-arrow the client switcher's
+     turning ▾; both were missing from this list (S852). */
   .rail-btn, .sidebar-link, .module-tab, .sidebar-search-btn,
   .topbar-pill, .topbar-context-trigger, .topbar-account-trigger, .topbar-upgrade,
-  .skip-link, .sidebar-pin {
+  .skip-link, .sidebar-pin, .sidebar-wrap, .sidebar-dropdown-arrow {
     transition-duration: 0ms !important;
   }
   .rail-tip {
     animation-duration: 0ms !important;
   }
-  .guest-order-banner, .guest-order-glow, .module-tab-dot {
+  .guest-order-banner, .guest-order-glow, .module-tab-dot::after {
     animation: none !important;
+  }
+  /* The motion tokens themselves go to zero (S852). A class can be listed above, but an INLINE
+     `transition: transform var(--motion-fast) …` (a disclosure chevron, a switch knob, a tile hover)
+     cannot be reached by any selector here. Every one of them reads the token, so zeroing the token
+     is the one rule that reaches them all. */
+  :root {
+    --motion-fast: 0ms;
+    --motion-slow: 0ms;
   }
 }
 
@@ -725,11 +790,15 @@ textarea,
    rule at any specificity, so a component that sets its own display can never be hidden by a
    media query. The drawer is not unmounted — it is translated off-screen below 768px and
    display:none above it, so its scroll position and dropdown state survive. */
+/* 100vh, then 100dvh (S852). On a phone 100vh is the tallest the viewport ever gets, so the
+   drawer's last row (Support, Help, Sign out) sat under the browser toolbar; a browser without dvh
+   drops the second declaration and keeps the first. */
 .sidebar-wrap {
   position: fixed;
   top: 0;
   left: 0;
   height: 100vh;
+  height: 100dvh;
   z-index: 100;
   display: none;
 }
@@ -737,6 +806,7 @@ textarea,
 .sidebar-shell {
   width: 240px;
   height: 100vh;
+  height: 100dvh;
   background: var(--theme-sidebar);
   border-right: 1px solid var(--theme-border);
   display: flex;
@@ -1580,7 +1650,9 @@ tr.interactive-row:focus-visible {
 .sidebar-dropdown-trigger:focus-visible,
 .sidebar-dropdown-item:focus-visible,
 .mobile-hamburger:focus-visible {
-  outline: 2px solid var(--theme-accent);
+  /* The outline token, not the accent (S852): the accent measured 3.91:1 on the Light sidebar, and
+     every other focus indicator in the product already reads --theme-focus-outline. */
+  outline: 2px solid var(--theme-focus-outline);
   outline-offset: 2px;
 }
 
@@ -1939,7 +2011,7 @@ tr.interactive-row:focus-visible {
 }
 
 .btn-linklike:focus-visible {
-  outline: 2px solid var(--theme-accent);
+  outline: 2px solid var(--theme-focus-outline);
   outline-offset: 2px;
 }
 
@@ -2690,6 +2762,70 @@ table.purchases-table td { padding-top: 7px; padding-bottom: 7px; }
   .calc-drag-row { min-height: 44px; }
 }
 
+/* The rest of the Quick Calculator's hooks (S852). The panel's height cap says 100vh and then
+   100dvh, which an inline style cannot: on a phone 100vh sits under the browser toolbar. The keys
+   and the text-like actions (copy the result, reuse or copy a tape line, clear the tape) are
+   inline-styled buttons, so their focus pair lives here; they fell back to the browser ring. The
+   tape's ring is inset because the tape scrolls, and a scroll box clips anything drawn outside it. */
+.calc-panel {
+  max-height: calc(100vh - 24px);
+  max-height: calc(100dvh - 24px);
+}
+.calc-key:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
+.calc-text-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  background: none;
+  border: none;
+  border-radius: 0;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.calc-text-btn:focus-visible {
+  outline: none;
+  background: var(--theme-focus-ring);
+  box-shadow: inset 0 0 0 2px var(--theme-focus-outline);
+}
+.calc-tape-row {
+  display: flex;
+  align-items: stretch;
+}
+.calc-tape-row:hover {
+  background: var(--theme-table-hover);
+}
+
+/* SearchableSelect's and BsCalendarPicker's triggers, and the picker's month arrows, Today and
+   Clear (S852). Every colour and size in those two components is inline, so the focus pair could
+   only arrive as a class: an inline `boxShadow: 'none'` had been cancelling the browser's ring and
+   putting nothing in its place. The triggers take the field pair, as .form-select does. */
+.picker-trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);
+}
+.picker-btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--theme-focus-outline);
+}
+
+/* The command palette's overlay and result list (S852): 100vh and then 100dvh for the same phone
+   toolbar reason, so the list is not cut off under it. */
+.cmd-palette-overlay {
+  padding: 14vh 16px 40px;
+  padding-top: 14dvh;
+}
+.cmd-palette-list {
+  max-height: 52vh;
+  max-height: 52dvh;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
 /* What the last status move did — "Sharma ×4 confirmed — 5th Bhadra at 7:30 PM. Show that day".
    Sits where ActionError sits and reads in the success colour AS TEXT; it is a sentence, not a
    card, for the same reason .action-error is not one. */
@@ -2781,7 +2917,9 @@ table.data-table td input[type="number"],
 table.data-table td input[type="text"],
 table.data-table td input:not([type]) {
   background: var(--theme-input-bg);
-  border: 1px solid var(--theme-border);
+  /* The text-field border (S852), the same 3:1 edge .form-input has; disabled and read-only step
+     down to border-lt with the rest of the fields, further down this file. */
+  border: 1px solid var(--theme-input-border);
   border-radius: var(--radius-sm);
   color: var(--theme-text1);
   padding: 6px 8px;
@@ -2934,9 +3072,12 @@ textarea:focus-visible {
   letter-spacing: 0.04em;
 }
 
+/* --theme-input-border, not --theme-border, on every text-entry control (S852): the shared border
+   measured ~1.4:1 against the well, under WCAG 1.4.11's 3:1, so a field could not be found on the
+   card. See the token's note in :root. */
 .form-select {
   background: var(--theme-input-bg);
-  border: 1px solid var(--theme-border);
+  border: 1px solid var(--theme-input-border);
   border-radius: var(--radius-md);
   padding: 8px 12px;
   font-size: 13px;
@@ -2967,7 +3108,7 @@ textarea:focus-visible {
 .form-field select,
 .form-field textarea {
   background: var(--theme-input-bg);
-  border: 1px solid var(--theme-border);
+  border: 1px solid var(--theme-input-border);
   border-radius: var(--radius-md);
   padding: 9px 12px;
   font-size: 13px;
@@ -3140,6 +3281,16 @@ textarea::placeholder {
 .form-field select:disabled,
 .form-field textarea:disabled {
   cursor: not-allowed;
+}
+
+/* A table cell's box steps down too (S852). It took the stronger --theme-input-border at rest, so
+   without this a locked month's grid would read as editable as an open one. Surface only: the
+   text colour is left to the cell, which often sets its own inline. */
+table.data-table td select:disabled,
+table.data-table td input:disabled,
+table.data-table td input[readonly] {
+  background: transparent;
+  border-color: var(--theme-border-lt);
 }
 
 /* Read-only is not refusal: the value is real and meant to be read, selected and copied, so the
@@ -4112,7 +4263,9 @@ textarea::placeholder {
 .print-sheet-cat {
   font-size: 13px;
   font-weight: 600;
-  color: var(--theme-accent);
+  /* accent-ink: the category heading is TEXT on screen, and the base accent measured 3.91:1 there
+     on Light (S852). Paper is black, in the print block below. */
+  color: var(--theme-accent-ink);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   margin: 0 0 10px;
@@ -4161,6 +4314,7 @@ textarea::placeholder {
     --theme-card: #ffffff !important;
     --theme-border: #d7d3d3 !important;
     --theme-border-lt: #e5e3e3 !important;
+    --theme-input-border: #807c7b !important;
     --theme-text1: #201e1d !important;
     --theme-text2: #605d5d !important;
     --theme-text3: #6c6868 !important;

@@ -9,6 +9,12 @@ import Modal from './Modal'
 // Render it conditionally like any Modal. `children` is the consequence copy — prefer a short
 // list of what will actually happen over "Are you sure?". While `busy`, Cancel and the backdrop
 // are inert so a mid-write Escape can't strand a half-committed action.
+//
+// The Confirm button is NOT disabled while busy (S852). Disabling the button a keyboard user just
+// pressed drops focus to <body> for as long as the write takes (up to CONFIRM_TIMEOUT_MS, 30s), and
+// the next Tab then leaves the dialog. It stays focusable and wears `aria-busy` + `aria-disabled`
+// (the `.btn[aria-busy]` treatment), a second press does nothing, and a polite status line says the
+// busy label out loud, since a label change on a focused button is not announced.
 export default function ConfirmModal({
   title,
   children,
@@ -30,10 +36,17 @@ export default function ConfirmModal({
       <div style={{ fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>{children}</div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
         <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>{cancelLabel}</button>
-        <button type="button" className={danger ? 'btn btn-danger' : 'btn btn-primary'} onClick={onConfirm} disabled={busy}>
+        <button
+          type="button"
+          className={danger ? 'btn btn-danger' : 'btn btn-primary'}
+          onClick={busy ? undefined : onConfirm}
+          aria-busy={busy || undefined}
+          aria-disabled={busy || undefined}
+        >
           {busy ? busyLabel : confirmLabel}
         </button>
       </div>
+      <span className="sr-only" role="status">{busy ? `${busyLabel} Please wait.` : ''}</span>
     </Modal>
   )
 }

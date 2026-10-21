@@ -55,7 +55,7 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
     // for that on-screen preview only — Layout.css strips it under @media print, same as every
     // other .card on paper (S498).
     <div className="vbc-paper" style={{ background: '#fff', borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.3)' }}>
-    <div style={{ fontFamily: "'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif", color: '#000', padding: '20px 24px', maxWidth: 760, margin: '0 auto' }}>
+    <div style={{ fontFamily: "'Archivo Variable', 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif", color: '#000', padding: '20px 24px', maxWidth: 760, margin: '0 auto' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: 10, marginBottom: 14 }}>
         <div>

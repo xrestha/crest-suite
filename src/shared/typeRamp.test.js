@@ -11,8 +11,11 @@ import path from 'path'
 // it legal here. Never hard-code the list in this file.
 //
 // Checked: `fontSize: 26`, `fontSize: 12.5`, `fontSize: '26px'`, `fontSize: "26px"`, each numeric arm
-// of a ternary (`touch ? 22 : 18`), and CSS `font-size: 26px`, in .css files and in CSS written inside
-// JS strings. Not checked: em, rem, %, pt, clamp(), var(), and a size held in a variable.
+// of a ternary (`touch ? 22 : 18`), an SVG text attribute (`fontSize={big ? 11 : 9}`, S852), and CSS
+// `font-size: 26px`, in .css files and in CSS written inside JS strings. Not checked: em, rem, %, pt,
+// clamp(), var(), and a size held in a variable.
+//
+// And one step is a glyph size, not a text size: 9px, the ramp's `chevron` (S852). See GLYPH_SITES.
 
 const SRC = path.resolve(__dirname, '..')
 const DESIGN = path.resolve(__dirname, '../../DESIGN.md')
@@ -34,6 +37,37 @@ const PRINT_EXEMPT = [
   {
     path: 'modules/hr/employees/EmployeeJoiningForm.jsx',
     reason: 'A blank A4 joining form to print and fill in by hand. The dialog shows the paper itself (Modal printable), so its sizes are paper sizes.',
+  },
+]
+
+// 9px is on the ramp as `chevron`: the size of a GLYPH (a sort arrow, the ▶ on a nav group), never of
+// words. 10px (`micro`) is the floor for anything someone reads. Read from the ramp alone, a 9px LABEL
+// passed as legal, and that is how the BS calendar's weekday initials, the chart stat pills' labels,
+// chart ticks and the Help plan badges sat under the floor unseen (S852). So a literal 9 must be on a
+// line GLYPH_SITES names, in print output (an @media print block, PRINT_EXEMPT, or PAPER_9PX below),
+// and nowhere else. The --font-size-chevron token is held to the same job: a JSX line that wears it
+// must be aria-hidden (a glyph is decoration), and a CSS line must be a glyph site.
+const GLYPH_PX = 9
+const GLYPH_SITES = [
+  {
+    path: 'components/Layout.css',
+    match: /\.th-sort-arrow/,
+    reason: 'The ▲/▼ beside a sortable column heading. It is a mark, and the heading text beside it is the label.',
+  },
+]
+// Paper documents whose small print is 9px. Each is only ever printed, or is a page whose screen
+// view is the paper itself, so the screen floor does not apply; the rest of the ramp still does.
+const PAPER_9PX = [
+  { path: 'modules/ims/recipes/RecipeCostCardPrint.jsx', reason: 'The A4 recipe cost card, rendered inside a .print-only block.' },
+  { path: 'modules/ims/gatepasses/GatePassPrint.jsx', reason: 'The A4 gate pass, rendered print-only and printed on save.' },
+  { path: 'modules/ims/purchases/PurchaseBillPrint.jsx', reason: 'The A4 purchase entry voucher, rendered print-only and printed on save.' },
+  { path: 'modules/ims/reports/VendorBalanceConfirmationPrint.jsx', reason: 'The A4 vendor balance confirmation letter, rendered print-only.' },
+  { path: 'pages/SubscriptionAgreement.css', reason: 'The printable contract. Black on white on screen as well, so the preview is the paper.' },
+  {
+    path: 'pages/dashboard/MonthlyOwnerReport.jsx',
+    from: /function pageFooterCss/,
+    to: /^}/,
+    reason: 'The @page footer of the printed Owner Report, drawn in the paper margin boxes.',
   },
 ]
 
@@ -64,8 +98,8 @@ function isCommentLine(line) {
 function sizesOnLine(line) {
   if (isCommentLine(line)) return []
   const found = []
-  for (const m of line.matchAll(/fontSize\s*:\s*([^,}\n]+)/g)) {
-    const v = m[1].trim()
+  const literal = raw => {
+    const v = raw.trim()
     let x
     if ((x = v.match(/^(\d+(?:\.\d+)?)$/))) found.push(x[1])
     else if ((x = v.match(/^['"`](\d+(?:\.\d+)?)px['"`]$/))) found.push(x[1])
@@ -76,6 +110,10 @@ function sizesOnLine(line) {
       }
     }
   }
+  for (const m of line.matchAll(/fontSize\s*:\s*([^,}\n]+)/g)) literal(m[1])
+  // An SVG <text> sizes itself with an attribute (S852), the form Home's chart axis used for its 8px
+  // weekday initials, which nothing here could see.
+  for (const m of line.matchAll(/fontSize=\{([^}\n]+)\}/g)) literal(m[1])
   for (const m of line.matchAll(/font-size\s*:\s*(\d+(?:\.\d+)?)px\b/g)) found.push(m[1])
   return found
 }
@@ -115,6 +153,45 @@ function exemptLines(entry, lines) {
 }
 
 const rel = f => path.relative(SRC, f).split(path.sep).join('/')
+
+/** 1-based line numbers in this file that are a named glyph site. */
+function glyphLines(name, lines) {
+  const out = new Set()
+  for (const entry of GLYPH_SITES.filter(e => e.path === name)) {
+    lines.forEach((l, i) => { if (entry.match.test(l)) out.add(i + 1) })
+  }
+  return out
+}
+
+/** `file:line` for every literal 9px used as TEXT in one file's source, per the GLYPH_SITES rule. */
+function nineAsText(name, text) {
+  const lines = text.split('\n')
+  const allow = [...PRINT_EXEMPT, ...PAPER_9PX].find(e => e.path === name)
+  const exempt = allow ? exemptLines(allow, lines) : new Set()
+  if (exempt === null) return []
+  const print = printLines(text)
+  const glyph = glyphLines(name, lines)
+  const out = []
+  lines.forEach((l, i) => {
+    const n = i + 1
+    if (print.has(n) || exempt.has(n) || glyph.has(n)) return
+    if (sizesOnLine(l).some(v => Number(v) === GLYPH_PX)) out.push(`${name}:${n}`)
+  })
+  return out
+}
+
+/** `file:line` for every line wearing the chevron token that is not plainly a glyph. */
+function chevronTokenAsText(name, text) {
+  const lines = text.split('\n')
+  const glyph = glyphLines(name, lines)
+  const out = []
+  lines.forEach((l, i) => {
+    if (!l.includes('var(--font-size-chevron)') || isCommentLine(l)) return
+    const ok = name.endsWith('.css') ? glyph.has(i + 1) : /aria-hidden/.test(l)
+    if (!ok) out.push(`${name}:${i + 1}`)
+  })
+  return out
+}
 
 const files = []
 ;(function walk(dir) {
@@ -161,6 +238,8 @@ describe('the size finder', () => {
     ['// was fontSize: 12.5 before S844', []],
     ['   * fontSize: 26 was the old value', []],
     ['  * { margin:0; font-size:11px; }', ['11']],
+    ['<text x={0} fontSize={big ? 9 : 8}>{dow}</text>', ['9', '8']],
+    ['<text fontSize={12}>', ['12']],
   ])('%s', (line, expected) => {
     expect(sizesOnLine(line)).toEqual(expected)
   })
@@ -173,6 +252,49 @@ describe('the size finder', () => {
   test('a from/to entry exempts the region it names and nothing else', () => {
     const lines = ['a', 'x = `<style>', 'p { font-size: 12.5px }', '</style>`', 'b']
     expect([...exemptLines({ from: /<style>/, to: /<\/style>/ }, lines)]).toEqual([2, 3, 4])
+  })
+})
+
+describe('9px is a glyph size, never a text size (S852)', () => {
+  test('a 9px label is caught; a glyph site, an @media print block and paper are not', () => {
+    const jsx = "<span style={{ fontSize: 9, color: 'red' }}>Label</span>\n<b style={{ fontSize: 10 }}>x</b>\n"
+    expect(nineAsText('components/Example.js', jsx)).toEqual(['components/Example.js:1'])
+    expect(nineAsText('components/Layout.css', 'table.data-table th .th-sort-arrow { font-size: 9px; }\n')).toEqual([])
+    expect(nineAsText('components/Example.css', '@media print {\n  .x { font-size: 9px; }\n}\n')).toEqual([])
+    expect(nineAsText('modules/ims/gatepasses/GatePassPrint.jsx', '<div style={{ fontSize: 9 }}>Gate Pass</div>\n')).toEqual([])
+  })
+
+  test('the chevron token is worn by a glyph only', () => {
+    expect(chevronTokenAsText('components/X.js', `<span aria-hidden="true" style={{ fontSize: 'var(--font-size-chevron)' }}>▶</span>`)).toEqual([])
+    expect(chevronTokenAsText('components/X.js', `<span style={{ fontSize: 'var(--font-size-chevron)' }}>PRO</span>`)).toEqual(['components/X.js:1'])
+  })
+
+  test('the glyph and paper lists still point at what they exempt', () => {
+    const problems = []
+    for (const entry of [...GLYPH_SITES, ...PAPER_9PX]) {
+      const file = path.join(SRC, entry.path)
+      if (!fs.existsSync(file)) { problems.push(`${entry.path}: no such file`); continue }
+      if (!(entry.reason && entry.reason.length > 20)) problems.push(`${entry.path}: say why`)
+      const lines = fs.readFileSync(file, 'utf8').split('\n')
+      const hit = entry.match
+        ? lines.some(l => entry.match.test(l) && sizesOnLine(l).some(v => Number(v) === GLYPH_PX))
+        : (entry.from
+          ? [...exemptLines(entry, lines)].some(n => sizesOnLine(lines[n - 1]).some(v => Number(v) === GLYPH_PX))
+          : lines.some(l => sizesOnLine(l).some(v => Number(v) === GLYPH_PX)))
+      // An entry whose 9px is gone exempts nothing and should be deleted, not left as a claim.
+      if (!hit) problems.push(`${entry.path}: no 9px left to exempt; remove the entry`)
+    }
+    expect(problems).toEqual([])
+  })
+
+  test('no 9px text, and no chevron token on text, in src/', () => {
+    const offenders = []
+    for (const f of files) {
+      const name = rel(f)
+      const text = fs.readFileSync(f, 'utf8')
+      offenders.push(...nineAsText(name, text), ...chevronTokenAsText(name, text))
+    }
+    expect(offenders).toEqual([])
   })
 })
 

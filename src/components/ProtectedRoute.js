@@ -19,7 +19,9 @@ export default function ProtectedRoute({ children, adminOnly = false }) {
       <div role="status" style={{
         minHeight: '100vh', background: 'var(--theme-bg, #191817)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: 'var(--theme-accent, #ff563c)', fontSize: 14, letterSpacing: '0.08em'
+        // accent-INK: this is text on the page ground, and the base accent measured 4.25:1 there on
+        // Light, on the screen every sign-in passes through (S852). The fallback is Night's ink.
+        color: 'var(--theme-accent-ink, #ffc4b8)', fontSize: 14, letterSpacing: '0.08em'
       }}>
         <span>
           Loading

@@ -57,7 +57,7 @@ const preset = Object.fromEntries([...darkBlock.matchAll(/(\w+): '([^']+)'/g)].m
 const MAP = {
   'accent-red': 'accent', 'accent-red-hover': 'accentHover', 'accent-text': 'accentText',
   'accent-ink': 'accentInk', 'ink-bg': 'bg', 'ink-card': 'card', 'ink-sidebar': 'sidebar',
-  'ink-border': 'border', 'ink-border-lt': 'borderLt', 'input-bg': 'inputBg',
+  'ink-border': 'border', 'ink-border-lt': 'borderLt', 'input-bg': 'inputBg', 'input-border': 'inputBorder',
   'table-hover': 'tableHover', 'focus-ring': 'focusRing',
   'text-primary': 'text1', 'text-secondary': 'text2', 'text-tertiary': 'text3',
   'signal-success': 'green', 'signal-danger': 'red', 'signal-warning': 'amber', 'signal-categorical': 'purple',

@@ -25,6 +25,7 @@ function registerModal(entry) {
 // user instead of rendering at the top of the page (no scrolling to reach it).
 // Backdrop click and the × button both call onClose; the panel itself stops propagation. A caller
 // passing `dirty` turns the backdrop click off while it is true; × and Escape still close (S842).
+// Once anything inside has been typed or changed the backdrop is off too, on every variant (S852).
 //
 // `zIndex` (default 100) exists because POS's order screen is a `position: fixed` full-screen
 // layer at 1000 and therefore its own stacking context: a dialog opened from it needs a higher
@@ -90,9 +91,16 @@ export default function Modal({
   // `dirty` lets a caller state it outright: a chip <button> click fires neither onInput nor
   // onChange, so a sheet made of picks (GuestOptionSheet) passes `dirty` from its own state.
   // An explicit `dirty` guards the backdrop for EVERY variant (S842): a stray tap was discarding
-  // POS's half-filled card dialogs (Adjust Points, Issue Credit Note, Booking). The automatic
-  // onInput/onChange tracking stays sheet-only, so a card dialog changes only if its caller opts in.
-  const onBackdrop = () => { if (!(dirty || (sheet && dirtyRef.current))) onClose() }
+  // POS's half-filled card dialogs (Adjust Points, Issue Credit Note, Booking).
+  // The automatic onInput/onChange tracking covers card and unstyled dialogs too since S852 (owner
+  // decision): S842 left them opt-in, and ~38 IMS and HR forms (a purchase bill, a pay form, the FY
+  // openings correction) never opted in, so one stray tap still threw away typed figures. A
+  // dialog nobody typed into fires neither event and closes on the backdrop exactly as before.
+  // A card or unstyled caller that passes `dirty` has compared its draft with what it opened on,
+  // so its answer wins outright: typing a name and deleting it again (ReservationModal) is clean.
+  // A sheet keeps its S759 rule, typed OR dirty, because its `dirty` covers picks only.
+  const guarded = () => (sheet || dirty === undefined ? (dirty || dirtyRef.current) : dirty)
+  const onBackdrop = () => { if (!guarded()) onClose() }
   const markDirty = () => { dirtyRef.current = true }
 
   useEffect(() => {
@@ -167,8 +175,8 @@ export default function Modal({
       <div
         ref={panelRef}
         onClick={e => e.stopPropagation()}
-        onInput={sheet ? markDirty : undefined}
-        onChange={sheet ? markDirty : undefined}
+        onInput={markDirty}
+        onChange={markDirty}
         className={sheet ? 'card modal-sheet' : (unstyled ? undefined : 'card')}
         role="dialog"
         aria-modal="true"

@@ -65,12 +65,16 @@ export default function CommandPalette({ open, onClose, items, onSelect }) {
   const activeId = results[activeIndex] ? `palette-opt-${activeIndex}` : undefined
 
   return createPortal(
+    // The top inset and the list height are classes (Layout.css), so each can say vh and then dvh:
+    // on a phone vh is the tallest the viewport ever gets, and the list ran on under the browser
+    // toolbar (S852). Everything else stays inline.
     <div
+      className="cmd-palette-overlay"
       onClick={onClose}
       onKeyDown={handleKeyDown}
       style={{
         position: 'fixed', inset: 0, zIndex: 400, background: 'rgba(0,0,0,0.6)',
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '14vh 16px 40px',
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
       }}
     >
       <div
@@ -111,7 +115,7 @@ export default function CommandPalette({ open, onClose, items, onSelect }) {
           {matches.length === 0 ? `No pages match ${query}` : `${matches.length} page${matches.length === 1 ? '' : 's'} match`}
         </span>
 
-        <div id="palette-listbox" role="listbox" aria-label="Pages" style={{ maxHeight: '52vh', overflowY: 'auto', padding: '6px 0' }}>
+        <div id="palette-listbox" role="listbox" aria-label="Pages" className="cmd-palette-list">
           {results.length === 0 ? (
             <div style={{ padding: '20px 16px', fontSize: 13, color: 'var(--theme-text3)', textAlign: 'center' }}>
               No pages match "{query}"

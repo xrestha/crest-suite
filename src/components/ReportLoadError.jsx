@@ -18,10 +18,16 @@
  * A string that is genuinely hand-written prose (a caller's own sentence) still reaches the
  * reader in full on that line.
  */
-import { errorInfo } from '../shared/errorText'
+import { errorInfo, isTimeoutError } from '../shared/errorText'
+
+// A READ that timed out wrote nothing, so the table's timeout sentence ("it is not known whether
+// this went through", worded for a save) does not fit here (S852). Same detail line either way.
+const READ_TIMEOUT_TEXT = 'The server took too long to answer, so this report could not be read. Check your connection, then reload the page.'
 
 export default function ReportLoadError({ error }) {
-  const { text, detail } = errorInfo(error, 'operator')
+  const info = errorInfo(error, 'operator')
+  const text = isTimeoutError(error) ? READ_TIMEOUT_TEXT : info.text
+  const { detail } = info
   return (
     <div className="card report-error" role="alert">
       <div className="report-error-title">Could not load this report</div>

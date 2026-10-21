@@ -48,6 +48,11 @@ export const PRESETS = {
     // those pairs. The Light half needed the same correction in the other direction.
     accentInk: '#ffc4b8',
     inputBg: '#1e1d1c', tableHover: 'rgba(255,255,255,0.04)', focusRing: 'rgba(255,86,60,0.15)',
+    // A text field's resting border (S852). `border` measured 1.36:1 on the card and 1.44:1 on the
+    // well, so a field's edge was nearly invisible (WCAG 1.4.11 asks 3:1 of a control boundary).
+    // #7a7675 clears 3.53 card, 3.75 well, 3.95 page, 4.13 sidebar, and 3.14 on a hovered row
+    // (tableHover composited over the card, #2d2b2a); #757170 was tried first and measured 2.92 there.
+    inputBorder: '#7a7675',
     // Deliberately carried over UNCHANGED from the previous palette. These four were tuned for AA
     // and for red-green colour blindness across S551/S608/S683; Modernist replaces ground, ink and
     // accent only. Retuning them to "match" the new accent would undo that work.
@@ -87,6 +92,9 @@ export const PRESETS = {
     // 8.11:1 on its own badge tint over the page ground (the S683 second-ground rule).
     accentInk: '#7c1405',
     inputBg: '#ffffff', tableHover: '#e6e4e4', focusRing: 'rgba(221,43,15,0.12)',
+    // See the Night note on inputBorder. `border` measured 1.22 card and 1.48 well here; #807c7b
+    // clears 3.41 card, 4.13 well, 3.69 page, 3.26 on a hovered row.
+    inputBorder: '#807c7b',
     green: '#15803d', red: '#dc2626', amber: '#b45309', purple: '#7c3aed',
     // Unchanged from the pre-Modernist palette, and see the S608/S683 history in git: these are
     // the only pair (of 120 searched) clearing both deuteranopia and protanopia while every
@@ -112,6 +120,7 @@ function applyTheme(t) {
   r.style.setProperty('--theme-accent-hover', t.accentHover)
   r.style.setProperty('--theme-accent-text', t.accentText)
   r.style.setProperty('--theme-input-bg', t.inputBg)
+  r.style.setProperty('--theme-input-border', t.inputBorder || legibleBorder(t.border, [t.card, t.inputBg, t.bg]))
   r.style.setProperty('--theme-table-hover', t.tableHover)
   r.style.setProperty('--theme-focus-ring', t.focusRing)
   r.style.setProperty('--theme-green', t.green)
@@ -136,6 +145,13 @@ function applyTheme(t) {
   // dark presets the accent itself clears the floor against their surfaces.
   r.style.setProperty('--theme-focus-outline', t.accentInk || t.accent)
   r.style.setProperty('--theme-card-shadow', t.cardShadow)
+  // The browser's own chrome follows the theme too (S852). Without `color-scheme` a native date
+  // picker, scrollbar or select list painted light on Night; and `theme-color` stayed the Night
+  // ground from index.html, so a Light user's phone status bar was a dark band over a paper page.
+  const dark = isDarkGround(t.bg)
+  r.style.colorScheme = dark ? 'dark' : 'light'
+  const meta = document.querySelector('meta[name="theme-color"]')
+  if (meta && t.bg) meta.setAttribute('content', t.bg)
 }
 
 // ── `system`: follow the phone's own light/dark setting ──────────────────────────────────────
@@ -209,6 +225,34 @@ export function legibleInk(accentHex, surfaceHex) {
     if (ratio(best, surface) >= 4.5) break
   }
   return toHex(best)
+}
+
+/**
+ * A text field's border, moved away from the ground until it clears 3:1 (WCAG 1.4.11) against
+ * every surface a field sits on. The presets author `inputBorder` by hand; this covers a custom
+ * theme whose card, well or page the user has re-coloured. Like legibleInk it gives up at pure
+ * black/white rather than looping.
+ */
+export function legibleBorder(borderHex, surfaceHexes) {
+  const border = hexToRgb(borderHex)
+  const surfaces = (surfaceHexes || []).map(hexToRgb).filter(Boolean)
+  if (!border || !surfaces.length) return borderHex
+  const clears = c => surfaces.every(s => ratio(c, s) >= 3)
+  if (clears(border)) return borderHex
+  const lightGround = surfaces.reduce((sum, s) => sum + relLum(s), 0) / surfaces.length > 0.45
+  const target = lightGround ? [0, 0, 0] : [255, 255, 255]
+  let best = border
+  for (let amt = 0.05; amt <= 1.0001; amt += 0.05) {
+    best = mixTo(border, target, amt)
+    if (clears(best)) break
+  }
+  return toHex(best)
+}
+
+/** True for a dark page ground. An unreadable value counts as dark, the product default. */
+export function isDarkGround(bgHex) {
+  const rgb = hexToRgb(bgHex)
+  return rgb ? relLum(rgb) < 0.4 : true
 }
 
 export const SYSTEM_KEY = 'system'
@@ -312,7 +356,11 @@ function loadSaved() {
       const key = defaultKeyForSurface()
       return { key, colors: resolveColors(key) }
     }
-    return { key: 'custom', colors: { ...PRESETS.dark, ...saved.colors } }
+    const merged = { ...PRESETS.dark, ...saved.colors }
+    // A custom blob saved before S852 has no inputBorder, and Night's would fill it in whatever
+    // grounds the user chose; derive one from their own grounds instead.
+    if (!saved.colors?.inputBorder) merged.inputBorder = legibleBorder(merged.border, [merged.card, merged.inputBg, merged.bg])
+    return { key: 'custom', colors: merged }
   } catch {
     const key = defaultKeyForSurface()
     return { key, colors: resolveColors(key) }
@@ -372,6 +420,10 @@ export function ThemeProvider({ children }) {
     }
     // The same applies in reverse: re-grounding the card can leave a derived ink unreadable on it.
     if (colorKey === 'card' && colors.accent) updated.accentInk = legibleInk(updated.accent, value)
+    // A field's border is derived from the grounds it sits on, so it re-derives with any of them.
+    if (['border', 'card', 'inputBg', 'bg'].includes(colorKey)) {
+      updated.inputBorder = legibleBorder(updated.border, [updated.card, updated.inputBg, updated.bg])
+    }
     setColors(updated)
     setThemeKey('custom')
     localStorage.setItem('crest_theme', JSON.stringify({ key: 'custom', colors: updated, schema: THEME_SCHEMA }))

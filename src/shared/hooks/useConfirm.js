@@ -50,11 +50,16 @@ export function useConfirm(options = {}) {
   const [busy, setBusy] = useState(false)
   const optionsRef = useRef(options)
   optionsRef.current = options
+  // A run in flight, as a ref rather than `busy`: a second press (a double click, or Enter held
+  // down) lands before the re-render that would show the dialog busy, and `busy` read in that same
+  // tick is still false. The Confirm button stays pressable while busy (S852), so this is the guard.
+  const runningRef = useRef(false)
   const ask = useCallback(opts => setPending(opts), [])
   const cancel = useCallback(() => setPending(null), [])
 
   async function run() {
-    if (!pending) return
+    if (!pending || runningRef.current) return
+    runningRef.current = true
     const current = pending
     setBusy(true)
     const limit = current.timeoutMs ?? optionsRef.current.timeoutMs
@@ -73,6 +78,7 @@ export function useConfirm(options = {}) {
       if (outcome === TIMED_OUT && onTimeout) onTimeout(current)
     } finally {
       clearTimeout(timer)
+      runningRef.current = false
       setBusy(false)
       setPending(p => (p === current ? null : p))
     }

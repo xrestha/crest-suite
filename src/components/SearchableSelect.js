@@ -28,6 +28,7 @@ export default function SearchableSelect({ value, onChange, options, placeholder
   const [highlight, setHighlight] = useState(0)
   const [coords, setCoords] = useState(null)
   const rootRef = useRef(null)
+  const triggerRef = useRef(null)
   const inputRef = useRef(null)
   const listRef = useRef(null)
   const uid = useId()
@@ -94,20 +95,30 @@ export default function SearchableSelect({ value, onChange, options, placeholder
     if (open && e.relatedTarget && !rootRef.current?.contains(e.relatedTarget)) close()
   }
 
-  function pick(opt) { onChange(opt.value); close() }
+  // A pick and an Escape hand focus back to the trigger (S852). Both unmount the filter box that
+  // has focus, so it fell to <body>: inside a dialog the next Tab left the dialog, and on a long
+  // form the keyboard restarted from the top of the page. The trigger is focused FIRST, so a caller
+  // whose onChange moves focus on (to the next field) still wins. A Tab out and an outside press
+  // close without this: focus is already going where the user sent it.
+  function returnFocus() { triggerRef.current?.focus() }
+  function pick(opt) { returnFocus(); close(); onChange(opt.value) }
 
   function onKeyDown(e) {
     if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(h => Math.min(h + 1, filtered.length - 1)) }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight(h => Math.max(h - 1, 0)) }
     else if (e.key === 'Enter') { e.preventDefault(); if (filtered[highlight]) pick(filtered[highlight]) }
-    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close() }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); returnFocus(); close() }
   }
 
   return (
     <div ref={rootRef} onBlur={onBlur} style={{ position: 'relative', ...style }}>
+      {/* `picker-trigger` is the keyboard focus pair (Layout.css): an inline style has no
+          :focus-visible, so this trigger had shown the browser ring or nothing (S852). */}
       <button
+        ref={triggerRef}
         type="button"
         id={id}
+        className="picker-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-describedby={invalid && id ? `${id}-err` : undefined}
@@ -115,7 +126,7 @@ export default function SearchableSelect({ value, onChange, options, placeholder
         style={{
           width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
           background: 'var(--theme-input-bg)',
-          border: `1px solid ${invalid ? 'var(--theme-red)' : 'var(--theme-border)'}`,
+          border: `1px solid ${invalid ? 'var(--theme-red)' : 'var(--theme-input-border)'}`,
           borderRadius: 'var(--radius-md)',
           padding: touch ? '11px 12px' : '7px 10px', minHeight: touch ? 44 : undefined,
           fontSize: touch ? 16 : 13, color: 'var(--theme-text1)', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',

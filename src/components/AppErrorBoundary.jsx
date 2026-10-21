@@ -151,7 +151,10 @@ export default class AppErrorBoundary extends Component {
           <div style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             width: 52, height: 52, borderRadius: 'var(--radius-full, 0)',
-            background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.3)',
+            // Tinted from the token, so it re-tones with the preset; the frozen Night red sat under
+            // Light too (S852). The var() fallback keeps it red if the tokens never loaded.
+            background: 'color-mix(in srgb, var(--theme-red, #f87171) 12%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--theme-red, #f87171) 30%, transparent)',
             marginBottom: 18, color: 'var(--theme-red-text, #f87171)',
           }}><TriangleAlert size={22} strokeWidth={2} aria-hidden="true" /></div>
 

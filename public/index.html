@@ -15,19 +15,20 @@
       stops iOS auto-zooming on field focus instead.
     -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- The Night ground, for the first paint only: applyTheme (ThemeContext.js) rewrites it to the
+         chosen theme's ground once the app loads, so a Light user's phone bar is not left dark (S852). -->
     <meta name="theme-color" content="#191817" />
-    <meta name="description" content="Food cost & inventory management for Nepal hospitality" />
+    <meta name="description" content="Inventory, HR and POS for restaurants and hotels in Nepal" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Crest Suite" />
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap"
-      rel="stylesheet"
-    />
+    <!--
+      No Google Fonts link (S852). Archivo is bundled from @fontsource-variable/archivo, imported in
+      src/index.js, so the first screen no longer waits on a render-blocking third-party stylesheet
+      and the service worker caches the font with the rest of the app.
+    -->
     <!--
       manifest.json provides metadata used when your web app is installed on a
       user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
