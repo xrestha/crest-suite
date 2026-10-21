@@ -1,4 +1,5 @@
 import { nextCodeAfter, bookWith } from './Items'
+import { deleteGuard, HIDE_INSTEAD } from './itemDeleteGuard'
 
 // Items.js imports AuthContext/scopedDb, which import the real supabaseClient — mock it so this
 // test exercises only the pure helpers exported beside the page (S756).
@@ -76,5 +77,75 @@ describe('bookWith (what a save adds to the item book, S792 MASTER-5)', () => {
 
   test('a book that was never read stays unread, so the name check falls back to `items`', () => {
     expect(bookWith(null, { id: 'i2', name: 'ITEM A', item_code: 'ITM-010' })).toBeNull()
+  })
+})
+
+// S855 (PERF-3): the list paints before the usage scan lands, so Del can be pressed while the scan
+// is still running. The guard reads the scan's tri-state and fails CLOSED on anything but 'ok':
+// three of the referencing tables CASCADE, so a delete on an unchecked item takes their rows with it.
+describe('deleteGuard (S855: refuses on anything but a scan that answered)', () => {
+  const base = { name: 'MILK', refs: [], failed: [], isAdmin: false }
+
+  test('pending refuses with a plain wait sentence, marked so the page can take it down', () => {
+    const v = deleteGuard({ ...base, status: 'pending' })
+    expect(v).toEqual({ action: 'refuse', scanPending: true, text: 'Still checking where "MILK" is used. Try again in a moment.' })
+  })
+
+  test('pending refuses an admin too, and never offers force-delete off a map still being built', () => {
+    const v = deleteGuard({ ...base, status: 'pending', isAdmin: true, refs: ['P'] })
+    expect(v.action).toBe('refuse')
+    expect(v.scanPending).toBe(true)
+  })
+
+  test('pending is not worded as a failure', () => {
+    const v = deleteGuard({ ...base, status: 'pending' })
+    expect(v.text).not.toMatch(/could not/i)
+  })
+
+  test('failed refuses with the could-not-check sentence, naming what could not be read', () => {
+    const v = deleteGuard({ ...base, status: 'failed', failed: ['the usage records'] })
+    expect(v.action).toBe('refuse')
+    expect(v.scanPending).toBeUndefined()
+    expect(v.text).toMatch(/^Crest could not check where "MILK" is used — the usage records could not be read, so it will not delete it\./)
+    expect(v.text).toMatch(/there is no undo/)
+  })
+
+  test('failed refuses an admin with known references rather than offering force-delete', () => {
+    expect(deleteGuard({ ...base, status: 'failed', isAdmin: true, refs: ['P'] }).action).toBe('refuse')
+  })
+
+  test('an unknown status refuses (fail closed)', () => {
+    expect(deleteGuard({ ...base, status: undefined }).action).toBe('refuse')
+    expect(deleteGuard({ ...base, status: 'ok?' }).action).toBe('refuse')
+  })
+
+  test('ok with no references opens the plain confirm', () => {
+    expect(deleteGuard({ ...base, status: 'ok' })).toEqual({ action: 'confirm' })
+    expect(deleteGuard({ ...base, status: 'ok', isAdmin: true })).toEqual({ action: 'confirm' })
+  })
+
+  test('ok with references refuses a non-admin, names the records and ends on Hide', () => {
+    const v = deleteGuard({ ...base, status: 'ok', refs: ['CS', 'P'] })
+    expect(v.action).toBe('refuse')
+    expect(v.text).toMatch(/^"MILK" cannot be deleted — it has records in Closing Stock, Purchases,/)
+    expect(v.text.endsWith(HIDE_INSTEAD)).toBe(true)
+    // Neither table cascades, so the refusal claims no erasure (S766).
+    expect(v.text).not.toMatch(/erase/)
+  })
+
+  test('erasure is claimed only for the tables that cascade', () => {
+    const v = deleteGuard({ ...base, status: 'ok', refs: ['SM', 'P'] })
+    expect(v.text).toMatch(/Deleting it would also erase its Staff Meals records\./)
+  })
+
+  test('ok with references offers an admin the force-delete, led by what holds the item', () => {
+    expect(deleteGuard({ ...base, status: 'ok', isAdmin: true, refs: ['R', 'W'] }))
+      .toEqual({ action: 'force', lead: '"MILK" is referenced in Recipes, Wastage.' })
+  })
+
+  test('a stock transfer blocks the force-delete outright (S849)', () => {
+    const v = deleteGuard({ ...base, status: 'ok', isAdmin: true, refs: ['TR', 'P'] })
+    expect(v.action).toBe('refuse')
+    expect(v.text).toMatch(/cannot be force-deleted/)
   })
 })

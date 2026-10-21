@@ -17,9 +17,10 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import {
-  ITEM_REF_TABLES, USAGE_LABELS, REF_TABLE_PROSE, forceDeleteBlockedText,
-  readItemRefCounts, refCodesFromCounts, priceImpactSentence, PRICE_CHANGE_KEEPS,
+  ITEM_REF_TABLES, USAGE_LABELS, REF_TABLE_PROSE,
+  readItemRefCounts, refCodesFromCounts, priceImpactPhrase, priceImpactSentence, PRICE_CHANGE_KEEPS,
 } from './itemRefTables'
+import { deleteGuard, HIDE_INSTEAD } from './itemDeleteGuard'
 import VatCostPriceBanner from './VatCostPriceBanner'
 import { unitRateText, unitRateCell } from '../../../shared/unitRate'
 import { FilterChips } from '../../../components/Tabs'
@@ -35,14 +36,6 @@ const DEFAULT_CATEGORIES = [
 ]
 
 const UNITS = ['GM', 'ML', 'KG', 'LTR', 'PCS', 'PKT', 'BTL', 'BOX', 'ROLL', 'BUNCH', 'JAR', 'CTN', 'BAG', 'TIN', 'SACHET']
-
-// S792 (FIGURES-1, owner decision D29): hiding never changes history. Past months keep every
-// purchase and count the item is on, on the monthly summary and every other report; hiding only
-// takes it off the pickers and the stock sheet from now on. The old wording said a hidden item left
-// stock valuation and the monthly summary, which D29 ruled out.
-const HIDE_INSTEAD =
-  'Hide it instead: it keeps every record it is already on, and past months keep its purchases and counts. ' +
-  'Hiding only takes it off the pickers and the stock sheet from now on, so hide it once its stock is down to zero.'
 
 // `rate` here is the price of ONE base unit — the only price the form collects and the exact value
 // written to items.rate. There is no pack size on the form or in the row; see the note on `pack`.
@@ -76,8 +69,9 @@ export function nextCodeAfter(rawPrefix, codes) {
 /**
  * The item book with one saved row added — its name keyed to its id, its code among the codes —
  * and, on a rename, the old name released. Returns `book` unchanged when it is null (not read yet,
- * or the read failed): getNextItemCode and the name check then fall back to `items`, which the
- * save reloads, and a partial book here would read as the whole one. Exported for Items.test.js.
+ * or the read failed): the name check then falls back to `items`, which the save reloads, and
+ * nextItemCode reads the codes fresh (S855); a partial book here would read as the whole one.
+ * Exported for Items.test.js.
  */
 export function bookWith(book, row, previousName) {
   if (!book) return book
@@ -140,7 +134,21 @@ export default function Items() {
   // Whether the usage scan actually answered. An absent chip must always mean "no records" and
   // never "we could not check" (the UsageChip rule), and the delete guard must refuse rather than
   // promise that nothing references an item it failed to look up.
-  const [usageScan, setUsageScan] = useState({ ok: false, failed: [] })
+  //
+  // S855 (PERF-3): the list no longer waits for the scan, so "still running" is a state the page
+  // now shows, and it needs its own value. `ok: false` had meant both "pending" and "failed", so a
+  // scan in flight would have painted the failure banner. `status` is 'pending' (on mount, on a
+  // client switch and at the start of every re-scan), 'ok' or 'failed'; every reader below fails
+  // closed on anything but 'ok'. `mapReady` says `refMap` holds a complete answer from an earlier
+  // scan of this client, which only the Used In filters lean on while a re-scan runs.
+  const [usageScan, setUsageScan] = useState({ status: 'pending', failed: [], mapReady: false })
+  // Which scan is current. A re-scan after a delete can overlap the one before it, and the older one
+  // must not land last and paint its map over the newer answer.
+  const scanSeqRef = useRef(0)
+  // Every code this visit has minted, so a scan that read the book just BEFORE a save cannot land
+  // after it and hand the next add the same code. Codes only: a deleted item's code staying taken
+  // costs one skipped number, while a name kept here could block a name that is free again.
+  const mintedCodesRef = useRef([])
   // The client's WHOLE item book, names and codes, unfiltered — including the sub-recipe mirror
   // rows `loadItems` excludes and `items` therefore never contains.
   //
@@ -148,13 +156,14 @@ export default function Items() {
   // real items (Stock Count deliberately does not filter `is_sub_recipe`), so a name shared with
   // one splits that ingredient's count exactly as a second real item would — and it was the one
   // collision the S706 check could not see, because the array it reads has the mirrors filtered
-  // out. `getNextItemCode` had the same blind spot one column over: it took its max over the
-  // filtered, possibly-cached array, so a mirror's code never counted and the next item could be
-  // minted onto it.
+  // out. The code minter (`nextItemCode`, was getNextItemCode) had the same blind spot one column
+  // over: it took its max over the filtered, possibly-cached array, so a mirror's code never
+  // counted and the next item could be minted onto it.
   //
-  // Null means "not read yet, or the read failed" — never "the book is empty". The check falls
+  // Null means "not read yet, or the read failed" — never "the book is empty". The name check falls
   // back to `items` in that state, which is exactly the S706 behaviour, and the unique index added
-  // in 20260909120000 is what makes the fallback safe rather than merely unchanged.
+  // in 20260909120000 is what makes the fallback safe rather than merely unchanged. A new CODE is
+  // never minted from `items` (no index backs it): with no book, the save reads the codes fresh.
   const [book, setBook] = useState(null)
   const [filterUsage, setFilterUsage] = useState('all')
   // A failed READ of the item book is not an empty item book. Without this, `data || []` renders
@@ -186,17 +195,43 @@ export default function Items() {
       const cached = readPageCache('items', 'items', clientId)
       setItems(cached ?? [])
       setCategories(readPageCache('items', 'categories', clientId) ?? [])
-      setRefMap({}); setRefCounts({}); setUsageScan({ ok: false, failed: [] }); setBook(null)
+      setRefMap({}); setRefCounts({}); setUsageScan({ status: 'pending', failed: [], mapReady: false }); setBook(null)
+      mintedCodesRef.current = []
       setLoadError(null); setPageError(null)
       setLoading(!cached)
     } else if (items.length === 0) {
       setLoading(true) // a cached list keeps showing while this refreshes
     }
-    Promise.all([loadCategories(clientId), loadItems(clientId), checkAllUsage(clientId)])
+    // S855 (PERF-3): the list waits for the list, not for the usage scan. The scan is two serial
+    // levels (the item book, then the server's reference counts) and the table used to stay on
+    // "Loading…" until both had answered. It starts in this same tick, so it costs no extra time, and
+    // Used In fills in after the rows paint; every action that reads it waits for `status: 'ok'`.
+    checkAllUsage(clientId)
+    Promise.all([loadCategories(clientId), loadItems(clientId)])
       .finally(() => { if (loadedClientRef.current === clientId) setLoading(false) })
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function checkAllUsage(forClient = clientId) {
+  // Starts a scan and never rejects: it is not awaited anywhere, so a throw inside it (a bug, or a
+  // builder that refused its arguments) would otherwise be an unhandled rejection that leaves the
+  // column on "checking…" for good. A throw is a scan that could not run, so it marks the scan failed.
+  function checkAllUsage(forClient = clientId) {
+    const seq = ++scanSeqRef.current
+    setUsageScan(s => ({ status: 'pending', failed: [], mapReady: s.mapReady }))
+    const isCurrent = () => loadedClientRef.current === forClient && scanSeqRef.current === seq
+    return runUsageScan(forClient, isCurrent).catch(err => {
+      console.error('Item Master: the usage scan could not run', err)
+      if (isCurrent()) settleScan(s => ({ ...s, status: 'failed', failed: ['the usage records'] }))
+    })
+  }
+
+  // The scan has answered, either way. A "still checking" refusal from a Del pressed while it ran is
+  // spent now, so it comes down rather than asking the reader to wait for something that is over.
+  function settleScan(next) {
+    setUsageScan(next)
+    setPageError(e => (e && e.scanPending ? null : e))
+  }
+
+  async function runUsageScan(forClient, isCurrent) {
     // None of these tables were filtered at all — for an admin "viewing as" a client, RLS
     // allows every tenant's rows, so this pulled every client's ENTIRE purchase/stock/wastage/
     // requisition/return history into the browser just to compute a "Used In" badge (a real
@@ -214,11 +249,11 @@ export default function Items() {
     // filtered `items` array cannot answer either question.
     const { data: myItems, error: myItemsErr } = await fetchAllRows(() =>
       scopedFrom('items', 'id, name, is_sub_recipe, item_code').order('id'))
-    if (loadedClientRef.current !== forClient) return
+    if (!isCurrent()) return
     // A failed read must not blank the usage map — it feeds the delete guard, and an empty map
     // reads as "nothing references this item" (S612 silent-zero class). Record that it failed, so
     // the guard refuses instead of promising the item is unreferenced.
-    if (myItemsErr) { setUsageScan({ ok: false, failed: ['the item list'] }); setBook(null); return }
+    if (myItemsErr) { settleScan(s => ({ ...s, status: 'failed', failed: ['the item list'] })); setBook(null); return }
 
     // Keyed on the same lower(name) the DB's unique index uses, so the message the form gives and
     // the constraint the server enforces cannot disagree about what counts as the same name.
@@ -231,7 +266,7 @@ export default function Items() {
 
     const myItemIds = (myItems || []).map(i => i.id)
     if (myItemIds.length === 0) {
-      setRefMap({}); setRefCounts({}); setUsageScan({ ok: true, failed: [] }); return
+      setRefMap({}); setRefCounts({}); settleScan({ status: 'ok', failed: [], mapReady: true }); return
     }
 
     // S792 (MASTER-8): counted on the server, in one call. This was twelve reads, one per
@@ -243,56 +278,34 @@ export default function Items() {
     // A row counts whatever its quantity: a Closing Stock count of 0 is a count (S695), a staff meal
     // defaults to qty 0, and every one of them blocks a delete, so every one of them earns the chip.
     const { data: counts, error: countErr } = await readItemRefCounts(supabase, myItemIds)
-    if (loadedClientRef.current !== forClient) return
+    if (!isCurrent()) return
     // A read that failed is NOT a book with no references. The map is left as it was (the same
     // choice as the item-list failure above), and the scan is marked failed, so the column says
     // "not checked" and the delete guard refuses rather than promising nothing references an item.
-    if (countErr) { setUsageScan({ ok: false, failed: ['the usage records'] }); return }
+    if (countErr) { settleScan(s => ({ ...s, status: 'failed', failed: ['the usage records'] })); return }
     setRefMap(refCodesFromCounts(counts))  // any reference at all: the chip, the filters, the delete guard
     setRefCounts(counts)                    // the same rows per code: the price-change warning (S756)
-    setUsageScan({ ok: true, failed: [] })
+    settleScan({ status: 'ok', failed: [], mapReady: true })
   }
 
   async function deleteItem(item) {
     setPageError(null)
-    const refs = refMap[item.id] || []
-    // And it refuses outright when the scan did not answer. Three of the eleven referencing tables
-    // are ON DELETE CASCADE, so "the database will stop me" is true for five of them and false for
-    // three — a delete run on an unchecked item does not fail safely, it destroys requisition
-    // lines, staff meals and vendor returns without asking.
-    if (refs.length === 0 && !usageScan.ok) {
-      setPageError(
-        `Crest could not check where "${item.name}" is used${usageScan.failed.length ? ` — ${usageScan.failed.join(', ')} could not be read` : ''}, so it will not delete it. ` +
-        'Some of those records would be removed along with the item rather than blocking the delete, and there is no undo. Reload the page and try again; if the check keeps failing, hide the item instead.'
-      )
+    // The guard reads only the scan: refuse while it runs or after it failed (fail closed, three of
+    // the eleven referencing tables CASCADE), refuse a referenced item for a non-admin, offer an
+    // admin the force-delete unless a transfer blocks it. Every branch is in itemDeleteGuard.js.
+    const verdict = deleteGuard({
+      name: item.name, refs: refMap[item.id] || [],
+      status: usageScan.status, failed: usageScan.failed, isAdmin,
+    })
+    if (verdict.action === 'refuse') {
+      setPageError(verdict.scanPending ? { text: verdict.text, detail: '', scanPending: true } : verdict.text)
       return
     }
-    if (refs.length > 0) {
-      const fullNames = refs.map(code => USAGE_LABELS[code] || code).join(', ')
-      if (!isAdmin) {
-        // "Deleting it would take those records with it" is only true of the tables that CASCADE.
-        // A Closing Stock count or a purchase line refuses the delete rather than going with it, so
-        // the message claims erasure only for the tables where it would really happen (S766).
-        const erased = ITEM_REF_TABLES.filter(t => t.cascades && refs.includes(t.label)).map(t => t.name)
-        setPageError(
-          `"${item.name}" can't be deleted — it has records in ${fullNames}, and an item stays in Item Master for as long as any record names it.` +
-          (erased.length ? ` Deleting it would also erase its ${erased.join(', ')} records.` : '') +
-          ` ${HIDE_INSTEAD}`
-        )
-        return
-      }
-      // S849 (PNL-8): an item that moved between outlets is never force-deleted. force_delete_item
-      // refuses it (one outlet's half of a transfer must not vanish while the other half stands), so
-      // the dialog is not offered at all: the page says why and points at Hide.
-      const blocked = forceDeleteBlockedText(refs)
-      if (blocked) {
-        setPageError(`"${item.name}" can't be deleted — it has records in ${fullNames}. ${blocked}`)
-        return
-      }
+    if (verdict.action === 'force') {
       // Admin: offer to force-delete (removes the referencing records too). The most destructive
       // action in IMS, so the ask is the product's own dialog with the consequence spelled out
       // (S682; was a window.confirm with the same text squeezed into an OS box).
-      askForceDelete(item, `"${item.name}" is referenced in ${fullNames}.`)
+      askForceDelete(item, verdict.lead)
       return
     }
     askConfirm({
@@ -421,7 +434,8 @@ export default function Items() {
   async function loadItems(forClient = clientId) {
     // Paged: a bare select stops at PostgREST's 1000 rows with no error and nothing in the data to
     // say so, which on this page means a partial item book presented as the whole one — and
-    // getNextItemCode() then takes its max over the visible slice and mints a duplicate code.
+    // the code minter took its max over the visible slice and minted a duplicate code (it reads the
+    // unfiltered book since S707, and never this list since S855).
     // `.order('id')` is the unique tiebreaker paging requires after the display order.
     const { data, error } = await fetchAllRows(() =>
       scopedFrom('items', '*, categories(name)')
@@ -523,9 +537,20 @@ export default function Items() {
   // a code another row already holds. `item_code` carries no unique index (deliberately: nothing
   // keys off it, and pushing HQ's codes into a branch that minted its own would make every such
   // push an abort), so nothing downstream would have caught the collision.
-  function getNextItemCode() {
-    const codes = book ? book.codes : items.map(i => i.item_code).filter(Boolean)
-    return nextCodeAfter(settings?.item_code_prefix || 'ITM', codes)
+  //
+  // S855 (PERF-3): the book is read beside the list rather than before it, so an Add can now reach
+  // here before the book has landed (or after its read failed). That used to fall back to `items`,
+  // the exact filtered array the paragraph above rules out. It reads the codes fresh instead, one
+  // round trip and only in that window, and resolves `{ code }` or `{ error }`; a failed read stops
+  // the save rather than guessing. Codes this visit already minted always count (`mintedCodesRef`).
+  async function nextItemCode() {
+    let codes = book?.codes
+    if (!codes) {
+      const { data, error } = await fetchAllRows(() => scopedFrom('items', 'id, item_code').order('id'))
+      if (error) return { error }
+      codes = (data || []).map(i => i.item_code).filter(Boolean)
+    }
+    return { code: nextCodeAfter(settings?.item_code_prefix || 'ITM', [...codes, ...mintedCodesRef.current]) }
   }
 
   // One entry point for the modal's error line, so a stale technical detail can never outlive the
@@ -575,7 +600,12 @@ export default function Items() {
       `Reload the page and try again, or keep ${oldUom}.`
     const known = refMap[original.id] || []
     if (known.length > 0) return refused(known.map(code => USAGE_LABELS[code] || code).join(', '))
-    if (!usageScan.ok) return unchecked
+    // S855: the list paints before the scan answers, so "not answered yet" is its own sentence. It
+    // still refuses: the live re-check below is only trusted on top of a scan that answered.
+    if (usageScan.status === 'pending') {
+      return `Still checking where "${original.name}" is used, and a unit change re-reads every past record. Try again in a moment, or keep ${oldUom}.`
+    }
+    if (usageScan.status !== 'ok') return unchecked
     const results = await Promise.all(ITEM_REF_TABLES.map(({ table }) =>
       supabase.from(table).select('item_id', { count: 'exact', head: true }).eq('item_id', original.id)
         .then(r => r, err => ({ error: err }))))
@@ -597,7 +627,13 @@ export default function Items() {
     const packMoved = oldPu !== payload.purchase_unit || Math.abs(oldCf - payload.conversion_factor) > 1e-9
     const counts = refCounts[original.id] || {}
     // The sentence lives in itemRefTables.js since S792, so Price Tracker's confirm says the same.
-    const pastRecords = priceImpactSentence(counts, { complete: usageScan.ok })
+    // S855: while the scan is still running an empty count is "not counted yet", never "no past
+    // records", and it is not a failure either, so it gets its own wording rather than the
+    // could-not-count sentence. Either way the confirm opens.
+    const scanPending = usageScan.status === 'pending'
+    const pastRecords = scanPending && !priceImpactPhrase(counts)
+      ? 'Crest is still counting the past records of this item, so it cannot say yet how many figures change, but stock counts, wastage, staff meals and recipe costs all read this price live, including months already closed.'
+      : priceImpactSentence(counts, { complete: usageScan.status === 'ok' })
     const bought = (counts.P || 0) > 0 || (counts.PO || 0) > 0
     const parts = []
     if (priceMoved && pastRecords) {
@@ -609,7 +645,7 @@ export default function Items() {
         </p>
       )
     }
-    if (packMoved && (bought || !usageScan.ok)) {
+    if (packMoved && (bought || usageScan.status !== 'ok')) {
       const packOf = (pu, cf) => (pu ? `1 ${pu} = ${cf} ${payload.uom}` : `no pack (bought in ${payload.uom})`)
       parts.push(
         <p key="pack" style={{ margin: '0 0 8px' }}>
@@ -746,11 +782,20 @@ export default function Items() {
       }
       rememberInBook({ id: editingId, name: payload.name, is_sub_recipe: false }, items.find(i => i.id === editingId)?.name)
     } else {
-      const itemCode = getNextItemCode()
+      const minted = await nextItemCode()
+      if (minted.error) {
+        // Nothing was sent: the insert never ran, so this may say the item was not added.
+        const { text, detail } = errorInfo(minted.error, 'operator')
+        showError(`"${payload.name}" was not added: Crest could not read the item codes already in use, so a new code could repeat one. What you typed is still here. ${text}`, detail)
+        setSaving(false)
+        return false
+      }
+      const itemCode = minted.code
       // `single` returns the row, so the book can key the new name to its id: an edit of the item
       // just added must not read as a clash with itself.
       const { data, error } = await scopedInsert('items', { ...payload, item_code: itemCode }, { single: true })
       if (error) { showSaveError(error); setSaving(false); return false }
+      mintedCodesRef.current.push(itemCode)
       rememberInBook({ id: data?.id, name: payload.name, item_code: itemCode, is_sub_recipe: false })
     }
     setSaving(false)
@@ -808,6 +853,14 @@ export default function Items() {
   // brief empty `items` and wipe the choice; the chips and the list read this one value.
   const shownCat = filterCat === 'all' || catsWithItems.some(c => c.id === filterCat) ? filterCat : 'all'
   const showCategoryCol = shownCat === 'all'
+  // S855 (PERF-3): the Used In filters read `refMap`, so they open only on a complete answer. Before
+  // the first scan lands (or after a scan failed) the map is empty or partial, and the Unused filter
+  // read it as "nothing references any of these" and listed every item. While a RE-scan runs (after
+  // a delete) the last complete map keeps the list still instead of jumping to every item and back;
+  // Del refuses in that window all the same. `filterUsage` is kept, so a chip pressed earlier comes
+  // back on its own once the filters reopen.
+  const usageFiltersOpen = usageScan.status === 'ok' || (usageScan.status === 'pending' && usageScan.mapReady)
+  const shownUsage = usageFiltersOpen ? filterUsage : 'all'
 
   // One memoized pass replaces what used to be a fresh filter here PLUS a full items.filter()
   // inside every category tab's render (O(tabs × items), with the same predicate re-evaluated
@@ -821,10 +874,10 @@ export default function Items() {
       const matchSearch = item.name.toLowerCase().includes(s) || (item.item_code || '').toLowerCase().includes(s)
       const usage = refMap[item.id] || []
       const matchUsage =
-        filterUsage === 'all'    ? true :
-        filterUsage === 'unused' ? usage.length === 0 :
-        filterUsage === 'stock'  ? (usage.includes('OS') || usage.includes('CS')) :
-        usage.includes(filterUsage)
+        shownUsage === 'all'    ? true :
+        shownUsage === 'unused' ? usage.length === 0 :
+        shownUsage === 'stock'  ? (usage.includes('OS') || usage.includes('CS')) :
+        usage.includes(shownUsage)
       if (!matchSearch || !matchUsage) return
       searchMatched.push(item)
       tabCounts.all += 1
@@ -838,7 +891,7 @@ export default function Items() {
         return bHas - aHas
       })
     return { filtered, tabCounts }
-  }, [items, search, refMap, filterUsage, shownCat, sortConvFirst])
+  }, [items, search, refMap, shownUsage, shownCat, sortConvFirst])
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
@@ -846,17 +899,29 @@ export default function Items() {
   // 40px height, the coarse-pointer target and a focus ring); this file had hand-rolled it.
   // What the printed sheet is actually a list of, in the same words as the controls that narrowed
   // it. Built here rather than inline so the header and the sheet cannot describe different things.
+  // The applied filter (`shownUsage`), never the pressed-earlier one, and while a re-scan runs the
+  // sheet says its Used In list is the last finished check rather than vouching for it as current.
   const usageScopeLabel = { all: null, R: 'used in recipes', P: 'used in purchases', stock: 'in stock counts', unused: 'unused items only' }
+  const usageScope = usageScopeLabel[shownUsage]
   const printScope = [
     shownCat === 'all' ? 'All categories' : (categories.find(c => c.id === shownCat)?.name || 'One category'),
     search.trim() ? `matching "${search.trim()}"` : null,
-    usageScopeLabel[filterUsage],
+    usageScope && usageScan.status === 'pending' ? `${usageScope}, as of the last finished check` : usageScope,
   ].filter(Boolean).join(' · ')
 
   // S756 (D5): the unit is a property of every quantity already recorded against the item, so it
   // stops being editable as soon as anything references it. `doSave` refuses independently (and
   // re-checks live), because this map is a page-load snapshot.
-  const uomLocked = !!editing && (refMap[editing]?.length || 0) > 0
+  //
+  // S855: it is also locked until the scan has answered (fail closed): with the list painting first,
+  // an Edit opened in the first second would otherwise offer a unit change on an empty map. The
+  // reason picks the line under the box; a known reference wins, since it holds whatever the scan says.
+  const uomLockReason = !editing ? null
+    : (refMap[editing]?.length || 0) > 0 ? 'records'
+    : usageScan.status === 'pending' ? 'pending'
+    : usageScan.status !== 'ok' ? 'unchecked'
+    : null
+  const uomLocked = uomLockReason != null
 
   const tabProps = (tab) => ({
     type: 'button',
@@ -929,10 +994,11 @@ export default function Items() {
           className="action-error--top"
         />
       )}
-      {/* Same for the usage scan: with it unanswered, an empty Used In cell means "not checked". */}
-      {!loading && !usageScan.ok && items.length > 0 && (
+      {/* Same for the usage scan: with it failed, an empty Used In cell means "not checked". Only a
+          FAILED scan: one still running is not a failure, and since S855 the list paints during it. */}
+      {!loading && usageScan.status === 'failed' && items.length > 0 && (
         <ActionError
-          error={`Crest could not check where these items are used${usageScan.failed.length ? ` — ${usageScan.failed.join(', ')} could not be read` : ''}, so the Used In column is incomplete and deleting is blocked. Everything else on this page works normally.`}
+          error={`Crest could not check where these items are used${usageScan.failed.length ? ` — ${usageScan.failed.join(', ')} could not be read` : ''}, so the Used In column is incomplete, its filters are off and deleting is blocked. Everything else on this page works normally.`}
           className="action-error--top"
         />
       )}
@@ -1006,7 +1072,9 @@ export default function Items() {
                   <FieldError id="items-f4" message={fieldErr.uom} />
                   {uomLocked && !fieldErr.uom && (
                     <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, display: 'block' }}>
-                      Locked — this item already has records counted in {form.uom}
+                      {uomLockReason === 'records' ? `Locked — this item already has records counted in ${form.uom}`
+                        : uomLockReason === 'pending' ? 'Locked while Crest checks where this item is used'
+                        : 'Locked — Crest could not check where this item is used. Reload the page to try again.'}
                     </span>
                   )}
                 </div>
@@ -1185,7 +1253,8 @@ export default function Items() {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
-          {/* Used-In filter (S796: FilterChips, so the applied filter has a pressed state). */}
+          {/* Used-In filter (S796: FilterChips, so the applied filter has a pressed state). Closed
+              until the scan has a complete answer (S855, `usageFiltersOpen`), with All pressed. */}
           <FilterChips
             label="Filter by where the item is used"
             options={[
@@ -1194,10 +1263,20 @@ export default function Items() {
               { key: 'P',      label: '📦 Purchases' },
               { key: 'stock',  label: '📊 Stock' },
               { key: 'unused', label: '○ Unused' },
-            ]}
-            active={filterUsage}
+            ].map(o => (o.key === 'all' || usageFiltersOpen ? o : {
+              ...o, disabled: true,
+              title: usageScan.status === 'pending'
+                ? 'Opens once Crest has checked where each item is used.'
+                : 'Off: Crest could not check where items are used. Reload the page to try again.',
+            }))}
+            active={shownUsage}
             onChange={setFilterUsage}
           />
+          {/* ONE polite announcement for the whole column while a scan runs, never one per row: each
+              row cell says "checking…" quietly. Always mounted, so the change is what is announced. */}
+          <span role="status" style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
+            {usageScan.status === 'pending' ? 'Checking where items are used…' : ''}
+          </span>
         </div>
         {/* A lone on/off toggle is a bare .tab-btn with aria-pressed (component-library.md). */}
         <button type="button" aria-pressed={sortConvFirst}
@@ -1320,7 +1399,11 @@ export default function Items() {
                         {refMap[item.id]?.length > 0 ? (
                           <UsageChip names={refMap[item.id].map(code => USAGE_LABELS[code] || code)}
                             text={`Has records in: ${refMap[item.id].map(code => USAGE_LABELS[code] || code).join(', ')}`} />
-                        ) : !usageScan.ok ? (
+                        ) : usageScan.status === 'pending' ? (
+                          // S855: the list paints before the scan lands. Not a dash (that is "no
+                          // records") and not "not checked" (that is a failure): the answer is coming.
+                          <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>checking…</span>
+                        ) : usageScan.status !== 'ok' ? (
                           // The chip must never be able to mean two things: with the scan
                           // unanswered, a dash would read as "no records" when it means "we could
                           // not check", and this column is what the delete guard is read from.
@@ -1343,8 +1426,11 @@ export default function Items() {
                           aria-label={`${item.is_active ? 'Hide' : 'Show'} ${item.name}`}>
                           {togglingId === item.id ? '…' : item.is_active ? 'Hide' : 'Show'}
                         </button>
+                        {/* aria-disabled, not disabled (the S759 pattern): until the scan has answered,
+                            a press says why it will not delete rather than doing nothing. */}
                         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px', color: 'var(--theme-red-text)', borderColor: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }}
-                          onClick={() => deleteItem(item)} aria-label={`Delete ${item.name}`}>Del</button>
+                          onClick={() => deleteItem(item)} aria-label={`Delete ${item.name}`}
+                          aria-disabled={usageScan.status !== 'ok' ? true : undefined}>Del</button>
                         </div>
                       </td>
                     </tr>
