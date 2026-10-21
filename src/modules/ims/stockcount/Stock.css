@@ -24,7 +24,10 @@
      on a tablet; transform composites (DESIGN.md → the S682 layout-property rule). */
   width: 100%;
   height: 100%;
-  background: color-mix(in srgb, var(--theme-accent) 25%, transparent);
+  /* Green, the palette's "done" (S856, owner): the share already counted. The accent at 25% read
+     as a dim red smudge on a counter's phone. At 40% the ink label over it stays at 5.8:1 on
+     Modernist Night and 7.5:1 on Light. */
+  background: color-mix(in srgb, var(--theme-green) 40%, transparent);
   transform: scaleX(var(--count-scale, 0));
   transform-origin: left;
   transition: transform var(--motion-slow) var(--ease-standard);

@@ -70,14 +70,16 @@ describe('buildCreditNoteHtml — combos', () => {
     const h = html(note({ gross_amount: 374.96, taxable_amount: 374.96, vat_amount: 48.74, net_amount: 424 }), items, true)
     const rows = [...h.match(/<tbody>([\s\S]*?)<\/tbody>/)[1].matchAll(/<tr>(.*?)<\/tr>/g)].map(m => m[1])
     expect(rows).toEqual([
-      '<td>1</td><td></td><td>Momo Combo</td><td>1</td><td>334.96</td><td>334.96</td>',
-      '<td></td><td></td><td colspan="4" style="padding-top:0;padding-left:10px">Chicken Momo</td>',
-      '<td></td><td></td><td colspan="4" style="font-size:10px;padding-top:0;padding-left:18px">Extra cheese +35</td>',
-      '<td></td><td></td><td colspan="4" style="padding-top:0;padding-left:10px">Coke</td>',
-      '<td>2</td><td></td><td>Tea</td><td>1</td><td>40.00</td><td>40.00</td>',
+      '<td>1</td><td>Momo Combo</td><td>1</td><td>334.96</td><td>334.96</td>',
+      '<td></td><td colspan="4" style="padding-top:0;padding-left:10px">Chicken Momo</td>',
+      '<td></td><td colspan="4" style="font-size:10px;padding-top:0;padding-left:18px">Extra cheese +35</td>',
+      '<td></td><td colspan="4" style="padding-top:0;padding-left:10px">Coke</td>',
+      '<td>2</td><td>Tea</td><td>1</td><td>40.00</td><td>40.00</td>',
     ])
     // The note's own stored figures, untouched.
     expect(rowValue(h, 'Gross Amount')).toBe('374.96')
+    // Total Qty counts the combo once, as its bill does (S856, owner decision): 1 combo + 1 tea.
+    expect(rowValue(h, 'Total Qty')).toBe('2')
   })
 })
 

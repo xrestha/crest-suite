@@ -328,11 +328,15 @@ export default function App() {
               <Route path="/pos"        element={<ModuleGate module="pos"><Pos /></ModuleGate>} />
               {/* The till pages run only in the outlet the till belongs to (S809 GAP-OUTLETS-1, Q24):
                   TillOutletGate sits inside ModuleGate on Orders, Billing, Shifts and the KDS. */}
-              <Route path="/pos/orders" element={<ModuleGate module="pos"><TillOutletGate><PosOrders /></TillOutletGate></ModuleGate>} />
+              {/* The two PosOrders routes carry different keys (S856). Without them React kept the
+                  one instance across a switch between them, and with it the view the first one
+                  started on: a staff PIN typing /pos/billing was sent to /pos/orders and still saw
+                  the bills list there (found on a real phone), and Billing → Orders stayed on it. */}
+              <Route path="/pos/orders" element={<ModuleGate module="pos"><TillOutletGate><PosOrders key="orders" /></TillOutletGate></ModuleGate>} />
               {/* Billing station (S762) — the same component on its third view: a list of open
                   bills instead of the floor plan. Supervisor+ is enforced inside PosOrders, since a
                   nav item is not a guard and this URL is typeable. */}
-              <Route path="/pos/billing" element={<ModuleGate module="pos"><TillOutletGate><PosOrders billingStation /></TillOutletGate></ModuleGate>} />
+              <Route path="/pos/billing" element={<ModuleGate module="pos"><TillOutletGate><PosOrders key="billing" billingStation /></TillOutletGate></ModuleGate>} />
               <Route path="/pos/tables" element={<ModuleGate module="pos"><PosTableManagement /></ModuleGate>} />
               <Route path="/pos/customers" element={<ModuleGate module="pos"><PosCustomers /></ModuleGate>} />
               <Route path="/pos/parking" element={<ModuleGate module="pos"><PosParkingSlips /></ModuleGate>} />

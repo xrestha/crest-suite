@@ -20,7 +20,8 @@ import { nepalTime, nepalDateAd, nepalBsLong } from '../../../shared/nepalTime'
 import { npr2 } from '../../../shared/nepalMoney'
 // The bill's own choices row (S758) and item rows (S839: a combo is one row with its dishes under it),
 // so the note's lines read as they did on the bill.
-import { billOptionRow, billItemRowsHtml } from '../orders/posOrderPrintHtml'
+import { billOptionRow, billItemRowsHtml, BILL_TABLE_CSS, BILL_TABLE_HEAD } from '../orders/posOrderPrintHtml'
+import { printedQtyOf } from '../orders/comboBillRows'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
 export { COPY_LABEL }
 
@@ -73,7 +74,7 @@ export function buildCreditNoteHtml(creditNote, items, settings, outletName, hsc
   // abroad carried the next or previous day beside a Nepal-pinned clock.
   const adDateStr = nepalDateAd(now)
   const bsDateStr = nepalBsLong(now)
-  const totalQty  = items.reduce((s, i) => s + i.qty, 0)
+  const totalQty  = printedQtyOf(items)   // a combo once, as its bill counts it (S856)
   // Every figure prints through the bill's own npr2 (S833), bare as the bill prints it, so a note
   // reads 12,345.00 beside its bill rather than 12345.00. The maths (Round Off) stays on numbers;
   // npr2 rounds to the paisa as toFixed(2) did, so only the grouping changes.
@@ -89,14 +90,7 @@ export function buildCreditNoteHtml(creditNote, items, settings, outletName, hsc
   .lg  { font-size:15px; letter-spacing:1px; }
   hr   { border:none; border-top:1px dashed #000; margin:6px 0; }
   .row { display:flex; justify-content:space-between; align-items:baseline; padding:2px 0; }
-  table { width:100%; border-collapse:collapse; font-size:11px; table-layout:fixed; }
-  th, td { text-align:left; padding:2px 4px 2px 0; word-wrap:break-word; }
-  th:last-child, td:last-child { padding-right:0; }
-  th:nth-child(1), td:nth-child(1) { width:19px; }
-  th:nth-child(2), td:nth-child(2) { width:24px; }
-  th:nth-child(4), td:nth-child(4) { width:26px; text-align:center; padding-right:0; }
-  th:nth-child(5), td:nth-child(5) { width:46px; text-align:right; }
-  th:nth-child(6), td:nth-child(6) { width:54px; text-align:right; }
+${BILL_TABLE_CSS}
   .tot  { font-weight:bold; font-size:13px; }
   .copy { font-size:11px; letter-spacing:1px; }
 </style>
@@ -119,7 +113,7 @@ export function buildCreditNoteHtml(creditNote, items, settings, outletName, hsc
   <div class="row"><span>Reason:</span><span>${esc(creditNote.reason)}</span></div>
   <hr>
   <table>
-    <thead><tr><th>Sn</th><th>HSC</th><th>Particulars</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
+    ${BILL_TABLE_HEAD}
     <tbody>
       ${billItemRowsHtml(items, hscMap, (i, opts) => billOptionRow(withChoices(i), opts))}
     </tbody>

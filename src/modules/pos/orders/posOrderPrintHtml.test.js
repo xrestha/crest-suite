@@ -306,11 +306,12 @@ describe('combos on the bill and the Complimentary Slip', () => {
   // The momo's line is its share of the combo plus its own extra cheese (+40, charged on top): 290.
   const MOMO = dish('Chicken Momo', 'g-momo', 0, { unit_price: 290, options: [{ option_name: 'Extra cheese', price_delta: 40 }] })
   const COKE = dish('Coke', 'g-drink', 1, { unit_price: 100 })
-  // The item rows exactly as buildBillHtml printed them before S839.
-  const legacyRows = (items, hscMap = {}) => items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${escapeHtml(hscMap[i.recipe_id] || '')}</td><td>${escapeHtml(i.name)}</td><td>${i.qty}</td><td>${npr2(i.unit_price)}</td><td>${npr2(i.qty * i.unit_price)}</td></tr>${billOptionRow(i)}`).join('')
+  // An ordinary line's row: S.N., the name with its HSC code on a small line under it (S856, owner
+  // decision; the code had its own column, where 2202.99 broke over three lines), qty, rate, amount.
+  const legacyRows = (items, hscMap = {}) => items.map((i, idx) => `<tr><td>${idx + 1}</td><td>${escapeHtml(i.name)}${hscMap[i.recipe_id] ? `<div style="font-size:10px">HSC ${escapeHtml(hscMap[i.recipe_id])}</div>` : ''}</td><td>${i.qty}</td><td>${npr2(i.unit_price)}</td><td>${npr2(i.qty * i.unit_price)}</td></tr>${billOptionRow(i)}`).join('')
   const tbody = html => html.match(/<tbody>([\s\S]*?)<\/tbody>/)[1].trim()
 
-  test('a bill without a combo prints its lines byte for byte as before', () => {
+  test('a bill without a combo prints one row per line, each with its choices under it', () => {
     const items = [TEA, LASSI, { ...BILL_27[0] }]
     const html = bill({ items })
     expect(tbody(html)).toBe(legacyRows(items))
@@ -321,29 +322,29 @@ describe('combos on the bill and the Complimentary Slip', () => {
     const html = bill({ items: [TEA, COKE, LASSI, MOMO] })
     const rows = [...tbody(html).matchAll(/<tr>(.*?)<\/tr>/g)].map(m => m[1])
     expect(rows).toEqual([
-      '<td>1</td><td></td><td>Tea</td><td>2</td><td>40.00</td><td>80.00</td>',
+      '<td>1</td><td>Tea</td><td>2</td><td>40.00</td><td>80.00</td>',
       // Σ 290 + 100 = 390 for one combo, at the place of its first dish (the Coke came first).
-      '<td>2</td><td></td><td>Momo Combo</td><td>1</td><td>390.00</td><td>390.00</td>',
+      '<td>2</td><td>Momo Combo</td><td>1</td><td>390.00</td><td>390.00</td>',
       // Its dishes in the order of their picks, by name only, the momo's own choice under it.
-      '<td></td><td></td><td colspan="4" style="padding-top:0;padding-left:10px">Chicken Momo</td>',
-      '<td></td><td></td><td colspan="4" style="font-size:10px;padding-top:0;padding-left:18px">Extra cheese +40</td>',
-      '<td></td><td></td><td colspan="4" style="padding-top:0;padding-left:10px">Coke</td>',
-      '<td>3</td><td></td><td>Lassi</td><td>1</td><td>120.00</td><td>120.00</td>',
-      '<td></td><td></td><td colspan="4" style="font-size:10px;padding-top:0">Large +30</td>',
+      '<td></td><td colspan="4" style="padding-top:0;padding-left:10px">Chicken Momo</td>',
+      '<td></td><td colspan="4" style="font-size:10px;padding-top:0;padding-left:18px">Extra cheese +40</td>',
+      '<td></td><td colspan="4" style="padding-top:0;padding-left:10px">Coke</td>',
+      '<td>3</td><td>Lassi</td><td>1</td><td>120.00</td><td>120.00</td>',
+      '<td></td><td colspan="4" style="font-size:10px;padding-top:0">Large +30</td>',
     ])
     // The totals are posBillingMath's, as on any bill.
     expect(rowValue(html, 'Gross Amount')).toBe('590.00')
     expect(rowValue(html, 'Net Amount')).toBe('590.00')
   })
 
-  test('two of one combo print qty 2 at the combo\'s rate; the HSC column stays blank for it', () => {
+  test('two of one combo print qty 2 at the combo\'s rate, with no HSC code for it', () => {
     const html = buildBillHtml({
       order: { invoice_no: 28, invoice_fy: '83/84', vat_registered: false, closed_at: '2026-10-10T08:00:00Z' },
       items: [{ ...MOMO, qty: 2 }, { ...COKE, qty: 2 }],
       copyLabel: 'ORIGINAL', outletName: 'Bloom Cafe', billingSettings: SETTINGS,
       hscMap: { 'r-Chicken Momo': '2106', 'r-Coke': '2202' }, tableName: 'Table 2', cashierName: 'Sita',
     })
-    expect(html).toContain('<tr><td>1</td><td></td><td>Momo Combo</td><td>2</td><td>390.00</td><td>780.00</td></tr>')
+    expect(html).toContain('<tr><td>1</td><td>Momo Combo</td><td>2</td><td>390.00</td><td>780.00</td></tr>')
     expect(html).not.toContain('2106')
   })
 
@@ -365,5 +366,22 @@ describe('combos on the bill and the Complimentary Slip', () => {
       + '<div style="font-size:10px;padding-left:10px">Chicken Momo</div><div style="font-size:10px;padding-left:18px">Extra cheese</div>'
       + '<div style="font-size:10px;padding-left:10px">Coke</div></td><td>1</td><td>125.50</td></tr>')
     expect(html).toContain('<span>Total Food Cost:</span><span>NPR 149.50</span>')
+    // Total Qty counts the combo once, as the bill does (S856): 2 tea + 1 combo.
+    expect(rowValue(html, 'Total Qty')).toBe('3')
+  })
+
+  // S856 (found on a live bill): in its own 24px column "2202.99" printed as 220 / 2.9 / 9 and ran
+  // into the S.N. It prints under the dish's name now, and the table has five columns.
+  test('an HSC code prints whole on a small line under the dish name', () => {
+    const html = buildBillHtml({
+      order: { invoice_no: 29, invoice_fy: '83/84', vat_registered: false, covers: 2, closed_at: '2026-10-10T08:00:00Z' },
+      items: [TEA, { ...COKE, qty: 1 }, MOMO], copyLabel: 'ORIGINAL', outletName: 'Bloom Cafe', billingSettings: SETTINGS,
+      hscMap: { 'r-tea': '0902.40', 'r-Coke': '2202.99' }, tableName: 'Table 2', cashierName: 'Sita',
+    })
+    expect(html).toContain('<tr><td>1</td><td>Tea<div style="font-size:10px">HSC 0902.40</div></td><td>2</td><td>40.00</td><td>80.00</td></tr>')
+    expect(html).toContain('<thead><tr><th>Sn</th><th>Particulars</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>')
+    expect(html).not.toContain('<th>HSC</th>')
+    // A combo's row carries no code, as before.
+    expect(html).not.toContain('2202.99')
   })
 })

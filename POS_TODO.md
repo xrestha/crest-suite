@@ -23,7 +23,21 @@ the room map (its own project; cancelled S856) and a browser pass of the new scr
   switched off and unused, so nothing in the app changes). **Not needed:** barcode support. **Kept as is:**
   hand-entered sales and purchase lines replaced on edit, until a client nears the NRs 5 crore tier.
 - **To the accountant:** the Tier-1 certification question, in one note with IMS's sales-side VAT question.
-- **The till checks still needing a person:** done together with the owner on BLOOM CAFE.
+- **The till checks still needing a person:** done together with the owner on BLOOM CAFE (a phone made a till,
+  "Test Waiter" Staff and "Test Cashier" Supervisor PINs, a "Test Combo" till-only; all kept for the re-check).
+  Pressed: the Billing guard for a Staff PIN, the idle lock with its kept cart, a combo with a swap and a
+  dish's own choice, its KOT and BOT, a table move, a discount on a mixed bill, a comped combo, the bill and
+  its credit note. Two test bills (TI2642, TI2643) were reversed by Credit Notes 3 and 4, refunded in cash,
+  "not served"; the shift's Expected Cash is back at NPR 12,676. Fixed (crest-v471): a Staff PIN typing
+  `/pos/billing` kept the bills list under Orders; the HSC code broke across three lines (now under the
+  dish name, owner); a credit note and Complimentary Slip counted a combo's dishes in Total Qty (now once,
+  owner); the payment preview printed no covers; the credit note blamed a dropped connection when a print
+  window had paused the page; Send's tip covered the message line on a phone.
+- **Open from the live check:** (1) the Z-report's Comp Food Cost counts whole Complimentary bills only, so a
+  comped dish on a paid bill (the Test Combo) is in no comp cost: owner question. (2) A percent discount skips
+  combo dishes by design (pos-combos.md); check that the discount box says so to a cashier. (3) Still not
+  pressed: the Billing refusal for a bill closed on another till, build-your-own, a guest QR combo, the
+  non-Suite upsell.
 
 **S853 owner decisions (2026-10-21, asked in plain words) on the open items below:**
 - **Build next:** one Send on the order screen (food to the kitchen, drinks to the bar), with holding a course
@@ -894,6 +908,7 @@ In this order. Service charge was offered and **not** chosen.
     test outlet with Customization on), not CASA ACAI CAFE as first written: CASA is a paying
     customer, and the template writes onto its menu. The guest steps were pressed in S767.
   - ~~Release 2: combos~~ — shipped S839 (both kinds; see POS_DECISIONS.md A and `docs/pos-combos.md`).
+    S856 pressed the combo half on BLOOM CAFE (above); the guest QR combo is still open.
     Left open from it (the till floor 455, `20261014170000`, and `admin-user-ops` v71 are live):
     **browser checks** on BLOOM CAFE (set up a combo, ring one on the till with a
     swap and a dish's own choice, Pay with a discount on a mixed bill, comp and move it, a guest QR combo,
@@ -991,7 +1006,7 @@ when these were filed. Every item below assumes they are.
   and no top-row tab, in both the bar and the phone drawer. One sign-in as a non-Suite client's
   Owner answers it — the code path is `suiteUpsellInPanels`.
 
-- [ ] 🟢 **Two guards on the Billing station (S762) were never clicked.** The list, both Bill
+- [ ] 🟢 **(1) pressed S856** on a real till: the guard redirected, but the bills list stayed on screen under Orders; fixed (route keys, crest-v471). (2) still not pressed. **Two guards on the Billing station (S762) were never clicked.** The list, both Bill
   paths (a table and a takeaway), the payment window opening on the right order and ← returning to
   the list were all verified live on BHATTI CHOILA. Two were not, for want of a second actor:
   (1) a Staff-rank PIN typing `/pos/billing` should land back on `/pos/orders` — the component
@@ -1000,7 +1015,7 @@ when these were filed. Every item below assumes they are.
   the tap, should say so and refresh rather than open the covers numpad. Both are single clicks
   once a staff PIN and a second device are to hand.
 
-- [ ] 🟢 **Four S776 behaviours were verified in code and tests but never pressed live** (S776,
+- [ ] 🟢 **(1) pressed S856:** a Staff PIN idle 3+ minutes (screen dark) locked to the PIN screen, named the kept item, and brought it back unsent. **Four S776 behaviours were verified in code and tests but never pressed live** (S776,
   2026-09-17), each for want of a real till or live service on the dummy client:
   (1) **the idle lock on a real PIN session** — keep and restore were exercised by firing the lock
   event by hand as the Owner, and the PIN screen's note by a render test, because the browser was not

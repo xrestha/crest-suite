@@ -188,6 +188,9 @@ const keptBefore = kept => (kept?.reason === 'update' ? 'the till updated'
   : kept?.reason === 'ended' ? 'the sign-in ended' : 'the till locked')
 // The dishes a kept cart had not saved, as a waiter reads them: "1× Masala Tea, 2× Veg Momo" (S809 3g).
 const keptLinesText = kept => keptLinesToRestore(kept?.items, []).map(l => `${l.qty}× ${l.name}`).join(', ')
+// A touch screen (a till tablet, a waiter's phone): where a tap focuses a button and a tip on it
+// would cover what is above it. Read per render, so a tablet with a mouse plugged in counts as one.
+const coarsePointer = () => { try { return window.matchMedia('(pointer: coarse)').matches } catch (_) { return false } }
 
 // `billingStation` is the /pos/billing route (S762) — the SAME component, entered on a third view
 // that lists the open bills instead of the floor plan. Deliberately not a separate page: billing is
@@ -1502,6 +1505,8 @@ export default function PosOrders({ billingStation = false } = {}) {
     bill_remarks: billRemarks, close_reason: closeReason,
     discount_amount: discountAmt,
     table_name: screenTableName, order_no: orderNo, print_count: 0,
+    // The bill prints "Covers:" from the stored order; the preview showed it blank (S856, found live).
+    covers,
   }
   const previewHtml = !billingOpen ? null
     : billingTab === 'pay' ? buildBillHtml({
@@ -7550,17 +7555,25 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               {/* S854 (owner decision): ONE Send. Food goes to the kitchen and drinks to the bar by Ticket
                   Routing; the label says how much is new. Holding a course back is the menu beside it. */}
-              <Tip text={sendTip} style={{ display: 'inline-block', flex: 1, minWidth: 0, borderBottom: 'none' }}>
-                <button
-                  className="btn btn-primary"
-                  style={{ width: '100%', padding: '12px 0', fontSize: 16, justifyContent: 'center', display: 'flex' }}
-                  onClick={saveOrder}
-                  disabled={saving || orderItems.length === 0}
-                  aria-keyshortcuts="Alt+S"
-                >
-                  {saving ? 'Sending…' : sendLabel}
-                </button>
-              </Tip>
+              {(() => {
+                const sendButton = (
+                  <button
+                    className="btn btn-primary"
+                    style={{ width: '100%', padding: '12px 0', fontSize: 16, justifyContent: 'center', display: 'flex' }}
+                    onClick={saveOrder}
+                    disabled={saving || orderItems.length === 0}
+                    aria-keyshortcuts="Alt+S"
+                  >
+                    {saving ? 'Sending…' : sendLabel}
+                  </button>
+                )
+                // On a touch screen a tap focuses Send and its tip then sat over the message line above
+                // it, hiding what the send had just said (S856, found on a phone). The label already
+                // says what it does there; the tip is for a mouse or keyboard.
+                return coarsePointer()
+                  ? <div style={{ flex: 1, minWidth: 0 }}>{sendButton}</div>
+                  : <Tip text={sendTip} style={{ display: 'inline-block', flex: 1, minWidth: 0, borderBottom: 'none' }}>{sendButton}</Tip>
+              })()}
               <RowMenu label="More ways to save this order" zIndex={1100} className="till-hit--row"
                 disabled={saving}
                 items={[unsentLines.length > 0 && {

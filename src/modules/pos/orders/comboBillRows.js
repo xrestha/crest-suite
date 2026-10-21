@@ -85,3 +85,13 @@ export function groupComboLines(items) {
   }
   return rows
 }
+
+/**
+ * Total Qty as the paper counts it (S856, owner decision): what the guest ordered, so a combo counts
+ * once at its quantity, never once per dish inside it — the rule computeOrderAmounts already applied
+ * to the bill. The credit note and the Complimentary Slip counted the dishes, so a bill and its note
+ * gave two different totals for the same food.
+ */
+export function printedQtyOf(items) {
+  return groupComboLines(items).reduce((s, r) => s + (r.combo ? r.qty : (Number(r.item.qty) || 0)), 0)
+}

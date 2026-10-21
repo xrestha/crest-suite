@@ -6,7 +6,7 @@ import { computeOrderAmounts, billVatRegistered } from '../../../utils/posBillin
 import { escapeHtml as esc } from '../../../utils/escapeHtml'
 import { kotBotDoc, voidSlipDoc, moveSlipDoc, renderTicketDocHtml } from '../printing/ticketDoc'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
-import { groupComboLines } from './comboBillRows'
+import { groupComboLines, printedQtyOf } from './comboBillRows'
 
 // Pure 80mm-thermal HTML builders for PosOrders.jsx — no React, no Supabase, no component state.
 // Everything they need (outlet/billing settings, table name, cashier name, HSC codes) is passed
@@ -40,26 +40,42 @@ export function billOptionRow(i, { indent = 0 } = {}) {
         return esc(o.option_name || '') + (d ? ` ${d > 0 ? '+' : '−'}${Math.abs(d)}` : '')
       }).join(', ')
     : esc(i.option_summary)
-  return `<tr><td></td><td></td><td colspan="4" style="font-size:10px;padding-top:0${indent ? `;padding-left:${indent}px` : ''}">${text}</td></tr>`
+  return `<tr><td></td><td colspan="4" style="font-size:10px;padding-top:0${indent ? `;padding-left:${indent}px` : ''}">${text}</td></tr>`
 }
 
 // Combos (S839, docs/pos-combos.md): how far a combo's dishes, and their choices, sit in under it.
 const COMBO_DISH_INDENT = 10
 const COMBO_CHOICE_INDENT = 18
 
-// The item rows of a bill or a credit note. An ordinary line prints as it always has: S.N., HSC, name,
-// qty, rate, amount, and its choices under it. The dishes of one combo (groupComboLines) print as ONE
-// row at the place of its first dish: the combo's name, no HSC, its quantity, amount = the sum of its
-// dishes' qty × unit_price and rate = amount ÷ qty; each dish is listed under it by name, unpriced,
-// with its own choices (whose charges are inside the combo's amount). S.N. counts printed rows.
+// The item rows of a bill or a credit note. An ordinary line prints as S.N., name with its HSC code on
+// a small line under it, qty, rate, amount, and its choices under it. The HSC code had its own 24px
+// column until S856, where a code like 2202.99 broke over three lines and ran into the S.N. (owner
+// decision: under the name). The dishes of one combo (groupComboLines) print as ONE row at the place of
+// its first dish: the combo's name, no HSC, its quantity, amount = the sum of its dishes'
+// qty × unit_price and rate = amount ÷ qty; each dish is listed under it by name, unpriced, with its
+// own choices (whose charges are inside the combo's amount). S.N. counts printed rows.
 // `optionRowOf(line, opts)` prints a line's choices: the credit note passes its reader of the stored ones.
+const hscLine = code => (code ? `<div style="font-size:10px">HSC ${esc(code)}</div>` : '')
+
 export function billItemRowsHtml(items, hscMap, optionRowOf = billOptionRow) {
   return groupComboLines(items).map((r, idx) => (r.combo
-    ? `<tr><td>${idx + 1}</td><td></td><td>${esc(r.name)}</td><td>${r.qty}</td><td>${npr2(r.rate)}</td><td>${npr2(r.amount)}</td></tr>` +
-      r.dishes.map(d => `<tr><td></td><td></td><td colspan="4" style="padding-top:0;padding-left:${COMBO_DISH_INDENT}px">${esc(d.name)}</td></tr>${optionRowOf(d, { indent: COMBO_CHOICE_INDENT })}`).join('')
-    : `<tr><td>${idx + 1}</td><td>${esc(hscMap[r.item.recipe_id] || '')}</td><td>${esc(r.item.name)}</td><td>${r.item.qty}</td><td>${npr2(r.item.unit_price)}</td><td>${npr2(r.item.qty * r.item.unit_price)}</td></tr>${optionRowOf(r.item)}`
+    ? `<tr><td>${idx + 1}</td><td>${esc(r.name)}</td><td>${r.qty}</td><td>${npr2(r.rate)}</td><td>${npr2(r.amount)}</td></tr>` +
+      r.dishes.map(d => `<tr><td></td><td colspan="4" style="padding-top:0;padding-left:${COMBO_DISH_INDENT}px">${esc(d.name)}</td></tr>${optionRowOf(d, { indent: COMBO_CHOICE_INDENT })}`).join('')
+    : `<tr><td>${idx + 1}</td><td>${esc(r.item.name)}${hscLine(hscMap[r.item.recipe_id])}</td><td>${r.item.qty}</td><td>${npr2(r.item.unit_price)}</td><td>${npr2(r.item.qty * r.item.unit_price)}</td></tr>${optionRowOf(r.item)}`
   )).join('')
 }
+
+// The bill's and the credit note's item table: S.N., Particulars (the code under the name), Qty, Rate,
+// Amount. Both documents print it, so the columns are said once.
+export const BILL_TABLE_CSS = `
+  table { width:100%; border-collapse:collapse; font-size:11px; table-layout:fixed; }
+  th, td { text-align:left; padding:2px 4px 2px 0; word-wrap:break-word; }
+  th:last-child, td:last-child { padding-right:0; }
+  th:nth-child(1), td:nth-child(1) { width:19px; }
+  th:nth-child(3), td:nth-child(3) { width:26px; text-align:center; padding-right:0; }
+  th:nth-child(4), td:nth-child(4) { width:46px; text-align:right; }
+  th:nth-child(5), td:nth-child(5) { width:54px; text-align:right; }`
+export const BILL_TABLE_HEAD = '<thead><tr><th>Sn</th><th>Particulars</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>'
 
 export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmount, outletName, billingSettings, hscMap, tableName, cashierName }) {
   // S809 2c (CHECKOUT-6): a closed bill prints as the type it was issued as, from its own stamp, so a
@@ -109,14 +125,7 @@ export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmou
   .lg  { font-size:15px; letter-spacing:1px; }
   hr   { border:none; border-top:1px dashed #000; margin:6px 0; }
   .row { display:flex; justify-content:space-between; align-items:baseline; padding:2px 0; }
-  table { width:100%; border-collapse:collapse; font-size:11px; table-layout:fixed; }
-  th, td { text-align:left; padding:2px 4px 2px 0; word-wrap:break-word; }
-  th:last-child, td:last-child { padding-right:0; }
-  th:nth-child(1), td:nth-child(1) { width:19px; }
-  th:nth-child(2), td:nth-child(2) { width:24px; }
-  th:nth-child(4), td:nth-child(4) { width:26px; text-align:center; padding-right:0; }
-  th:nth-child(5), td:nth-child(5) { width:46px; text-align:right; }
-  th:nth-child(6), td:nth-child(6) { width:54px; text-align:right; }
+${BILL_TABLE_CSS}
   .tot  { font-weight:bold; font-size:13px; }
   .copy { font-size:11px; letter-spacing:1px; }
 </style>
@@ -140,7 +149,7 @@ export function buildBillHtml({ order, items, copyLabel, qrUrl, payments, qrAmou
   <div class="row" style="font-size:11px;color:#000"><span>Cashier: ${esc(cashierName || '')}</span><span>${nowStr}</span></div>
   <hr>
   <table>
-    <thead><tr><th>Sn</th><th>HSC</th><th>Particulars</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead>
+    ${BILL_TABLE_HEAD}
     <tbody>
       ${billItemRowsHtml(items, hscMap)}
     </tbody>
@@ -293,7 +302,7 @@ export function buildCompSlipHtml({ order, items, plateCostOf, copyLabel, outlet
   const bs        = nepalBs(stamp)
   const bsDateStr = bs ? `${bs.day} ${BS_MONTHS[bs.month - 1]} ${bs.year}` : ''
 
-  const totalQty  = items.reduce((s, i) => s + i.qty, 0)
+  const totalQty  = printedQtyOf(items)   // a combo once, as the bill counts it (S856)
   const lineCost  = i => i.qty * (Number(plateCostOf?.(i)) || 0)
   const totalCost = items.reduce((s, i) => s + lineCost(i), 0)
   // A combo is one row here too (S839, groupComboLines): its name, its quantity, and the food cost of

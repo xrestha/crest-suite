@@ -14,7 +14,7 @@ supplier split (the aging half was already fixed in S849). PERF-5 stayed open.
 not engineering: a count-PIN sign-in on a real storeroom phone (S761, below) and the accountant's question about a
 sales-side VAT view for IMS-only clients. **Owner decisions (S856, asked in plain words):** the phone check is done
 together with the owner, step by step; the VAT question goes to the accountant first, in one note with POS's Tier-1
-certification question, and nothing is built until they answer.
+certification question, and nothing is built until they answer. The phone check ran later the same day: see the S761 row below.
 
 **S853 owner decisions (2026-10-21, asked in plain words):**
 - ✅ S855 **Build next:** PERF-2, PERF-3 and PERF-4 together (PERF-4 touches the service worker, so it is planned with
@@ -316,7 +316,12 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
   separate owner decision — not started. **→ Taken into S792 stage 1** (DATABASE-4, owner-approved
   plan 2026-09-28): the count PIN is refused on `opening_stock`, `wastages` and `staff_meals`, and the
   settings that switch scope and blind count off are fenced (DATABASE-1).
-- ⚪ **S761 was not click-verified as a count account.** The PIN is hashed, so the trimmed page was
+- ✅ S856 — **pressed live on a real storeroom phone** (BLOOM CAFE, a "Test Counter" PIN, kept for the re-check):
+  one tab, no NPR per line, blind count hides Purchased, a count saves under the counter's name and clears,
+  and typing `/purchases` lands back on Stock Count. Found and fixed (crest-v471): the drawer offered
+  Inventory Dashboard; the 10-minute lock and Sign out landed on the email `/login`, not `/ims/count`; the
+  plan badge and days-left chip showed to a counter; the count bar's fill is green now (owner). Was:
+  ~~S761 was not click-verified as a count account.~~ The PIN is hashed, so the trimmed page was
   checked by build, lint, the full suite and by hand-checking the header/body/footer column counts
   across all four `hideValues` × `blindCount` combinations — not by signing in on a phone. Worth a
   real look on a storeroom handset before the next month-end count.

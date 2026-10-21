@@ -466,6 +466,9 @@ Three properties hold it together, and each is load-bearing:
   HSC codes that print on the Tax Invoice; called synchronously from `showLoadedOrder` it reads the
   pre-commit cart and the bill goes out short with nothing saying so. The effect waits for
   `view === 'order' && orderId`.
+- **The two routes' `PosOrders` carry their own `key` (`orders`, `billing`; `App.js`, S856).** Without it
+  React kept ONE instance across a switch, with the view it started on: a Staff PIN sent from
+  `/pos/billing` to `/pos/orders` by the rank guard still saw the bills list (found on a real phone).
 - **`openTable(table, { existingOnly: true })` must not fall through to a fresh order.** A row is on
   the Billing list because the floor said that table had an open bill; if it does not any more,
   another till closed it, and the covers numpad is a baffling answer to "bill this".
@@ -764,6 +767,12 @@ Effective rate = settled commission ÷ ex-VAT settled base. The contracted rate 
 against is `settings.pos_delivery_partners[].commission_pct`, also the settle-time pre-fill.
 History: docs/rules-archive/pos-billing.md#delivery-partner-rollup-story
 
+
+### The HSC code prints under the dish name (S856, owner decision)
+
+The bill and the credit note share one item table (`BILL_TABLE_CSS`, `BILL_TABLE_HEAD`, `billItemRowsHtml`):
+S.N., Particulars, Qty, Rate, Amount. In its own 24px column a code like 2202.99 broke over three lines
+and ran into the S.N. The payment window's preview carries the order's covers, as the paper does.
 
 ### A printed slip is stamped with the BILL's moment, not the print's (S670)
 

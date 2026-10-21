@@ -4,7 +4,7 @@ import { supabase } from '../../../supabaseClient'
 import { useTheme } from '../../../context/ThemeContext'
 import { errorText } from '../../../shared/errorText'
 import { getInitials, avatarColorFor, relativeLuminance } from '../../../utils/avatarColor'
-import { IMS_COUNT_HOME } from '../../../shared/imsCountAccess'
+import { IMS_COUNT_HOME, IMS_COUNT_DEVICE_KEY } from '../../../shared/imsCountAccess'
 import DeviceGate from '../../../components/DeviceGate'
 
 // The stock-count tablet's front door (S737). Structural mirror of PosLogin.jsx — same roster, same
@@ -22,7 +22,7 @@ const KEYS = [
   ['C', '0', '⌫'],
 ]
 
-const LS_CLIENT = 'ims_count_client_id'
+const LS_CLIENT = IMS_COUNT_DEVICE_KEY   // ProtectedRoute reads it to send a session ending here back
 const LS_NAME   = 'ims_count_client_name'
 const LS_SECRET = 'ims_count_device_secret'
 

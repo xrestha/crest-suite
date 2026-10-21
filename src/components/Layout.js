@@ -840,8 +840,10 @@ export default function Layout() {
   //
   // As of S638 only this panel's own Dashboard renders here; the four Suite destinations moved
   // into their own labelled group below. See renderSuiteGroup for why.
+  // Through isItemVisible like every other row (S856): a stock-count PIN login's drawer listed
+  // "Inventory Dashboard", a link ProtectedRoute only bounced back to Stock Count.
   function renderDashboardRow() {
-    return renderNavItem(dashNavItem, { pinnable: false })
+    return isItemVisible(dashNavItem) ? renderNavItem(dashNavItem, { pinnable: false }) : null
   }
 
   // ── Crest Suite reads as its own section ─────────────────────────────────────────────────────
@@ -1623,10 +1625,13 @@ export default function Layout() {
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <span className="sidebar-client-label">
-                    Property ·{' '}
-                    <span style={{ color: plan === 'pro' ? 'var(--theme-accent-ink)' : plan === 'growth' ? 'var(--theme-green-text)' : 'var(--theme-text3)', fontWeight: 700 }}>
-                      {plan === 'pro' ? 'Pro' : plan === 'growth' ? 'Growth' : 'Starter'}
-                    </span>
+                    Property
+                    {!imsCountOnly && <>
+                      {' · '}
+                      <span style={{ color: plan === 'pro' ? 'var(--theme-accent-ink)' : plan === 'growth' ? 'var(--theme-green-text)' : 'var(--theme-text3)', fontWeight: 700 }}>
+                        {plan === 'pro' ? 'Pro' : plan === 'growth' ? 'Growth' : 'Starter'}
+                      </span>
+                    </>}
                   </span>
                   {/* Multi-outlet: the same dropdown mechanic the admin switcher above uses, but
                       scoped to this login's group and written through set_active_outlet().
@@ -1654,7 +1659,7 @@ export default function Layout() {
                 </div>
                 {userInfoBlock}
               </div>
-              {!outletDropdownOpen && (() => {
+              {!outletDropdownOpen && !imsCountOnly && (() => {
                 const s = getSubStatus(profile?.clients)
                 if (!s.label) return null
                 return (
@@ -1962,7 +1967,8 @@ export default function Layout() {
               <span className="topbar-context-name topbar-context-name--static">{clientName}</span>
             ) : null}
 
-            {subStatusBadge(isAdmin ? allClients.find(c => c.id === adminViewClientId) : profile?.clients)}
+            {/* A counting tablet shows no plan and no days left (S856, owner): the counter cannot act on either. */}
+            {!imsCountOnly && subStatusBadge(isAdmin ? allClients.find(c => c.id === adminViewClientId) : profile?.clients)}
             {adminViewClientId && !isAdmin && <span className="context-bar-tag">Viewing as admin</span>}
 
             {/* The context bar's facts, hoisted into the shell. Every IMS figure is period-scoped,
@@ -1978,7 +1984,7 @@ export default function Layout() {
                 </span>
               </>
             )}
-            {!isAdmin && clientName && (
+            {!isAdmin && !imsCountOnly && clientName && (
               <>
                 <span aria-hidden="true" className="context-bar-sep">·</span>
                 <span className="context-bar-plan">{plan === 'pro' ? 'Pro' : plan === 'growth' ? 'Growth' : 'Starter'}</span>
@@ -2077,7 +2083,7 @@ export default function Layout() {
         <nav aria-label={`${PANEL_TITLES[panel] || 'Crest'} pages`} className="topbar-nav">
           {/* Each row opens on its module's own dashboard (S800). The cross-module page stays first
               only where it IS the module's dashboard (one module, no Home) and on the admin row. */}
-          {(!homeIsOverview || panel === 'admin') && renderBarPill(dashNavItem, { label: dashLabel })}
+          {(!homeIsOverview || panel === 'admin') && isItemVisible(dashNavItem) && renderBarPill(dashNavItem, { label: dashLabel })}
           {panel === 'home' && homeIsOverview && homeLinks.map(i => renderBarPill(i))}
           {panel === 'ims' && homeIsOverview && imsVisible && isItemVisible(IMS_DASHBOARD) && renderBarPill(IMS_DASHBOARD)}
           {panel === 'hr' && hrVisible && isItemVisible(HR_DASHBOARD) && renderBarPill(HR_DASHBOARD)}

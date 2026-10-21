@@ -23,6 +23,8 @@ there.
   (`comboPricing.js`, display only). A pick's share follows its cheapest dish's guest price, inactive
   dishes included, the last pick takes the rounding. Change both together; the till only ever shows
   the server's prices once a save answers.
+- **Total Qty counts a combo once, on the bill, the credit note and the Complimentary Slip**
+  (`printedQtyOf` in `comboBillRows.js`, S856, owner decision): what the guest ordered, never its dishes.
 - **A bill discount never touches a combo.** `posBillingMath` spreads it per line (0 on a combo dish),
   `storedDiscountRatio` and `billSalesRows` leave combo dishes out, and so do `pos_bill_sales_rows`
   and `guard_pos_order_close` (`discount_on_combo`). A new reader of bill lines that applies the

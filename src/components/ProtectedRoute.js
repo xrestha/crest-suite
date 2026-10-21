@@ -2,7 +2,7 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import SubscriptionLock from './SubscriptionLock'
 import LegalReacceptance from './LegalReacceptance'
-import { IMS_COUNT_HOME, imsCountPathReachable } from '../shared/imsCountAccess'
+import { IMS_COUNT_HOME, IMS_COUNT_LOGIN, imsCountPathReachable, isCountDevice } from '../shared/imsCountAccess'
 import { readTillDevice } from '../modules/pos/tillOutlet'
 
 export default function ProtectedRoute({ children, adminOnly = false }) {
@@ -34,7 +34,9 @@ export default function ProtectedRoute({ children, adminOnly = false }) {
   // S809 ACCESS-7: on an activated till, a session that ends by itself (its tablet revoked, the login
   // blocked, a refresh refused) goes back to that till's PIN screen, never to the owner's email login.
   // A session whose profile could not be read goes there too (S833): the PIN screen signs it out.
-  const signInPage = readTillDevice().clientId ? '/pos/login' : '/login'
+  // A counting device goes to its own PIN screen the same way (S856): its idle lock's redirect lost
+  // the race to this one.
+  const signInPage = readTillDevice().clientId ? '/pos/login' : isCountDevice() ? IMS_COUNT_LOGIN : '/login'
   if (!session) return <Navigate to={signInPage} replace />
   if (adminOnly && profile?.role !== 'admin') return <Navigate to="/dashboard" replace />
   if (!profile) return <Navigate to={signInPage} replace />

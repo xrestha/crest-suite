@@ -422,10 +422,17 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     if (!postsToIms) {
       ims = { posted: false, reason: 'no_ims' }
     } else {
+      const readIms = ms => withTimeout(creditNoteInInventory({ supabase, scopedFrom, note: created, order, today, imsSince: clientModules?.imsSince || null }), ms, 'Checking Inventory')
       try {
-        ims = await withTimeout(creditNoteInInventory({ supabase, scopedFrom, note: created, order, today, imsSince: clientModules?.imsSince || null }), 20000, 'Checking Inventory')
-      } catch (err) {
-        ims = { posted: false, reason: 'read', error: err }
+        ims = await readIms(20000)
+      } catch (_) {
+        // A print window left open pauses this page, and the check's 20 seconds run out behind it:
+        // found live (S856), where the notice then blamed a dropped connection. Ask once more first.
+        try {
+          ims = await readIms(10000)
+        } catch (err) {
+          ims = { posted: false, reason: 'read', error: err }
+        }
       }
     }
     // Nothing more is owed to Inventory: the note is in it, the outlet has none, or the bill is from
@@ -452,7 +459,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
           : ims.reason === 'bill_waiting'
             ? `This bill has not reached Inventory yet, so this credit note waits for it: its food can only go back once the bill's own sale is in. "Post to Inventory" on the Orders floor posts the bill first and then this note, while their month is open in Inventory; for a closed month the Owner posts them from Periods.`
             : ims.reason === 'read'
-              ? `Could not check whether this credit note was taken off Inventory sales (the connection dropped before the answer came back). If it was not, the Orders floor counts it as waiting, and "Post to Inventory" there posts it.`
+              ? `Could not check whether this credit note was taken off Inventory sales: the check got no answer in time. If it was not, the Orders floor counts it as waiting, and "Post to Inventory" there posts it.`
               : `This credit note could not be taken off Inventory sales just now (the database could not post it). It is marked as waiting: press "Post to Inventory" on the Orders floor to post it.`,
       detail: ims.error ? errorLine(ims.error) : '',
     })

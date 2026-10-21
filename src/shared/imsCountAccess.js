@@ -26,6 +26,19 @@ export const IMS_COUNT_HOME = '/stock'
  */
 export const IMS_COUNT_LOGIN = '/ims/count'
 
+/** Where a set-up counting device keeps its outlet (ImsCountLogin writes it when the QR is scanned). */
+export const IMS_COUNT_DEVICE_KEY = 'ims_count_client_id'
+
+/**
+ * Whether this browser was set up as a counting device (S856). ProtectedRoute sends a session that
+ * ends here to the PIN screen, as it sends a till's to the till's: the idle lock asked for
+ * /ims/count, but the signed-out guard's own redirect to /login landed after it, so a counting
+ * phone woke on the email page the counter has no key for (found on a real storeroom phone).
+ */
+export function isCountDevice() {
+  try { return !!localStorage.getItem(IMS_COUNT_DEVICE_KEY) } catch (_) { return false }
+}
+
 /**
  * Minutes of no input before a counting tablet locks back to its PIN screen (S792, owner decision
  * D39). A shared tablet stayed signed in for ever, so the next person counted under the previous
