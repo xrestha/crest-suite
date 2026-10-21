@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import { scopedUpdate as scopedUpdateRaw } from '../shared/scopedDb'
+import { invalidatePeriodList } from '../shared/periodList'
 import { useScopedDb } from '../shared/hooks/useScopedDb'
 import { BS_MONTHS, BS_YEAR_MAX, getBsToday, formatBsDay } from '../utils/bsCalendar'
 import { nepalBs, nepalDateAd } from '../shared/nepalTime'
@@ -351,6 +352,7 @@ export default function Periods() {
         // Destructured, not a bare await — supabase-js RESOLVES with { data, error } rather than
         // throwing, so a bare await here was a click, a "Working…", a reload and an unchanged row.
         const { error } = await scopedUpdateRaw('monthly_periods', cid, { status: 'open' }).eq('id', existing.id)
+        invalidatePeriodList(cid)   // the shared month list (S855) re-reads; a refused write changed nothing, so this costs one read
         if (error) fail(`${label} was not reopened for this client — it is still closed, so they still cannot record anything.`, error)
         else ok(`${label} reopened for this client.`)
         await loadAllClientPeriods()
@@ -435,6 +437,7 @@ export default function Periods() {
     // so this one CAN say the write did not land (the S619 rule is about dead fetches).
     const { data, error } = await scopedUpdateRaw('monthly_periods', cid, { bs_year: year, bs_month: month })
       .eq('id', periodId).eq('status', 'open').select('id')
+    invalidatePeriodList(cid)
     // `errorLine`, not `error.message` — the sentence leads and the raw `code · message` rides
     // along in parentheses (S619). These three edit paths were the ones S682's alert sweep did
     // not reach. `.message` is also optional-chained: a fetch that never reached Postgres has no
@@ -556,6 +559,7 @@ export default function Periods() {
     // the actual fix for that scenario — it doesn't touch status at all, so it can never hit this.
     setNotice(null)
     const { error } = await scopedUpdate('monthly_periods', { status: 'open' }).eq('id', id)
+    invalidatePeriodList(clientId)
     if (error) {
       if (error.code === '23505' || error.message?.includes('one_open_per_client')) {
         fail('Can\'t reopen — a more recent period is already open for this client (only one period can be open at a time). You do not need to: as admin, a closed period is still editable. Use "Add missing bills" on this row for a purchase bill that was missed, edit Stock Count or Sales for this month directly, and use "Resync Opening Stock" to push a corrected closing count into whatever period comes next. Reopening is only needed to hand entry back to the client\'s own logins.')
@@ -742,6 +746,7 @@ export default function Periods() {
       .eq('id', id)
       .eq('status', 'open') // safety guard — DB-level protection
       .select('id')
+    invalidatePeriodList(clientId)
 
     if (error) {
       setEditError(/unique/i.test(error.message || '') ? 'A period for this month already exists.' : errorLine(error, 'operator'))

@@ -39,6 +39,7 @@
 import { supabase } from '../../../supabaseClient'
 import { runChunkedByIds } from '../../../shared/fetchAllRows'
 import { formatAdAsBs } from '../../../utils/bsCalendar'
+import { invalidatePeriodList } from '../../../shared/periodList'
 
 // Parents before children, so every FK target exists first (header).
 export const RESTORE_ORDER = [
@@ -449,7 +450,13 @@ async function assertEmpty(clientId) {
  * @returns { inserted, tables, skipped, notes, renamed } — `skipped` lists only what did NOT come
  *   back (any entry means the restore is incomplete); `notes` are expected, nothing lost.
  */
-export async function restoreClientData(clientId, parsed, { onProgress = () => {} } = {}) {
+export async function restoreClientData(clientId, parsed, options) {
+  // A restore removes the seeded month and writes the backup's months, so the shared month list
+  // (S855) is dropped however the restore ends, a thrown refusal included.
+  try { return await restoreClientRows(clientId, parsed, options) } finally { invalidatePeriodList(clientId) }
+}
+
+async function restoreClientRows(clientId, parsed, { onProgress = () => {} } = {}) {
   if (!clientId) throw new Error('restoreClientData: clientId is required')
   const { manifest, data } = parsed || {}
   if (!data || manifest?.schema !== 'crest-client-export') {

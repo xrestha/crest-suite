@@ -88,6 +88,15 @@ nothing of A. **Every route is lazy, so a first visit also pays its code before 
 `prefetchHrPages()` fetches HR's pages one at a time once the first HR page is up, and its test pins
 the list to `App.js`.
 
+**A period page takes its month from the shared list, never its own read first (S855, PERF-2).**
+~30 IMS pages each read `monthly_periods` and only then started their reads, one round trip per
+visit. `src/shared/periodList.js` keeps one list per client (Layout reads it on mount);
+`initPeriodLoad` + `usePeriodList()` start a page's load from the list in memory beside a fresh
+read and re-pick if another device moved the month, holding the loading state until both land.
+A write that changes the list (close, reopen, rename, create, restore) calls
+`invalidatePeriodList(clientId)`. A page needing a column beyond `PERIOD_LIST_COLUMNS` keeps its
+own read for it. `MonthlySummary.js` is the worked example.
+
 **Bulking a read means re-checking the 1000-row cap.** Collapsing N per-period queries into one
 `.in()` multiplies the row count — page it with `fetchAllRows` and give the sort a unique
 tiebreaker, or the fix trades a slow page for a silently truncated one.

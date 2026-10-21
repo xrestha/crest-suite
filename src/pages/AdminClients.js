@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { scopedInsert } from '../shared/scopedDb'
+import { invalidatePeriodList } from '../shared/periodList'
 import { getBsToday, formatAdAsBs } from '../utils/bsCalendar'
 import { getSubStatus, getAccessState, suiteState } from '../utils/subscription'
 import { fetchAllRows } from '../shared/fetchAllRows'
@@ -231,6 +232,7 @@ export default function AdminClients() {
       writes.push(supabase.from('settings').insert({ client_id: clientId, app_name: name }))
     }
     const results = await Promise.all(writes)
+    invalidatePeriodList(clientId)   // the shared month list (S855), for an operator who viewed this client before
     return results.find(r => r?.error)?.error || null
   }
 

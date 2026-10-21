@@ -7,6 +7,7 @@ import { failedSectionKeys, sectionList } from '../../modules/ownerReport/sectio
 import { backfillApprovedLeave } from '../../modules/hr/leave/backfillApprovedLeave'
 import { loadImsWaiting, waitingForPeriod, countPhrase } from '../../modules/pos/orders/posImsWaiting'
 import { BS_MONTHS } from '../../utils/bsCalendar'
+import { invalidatePeriodList } from '../../shared/periodList'
 
 /**
  * Closing a period, as ONE routine.
@@ -266,6 +267,7 @@ export async function createPeriodWithCarryForward({ clientId, periods, bs_year,
     'monthly_periods', clientId, { bs_year, bs_month, status: 'open' }, { single: true }
   )
   if (error) return { created: null, error, carriedFrom: null, carried: 0, carryError: null, leaveFill: null }
+  invalidatePeriodList(clientId)   // the shared month list (S855) must not keep offering the old open month
   // Leave approved months ago for this month can only be written now that the month exists (S741).
   const leaveFill = await backfillApprovedLeave({ clientId, period: created })
   const prev = previousExistingPeriod(periods || [], { bs_year, bs_month })
@@ -310,7 +312,13 @@ export async function createPeriodWithCarryForward({ clientId, periods, bs_year,
  *   failures: Array<{stage: 'close'|'already_closed'|'open_next'|'carry_forward'|'leave_backfill'|'report'|'report_partial'|'report_slow', error: any, sections?: string[]}>,
  *   leaveFill: {filled: number, skipped: number, employees: number, error: any}|null}>}
  */
-export async function performPeriodClose({ clientId, period, openNext = true, actorId = null, makeReport = true, reportTimeoutMs = REPORT_TIMEOUT_MS }) {
+export async function performPeriodClose(args) {
+  // Whatever stage it stopped at, the month list may have changed (closed, next month opened), so
+  // the shared list (S855) is dropped on every path, including the ones that return early.
+  try { return await closePeriodStages(args) } finally { invalidatePeriodList(args.clientId) }
+}
+
+async function closePeriodStages({ clientId, period, openNext = true, actorId = null, makeReport = true, reportTimeoutMs = REPORT_TIMEOUT_MS }) {
   const failures = []
   // Guarded on the status it changes (S792, STOCK-8). Unguarded, a stale "End month" pressed on a
   // dashboard that had not reloaded since someone else closed the month matched anyway (closed →

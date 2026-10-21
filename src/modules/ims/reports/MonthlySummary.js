@@ -15,6 +15,8 @@ import NoPeriodState from '../../../components/NoPeriodState'
 import { periodRevenue, periodStockMaps, valuePeriodItems, periodRowIds, periodValuationItems, periodGap } from './periodCost'
 import { FOOD_COST_TIP, SPEND_LABEL, SPEND_SO_FAR_LABEL, SPEND_TIP, SPEND_SO_FAR_TIP } from './foodCostBasis'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { initPeriodLoad } from '../../../shared/periodList'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { unjudgedFcFigure, UncountedItemsBanner } from '../../../shared/uncountedItems'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
@@ -28,6 +30,7 @@ export default function MonthlySummary() {
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
   const periodReq = useLatestRequest()
+  const periodList = usePeriodList()
   const biz = useBizInfo()
   const [periods, setPeriods] = useState([])
   const [selectedPeriod, setSelectedPeriod] = useState(null)
@@ -48,26 +51,17 @@ export default function MonthlySummary() {
     setReport(null)
     setPeriods([])
     setSelectedPeriod(null)
-    const { data: p, error } = await scopedFrom('monthly_periods')
-      .order('bs_year', { ascending: false })
-      .order('bs_month', { ascending: false })
-    if (!periodReq.isCurrent(initKey)) return   // a newer client switch owns the page
-    if (error) { setLoadError(error); setLoading(false); return }
-    setPeriods(p || [])
-    // Falls back to the latest period when none is open (the S722 rule): between closing one month
-    // and opening the next, this page selected nothing and said "No data for this period yet"
-    // under a "—" chip, about months that have data.
-    const chosen = (p || []).find(x => x.status === 'open') || (p || [])[0]
-    if (chosen) {
-      // init() claims the page too (S756) — once a period change has run, the ref holds that id,
-      // and an admin client switch re-running init would otherwise have every setter skipped.
-      periodReq.begin(chosen.id)
-      setSelectedPeriod(chosen)
-      await buildReport(chosen.id)
-      if (periodReq.isCurrent(chosen.id)) setLoading(false)
-      return
-    }
-    setLoading(false)
+    // The month comes from the shared list (S855, PERF-2): on any visit after the first, the report's
+    // reads start beside a fresh read of the list instead of after it, and a month closed or opened
+    // elsewhere meanwhile re-picks before anything paints. Falls back to the latest month when none
+    // is open (the S722 rule); init() claims each month it loads (S756), inside `initPeriodLoad`.
+    const out = await initPeriodLoad({
+      req: periodReq, initKey, periodList,
+      setPeriods, select: setSelectedPeriod, load: buildReport,
+    })
+    if (out.superseded) return   // a newer client switch or period pick owns the page
+    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {

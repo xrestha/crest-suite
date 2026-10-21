@@ -25,13 +25,31 @@ const PREFIX = 'crest_cache_'
 // Module-level: one signed-in user per tab. null = nobody known, which reads and writes nothing.
 let cacheUserId = null
 
+// In-memory caches that must be emptied with this one (the shared month list, `periodList.js`,
+// S855). They register here rather than this file importing them, so it stays dumb storage.
+const clearListeners = new Set()
+
+/** Runs `fn` whenever the page cache is cleared or a different user is set. Returns an unsubscribe. */
+export function onPageCacheClear(fn) {
+  clearListeners.add(fn)
+  return () => clearListeners.delete(fn)
+}
+
+function notifyClear() {
+  clearListeners.forEach(fn => { try { fn() } catch (e) { console.error('page cache clear listener', e) } })
+}
+
 /** Who the cache belongs to. Called by AuthContext wherever it learns the session. */
 export function setPageCacheUser(userId) {
-  cacheUserId = userId || null
+  const next = userId || null
+  // A different login in this tab must not read the last one's in-memory caches either.
+  if (next !== cacheUserId) notifyClear()
+  cacheUserId = next
 }
 
 /** Removes every page-cache entry in this tab and nothing else. */
 export function clearPageCache() {
+  notifyClear()
   try {
     const keys = []
     for (let i = 0; i < sessionStorage.length; i++) {

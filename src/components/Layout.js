@@ -26,7 +26,7 @@ import ArrivalAlert from './ArrivalAlert'
 import SetupStepStrip from './SetupStepStrip'
 import { viewerOf as setupGuideViewerOf } from '../shared/onboarding/setupViewer'
 import { playGuestAlert, soundBlocked, unlockAudio } from '../modules/pos/posChime'
-import { useScopedDb } from '../shared/hooks/useScopedDb'
+import { readPeriodList, subscribePeriodList } from '../shared/periodList'
 import { BS_MONTHS } from '../utils/bsCalendar'
 import { colorTint } from '../data/pricingPlans'
 import { APP_VERSION } from '../shared/appVersion'
@@ -412,7 +412,6 @@ export default function Layout() {
           imsCountOnly, isStationTeam, session,
           suitePlan, groupId, clientKnown, suite } = auth
   const { settings } = useSettings()
-  const { scopedFrom } = useScopedDb()
 
   // ── Context bar ──────────────────────────────────────────────────────────────────────────────
   // Which tenant and which BS period the figures on screen belong to. The shell never stated
@@ -421,17 +420,24 @@ export default function Layout() {
   // does, the ~35 report pages do not. Every IMS figure is period-scoped, an admin can be viewing
   // as another tenant, and an Owner can switch outlets: three independent ways to read a real
   // number off the wrong books, on a product whose thesis is trusting the number enough to act.
-  // monthly_periods carries a partial unique index allowing at most one open period per client,
-  // which is why this is a .limit(1) read rather than an ordered one.
+  // monthly_periods carries a partial unique index allowing at most one open period per client.
+  // Since S855 (PERF-2) this is the shared month list (`periodList.js`), read on mount so that on a
+  // cold load the first period page finds it already in flight, and every page after it starts its
+  // data reads without waiting for one. Subscribing also keeps the chip current: any page's fresh
+  // read updates it, and a close, reopen or rename (which invalidates the list) re-reads it here.
+  // A failed read keeps the last good chip.
   const [activePeriod, setActivePeriod] = useState(null)
   useEffect(() => {
     if (!clientId || !clientModules.ims) { setActivePeriod(null); return }
     let cancelled = false
-    scopedFrom('monthly_periods', 'bs_year, bs_month, status')
-      .eq('status', 'open').limit(1).maybeSingle()
-      .then(({ data }) => { if (!cancelled) setActivePeriod(data || null) })
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const show = list => { if (!cancelled) setActivePeriod(list.find(p => p.status === 'open') || null) }
+    const refresh = () => readPeriodList(clientId).then(({ data, error }) => {
+      if (error) { console.error('Layout: month list read failed', error); return }
+      show(data)
+    })
+    const unsubscribe = subscribePeriodList(clientId, list => { if (list) show(list); else refresh() })
+    refresh()
+    return () => { cancelled = true; unsubscribe() }
   }, [clientId, clientModules.ims])
   const navigate = useNavigate()
   const clientName = profile?.clients?.name
