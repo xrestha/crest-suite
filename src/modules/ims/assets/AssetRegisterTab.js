@@ -1,5 +1,5 @@
 import { nprInt } from '../../../shared/nepalMoney'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
@@ -13,12 +13,15 @@ import AssetFormModal from './AssetFormModal'
 import AssetCategoryModal from './AssetCategoryModal'
 import AssetCard from './AssetCard'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { settleWithin } from '../../../utils/withTimeout'
 import { bookPositionsByAsset, bookValue } from './depreciationCompute'
 import { formatAdAsBs } from '../../../utils/bsCalendar'
 
 const fmt = nprInt
 // A stored AD date as the BS date it was picked as, never the runtime's AD rendering (S792, COSTS-11).
 const fmtDate = d => formatAdAsBs(d)
+// A status is a state, not a verdict (S852): every one is a grey chip, and the word says which.
+const STATUS_LABEL = { active: 'Active', disposed: 'Disposed', written_off: 'Written Off' }
 
 // GAPS-12: what the operator's Delete asset does, from the posted lines this tab read.
 function deleteConsequence(asset, linesByAssetId, chargedByAssetId) {
@@ -39,8 +42,13 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
   // pre-S792 'nbv' entry (closing NBVs) is never read back as charges.
   const [chargedByAssetId, setChargedByAssetId] = useState(() => readPageCache('fixed-assets', 'charged', clientId) ?? {})
   // A failed NBV read must not render every asset at full cost / 0% depreciated — and must never
-  // be written into the cache (S682).
+  // be written into the cache (S682). Since S852 the two columns show a dash then, never the last
+  // figures this browser saw or the cost, and say so above the table, where it is seen first.
   const [nbvError, setNbvError] = useState(null)
+  // True once the charges are known: from this visit's read, or from the revisit cache. Until then
+  // the two columns wait rather than show every asset at cost (S852).
+  const [chargesReady, setChargesReady] = useState(() => readPageCache('fixed-assets', 'charged', clientId) != null)
+  const nbvReq = useRef(0)
   // S849 (GAPS-12): how many posted lines each asset carries, from the same read — not cached, so
   // the operator's delete confirm counts only from a read that succeeded on this visit. null = not
   // counted (the read failed, or has not landed yet).
@@ -66,19 +74,25 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
   // view allowed sessionDataCache's read-revisit cache (a pure display read, never a batch-save
   // baseline like Stock.js's "Save All").
   async function loadNbv() {
-    if (assets.length === 0) { setChargedByAssetId({}); setLinesByAssetId({}); return }
+    // One load wins (S852): a reload started while another is in flight supersedes it.
+    const myReq = ++nbvReq.current
+    if (assets.length === 0) { setChargedByAssetId({}); setLinesByAssetId({}); setNbvError(null); setChargesReady(true); return }
     // Paged (one row per asset per run crosses the 1000-row cap inside a year of monthly runs, and
     // a truncated read shows the assets past the cut at full cost), and summed through
     // bookPositionsByAsset, so every run and reversal counts whatever period it covers (S792).
-    const { data, error } = await fetchAllRows(() => scopedFrom('assets_depreciation_schedule', 'id, asset_id, period_start, period_end, depreciation_amount, override_amount')
-      .eq('is_posted', true).order('period_end', { ascending: true }).order('id'))
+    // Bounded (S852): a read that never answers is a failed read with a retry, not a column that
+    // waits for ever.
+    const { data, error } = await settleWithin(fetchAllRows(() => scopedFrom('assets_depreciation_schedule', 'id, asset_id, period_start, period_end, depreciation_amount, override_amount')
+      .eq('is_posted', true).order('period_end', { ascending: true }).order('id')), 20000, 'Posted depreciation')
+    if (myReq !== nbvReq.current) return
     if (error) {
       const a = asActionError(error)
-      setNbvError({ text: 'Could not load the posted depreciation, so the Net Book Value column is not real — it shows the last figures this browser saw, or cost. Reload before relying on it. ' + a.text, detail: a.detail })
+      setNbvError({ text: 'Could not load the posted depreciation, so Current NBV and % Depreciated are not shown. ' + a.text, detail: a.detail })
       setLinesByAssetId(null)
       return
     }
     setNbvError(null)
+    setChargesReady(true)
     const map = {}, counts = {}
     Object.entries(bookPositionsByAsset(data)).forEach(([assetId, p]) => { map[assetId] = p.charged; counts[assetId] = p.rows })
     setChargedByAssetId(map)
@@ -141,6 +155,15 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
         <Fab onClick={() => setShowForm(true)} label="+ Add Asset" />
       </div>
 
+      {/* Above the table, where it is read before the figures it explains (S852). It sat below a
+          table that can run to hundreds of rows. */}
+      {nbvError && (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+          <ActionError error={nbvError} className="action-error--top" />
+          <button type="button" className="btn btn-ghost btn-sm" onClick={loadNbv}>Retry</button>
+        </div>
+      )}
+
       {filtered.length === 0 ? (
         <div className="card">
           <div className="empty-state">
@@ -180,10 +203,16 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
                   <td style={{ textAlign: 'right' }}>{fmt(a.unit_cost)}</td>
                   <td style={{ textAlign: 'right' }}>{fmt(a.total_cost)}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(a.acquisition_date)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-text1)' }}>{fmt(nbvOf(a))}</td>
-                  <td style={{ textAlign: 'right' }}>{pctDepreciatedOf(a).toFixed(1)}%</td>
+                  {/* Only figures this visit could work out (S852): a dash after a failed read, a
+                      placeholder while it is still on its way. */}
+                  <td style={{ textAlign: 'right', color: nbvError ? 'var(--theme-text2)' : 'var(--theme-text1)' }}>
+                    {nbvError ? '—' : !chargesReady ? <span className="skeleton" style={{ display: 'inline-block', width: '4em', height: '0.85em' }} /> : fmt(nbvOf(a))}
+                  </td>
+                  <td style={{ textAlign: 'right', color: nbvError ? 'var(--theme-text2)' : undefined }}>
+                    {nbvError ? '—' : !chargesReady ? <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em' }} /> : `${pctDepreciatedOf(a).toFixed(1)}%`}
+                  </td>
                   <td>
-                    <span className={`badge ${a.status === 'active' ? 'badge-green' : 'badge-red'}`}>{a.status}</span>
+                    <span className="badge-gray">{STATUS_LABEL[a.status] || a.status}</span>
                   </td>
                   <td onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 6 }}>
                     <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setEditingAsset(a)} aria-label={`Edit ${a.name || 'asset'}`}>Edit</button>
@@ -201,8 +230,6 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
           </table>
         </div>
       )}
-
-      <ActionError error={nbvError} />
 
       {showForm && (
         <AssetFormModal categories={categories} onClose={() => setShowForm(false)} onSaved={handleSaved} />

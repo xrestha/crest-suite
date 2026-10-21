@@ -7,6 +7,7 @@ import {
 } from 'recharts'
 import { chartMotion } from '../../shared/chartMotion'
 import { COST_BREAKDOWN_COLORS } from '../../shared/chartColors'
+import { TOOLTIP_CHROME } from '../../shared/tooltipChrome'
 import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
 import { supabase } from '../../supabaseClient'
@@ -388,6 +389,13 @@ export default function OwnerDashboard() {
   const trend = sections.trend.status === 'ok' ? sections.trend.data : null
   const trendChartData = trend?.points || []
   const hasTrendData = trendChartData.some(d => d.prime != null || d.margin != null)
+  // The chart in words, figures included (S852), as Home's Food Cost trend gives them: a screen
+  // reader heard which lines were drawn and none of the numbers on them.
+  const trendPct = v => (v == null ? 'not recorded' : `${v}%`)
+  const trendSummary = `Cost and margin trend over the last ${trendChartData.length} closed month${trendChartData.length === 1 ? '' : 's'}, each from the figures frozen on the Owner Report for that month. `
+    + trendChartData.map(d => `${d.label}: Food Cost ${trendPct(d.fc)}, Labor Cost ${trendPct(d.labor)}, Prime Cost ${trendPct(d.prime)}, Net Margin ${trendPct(d.margin)}`).join('; ')
+    + '.'
+    + ((trend?.marks || []).length > 0 ? ` The method changed at ${trend.marks.map(m => m.label).join(', ')}.` : '')
 
   const failedSections = SECTION_NAMES.filter(n => sections[n].status === 'failed')
   const stillLoading = SECTION_NAMES.some(n => sections[n].status === 'loading')
@@ -422,7 +430,9 @@ export default function OwnerDashboard() {
         )}
         <div style={kpiSubtextStyle}>
           {state === 'failed' ? (
-            <>Couldn't load · <button type="button" className="btn-linklike" onClick={e => { e.stopPropagation(); retry(tile.failed) }}>Retry</button></>
+            // A real button with the touch floor (S852): an 11px underlined word was the only way to
+            // reload a failed tile on a phone.
+            <>Couldn't load · <button type="button" className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); retry(tile.failed) }}>Retry</button></>
           ) : state === 'none' ? noneText : state === 'loading' ? ' ' : sub}
         </div>
         {state === 'ok' && extra.filter(Boolean).map((line, i) => <div key={i} style={kpiSubtextStyle}>{line}</div>)}
@@ -500,7 +510,7 @@ export default function OwnerDashboard() {
               <SupportContactLine variant="buttons" />
               {isAdmin && (
                 <p style={{ margin: '8px 0 0' }}>
-                  <button type="button" className="btn-linklike" onClick={() => navigate('/periods')}>Open Periods →</button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/periods')}>Open Periods →</button>
                 </p>
               )}
             </div>
@@ -682,19 +692,18 @@ export default function OwnerDashboard() {
                   pay earned plus bonuses and final pay — so a line can step there with nothing in the kitchen having
                   changed.
                 </p>
-                <p className="sr-only">
-                  Trend of Food Cost %, Labor Cost %, Prime Cost %, and Net Margin % across the last {trendChartData.length} closed periods, sourced from each period's frozen Monthly Owner Report snapshot.
-                  {(trend?.marks || []).length > 0 && ` The method changed at ${trend.marks.map(m => m.label).join(', ')}.`}
-                </p>
+                <p className="sr-only">{trendSummary}</p>
               </>}
               renderChart={h => (
                 <ResponsiveContainer width="100%" height={h}>
                   <LineChart data={trendChartData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                     <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
+                    {/* Ticks thin out when they would touch (S852): `interval={0}` drew every month
+                        and the labels ran into each other at 390px. The first and last stay. */}
+                    <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={12} />
                     <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={40} />
                     <RTooltip
-                      contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11, color: 'var(--theme-text1)' }}
+                      contentStyle={{ ...TOOLTIP_CHROME, color: 'var(--theme-text1)' }}
                       labelStyle={{ color: 'var(--theme-text1)' }}
                       formatter={(v, name) => [v != null ? `${v}%` : '—', name]}
                     />

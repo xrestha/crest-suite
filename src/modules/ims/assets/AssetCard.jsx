@@ -196,7 +196,8 @@ The asset is still on the register as active.`, detail })
           <span><Tip text="Depreciation already charged before this business used Crest, typed in from last year's books on the asset form. It is in Accumulated Depreciation above but in no run below, and Crest's runs charge from the day after its date." width={290}>Taken before Crest</Tip>: <strong style={{ color: 'var(--theme-text1)' }}>NPR {fmt(asset.opening_accumulated_depreciation)}</strong> to {fmtDate(asset.opening_as_of)}</span>
         )}
         <span>Location: <strong style={{ color: 'var(--theme-text1)' }}>{asset.location || '—'}</strong></span>
-        <span>Status: <strong style={{ color: asset.status === 'active' ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>{asset.status}</strong></span>
+        {/* A status is a state, not a verdict (S852): ink, like the facts beside it. */}
+        <span>Status: <strong style={{ color: 'var(--theme-text1)' }}>{{ active: 'Active', disposed: 'Disposed', written_off: 'Written Off' }[asset.status] || asset.status}</strong></span>
       </div>
 
       <h3 style={{ fontSize: 13, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Depreciation History (Book)</h3>
@@ -239,8 +240,9 @@ The asset is still on the register as active.`, detail })
       )}
 
       {asset.status !== 'active' ? (
-        <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', fontSize: 13 }}>
-          <strong style={{ color: 'var(--theme-red-text)' }}>{asset.status === 'disposed' ? 'Disposed' : 'Written Off'}</strong> on {fmtDate(asset.disposal_date)} —
+        // A plain fact about the asset, not a warning (S852): the neutral banner, not a red one.
+        <div className="note-banner" style={{ marginBottom: 0 }}>
+          <strong>{asset.status === 'disposed' ? 'Disposed' : 'Written Off'}</strong> on {fmtDate(asset.disposal_date)} —
           {' '}Proceeds NPR {fmt(asset.disposal_proceeds)}, {asset.disposal_gain_loss >= 0 ? 'Gain' : 'Loss'} of NPR {fmt(Math.abs(asset.disposal_gain_loss))}.
           {asset.disposal_reason && <div style={{ marginTop: 4, color: 'var(--theme-text2)' }}>{asset.disposal_reason}</div>}
         </div>

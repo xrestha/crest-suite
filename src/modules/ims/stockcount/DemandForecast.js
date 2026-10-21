@@ -702,9 +702,13 @@ function DemandForecastBody() {
       </div>
 
       <div className="page-header no-print">
-        <h1 className="page-title">
-          Demand Forecast <Tip text="Predicts per-dish plates, revenue and (with POS) covers for the days ahead, from the last 8 same-weekday days in your sales history, weighted so recent weeks count more. A simple, auditable model — not a trained AI — so you can see exactly why a number was predicted. Below the days, the same forecast is exploded into the raw ingredients it will consume." width={340}>ⓘ</Tip>
-        </h1>
+        {/* The Tip sits beside the heading, not in it, so the heading's name is only its text (S852). */}
+        <div className="page-title-row">
+          <h1 className="page-title">Demand Forecast</h1>
+          <Tip text="Predicts per-dish plates, revenue and (with POS) covers for the days ahead, from the last 8 same-weekday days in your sales history, weighted so recent weeks count more. A simple, auditable model — not a trained AI — so you can see exactly why a number was predicted. Below the days, the same forecast is exploded into the raw ingredients it will consume." width={340}>
+            <span aria-hidden="true">ⓘ</span><span className="sr-only">About Demand Forecast</span>
+          </Tip>
+        </div>
         <p className="page-subtitle">
           What each day ahead will sell, and what to buy for it — for prep and purchasing.
         </p>
@@ -910,10 +914,14 @@ function DemandForecastBody() {
         </div>
 
         <div style={{ marginTop: 32 }}>
-          <h2 style={{ margin: '0 0 2px', fontSize: 18, color: 'var(--theme-text1)' }}>
-            Ingredients to buy — {horizonLabel.toLowerCase()}{' '}
-            <Tip text="Every dish above, multiplied through its recipe (and any sub-recipes, adjusted for yield) at the per-portion quantities in Recipe Costing, then summed per raw item for the days shown. With Crest Customization it also adds the choices guests usually make on each dish (toppings, add-ons, a build-your-own bowl's contents), learned per plate from the till sales of the 12 weeks the forecast learned from. In store is the same on-hand figure Stock Report and Reorder Report show; Keep is the item's par level from the Reorder Report, the minimum you want left on the shelf; To buy covers the forecast and keeps that par." width={340}>ⓘ</Tip>
-          </h2>
+          <div className="page-title-row" style={{ margin: '0 0 2px' }}>
+            <h2 style={{ margin: 0, fontSize: 18, color: 'var(--theme-text1)' }}>
+              Ingredients to buy — {horizonLabel.toLowerCase()}
+            </h2>
+            <Tip text="Every dish above, multiplied through its recipe (and any sub-recipes, adjusted for yield) at the per-portion quantities in Recipe Costing, then summed per raw item for the days shown. With Crest Customization it also adds the choices guests usually make on each dish (toppings, add-ons, a build-your-own bowl's contents), learned per plate from the till sales of the 12 weeks the forecast learned from. In store is the same on-hand figure Stock Report and Reorder Report show; Keep is the item's par level from the Reorder Report, the minimum you want left on the shelf; To buy covers the forecast and keeps that par." width={340}>
+              <span aria-hidden="true">ⓘ</span><span className="sr-only">About the ingredients to buy</span>
+            </Tip>
+          </div>
           <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 12px' }}>
             In each item's base unit. To buy = forecast use + the par to keep − in store, never below zero, rounded up to whole packs where the item has a pack size, and grouped by the supplier you last bought it from. The value is of what will arrive, at the Item Master rate. Occasional dishes are included at their average, so a rarely-sold dish still puts a little of its ingredients on the list.
             {!ingredients.loading && !ingredients.error && inStoreKnown && ` In store is as at ${stockPeriodLabel}.`}
@@ -978,7 +986,7 @@ function DemandForecastBody() {
                           )}
                           {canRaisePo && g.supplierId && g.active && g.rows.some(r => r.buyQty > 0) && (
                             <Tip text={`Opens a new purchase order for ${g.name} with these items and quantities filled in. You check it and save it on Purchase Orders — nothing is ordered from here.`} width={280}>
-                              <button type="button" className="btn btn-ghost btn-sm no-print" style={{ marginLeft: 12 }} onClick={() => raisePo(g)}>
+                              <button type="button" className="btn btn-ghost btn-sm no-print" style={{ marginLeft: 12 }} onClick={() => raisePo(g)} aria-label={`Create purchase order for ${g.name}`}>
                                 Create purchase order
                               </button>
                             </Tip>

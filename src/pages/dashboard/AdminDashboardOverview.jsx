@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useSettings } from '../../context/SettingsContext'
@@ -9,6 +9,19 @@ import { getSubStatus, getDateStatus, suiteState } from '../../utils/subscriptio
 import { suitePagesText } from '../../data/pricingPlans'
 import { clientMRR } from '../../shared/clientMrr'
 import { fetchAllRows } from '../../shared/fetchAllRows'
+import { settleWithin } from '../../utils/withTimeout'
+import ActionError, { asActionError } from '../../components/ActionError'
+import { npr } from '../../shared/nepalMoney'
+
+// Each read settles within this, so a hang is a failed read with a Retry, never a skeleton for ever.
+const READ_TIMEOUT_MS = 20000
+// What each failed read takes off the page, said before the technical reason (S852).
+const READ_CONSEQUENCE = {
+  clients: 'The client list could not be loaded, so no count, revenue or property is shown.',
+  periods: 'The months could not be loaded, so No Open Period and the Period column are not shown.',
+  active: 'Recent sign-ins could not be loaded, so Active Today is not shown.',
+}
+const NO_READ_ERRORS = { clients: null, periods: null, active: null }
 
 // Cross-tenant admin overview — every client's periods/profiles in one unscoped read to build
 // the platform-wide table, so this stays on raw supabase.from() rather than scopedDb (there is
@@ -29,19 +42,27 @@ export default function AdminDashboardOverview() {
   // the business, on the one screen whose job is to say how the business is doing. Same rule the
   // client-facing dashboards were given: surface it, offer a retry, and do not dress a number
   // nobody computed as a figure.
-  const [loadError, setLoadError]         = useState('')
+  // One slot PER READ since S852: S734 said so in a banner and still drew every tile, so a failed
+  // periods read put every client in the red No Open Period tile and a failed clients read showed
+  // NPR 0. A tile now renders its figure only when every read it is built from answered.
+  const [readErrors, setReadErrors]       = useState(NO_READ_ERRORS)
+  // Banners the operator closed, by read → the error object closed. A new failure shows again.
+  const [hiddenBanners, setHiddenBanners] = useState({})
+  const loadIdRef = useRef(0)
   // Which attention KPI card is currently narrowing the table below. null = show everything.
   const [filter, setFilter]               = useState(null)
 
   useEffect(() => { loadAdminStats() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadAdminStats() {
+    // The latest load wins (S852): a Retry pressed during a load supersedes it.
+    const myId = ++loadIdRef.current
     setAdminLoading(true)
     const since24h = new Date(Date.now() - 86400000).toISOString()
     const results = await Promise.all([
-      supabase.from('clients')
+      settleWithin(supabase.from('clients')
         .select('id, name, plan, suite_plan, is_active, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, billing_cycle, location, ims_enabled, hr_enabled, pos_enabled, customization_enabled, is_trial, trial_approved_at, subscribe_requested, trial_expires_at, is_internal')
-        .order('name'),
+        .order('name'), READ_TIMEOUT_MS, 'Clients'),
       // Paged (S734). This is EVERY client's every period — one row per tenant per BS month, so
       // 30 properties two years in is already past PostgREST's 1000-row cap, and a bare select
       // returns the first 1000 with no error. The descending sort meant the rows that fell off
@@ -50,20 +71,23 @@ export default function AdminDashboardOverview() {
       // client into the "No Open Period" tile — the red count an operator rings people about.
       // `.order('id')` is the unique tiebreaker fetchAllRows requires; without it paging a
       // (bs_year, bs_month) sort repeats a row on one page and skips it on the next.
-      fetchAllRows(() => supabase.from('monthly_periods')
+      settleWithin(fetchAllRows(() => supabase.from('monthly_periods')
         .select('client_id, bs_year, bs_month, status')
         .order('bs_year', { ascending: false })
         .order('bs_month', { ascending: false })
-        .order('id')),
-      supabase.from('profiles')
+        .order('id')), READ_TIMEOUT_MS, 'Months'),
+      settleWithin(supabase.from('profiles')
         .select('client_id')
         .not('client_id', 'is', null)
-        .gte('last_seen_at', since24h),
+        .gte('last_seen_at', since24h), READ_TIMEOUT_MS, 'Recent sign-ins'),
     ])
-    const [{ data: clients }, { data: periods }, { data: recentProfiles }] = results
-    setLoadError(results.some(r => r.error)
-      ? 'Platform data failed to load — the counts and revenue below may be incomplete or missing entirely.'
-      : '')
+    if (myId !== loadIdRef.current) return
+    const [clientsRes, periodsRes, activeRes] = results
+    setReadErrors({ clients: clientsRes.error || null, periods: periodsRes.error || null, active: activeRes.error || null })
+    // A failed read contributes nothing, and each tile below checks its own reads before drawing.
+    const clients = clientsRes.error ? [] : clientsRes.data
+    const periods = periodsRes.error ? [] : periodsRes.data
+    const recentProfiles = activeRes.error ? [] : activeRes.data
     const openMap = {}, latestMap = {}
     ;(periods || []).forEach(p => {
       if (p.status === 'open') openMap[p.client_id] = p
@@ -78,6 +102,12 @@ export default function AdminDashboardOverview() {
     setActiveTodayClients(activeToday)
     setAdminLoading(false)
   }
+
+  const clientsFailed = !!readErrors.clients
+  const periodsFailed = !!readErrors.periods
+  const activeFailed  = !!readErrors.active
+  // With no client list there is nothing to say about the other two reads.
+  const failedReads = clientsFailed ? ['clients'] : ['periods', 'active'].filter(k => readErrors[k])
 
   const active   = adminClients.filter(c => c.is_active)
   const inactive = adminClients.filter(c => !c.is_active)
@@ -106,7 +136,9 @@ export default function AdminDashboardOverview() {
     const s = getDateStatus(endDate)
     return s.days !== null && s.days <= 7
   })
-  const noPeriod     = active.filter(c => !clientPeriods[c.id] || clientPeriods[c.id].status !== 'open')
+  // Only from a periods read that answered: a failed one is not "no client has a month open".
+  const hasNoOpenPeriod = c => !periodsFailed && (!clientPeriods[c.id] || clientPeriods[c.id].status !== 'open')
+  const noPeriod     = active.filter(hasNoOpenPeriod)
   const trialSignups = adminClients.filter(c => c.is_trial)
   const wantToSub    = trialSignups.filter(c => c.subscribe_requested)
   // Signed up, not yet approved (S697) — a person on the "we will call you" screen. Outranks
@@ -129,7 +161,7 @@ export default function AdminDashboardOverview() {
   const needsAttention = new Set(
     active.filter(c => {
       const s = getSubStatus(c)
-      return (s.days !== null && s.days <= 30) || !clientPeriods[c.id] || clientPeriods[c.id].status !== 'open'
+      return (s.days !== null && s.days <= 30) || hasNoOpenPeriod(c)
     }).map(c => c.id)
   )
   const sorted = [
@@ -148,7 +180,9 @@ export default function AdminDashboardOverview() {
     noPeriod:  { label: 'No open period',    test: c => noPeriod.some(x => x.id === c.id) },
     activeToday: { label: 'Active today',    test: c => activeTodayClients.some(x => x.id === c.id) },
   }
-  const activeFilter = FILTERS[filter]
+  // A filter whose own read failed narrows nothing: its tile is not drawn as a filter then.
+  const filterUsable = { expiring: true, churn: true, noPeriod: !periodsFailed, activeToday: !activeFailed }
+  const activeFilter = filter && filterUsable[filter] ? FILTERS[filter] : null
   const visibleSorted = sorted.filter(c => {
     if (activeFilter && !activeFilter.test(c)) return false
     if (!searchQ) return true
@@ -225,11 +259,25 @@ export default function AdminDashboardOverview() {
     onClick: () => setFilter(filter === key ? null : key),
     'aria-pressed': filter === key,
   })
+  // A tile whose figure was not computed (S852): a dash, the reason and a Retry, never a 0. The
+  // same box as the real tile, so the strip keeps its shape.
+  const tileLabelStyle = { fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }
+  const notLoadedTile = label => (
+    <div {...statCard()}>
+      <div style={tileLabelStyle}>{label}</div>
+      <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--theme-text2)', lineHeight: 1.1 }}>—</div>
+      <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
+        Could not load · <button type="button" className="btn btn-ghost btn-sm" onClick={loadAdminStats}>Retry</button>
+      </div>
+    </div>
+  )
   const planBadge = (plan) => ({
     fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 'var(--radius-sm)',
-    color:       plan === 'pro' ? 'var(--theme-accent-ink)'  : plan === 'growth' ? 'var(--theme-green-text)'               : 'var(--theme-text2)',
-    background:  plan === 'pro' ? 'color-mix(in srgb, var(--theme-accent) 12%, transparent)': plan === 'growth' ? 'color-mix(in srgb, var(--theme-green) 10%, transparent)'            : 'color-mix(in srgb, var(--theme-text2) 10%, transparent)',
-    border: `1px solid ${plan === 'pro' ? 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' : plan === 'growth' ? 'color-mix(in srgb, var(--theme-green) 20%, transparent)' : 'color-mix(in srgb, var(--theme-text2) 20%, transparent)'}`,
+    // A plan is a category, not a verdict (S852): one neutral chip, and the label carries the tier.
+    // Growth was green, the colour this page also uses for "healthy".
+    color:       plan === 'starter' || !plan ? 'var(--theme-text2)' : 'var(--theme-text1)',
+    background:  'color-mix(in srgb, var(--theme-text2) 10%, transparent)',
+    border: '1px solid color-mix(in srgb, var(--theme-text2) 20%, transparent)',
   })
 
   return (
@@ -237,26 +285,33 @@ export default function AdminDashboardOverview() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Admin Dashboard</h1>
-          <p className="page-subtitle">{active.length} active · {inactive.length} inactive · {adminClients.length} total properties</p>
+          <p className="page-subtitle">
+            {adminLoading ? 'Loading properties…'
+              : clientsFailed ? 'Property counts not loaded'
+              : `${active.length} active · ${inactive.length} inactive · ${adminClients.length} total properties`}
+          </p>
         </div>
         <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => navigate('/admin/clients')}>Manage Clients →</button>
       </div>
 
-      {loadError && (
-        <div role="alert" className="card dash-row" style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16,
-          borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
-          background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
-        }}>
-          <p style={{ color: 'var(--theme-red-text)', margin: 0, fontSize: 13 }}>
-            <span aria-hidden="true">⚠</span> {loadError}
-          </p>
-          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-            <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={loadAdminStats}>Retry</button>
-            <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setLoadError('')} aria-label="Dismiss">×</button>
+      {/* One banner per failed read, through ActionError (the consequence, then the reason, then
+          code · message as fine print). × hides the banner only; the tiles keep their dashes. */}
+      {!adminLoading && failedReads.filter(k => hiddenBanners[k] !== readErrors[k]).map(k => {
+        const a = asActionError(readErrors[k], 'operator')
+        return (
+          <div key={k} className="card dash-row" style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap',
+            borderColor: 'color-mix(in srgb, var(--theme-red) 25%, transparent)',
+            background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)',
+          }}>
+            <ActionError error={{ text: `${READ_CONSEQUENCE[k]} ${a.text}`, detail: a.detail }} />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-ghost btn-sm" onClick={loadAdminStats}>Retry</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setHiddenBanners(prev => ({ ...prev, [k]: readErrors[k] }))} aria-label="Hide this message">×</button>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })}
 
       {adminLoading ? (
         <>
@@ -303,7 +358,7 @@ export default function AdminDashboardOverview() {
           <div className="dash-section" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(158px, 1fr))', gap: 8 }}>
 
             {/* 1 — Active Properties + module adoption */}
-            <div {...statCard()}>
+            {clientsFailed ? notLoadedTile('Active Properties') : <div {...statCard()}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Active Properties</div>
               <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1.1 }}>{active.length}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>{inactive.length} inactive · {adminClients.length} total</div>
@@ -357,15 +412,15 @@ export default function AdminDashboardOverview() {
                   </Tip>
                 )}
               </div>
-            </div>
+            </div>}
 
-            {/* 2 — Active Today */}
-            <button {...filterCard('activeToday', activeTodayClients.length > 0 ? 'color-mix(in srgb, var(--theme-green) 25%, transparent)' : undefined)}>
+            {/* 2 — Active Today: the client list AND the recent sign-ins */}
+            {clientsFailed || activeFailed ? notLoadedTile('Active Today') : <button {...filterCard('activeToday', activeTodayClients.length > 0 ? 'color-mix(in srgb, var(--theme-green) 25%, transparent)' : undefined)}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ width: 6, height: 6, borderRadius: 0, background: activeTodayClients.length > 0 ? 'var(--theme-green)' : 'var(--theme-border)', flexShrink: 0 }} />
                 Active Today
               </div>
-              <div style={{ fontSize: 24, fontWeight: 800, color: activeTodayClients.length > 0 ? 'var(--theme-green-text)' : 'var(--theme-text2)', lineHeight: 1.1 }}>
+              <div style={{ fontSize: 24, fontWeight: 800, color: activeTodayClients.length > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)', lineHeight: 1.1 }}>
                 {activeTodayClients.length}
               </div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4, lineHeight: 1.7 }}>
@@ -381,12 +436,12 @@ export default function AdminDashboardOverview() {
                       {activeTodayClients.length > 4 && <div>and {activeTodayClients.length - 4} more</div>}
                     </>}
               </div>
-            </button>
+            </button>}
 
             {/* 3 — Expiring ≤30 days + churn risk sub-count */}
-            <button {...filterCard(churnRisk.length > 0 ? 'churn' : 'expiring', churnRisk.length > 0 ? 'color-mix(in srgb, var(--theme-red) 30%, transparent)' : expiring30.length > 0 ? 'rgba(217,119,6,0.15)' : undefined)}>
+            {clientsFailed ? notLoadedTile('Expiring ≤30 Days') : <button {...filterCard(churnRisk.length > 0 ? 'churn' : 'expiring', churnRisk.length > 0 ? 'color-mix(in srgb, var(--theme-red) 30%, transparent)' : expiring30.length > 0 ? 'color-mix(in srgb, var(--theme-amber) 15%, transparent)' : undefined)}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Expiring ≤30 Days</div>
-              <div style={{ fontSize: 24, fontWeight: 800, color: churnRisk.length > 0 ? 'var(--theme-red-text)' : expiring30.length > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)', lineHeight: 1.1 }}>
+              <div style={{ fontSize: 24, fontWeight: 800, color: churnRisk.length > 0 ? 'var(--theme-red-text)' : expiring30.length > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text1)', lineHeight: 1.1 }}>
                 {expiring30.length}
               </div>
               {churnRisk.length > 0 ? (
@@ -394,29 +449,29 @@ export default function AdminDashboardOverview() {
               ) : (
                 <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Within 30 days</div>
               )}
-            </button>
+            </button>}
 
-            {/* 4 — No Open Period */}
-            <button {...filterCard('noPeriod', noPeriod.length > 0 ? 'color-mix(in srgb, var(--theme-red) 35%, transparent)' : undefined)}>
+            {/* 4 — No Open Period: the client list AND the months */}
+            {clientsFailed || periodsFailed ? notLoadedTile('No Open Period') : <button {...filterCard('noPeriod', noPeriod.length > 0 ? 'color-mix(in srgb, var(--theme-red) 35%, transparent)' : undefined)}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>No Open Period</div>
-              <div style={{ fontSize: 24, fontWeight: 800, color: noPeriod.length > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)', lineHeight: 1.1 }}>{noPeriod.length}</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: noPeriod.length > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)', lineHeight: 1.1 }}>{noPeriod.length}</div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Active clients — need setup</div>
-            </button>
+            </button>}
 
             {/* 5 — MRR + ARR */}
-            <div {...statCard()}>
+            {clientsFailed ? notLoadedTile('Est. Monthly Revenue') : <div {...statCard()}>
               <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 8 }}>Est. Monthly Revenue</div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--theme-accent-ink)', lineHeight: 1.1 }}>
-                NPR {estMRR.toLocaleString('en-IN')}
+              <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--theme-text1)', lineHeight: 1.1 }}>
+                {npr(estMRR)}
               </div>
               <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>
                 {payingCount} paying · ARR{' '}
-                <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>NPR {estARR.toLocaleString('en-IN')}</span>
+                <span style={{ color: 'var(--theme-text1)', fontWeight: 700 }}>{npr(estARR)}</span>
               </div>
-            </div>
+            </div>}
 
             {/* 6 — Trial Signups */}
-            <div
+            {clientsFailed ? notLoadedTile('Trial Signups') : <div
               className="stat-card stat-card--compact"
               style={{ borderColor: toApprove.length > 0 || wantToSub.length > 0 ? 'color-mix(in srgb, var(--theme-red) 50%, transparent)' : trialSignups.length > 0 ? 'color-mix(in srgb, var(--theme-accent) 25%, transparent)' : undefined, cursor: 'pointer' }}
               onClick={() => navigate('/admin/clients')}
@@ -440,10 +495,17 @@ export default function AdminDashboardOverview() {
                   {trialSignups.length === 0 ? 'No active trials' : '7-day free · Growth + HR + POS'} · View →
                 </div>
               )}
-            </div>
+            </div>}
           </div>
 
           {/* ── Single merged "All Properties" table ── */}
+          {/* No client list, no table (S852): an empty one would read as a platform with no properties. */}
+          {clientsFailed ? (
+            <div className="card card--compact" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>— The property list could not be loaded, so no property is shown.</p>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={loadAdminStats}>Retry</button>
+            </div>
+          ) : (
           <div className="card" style={{ padding: 0 }}>
             <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--theme-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>All Properties</span>
@@ -464,7 +526,7 @@ export default function AdminDashboardOverview() {
                 </button>
               )}
               <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
-                MRR: <span style={{ color: 'var(--theme-accent-ink)', fontWeight: 700 }}>NPR {estMRR.toLocaleString('en-IN')}</span>
+                MRR: <span style={{ color: 'var(--theme-text1)', fontWeight: 700 }}>{npr(estMRR)}</span>
                 {' '}· {payingCount} paying
               </span>
             </div>
@@ -638,10 +700,10 @@ export default function AdminDashboardOverview() {
                             clientMRR never reads is_active, so an archived, locked-out client
                             used to show a live "NPR 5,000 · Monthly" in a column whose total
                             excluded it (S574). */}
-                        <td style={{ textAlign: 'right', fontWeight: mrr > 0 && c.is_active ? 700 : 400, color: mrr > 0 && c.is_active ? 'var(--theme-accent-ink)' : 'var(--theme-text3)' }}>
+                        <td style={{ textAlign: 'right', fontWeight: mrr > 0 && c.is_active ? 700 : 400, color: mrr > 0 && c.is_active ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>
                           {mrr > 0 ? (
                             <>
-                              NPR {mrr.toLocaleString('en-IN')}
+                              {npr(mrr)}
                               <span style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--theme-text3)', marginTop: 4 }}>
                                 {c.is_active ? (c.billing_cycle === 'annual' ? 'Annual' : 'Monthly') : 'inactive — not billed'}
                               </span>
@@ -682,9 +744,12 @@ export default function AdminDashboardOverview() {
                             : <span style={{ color: 'var(--theme-text3)', fontSize: 12 }}>—</span>}
                         </td>
 
-                        {/* Current Period */}
+                        {/* Current Period. A failed months read is a dash, never a red "No period" on
+                            every row (S852). */}
                         <td>
-                          {isOpen ? (
+                          {periodsFailed ? (
+                            <span title="The months could not be loaded" style={{ fontSize: 12, color: 'var(--theme-text3)' }}>—</span>
+                          ) : isOpen ? (
                             <span style={{ fontSize: 12, color: 'var(--theme-text1)' }}>
                               {BS_MONTHS[period.bs_month - 1]} {period.bs_year}
                               {' '}<span style={{ fontSize: 11, color: 'var(--theme-green-text)' }}>● Open</span>
@@ -735,10 +800,10 @@ export default function AdminDashboardOverview() {
                       <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
                         <td colSpan={3} style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--theme-text2)', fontSize: 12 }}>
                           {narrowed ? 'Shown' : 'Total'} — {shownPaying} paying · {shownActive.length - shownPaying} non-paying
-                          {narrowed && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> · platform NPR {estMRR.toLocaleString('en-IN')}</span>}
+                          {narrowed && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> · platform {npr(estMRR)}</span>}
                         </td>
-                        <td style={{ textAlign: 'right', padding: '10px 12px', fontWeight: 800, color: 'var(--theme-accent-ink)', fontSize: 15 }}>
-                          NPR {shownMRR.toLocaleString('en-IN')}
+                        <td style={{ textAlign: 'right', padding: '10px 12px', fontWeight: 800, color: 'var(--theme-text1)', fontSize: 15 }}>
+                          {npr(shownMRR)}
                         </td>
                         <td colSpan={5} />
                       </tr>
@@ -748,6 +813,7 @@ export default function AdminDashboardOverview() {
               </table>
             </div>
           </div>
+          )}
         </>
       )}
     </div>

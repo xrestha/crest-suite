@@ -874,7 +874,9 @@ function MonthlyOwnerReportBody() {
                     )}
                     {/* What the figure counts depends on when it was frozen (S792, FIGURES-5): from v10
                         it is the Wastage Report's own total; before, active items only. */}
-                    <Row label="Wastage Value" value={fmt(snapshot.ims.wastageValueTotal)} color={snapshot.ims.wastageValueTotal > 0 ? 'var(--theme-red-text)' : undefined}
+                    {/* Ink, not red above 0 (S852): wastage has no band, and any waste at all is not a
+                        verdict. The Owner Dashboard shows the same figure in ink. */}
+                    <Row label="Wastage Value" value={fmt(snapshot.ims.wastageValueTotal)}
                       tip={schemaVersion >= 10
                         ? 'Everything logged as waste this period, valued at each item\'s rate: raw items, prep (sub-recipes) and hidden items alike — the same total as the Wastage Report.'
                         : 'Waste logged this period on items that were active when this report was made (prep included), valued at each item\'s rate. Newer reports count hidden items too, as the Wastage Report does.'} />
@@ -889,7 +891,7 @@ function MonthlyOwnerReportBody() {
                     <Row label="Closing Stock" value={fmt(snapshot.ims.closingStockValueTotal)}
                       tip="Value of stock physically counted at period close (qty × per-unit rate) — becomes next period's Opening Stock." />
                     {snapshot.ims.cogsTotal != null && (
-                      <Row label="Food Used (COGS)" value={fmt(snapshot.ims.cogsTotal)} color="var(--theme-accent-ink)"
+                      <Row label="Food Used (COGS)" value={fmt(snapshot.ims.cogsTotal)}
                         tip={`${COGS_FORMULA}, valued like Monthly Summary — the numerator of Food Cost %. Prep (sub-recipes) counted at Stock Count is left out, as on Monthly Summary, so the rows above add up to it exactly only when no prep was counted.`} />
                     )}
                     <Row label="Cash Purchases" value={fmt(snapshot.ims.cashNet)} />
@@ -968,7 +970,7 @@ function MonthlyOwnerReportBody() {
                       <Row label="Leavers' Final Pay" value={fmt(snapshot.hr.payroll.other.settlement)}
                         tip="Final Settlements finalized this month: the leaver's last part-month (earned pay and overtime), employer SSF, leave encashment, festival share, notice pay and gratuity, less any notice deduction. Travel claims are not labour." />
                     )}
-                    <Row label={earnedLabour(snapshot) ? 'Total Labour Cost' : 'Total Payroll Cost'} value={fmt(snapshot.hr.payroll?.total)} color="var(--theme-accent-ink)"
+                    <Row label={earnedLabour(snapshot) ? 'Total Labour Cost' : 'Total Payroll Cost'} value={fmt(snapshot.hr.payroll?.total)}
                       tip={earnedLabour(snapshot)
                         ? 'Pay earned (gross less unpaid days) + overtime + employer SSF, plus festival allowance, incentives and leavers\' final pay finalized this month — the figure Labor Cost % divides by revenue.'
                         : 'Gross pay + overtime + employer SSF — the rule this report was generated under. Unpaid days were not taken off and festival, incentive and final-settlement pay was not counted; Regenerate Snapshot to apply the current rule.'} />
@@ -1090,7 +1092,10 @@ function MonthlyOwnerReportBody() {
 
             {snapshot.menuEngineering && (() => {
               const me = snapshot.menuEngineering
-              const quadrantColor = { Star: 'var(--theme-green-text)', Plowhorse: 'var(--theme-accent-ink)', Puzzle: 'var(--theme-amber-text)', Dog: 'var(--theme-red-text)' }
+              // A quadrant is a category, so it takes no signal colour (S852): the name and the
+              // Meaning column carry it. Green Star and red Dog read as good and bad dishes, and
+              // amber Puzzle as a warning, which none of them is on its own.
+              const quadrantStyle = { color: 'var(--theme-text1)', fontWeight: 700 }
               return (
                 <div className="owner-report-section owner-report-page-break">
                   <h3 style={sectionTitleStyle}>Menu Engineering Matrix</h3>
@@ -1101,16 +1106,16 @@ function MonthlyOwnerReportBody() {
                     <table className="data-table owner-report-table">
                       <thead><tr><th>Quadrant</th><th style={{ textAlign: 'right' }}>Items</th><th>Meaning</th></tr></thead>
                       <tbody>
-                        <tr><td style={{ color: quadrantColor.Star, fontWeight: 700 }}>Star</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Star}</td><td style={{ color: 'var(--theme-text3)' }}>High profit, high popularity — feature these</td></tr>
+                        <tr><td style={quadrantStyle}>Star</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Star}</td><td style={{ color: 'var(--theme-text3)' }}>High profit, high popularity — feature these</td></tr>
                         {/* Descriptions match this app's own classify() condition (mirrored verbatim from
                             MenuEngineering.js), not the traditional restaurant-industry meaning of these two
                             words — this app's "Plowhorse"/"Puzzle" mapping is swapped from convention (see
                             MenuEngineering.js's own quadrants, same swap). Found live 2026-07-28: these two
                             rows previously had the traditional-meaning text, which was backwards advice
                             against what quadrantCounts actually counts. */}
-                        <tr><td style={{ color: quadrantColor.Plowhorse, fontWeight: 700 }}>Plowhorse</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Plowhorse}</td><td style={{ color: 'var(--theme-text3)' }}>Profitable, underselling — promote/reposition</td></tr>
-                        <tr><td style={{ color: quadrantColor.Puzzle, fontWeight: 700 }}>Puzzle</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Puzzle}</td><td style={{ color: 'var(--theme-text3)' }}>Popular, low profit — consider reprice/portion</td></tr>
-                        <tr><td style={{ color: quadrantColor.Dog, fontWeight: 700 }}>Dog</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Dog}</td><td style={{ color: 'var(--theme-text3)' }}>Low profit, low popularity — consider cutting</td></tr>
+                        <tr><td style={quadrantStyle}>Plowhorse</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Plowhorse}</td><td style={{ color: 'var(--theme-text3)' }}>Profitable, underselling — promote/reposition</td></tr>
+                        <tr><td style={quadrantStyle}>Puzzle</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Puzzle}</td><td style={{ color: 'var(--theme-text3)' }}>Popular, low profit — consider reprice/portion</td></tr>
+                        <tr><td style={quadrantStyle}>Dog</td><td style={{ textAlign: 'right' }}>{me.quadrantCounts.Dog}</td><td style={{ color: 'var(--theme-text3)' }}>Low profit, low popularity — consider cutting</td></tr>
                         {/* Not a quadrant — the dishes with no selling price or no costed
                             ingredients, which have no food cost to be judged on (S715, schema v5).
                             Guarded because a snapshot frozen before v5 has no such key, and an
