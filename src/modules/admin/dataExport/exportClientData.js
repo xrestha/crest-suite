@@ -71,6 +71,17 @@ async function readAll(table, applyFilter) {
   return data || []
 }
 
+// The same rule for the four reads that do not go through readAll: the staff names, the settings
+// row, the login roster and the PIN vault. Each used to be destructured without its error, so a
+// failed one was written into the backup as an empty part and runBackup still stamped
+// last_backup_at — guard 6 of the trial purge, and what preflightBackup checks before Delete
+// Client. A client could then be deleted on a backup that cannot restore their logins, PINs,
+// branding, VAT number or payment QR (S852). Throwing here stops runBackup before the stamp.
+function rowsOrThrow(part, { data, error }) {
+  if (error) throw new Error(`${part}: ${error.message}`)
+  return data || []
+}
+
 async function readByIds(table, fkCol, ids) {
   if (ids.length === 0) return []
   const out = []
@@ -141,12 +152,12 @@ export async function exportClientData(clientId, onProgress = () => {}) {
   // Display names for every attribution UUID, resolved once. get_client_profile_names is the
   // supported way to read other people's names — profiles_select RLS is self-or-admin only, so
   // this also keeps working if the export is ever run by a non-admin path.
-  const { data: names } = await supabase.rpc('get_client_profile_names', { p_client_id: clientId })
-  const nameById = Object.fromEntries((names || []).map(n => [n.id, n.full_name]))
+  const names = rowsOrThrow('staff names', await supabase.rpc('get_client_profile_names', { p_client_id: clientId }))
+  const nameById = Object.fromEntries(names.map(n => [n.id, n.full_name]))
   step('staff names')
 
   // The client row, its settings, its account roster and the encrypted PIN vault.
-  const [{ data: clientRow }, { data: settingsRows }, { data: profileRows }, { data: vaultRows }] = await Promise.all([
+  const [clientRes, settingsRes, profilesRes, vaultRes] = await Promise.all([
     supabase.from('clients').select('*').eq('id', clientId).single(),
     supabase.from('settings').select('*').eq('client_id', clientId),
     // The roster restore re-provisions from. Password material is never selected — there is none
@@ -164,7 +175,14 @@ export async function exportClientData(clientId, onProgress = () => {}) {
     // PINs back instead of re-issuing every till code by hand.
     supabase.from('staff_pin_vault').select('user_id, client_id, kind, pin_cipher, updated_at').eq('client_id', clientId),
   ])
+  // .single() reports "no row" as PGRST116, which keeps its own plain sentence below; any other
+  // error is a failed read, not a missing client.
+  if (clientRes.error && clientRes.error.code !== 'PGRST116') throw new Error(`clients: ${clientRes.error.message}`)
+  const clientRow = clientRes.data
   if (!clientRow) throw new Error('Client not found, or not readable by this account.')
+  const settingsRows = rowsOrThrow('settings', settingsRes)
+  const profileRows  = rowsOrThrow('profiles', profilesRes)
+  const vaultRows    = rowsOrThrow('staff_pin_vault', vaultRes)
   // The outlet group by NAME, as an annotation on the row (not a column): a restore never writes the
   // group back, but names it so the operator can re-join it in Billing (S849 DATABASE-7), and a group
   // id alone means nothing once the group is gone. Best effort: a failed read leaves it out.
@@ -174,9 +192,9 @@ export async function exportClientData(clientId, onProgress = () => {}) {
     if (grp?.name) clientRow.group_name_exported = grp.name
   }
   data.clients = [clientRow]
-  data.settings = settingsRows || []
-  data.profiles = profileRows || []
-  data.staff_pin_vault = vaultRows || []
+  data.settings = settingsRows
+  data.profiles = profileRows
+  data.staff_pin_vault = vaultRows
   step('client record')
 
   for (const table of CLIENT_SCOPED_TABLES) {

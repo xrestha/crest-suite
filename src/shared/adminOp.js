@@ -27,6 +27,12 @@ export async function adminOp(action, params = {}) {
     // Block instead of Delete), so a caller can act on WHICH refusal without matching its words.
     const e = new Error(detail)
     if (code) e.code = code
+    // And what KIND of failure it was (S852). `name` stays supabase-js' own, so
+    // `FunctionsFetchError` still means the request got no answer at all and nobody can say whether
+    // the action ran; `cause` is the original error, its HTTP Response included. Before this the
+    // rethrow was a bare Error and only the words "Failed to send a request" told the two apart.
+    if (error.name) e.name = error.name
+    e.cause = error
     throw e
   }
   if (data?.error) {

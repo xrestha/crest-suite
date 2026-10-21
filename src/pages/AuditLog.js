@@ -10,6 +10,7 @@ import { useLatestRequest } from '../shared/hooks/useLatestRequest'
 import { nepalBsLong, nepalCivilDate, nepalDateLong, nepalTime, nepalTime24 } from '../shared/nepalTime'
 import { NPR_LOCALE } from '../shared/nepalMoney'
 import { formatAd } from '../utils/bsCalendar'
+import { settleWithin, isTimeout } from '../utils/withTimeout'
 
 const PAGE_SIZE = 500
 
@@ -266,6 +267,13 @@ const PURGE_OPTIONS = [
   { days: 730, label: '2 years' },
 ]
 
+// A minute, not the 20 s default: the purge deletes by age across every client, which on a long
+// log is the slowest write on this page (S852). Exported for the test.
+export const PURGE_TIMEOUT_MS = 60000
+export const PURGE_TIMEOUT_TEXT =
+  'The server did not answer within a minute, so the deletion may or may not have gone through. ' +
+  'Close this, reload the page, and look for a Purged entry at the top of the log before trying again.'
+
 const HELP_ITEMS = [
   { area: 'Purchase',      icon: '↓', ops: 'Add · Edit · Delete', note: 'Every purchase entry change per client' },
   { area: 'Return',        icon: '↩', ops: 'Add · Edit · Delete', note: 'Vendor returns against purchase entries' },
@@ -393,14 +401,22 @@ export default function AuditLog() {
   // refuses anything under 90 days, so this dialog cannot be talked into deleting recent history,
   // and the purge writes its own audit row. The Area/User/search filters play no part in it: a
   // purge is by age and client only, which is exactly what the dialog says.
+  //
+  // Bounded (S852): the dialog cannot be cancelled while it is busy, so a request that never
+  // answered held it open for good. A timeout is not a refusal: the delete may still have run, and
+  // it writes its own Purged entry, which is the place that can tell.
   async function runPurge() {
     setPurging(true)
     setPurgeError(null)
-    const { data: deleted, error } = await supabase.rpc('admin_purge_audit_logs', {
+    const { data: deleted, error } = await settleWithin(supabase.rpc('admin_purge_audit_logs', {
       p_older_than_days: purgeDays,
       p_client_id: filterClient !== 'all' ? filterClient : null,
-    })
+    }), PURGE_TIMEOUT_MS, 'Deleting old entries')
     setPurging(false)
+    if (error && isTimeout(error)) {
+      setPurgeError({ text: PURGE_TIMEOUT_TEXT, detail: error.message })
+      return
+    }
     if (error) { setPurgeError(asActionError(error)); return }
     const scope = filterClient !== 'all' ? `for ${clientName(filterClient)}` : 'across all clients'
     const label = PURGE_OPTIONS.find(o => o.days === purgeDays)?.label || `${purgeDays} days`

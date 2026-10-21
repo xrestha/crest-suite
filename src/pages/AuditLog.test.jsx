@@ -11,7 +11,7 @@
  */
 
 import React from 'react'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 
 const mockCalls = []
 const mockRpc = jest.fn()
@@ -43,7 +43,7 @@ jest.mock('../supabaseClient', () => ({
 jest.mock('../context/AuthContext', () => ({ useAuth: () => ({ loading: false }) }))
 
 // eslint-disable-next-line import/first
-import AuditLog from './AuditLog'
+import AuditLog, { PURGE_TIMEOUT_MS } from './AuditLog'
 
 const row = (id, over = {}) => ({
   id, created_at: '2026-09-14T10:15:00+00:00', client_id: 'c1', client_name: 'Casa Acai Cafe',
@@ -92,6 +92,32 @@ test('the purge sends an age of at least 90 days and nothing a caller could aim 
   expect(args.p_older_than_days).toBeGreaterThanOrEqual(90)
   expect(args.p_client_id).toBeNull()
   await screen.findByText(/42 entries older than 1 year deleted across all clients/)
+})
+
+// The busy confirm cannot be cancelled, so a purge that never answers used to hold it open for good
+// (S852). It is released after a minute, and the message says the delete may still have run rather
+// than that it did not.
+test('a purge with no answer releases the dialog and says it may still have gone through', async () => {
+  mockPages = [[row(1)]]
+  mockRpc.mockReturnValue(new Promise(() => {}))
+  render(<AuditLog />)
+  expect(await screen.findByRole('cell', { name: 'Aashish' })).toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: /Delete old entries/ }))
+  const dialog = await screen.findByRole('dialog')
+  jest.useFakeTimers()
+  try {
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete old entries' }))
+    expect(within(dialog).getByRole('button', { name: 'Deleting…' })).toBeInTheDocument()
+    await act(async () => { jest.advanceTimersByTime(PURGE_TIMEOUT_MS + 1000) })
+  } finally {
+    jest.useRealTimers()
+  }
+  const alert = await within(screen.getByRole('dialog')).findByRole('alert')
+  expect(alert).toHaveTextContent(/may or may not have gone through/)
+  expect(alert).toHaveTextContent(/look for a Purged entry/)
+  expect(alert).not.toHaveTextContent(/nothing was deleted/i)
+  expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete old entries' })).not.toHaveAttribute('aria-busy')
 })
 
 test('a server-written row says System, and values are formatted by meaning', async () => {

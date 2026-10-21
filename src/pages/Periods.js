@@ -24,6 +24,7 @@ import { closingCountNote } from './periods/closingCountNote'
 import { errorInfo, errorLine } from '../shared/errorText'
 import ActionError from '../components/ActionError'
 import ReportLoadError from '../components/ReportLoadError'
+import RowMenu from '../components/RowMenu'
 
 // The BS year a period may be created or edited into. The floor is a typo guard — 2070 BS is
 // 2013 AD, well before any client existed. The ceiling is the verified calendar table's own limit
@@ -862,33 +863,44 @@ export default function Periods() {
                     const isEditingThis = editingAllClientId === c.id
 
                     return (
-                      <tr key={c.id} style={{ opacity: c.is_active ? 1 : 0.45 }}>
+                      // An inactive client is named by a badge, not dimmed (S852): opacity 0.45 took
+                      // the name and every action on the row below AA (S613 rule).
+                      <tr key={c.id}>
                         <td>
-                          <button
-                            onClick={async () => { if (await switchAdminClient(c.id, c.name)) navigate('/periods') }}
-                            style={{ background: 'none', border: 'none', color: 'var(--theme-text1)', fontWeight: 600, cursor: 'pointer', fontSize: 13, padding: 0, textAlign: 'left' }}
-                          >
-                            {c.name}
-                          </button>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              className="btn-linklike btn-linklike--quiet"
+                              onClick={async () => { if (await switchAdminClient(c.id, c.name)) navigate('/periods') }}
+                              style={{ fontWeight: 600 }}
+                            >
+                              {c.name}
+                            </button>
+                            {!c.is_active && <span className="badge badge-gray">Inactive</span>}
+                          </span>
                         </td>
 
                         {isEditingThis ? (
                           <td colSpan={2}>
                             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                              {/* autoFocus: Rename is a menu item now, and the menu goes when the
+                                  row turns into this editor, so focus would fall to the page (S852). */}
                               <input aria-label="BS year"
+                                autoFocus
+                                className="form-input form-input--auto"
                                 type="number" value={editAllForm.bs_year}
                                 onChange={e => setEditAllForm(f => ({ ...f, bs_year: e.target.value }))}
                                 min={YEAR_MIN} max={YEAR_MAX}
-                                style={{ width: 90, padding: '4px 8px', fontSize: 13, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text1)' }}
+                                style={{ width: 96 }}
                               />
                               <select aria-label="BS month"
+                                className="form-select"
                                 value={editAllForm.bs_month}
                                 onChange={e => setEditAllForm(f => ({ ...f, bs_month: parseInt(e.target.value) }))}
-                                style={{ padding: '4px 8px', fontSize: 13, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', color: 'var(--theme-text1)' }}
                               >
                                 {BS_MONTHS.map((m, i) => <option key={i} value={i + 1}>{i + 1} — {m}</option>)}
                               </select>
-                              {editAllError && <span style={{ color: 'var(--theme-red-text)', fontSize: 11 }}>{editAllError}</span>}
+                              {editAllError && <span className="field-error" role="alert">{editAllError}</span>}
                             </div>
                           </td>
                         ) : (
@@ -909,14 +921,14 @@ export default function Periods() {
 
                         <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{cp.length}</td>
                         <td style={{ textAlign: 'right' }}>
-                          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
                             {isEditingThis ? (
                               <>
-                                <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
+                                <button className="btn btn-ghost btn-sm"
                                   onClick={() => { setEditingAllClientId(null); setEditAllError('') }} disabled={savingAll}>
                                   Cancel
                                 </button>
-                                <button className="btn btn-primary" style={{ fontSize: 11, padding: '4px 10px' }}
+                                <button className="btn btn-primary btn-sm"
                                   onClick={() => saveAllEdit(openPeriod, c.id)} disabled={savingAll}>
                                   {savingAll ? 'Saving…' : 'Save'}
                                 </button>
@@ -925,39 +937,37 @@ export default function Periods() {
                               <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Working…</span>
                             ) : (
                               <>
-                                {openPeriod && (
-                                  <button
-                                    title="Change which BS month this period IS. Everything recorded in it moves with it."
-                                    onClick={() => { setEditingAllClientId(c.id); setEditAllForm({ bs_year: openPeriod.bs_year, bs_month: openPeriod.bs_month }); setEditAllError('') }}
-                                    style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'color-mix(in srgb, var(--theme-accent) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-accent) 35%, transparent)', color: 'var(--theme-accent-ink)' }}
-                                  >Rename</button>
-                                )}
                                 {openPeriod ? (
                                   <>
+                                    {/* One next step on the row, the rest behind the menu (S852, the
+                                        RowMenu shape): End Period sat beside Close & Start Next as a
+                                        look-alike red pill, and it is the one that opens no month, so
+                                        the client cannot record anything until a period is created.
+                                        It is last in the menu, under a rule, and keeps its confirm. */}
                                     <button
+                                      type="button"
+                                      className="btn btn-ghost btn-sm"
                                       onClick={() => adminCloseAndAdvance(openPeriod, c.id)}
-                                      style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'color-mix(in srgb, var(--theme-red) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', color: 'var(--theme-red-text)' }}
                                     >
-                                      Close & Start Next
+                                      Close &amp; Start Next
                                     </button>
-                                    <button
-                                      onClick={() => adminEndPeriod(openPeriod, c.id)}
-                                      // Was three undocumented reds (rgba(127,29,29), rgba(185,28,28), #b91c1c) — a
-                                      // second red with no home in the palette. Now the documented alpha-tint pattern:
-                                      // tinted fill and border off --theme-red, text on the contrast-safe variant.
-                                      style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'color-mix(in srgb, var(--theme-red) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 35%, transparent)', color: 'var(--theme-red-text)' }}
-                                    >
-                                      End Period
-                                    </button>
-                                    <Tip text="Closes this period without opening the next one. The client will be blocked from recording data until a new period is created." width={240}>ⓘ</Tip>
+                                    <RowMenu
+                                      label={`More for ${c.name}`}
+                                      items={[
+                                        { key: 'rename', label: 'Rename this period', onSelect: () => { setEditingAllClientId(c.id); setEditAllForm({ bs_year: openPeriod.bs_year, bs_month: openPeriod.bs_month }); setEditAllError('') } },
+                                        '-',
+                                        { key: 'end', label: 'End Period (opens no next month)', danger: true, onSelect: () => adminEndPeriod(openPeriod, c.id) },
+                                      ]}
+                                    />
                                   </>
                                 ) : closedTodayPeriod(c.id) ? (
                                   // Today's month is already on record, closed: the honest verb is
                                   // Reopen, and it gets the confirm that verb implies.
                                   <Tip text={`${periodLabel(closedTodayPeriod(c.id))} already exists for this client and is closed. Reopen hands entry back to the client's own logins — it does not create a new period.`} width={280}>
                                     <button
+                                      type="button"
+                                      className="btn btn-ghost btn-sm"
                                       onClick={() => adminReopenToday(closedTodayPeriod(c.id), c.id)}
-                                      style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'color-mix(in srgb, var(--theme-green) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 30%, transparent)', color: 'var(--theme-green-text)' }}
                                     >
                                       Reopen {BS_MONTHS[bsToday.month - 1]}
                                     </button>
@@ -965,8 +975,9 @@ export default function Periods() {
                                 ) : (
                                   <Tip text={`Creates ${BS_MONTHS[bsToday.month - 1]} ${bsToday.year} for this client and carries the previous period's closing count into it as opening stock, the same way Close & Start Next does.`} width={280}>
                                     <button
+                                      type="button"
+                                      className="btn btn-ghost btn-sm"
                                       onClick={() => adminCreatePeriod(c.id)}
-                                      style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'color-mix(in srgb, var(--theme-green) 7%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 30%, transparent)', color: 'var(--theme-green-text)' }}
                                     >
                                       + Create Period
                                     </button>
@@ -1145,31 +1156,24 @@ export default function Periods() {
                           <td colSpan={3}>
                             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                               <input aria-label="BS year"
+                                className="form-input form-input--auto"
                                 type="number"
                                 value={editForm.bs_year}
                                 onChange={e => setEditForm({ ...editForm, bs_year: e.target.value })}
                                 min={YEAR_MIN} max={YEAR_MAX}
-                                style={{
-                                  width: 90, padding: '4px 8px', fontSize: 13,
-                                  background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
-                                  borderRadius: 'var(--radius-sm)', color: 'var(--theme-text1)'
-                                }}
+                                style={{ width: 96 }}
                               />
                               <select aria-label="BS month"
+                                className="form-select"
                                 value={editForm.bs_month}
                                 onChange={e => setEditForm({ ...editForm, bs_month: parseInt(e.target.value) })}
-                                style={{
-                                  padding: '4px 8px', fontSize: 13,
-                                  background: 'var(--theme-bg)', border: '1px solid var(--theme-border)',
-                                  borderRadius: 'var(--radius-sm)', color: 'var(--theme-text1)'
-                                }}
                               >
                                 {BS_MONTHS.map((m, i) => (
                                   <option key={i} value={i + 1}>{i + 1} — {m}</option>
                                 ))}
                               </select>
                               {editError && (
-                                <span style={{ color: 'var(--theme-red-text)', fontSize: 12 }}>{editError}</span>
+                                <span className="field-error" role="alert">{editError}</span>
                               )}
                             </div>
                           </td>

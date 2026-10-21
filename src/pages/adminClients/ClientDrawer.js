@@ -27,6 +27,8 @@ import {
   pickBackupDirectory, ensureBackupDirectory, isFileSystemAccessSupported,
 } from '../../modules/admin/dataExport/backupDirectory'
 import { errorLine, errorInfo } from '../../shared/errorText'
+import { loginOpFailure, loginWriteFailure, withDetail } from './loginOpError'
+import { clearStopped, archiveLockFailed, loginsStopped, deleteStageFailed, dangerUnexpected, restoreStopped, KEEP_BACKUP } from './dangerZoneText'
 import { nepalBsLong } from '../../shared/nepalTime'
 import { settleWithin } from '../../utils/withTimeout'
 import { andList } from '../../shared/offeredPicks'
@@ -152,6 +154,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   const [revealedPins, setRevealedPins] = useState({})
   const [revealingId, setRevealingId]   = useState(null)
   const [pinErr, setPinErr]             = useState('')
+  const [pinsLoadFailed, setPinsLoadFailed] = useState(false) // the list is not shown, never "no accounts" (S852)
   const revealTimersRef                 = useRef({})
   useEffect(() => () => {
     Object.values(revealTimersRef.current).forEach(clearTimeout)
@@ -345,7 +348,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // here because admin passes profiles_select's `is_admin()` branch and staff_pin_vault is an
   // admin-only table. The PIN itself never comes from either query — only whether one is stored.
   async function loadPinAccounts() {
-    setLoadingPins(true); setPinErr(''); setRevealedPins({})
+    setLoadingPins(true); setPinErr(''); setPinsLoadFailed(false); setRevealedPins({})
     const [{ data: profs, error: profErr }, { data: vaultRows, error: vaultErr }] = await Promise.all([
       supabase.from('profiles')
         .select('id, full_name, pos_email, hr_self_service')
@@ -357,7 +360,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     // failed vault read rendered every account as "Not stored", which the copy beside it tells
     // the operator to fix by RESETTING the PIN (S736).
     if (profErr || vaultErr) {
-      setPinErr('Could not read this client\'s PIN accounts, so nothing below can be trusted — retry. ' + errorLine(profErr || vaultErr))
+      setPinErr(withDetail('Could not read the PIN accounts of this client, so the list is not shown: an account left out, or shown as not stored, could not be trusted. Press Retry.', profErr || vaultErr))
+      setPinsLoadFailed(true)
       setPinAccounts([]); setLoadingPins(false); return
     }
     const storedAt = new Map((vaultRows || []).map(v => [v.user_id, v.updated_at]))
@@ -382,7 +386,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         const next = { ...prev }; delete next[userId]; return next
       }), 30000)
     } catch (e) {
-      setPinErr(e.message || 'Could not reveal PIN')
+      setPinErr(loginOpFailure('The PIN was not shown.', e))
     }
     setRevealingId(null)
   }
@@ -436,7 +440,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     } catch (err) {
       const already = /already.*registered|already.*exists|duplicate/i.test(err.message || '')
       if (already) { await reassignExistingUser(email, full_name); return }
-      setUserError('Could not create user: ' + err.message)
+      setUserError(loginOpFailure('The login was not created.', err))
       setSavingUser(false)
       return
     }
@@ -444,7 +448,14 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     const { error: profileError } = await supabase
       .from('profiles')
       .upsert({ id: authData.user.id, client_id: client.id, full_name, role: 'client' }, { onConflict: 'id' })
-    if (profileError) { setUserError('User created but profile link failed: ' + profileError.message); setSavingUser(false); return }
+    if (profileError) {
+      // The login exists now, so this is not a retry of the create: pressing Create User again with
+      // the same email finds it and offers to move it here, which writes the missing link (S852).
+      setUserError(withDetail(`${email} was created, but linking it to ${client.name} could not be confirmed, so it may not sign in here yet. If it is not in the list below, press Create User again with the same email and accept the move.`, profileError))
+      setSavingUser(false)
+      loadUsers()
+      return
+    }
 
     setUserSuccess(`✓ ${email} created and linked.`)
     setUserForm(EMPTY_USER)
@@ -458,7 +469,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   async function reassignExistingUser(email, full_name) {
     try {
       const { data: existingId, error: findErr } = await supabase.rpc('find_user_id_by_email', { p_email: email })
-      if (findErr) { setUserError('Could not look up the email: ' + findErr.message); setSavingUser(false); return }
+      if (findErr) { setUserError(withDetail('Could not look up which login holds that email, so nothing was changed. Press Create User again.', findErr)); setSavingUser(false); return }
       if (!existingId) {
         setUserError('That email already exists but could not be located to reassign.')
         setSavingUser(false); return
@@ -467,7 +478,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       // "is this a platform admin" refusal and reassign an operator's own account to a client.
       const { data: prof, error: profErr } = await supabase.from('profiles').select('role').eq('id', existingId).maybeSingle()
       if (profErr) {
-        setUserError('Could not check whether that email is a platform-admin account, so nothing was changed. Try again. ' + errorLine(profErr))
+        setUserError(withDetail('Could not check whether that email is a platform-admin account, so nothing was changed. Try again.', profErr))
         setSavingUser(false); return
       }
       if (prof?.role === 'admin') {
@@ -485,7 +496,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         run: () => moveLoginHere(existingId, email, full_name),
       })
     } catch (err) {
-      setUserError('Could not reassign user: ' + err.message)
+      setUserError(withDetail('Could not finish checking that email, so the login was not moved to this client. Press Create User again.', err))
       setSavingUser(false)
     }
   }
@@ -513,9 +524,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       }
       if (full_name) row.full_name = full_name
       const { data: saved, error: upErr } = await supabase.from('profiles').upsert(row, { onConflict: 'id' }).select('id')
-      if (upErr) { setUserError('Could not reassign: ' + upErr.message); setSavingUser(false); return }
+      if (upErr) { setUserError(loginWriteFailure(`${email} was not moved, and still belongs to its previous client.`, upErr)); setSavingUser(false); return }
       if (!saved || saved.length === 0) {
-        setUserError('Reassign did not take effect — the profiles table is blocking it (RLS). Run the admin-profiles policy fix, then retry.')
+        setUserError({ text: `${email} was not moved: the database did not let this account change that login, so it still belongs to its previous client.`, detail: 'profiles upsert returned no row (RLS): run the admin-profiles policy fix, then retry' })
         setSavingUser(false); return
       }
       setUserError('')
@@ -524,8 +535,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       setSavingUser(false)
       loadUsers()
     } catch (err) {
-      setUserError('Could not reassign user: ' + err.message)
+      setUserError(withDetail('The move could not be confirmed. Check the list below before trying again.', err))
       setSavingUser(false)
+      loadUsers()
     }
   }
 
@@ -558,12 +570,18 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       if (!alreadyGone) {
         // Auth user still exists but deletion failed — don't remove the profile
         // or the email stays locked with no way to clean it up.
-        setUserError('Could not delete the login (email stays in use): ' + err.message)
+        setUserError(loginOpFailure('The login was not deleted, and its email stays in use.', err))
         return
       }
       // Auth user was already deleted — fall through and clean up the orphaned profile
     }
-    await supabase.from('profiles').delete().eq('id', user.id)
+    // One write never proves another landed (S852): the success line waits for this delete's own answer.
+    const { error: profDelErr } = await supabase.from('profiles').delete().eq('id', user.id)
+    if (profDelErr) {
+      setUserError(withDetail('The login was removed, but clearing its profile row could not be confirmed, so it may still show in the list below. Press Delete on it again to clear it.', profDelErr))
+      loadUsers()
+      return
+    }
     setUserSuccess('✓ User deleted and email freed.')
     loadUsers()
   }
@@ -588,8 +606,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
           setUserError('')
           setUserSuccess(`✓ ${user.full_name || 'The login'} is blocked: it can no longer sign in, and its name stays on everything it recorded.`)
         } catch (blockErr) {
-          // admin-user-ops' refusal is already a sentence naming the person and what happened.
-          setUserError(blockErr.message)
+          // admin-user-ops' refusal is usually a sentence naming the person and what happened, so it
+          // follows the consequence; a bare code or no answer goes to the fine print (S852).
+          setUserError(loginOpFailure(`${user.full_name || 'The login'} is not blocked, and their PIN still works.`, blockErr))
         }
       },
     })
@@ -971,9 +990,20 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       // blocked picker produced a button that did nothing and said nothing, which is how this
       // was found. There is no way to tell the two apart, so say something that covers both
       // rather than staying silent on a failure.
-      setBackupMsg(err.name === 'AbortError'
-        ? 'error:Folder selection was cancelled, or blocked by this browser. Exports will download instead.'
-        : 'error:' + err.message)
+      if (err.name === 'AbortError') {
+        setBackupMsg('error:Folder selection was cancelled, or blocked by this browser. Exports will download instead.')
+        return
+      }
+      // Any other failure can come after the pick (saving the folder in this browser, or asking for
+      // its permission), so read back where backups now go rather than guess (S852).
+      let state = 'none'
+      try { ({ state } = await ensureBackupDirectory({ request: false })) } catch (_) { /* state stays none */ }
+      setBackupState(state)
+      setBackupMsg(withDetail(state === 'granted'
+        ? 'The new folder was not set, so backups keep going to the folder chosen before.'
+        : isFileSystemAccessSupported()
+          ? 'No backup folder is set up in this browser, so backups will download to this computer instead. Choose the folder again to try once more.'
+          : 'This browser cannot write to a folder (Chrome and Edge can), so backups will download to this computer instead.', err))
     }
   }
 
@@ -990,7 +1020,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       onClientUpdated()
       return { ok: true, method }
     } catch (err) {
-      setBackupMsg('error:' + err.message)
+      // runBackup stamps the date only after the files are written, so any throw means no stamp; a
+      // part that could not be read is one of those throws since S852, named in the message.
+      setBackupMsg('error:The backup did not finish, so no backup date was recorded for this client. ' + err.message)
       return { ok: false }
     } finally {
       setBackupBusy(false)
@@ -1050,9 +1082,12 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       return { text, failed: false }
     } catch (err) {
       setRelinkRoster(roster)
+      // "could not be confirmed", not "were not" (S852): with no answer some may have re-linked.
+      // Pressing the button again is safe, because it only fills a link that is still empty.
       return {
-        text: ` But staff logins were NOT re-linked to their employee records (${err.message}): until they are, Crest Staff refuses those logins and a leaver settled later keeps theirs. Press "Re-link staff logins" below.`,
+        text: ` But staff logins could not be confirmed as re-linked to their employee records: until they are, Crest Staff refuses those logins and a leaver settled later keeps theirs. Press "Re-link staff logins" below; it only fills links that are still empty, so pressing it again is safe.`,
         failed: true,
+        detail: errorInfo(err, 'operator').detail,
       }
     }
   }
@@ -1060,8 +1095,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   async function retryRelink() {
     if (!relinkRoster) return
     setRestoreBusy(true)
-    const { text, failed } = await relinkStaffLogins(relinkRoster)
-    setRestoreMsg(`${failed ? 'error' : 'ok'}:${text.trim() || 'Staff logins checked — nothing needed re-linking.'}`)
+    const { text, failed, detail } = await relinkStaffLogins(relinkRoster)
+    setRestoreMsg(failed ? { text: text.trim(), detail } : `ok:${text.trim() || 'Staff logins checked — nothing needed re-linking.'}`)
     setRestoreBusy(false)
   }
 
@@ -1070,12 +1105,20 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     setRestoreBusy(true)
     setRestoreMsg('')
     setRelinkRoster(null)
+    // How far it got, for the catch (S852): a failure before the first insert restored nothing; one
+    // after it may have left part of the backup in, and the restore cannot be run over that again.
+    let stage = 'file'
+    let started = false
+    const details = []
     try {
       const parsed = JSON.parse(await file.text())
+      stage = 'restore'
       const result = await restoreClientData(client.id, parsed, {
-        onProgress: (label, done, total) => setRestoreMsg(`info:Restoring ${label} (${done}/${total})…`),
+        onProgress: (label, done, total) => { started = true; setRestoreMsg(`info:Restoring ${label} (${done}/${total})…`) },
       })
+      stage = 'logins'
       let note = ''
+      let loginsFailed = false
 
       // Only rebuild logins when the target has none. After an Archive the accounts were never
       // deleted, so re-provisioning would create a second set of PIN logins for the same people;
@@ -1092,27 +1135,41 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         .eq('client_id', client.id)
         .or('pos_email.not.is.null,hr_self_service.eq.true,ims_email.not.is.null,ims_role.not.is.null,hr_role.not.is.null')
       if (loginCountErr) {
-        note = ' Staff logins were NOT rebuilt because the existing logins could not be counted — if this client has none, run the restore again to rebuild them. ' + errorLine(loginCountErr)
+        // Not "run the restore again" (S852): a restore refuses a client that now holds data.
+        loginsFailed = true
+        note = ' Staff logins were not rebuilt, because the existing logins could not be counted. Open the Users and Staff PINs tabs: if this client has no logins, they need recreating by hand.'
+        details.push(errorInfo(loginCountErr, 'operator').detail)
       } else if ((existingLogins || 0) > 0) {
         note = ' Existing staff logins were kept.'
       } else {
         setRestoreMsg('info:Rebuilding staff logins…')
-        const accounts = await adminOp('restore_staff_accounts', {
-          client_id: client.id,
-          roster: parsed.data?.profiles || [],
-          vault:  parsed.data?.staff_pin_vault || [],
-        })
-        const restoredCount = accounts.restored?.length || 0
-        note = restoredCount ? ` ${restoredCount} PIN login${restoredCount !== 1 ? 's' : ''} restored with their original PINs.` : ''
-        // A settled leaver's till or count PIN comes back blocked, as their settlement left it (S798),
-        // and a till login POS Staff blocked comes back blocked too (S809 3i).
-        const blockedBack = (accounts.restored || []).filter(r => /blocked \(settled leaver\)/.test(r.kind))
-        if (blockedBack.length) note += ` Restored blocked, as their Final Settlement left them: ${blockedBack.map(r => r.full_name).join(', ')}.`
-        const posBlockedBack = (accounts.restored || []).filter(r => /blocked \(POS Staff\)/.test(r.kind))
-        if (posBlockedBack.length) note += ` Restored blocked, as POS Staff had blocked them: ${posBlockedBack.map(r => r.full_name).join(', ')}.`
-        if (accounts.manual?.length) {
-          note += ` ${accounts.manual.length} account${accounts.manual.length !== 1 ? 's' : ''} must be recreated by hand: ` +
-            accounts.manual.map(m => `${m.full_name} (${m.kind})`).join(', ') + '.'
+        // Its own catch (S852): a throw here used to drop the whole summary of what the data restore
+        // had already put back. It creates logins one by one, so a failure may leave some created.
+        let accounts = null
+        try {
+          accounts = await adminOp('restore_staff_accounts', {
+            client_id: client.id,
+            roster: parsed.data?.profiles || [],
+            vault:  parsed.data?.staff_pin_vault || [],
+          })
+        } catch (accErr) {
+          loginsFailed = true
+          note = ' Staff logins could not be confirmed as rebuilt, so some may exist and some may not. Open the Users and Staff PINs tabs to see which came back, and recreate the missing ones by hand.'
+          details.push(errorInfo(accErr, 'operator').detail)
+        }
+        if (accounts) {
+          const restoredCount = accounts.restored?.length || 0
+          note = restoredCount ? ` ${restoredCount} PIN login${restoredCount !== 1 ? 's' : ''} restored with their original PINs.` : ''
+          // A settled leaver's till or count PIN comes back blocked, as their settlement left it (S798),
+          // and a till login POS Staff blocked comes back blocked too (S809 3i).
+          const blockedBack = (accounts.restored || []).filter(r => /blocked \(settled leaver\)/.test(r.kind))
+          if (blockedBack.length) note += ` Restored blocked, as their Final Settlement left them: ${blockedBack.map(r => r.full_name).join(', ')}.`
+          const posBlockedBack = (accounts.restored || []).filter(r => /blocked \(POS Staff\)/.test(r.kind))
+          if (posBlockedBack.length) note += ` Restored blocked, as POS Staff had blocked them: ${posBlockedBack.map(r => r.full_name).join(', ')}.`
+          if (accounts.manual?.length) {
+            note += ` ${accounts.manual.length} account${accounts.manual.length !== 1 ? 's' : ''} must be recreated by hand: ` +
+              accounts.manual.map(m => `${m.full_name} (${m.kind})`).join(', ') + '.'
+          }
         }
       }
 
@@ -1122,6 +1179,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       // Delete it finds nothing to do.
       const relink = await relinkStaffLogins(parsed.data?.profiles || [])
       note += relink.text
+      if (relink.detail) details.push(relink.detail)
 
       // `renamed` is not a failure and must not read as one: those rows DID restore, under a
       // changed name, because the backup held two items sharing one (S707). Said plainly, with the
@@ -1137,10 +1195,13 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         ? `The restore is NOT complete: ${lost.length} part${lost.length !== 1 ? 's' : ''} did not come back — ${lost.join('; ')}. `
         : ''
       const notesLine = result.notes?.length ? ` ${result.notes.join(' ')}` : ''
-      setRestoreMsg(`${relink.failed || lost.length ? 'error' : 'ok'}:${lostNote}Restored ${result.inserted.toLocaleString('en-IN')} rows across ${result.tables} tables.${note}${renamedNote}${notesLine}`)
+      const summary = `${lostNote}Restored ${result.inserted.toLocaleString('en-IN')} rows across ${result.tables} tables.${note}${renamedNote}${notesLine}`
+      setRestoreMsg(relink.failed || lost.length || loginsFailed
+        ? { text: summary, detail: details.filter(Boolean).join(' · ') }
+        : `ok:${summary}`)
       onClientUpdated()
     } catch (err) {
-      setRestoreMsg('error:' + err.message)
+      setRestoreMsg(restoreStopped({ clientName: client.name, stage, started, err }))
     }
     setRestoreBusy(false)
   }
@@ -1151,7 +1212,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // may stop to ask whether both files downloaded, which a dialog held busy could neither show nor
   // bound.
   function startDangerAction(work) {
-    void work().catch(err => { setDeletingAction(null); setDeleteMsg('error:' + (err?.message || String(err))) })
+    void work().catch(err => { setDeletingAction(null); setDeleteMsg(dangerUnexpected(client.name, err)) })
   }
 
   async function handleClearConversions() {
@@ -1245,7 +1306,13 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         ? 'ok:IMS transactions and the Fixed Assets register cleared. Other setup data was kept.'
         : `ok:${module.toUpperCase()} transactions cleared. Setup data was kept.`)
     } catch (err) {
-      setDeleteMsg('error:' + err.message)
+      const name = module.toUpperCase()
+      setDeleteMsg(clearStopped({
+        what: `the ${name} transactions of ${client.name}`,
+        button: `Clear ${name} Transactions`,
+        kept: `Setup data is kept.${module === 'pos' ? ' The stock re-count of hand-entered sales days did not run.' : ''}`,
+        err,
+      }))
     }
     setDeletingAction(null)
   }
@@ -1304,7 +1371,12 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       await adminOp('deleteClientData', { clientId: client.id })
       setDeleteMsg('ok:All client data has been permanently erased.')
     } catch (err) {
-      setDeleteMsg('error:' + err.message)
+      setDeleteMsg(clearStopped({
+        what: `the data of ${client.name}`,
+        button: 'Clear Client Data',
+        kept: 'Logins, settings and the client record are kept.',
+        err,
+      }))
     }
     setDeletingAction(null)
   }
@@ -1327,13 +1399,32 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       // logins — deleting them made "fully reversible" false: the Staff PINs tab showed "Not
       // stored" forever, and the restore's vault-rebuild branch is gated shut whenever logins
       // exist, which after an Archive they always do (phase 7 P1, S574).
-      await adminOp('deleteClientData', { clientId: client.id, keep_staff_vault: true })
+      // Two steps, two messages (S852): a clear that stops leaves the account unlocked, and a lock
+      // that does not confirm leaves an emptied outlet its logins may still sign in to.
+      try {
+        await adminOp('deleteClientData', { clientId: client.id, keep_staff_vault: true })
+      } catch (err) {
+        setDeleteMsg(clearStopped({
+          what: `the data of ${client.name}`,
+          prefix: 'Archive did not finish. ',
+          button: 'Archive Client',
+          kept: 'The account is not locked yet, and its logins and settings are kept.',
+          err,
+        }))
+        setDeletingAction(null)
+        return
+      }
       const { error } = await supabase.from('clients').update({ is_active: false }).eq('id', client.id)
-      if (error) throw new Error(error.message)
+      if (error) {
+        setDeleteMsg(archiveLockFailed(client.name, error))
+        setDeletingAction(null)
+        onClientUpdated()
+        return
+      }
       setDeleteMsg('ok:Client archived — data cleared, logins kept, account locked. Restore the backup to reverse this.')
       onClientUpdated()
     } catch (err) {
-      setDeleteMsg('error:' + err.message)
+      setDeleteMsg(dangerUnexpected(client.name, err))
     }
     setDeletingAction(null)
   }
@@ -1352,18 +1443,26 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       // half-deleted client (some logins gone, all data intact, raw upstream error, no statement
       // of what did or didn't happen). Now every user is attempted, and on any failure we stop
       // BEFORE touching data, so the client is still whole and the retry is safe (phase 7 P0, S574).
-      const { data: profiles } = await supabase.from('profiles').select('id, full_name').eq('client_id', client.id)
+      const { data: profiles, error: profilesErr } = await supabase.from('profiles').select('id, full_name').eq('client_id', client.id)
+      // A failed read is not a client with no logins (S852). The loop below then removed nobody, the
+      // data was cleared anyway, and the final clients delete was refused by the profiles foreign key
+      // under a message saying every login had gone. Stop here, before the first delete.
+      if (profilesErr) {
+        setDeleteMsg(withDetail(`Could not read the logins of ${client.name}, so nothing was deleted: every login and all of its data are as they were. Press Delete Client again.`, profilesErr))
+        setDeletingAction(null)
+        return
+      }
       const userFailures = []
       for (const p of (profiles || [])) {
         try {
           await adminOp('deleteUser', { userId: p.id })
         } catch (err) {
-          userFailures.push(`${p.full_name || p.id}: ${err.message}`)
+          userFailures.push({ name: p.full_name || p.id, err })
         }
       }
       if (userFailures.length) {
         const done = (profiles?.length || 0) - userFailures.length
-        setDeleteMsg(`error:${done} of ${profiles.length} logins removed, then stopped — NO data was deleted, so retrying is safe. Failed: ${userFailures.join('; ')}`)
+        setDeleteMsg(loginsStopped(client.name, done, profiles.length, userFailures))
         setDeletingAction(null)
         return
       }
@@ -1387,15 +1486,18 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
         // The last step refused (S835): its data was cleared, but rows still pointing at the client
         // were left behind — written after the clear, or in a table the clear does not reach — so
         // the record stays. The message names the table when the refusal does, and keeps the
-        // technical text as the fine print in brackets, as the other messages on this drawer do.
+        // technical text as the fine print under it (S852: it was in brackets in the sentence).
         // Only a refusal says so: a dropped connection proves nothing about rows, so it keeps the
-        // general message below.
+        // general message (deleteStageFailed), which leads with what each stage left behind.
         const table = stage === 'the client record' ? blockingTableOf(err) : null
         if (stage === 'the client record' && (err?.code === '23503' || table)) {
           const { detail } = errorInfo(err, 'operator')
-          setDeleteMsg(`error:All logins were removed and the client's data was cleared, but some of its rows were left behind${table ? ` in ${table}` : ''}, so the client record itself was not deleted and still exists. Press Delete Client again: it clears what was left and then deletes the record. If it stops on the same table again, Delete does not clear that table and it needs fixing before this client can be deleted.${detail ? ` (${detail})` : ''}`)
+          setDeleteMsg({
+            text: `All logins were removed and the data of ${client.name} was cleared, but some of its rows were left behind${table ? ` in ${table}` : ''}, so the client record itself was not deleted and still exists. Press Delete Client again: it clears what was left and then deletes the record. If it stops on the same table again, Delete does not clear that table and it needs fixing before this client can be deleted. ${KEEP_BACKUP}`,
+            detail,
+          })
         } else {
-          setDeleteMsg(`error:All logins were removed, but deleting ${stage} failed: ${err.message} — the client row still exists. Run Delete Client again to finish.`)
+          setDeleteMsg(deleteStageFailed(client.name, stage, err))
         }
         setDeletingAction(null)
         onClientUpdated()
@@ -1404,7 +1506,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
       onClientUpdated()
       onClose()
     } catch (err) {
-      setDeleteMsg('error:' + err.message)
+      setDeleteMsg(dangerUnexpected(client.name, err))
       setDeletingAction(null)
     }
   }
@@ -1496,7 +1598,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // (title left, × right) stays the one implementation.
   const modalTitle = (
     <span style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-      <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>
+      <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--theme-text1)' }}>
         {client.name}
       </span>
       <span style={{ fontSize: 12, color: 'var(--theme-text3)', fontWeight: 400 }}>
@@ -1651,7 +1753,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                     />
                   </div>
                 </div>
-                {userError   && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 12, margin: '0 0 8px' }}>{userError}</p>}
+                <ActionError error={userError} className="action-error--top" />
                 {userSuccess && <p role="status" style={{ color: 'var(--theme-green-text)', fontSize: 12, margin: '0 0 8px' }}>{userSuccess}</p>}
                 <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={createUser} disabled={savingUser}>
                   {savingUser ? 'Creating…' : '+ Create User'}
@@ -1717,12 +1819,12 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 not day-to-day support.
               </p>
 
-              {pinErr && (
-                <p role="alert" style={{ fontSize: 12, color: 'var(--theme-red-text)', margin: '0 0 12px' }}>{pinErr}</p>
-              )}
+              <ActionError error={pinErr} className="action-error--top" />
 
               {loadingPins ? (
                 <p style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Loading…</p>
+              ) : pinsLoadFailed ? (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={loadPinAccounts}>Retry</button>
               ) : pinAccounts.length === 0 ? (
                 <p style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
                   This client has no POS or Self-Service PIN accounts.
@@ -2409,7 +2511,9 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   {backupProgress || (lastBackupAt ? `Last backup: ${formatAd(new Date(lastBackupAt))}` : 'Never backed up')}
                 </span>
               </div>
-              {backupMsg && (
+              {/* An object is a failure with fine print (S852); a string keeps ok:/error:. */}
+              {typeof backupMsg === 'object' && <ActionError error={backupMsg} />}
+              {typeof backupMsg === 'string' && backupMsg && (
                 <p role={backupMsg.startsWith('ok:') ? 'status' : 'alert'}
                   style={{ fontSize: 12, margin: '8px 0 0', color: backupMsg.startsWith('ok:') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                   {backupMsg.replace(/^(ok|error):/, '')}
@@ -2448,6 +2552,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   ref={restoreInputRef}
                   id={fid('restore-file')}
                   type="file" accept=".json"
+                  aria-label="Backup file to restore"
                   className="visually-hidden"
                   tabIndex={-1}
                   disabled={restoreBusy}
@@ -2462,7 +2567,8 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 >
                   {restoreBusy ? 'Restoring…' : '↑ Choose backup file…'}
                 </button>
-                {restoreMsg && (
+                {typeof restoreMsg === 'object' && <ActionError error={restoreMsg} />}
+                {typeof restoreMsg === 'string' && restoreMsg && (
                   <p role={restoreMsg.startsWith('error:') ? 'alert' : 'status'}
                     style={{ fontSize: 12, margin: '10px 0 0', color: restoreMsg.startsWith('ok:') ? 'var(--theme-green-text)' : restoreMsg.startsWith('info:') ? 'var(--theme-text2)' : 'var(--theme-red-text)' }}>
                     {restoreMsg.replace(/^(ok|error|info):/, '')}
@@ -2547,7 +2653,10 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                 </p>
               </div>
 
-              {deleteMsg && (
+              {/* An object is a failure with fine print (S852, dangerZoneText.js); a string keeps the
+                  ok:/error: one-line convention the other Danger messages use. */}
+              {typeof deleteMsg === 'object' && <ActionError error={deleteMsg} className="action-error--top" />}
+              {typeof deleteMsg === 'string' && deleteMsg && (
                 <p role={deleteMsg.startsWith('ok:') ? 'status' : 'alert'}
                   style={{ fontSize: 12, margin: '0 0 16px', color: deleteMsg.startsWith('ok:') ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
                   {deleteMsg.replace(/^(ok|error):/, '')}
@@ -2652,7 +2761,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   setUserSuccess(`Password reset for ${resetUser.email}.`)
                   setResetUser(null)
                 } catch (err) {
-                  setUserError('Password reset failed: ' + err.message)
+                  setUserError(loginOpFailure(`The password for ${resetUser.email} was not changed, and the old one still works.`, err))
                   setResetUser(null)
                 }
                 setResettingPw(false)

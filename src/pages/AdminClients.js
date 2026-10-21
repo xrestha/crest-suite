@@ -76,6 +76,7 @@ export default function AdminClients() {
   const [featureModalClient, setFeatureModalClient] = useState(null)
   const [lastSeenMap, setLastSeenMap] = useState({})
   const [lastUserMap, setLastUserMap] = useState({})
+  const [lastSeenError, setLastSeenError] = useState(null)
   const [search, setSearch]           = useState('')
 
   // Platform totals. Only ACTIVE properties are summed, matching the Admin Dashboard exactly —
@@ -97,10 +98,18 @@ export default function AdminClients() {
     // clients, after which whole clients silently drop out of timeMap and their rows show a
     // plausible but wrong "last seen" (S574). Ordered with a unique tiebreaker per the
     // fetchAllRows contract.
-    const { data } = await fetchAllRows(() =>
+    const { data, error } = await fetchAllRows(() =>
       supabase.from('profiles').select('id, client_id, last_seen_at, full_name')
         .not('client_id', 'is', null).not('last_seen_at', 'is', null)
         .order('id'))
+    // A failed read keeps the last good times rather than blanking every card, and says so (S852):
+    // a card with no time reads as a client nobody has signed in to.
+    if (error) {
+      console.error('Admin Clients: last sign-in read failed:', error.message)
+      setLastSeenError(error)
+      return
+    }
+    setLastSeenError(null)
     const timeMap = {}
     const userMap = {}
     for (const row of (data || [])) {
@@ -444,7 +453,9 @@ export default function AdminClients() {
               <div>
                 <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-red-text)', letterSpacing: 0.3 }}>
                   Trial Accounts
-                  <span style={{ marginLeft: 8, background: 'color-mix(in srgb, var(--theme-red) 18%, transparent)', color: 'var(--theme-red-text)', borderRadius: 'var(--radius-md)', padding: '2px 8px', fontSize: 12, fontWeight: 800 }}>{trialClients.length}</span>
+                  {/* text1 ink (S852): red-text on this 18% chip over the 10% band measured 4.16:1 on
+                      Night, under AA at 12px. The red fill still carries the signal. */}
+                  <span style={{ marginLeft: 8, background: 'color-mix(in srgb, var(--theme-red) 18%, transparent)', color: 'var(--theme-text1)', borderRadius: 'var(--radius-md)', padding: '2px 8px', fontSize: 12, fontWeight: 800 }}>{trialClients.length}</span>
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 2 }}>
                   {awaitingCount > 0
@@ -469,10 +480,17 @@ export default function AdminClients() {
                 const wantsToSub = c.subscribe_requested
                 const awaiting   = !c.trial_approved_at
                 return (
+                  // flexWrap, and an info block with a basis (S852): the actions cluster was
+                  // flexShrink: 0 inside this overflow: hidden panel, so at 390px Manage was cut off
+                  // with no way to reach it. The client cards below have wrapped since S574.
                   <div key={c.id} style={{
-                    display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px',
+                    display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', flexWrap: 'wrap',
                     borderBottom: '1px solid color-mix(in srgb, var(--theme-red) 12%, transparent)',
-                    background: wantsToSub ? 'color-mix(in srgb, var(--theme-red) 6%, transparent)' : 'transparent',
+                    // A red edge, not a second 6% fill (S852): over the panel's 4% the extra fill took
+                    // the Awaiting approval badge to 4.32:1 on Light. Every text in these rows was
+                    // measured on the 4% tint: amber-text 5.45 and red-text 7.10 on Light, 10.10 and
+                    // 6.10 on Night.
+                    boxShadow: wantsToSub ? 'inset 3px 0 0 var(--theme-red)' : 'none',
                   }}>
                     {/* Subscribe badge */}
                     {wantsToSub && (
@@ -481,8 +499,8 @@ export default function AdminClients() {
                       </div>
                     )}
                     {/* Info */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</span>
                         {awaiting && (
                           <span className="badge badge-amber" style={{ flexShrink: 0, fontWeight: 700 }}>
@@ -497,7 +515,8 @@ export default function AdminClients() {
                       </div>
                       <div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 2 }}>
                         {c.trial_start_date && (
-                          <span style={{ color: 'var(--theme-text3)', marginRight: 8 }}>
+                          // text2, not text3: Light's text3 fails AA on this red tint (S794, S852).
+                          <span style={{ color: 'var(--theme-text2)', marginRight: 8 }}>
                             Signed up {relativeTime(c.trial_start_date)}
                             {c.contact_person && c.contact_person !== c.name ? ` · ${c.contact_person}` : ''}
                           </span>
@@ -516,18 +535,17 @@ export default function AdminClients() {
                               </span>
                             : ''}
                         {c.contact_phone && (
-                          <span style={{ marginLeft: 8, color: 'var(--theme-text3)' }}>
+                          <span style={{ marginLeft: 8, color: 'var(--theme-text2)' }}>
                             · 📱 <a href={`https://wa.me/977${c.contact_phone.replace(/^0/, '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--theme-green-text)', textDecoration: 'none' }}>{c.contact_phone}</a>
                           </span>
                         )}
                       </div>
                     </div>
                     {/* Actions */}
-                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       {wantsToSub && (
                         <button
-                          className="btn btn-ghost"
-                          style={{ fontSize: 11, padding: '4px 8px', color: 'var(--theme-text2)' }}
+                          className="btn btn-ghost btn-sm"
                           onClick={() => dismissSubscribeRequest(c)}
                           title="Mark as handled">
                           ✓ Dismiss
@@ -535,30 +553,27 @@ export default function AdminClients() {
                       )}
                       {awaiting ? (
                         <button
-                          className="btn btn-primary"
-                          style={{ fontSize: 11, padding: '4px 10px' }}
+                          className="btn btn-primary btn-sm"
                           onClick={() => approveTrial(c)}
                           title="Opens the account and starts the 7-day trial today">
                           ✓ Approve trial
                         </button>
                       ) : (<>
                       <button
-                        className="btn btn-ghost"
-                        style={{ fontSize: 11, padding: '4px 8px' }}
+                        className="btn btn-ghost btn-sm"
                         onClick={() => extendTrial(c)}
                         title="Add 7 more days to the trial">
                         +7 Days
                       </button>
                       <button
-                        className="btn btn-primary"
-                        style={{ fontSize: 11, padding: '4px 10px' }}
+                        className="btn btn-primary btn-sm"
                         onClick={() => convertTrialToPaid(c)}>
                         Convert to Paid
                       </button>
                       </>)}
+                      {/* Neutral: opening the drawer is routine, and red here read as a delete (S852). */}
                       <button
-                        className="btn btn-ghost"
-                        style={{ fontSize: 11, padding: '4px 8px', color: 'var(--theme-red-text)' }}
+                        className="btn btn-ghost btn-sm"
                         onClick={() => setActiveDrawer(c)}>
                         Manage
                       </button>
@@ -575,6 +590,13 @@ export default function AdminClients() {
           it is next to the button that was pressed, and never inside the trial panel, which has
           its own slot. */}
       {actionError && <ActionError error={actionError} className="action-error--top" />}
+
+      {lastSeenError && !loading && !listError && (
+        <div className="note-banner" role="status">
+          <strong>Last sign-in times could not be read.</strong> A card below with no time may still have been used recently.{' '}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={loadLastSeen}>Retry</button>
+        </div>
+      )}
 
       {/* Client cards */}
       {loading ? (
@@ -637,7 +659,7 @@ export default function AdminClients() {
                   {/* Name + status */}
                   <div style={{ flex: '1 1 240px', minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)', fontFamily: 'Georgia, serif' }}>{c.name}</span>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--theme-text1)' }}>{c.name}</span>
                       <span className={`badge ${c.is_active ? 'badge-green' : 'badge-gray'}`}>{c.is_active ? 'Active' : 'Inactive'}</span>
                       {rel && (
                         <span style={{ fontSize: 12, color: isRecent ? 'var(--theme-green-text)' : 'var(--theme-text3)', fontWeight: isRecent ? 600 : 400 }}>
