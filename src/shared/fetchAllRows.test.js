@@ -1,4 +1,4 @@
-import { fetchAllRows, fetchAllRowsChunked, rowCapError, ROW_CAP_CODE } from './fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked, fetchAllRowsParallel, rowCapError, ROW_CAP_CODE } from './fetchAllRows'
 
 // Fake builder: records the .range() calls it receives and serves slices of `all`.
 function makeSource(all, { error = null } = {}) {
@@ -229,4 +229,126 @@ test('rowCapError is a supabase-shaped error with a stable code', () => {
   expect(e.code).toBe(ROW_CAP_CODE)
   expect(e.message).toMatch(/1,00,000 rows/)
   expect(e.details).toMatch(/maxRows=100000/)
+})
+
+// S853 (OWNER-DASHBOARD-9): page 1 brings the count, the rest go out together.
+// A fake that answers `count` only when page 1 asks for it, and tracks what is in flight.
+function makeCountedSource(all, { count = all.length, delayOf = () => 0, failOn = () => null } = {}) {
+  const ranges = []
+  const opts = []
+  let inFlight = 0
+  let maxLater = 0
+  const makeQuery = selectOptions => {
+    opts.push(selectOptions)
+    return {
+      range: (from, to) => {
+        ranges.push([from, to])
+        inFlight++
+        if (from > 0) maxLater = Math.max(maxLater, inFlight)
+        return new Promise(resolve => setTimeout(() => {
+          inFlight--
+          const error = failOn(from)
+          if (error) return resolve({ data: null, error })
+          resolve({ data: all.slice(from, to + 1), error: null, count: selectOptions?.count === 'exact' ? count : null })
+        }, delayOf(from)))
+      },
+    }
+  }
+  return { makeQuery, ranges, opts, maxLater: () => maxLater }
+}
+
+describe('fetchAllRowsParallel', () => {
+  test('an exact count asks for the right pages, every page after the first at once, rows in order', async () => {
+    // Later pages resolve out of order: the third first.
+    const src = makeCountedSource(rows(3500), { delayOf: from => (from === 1000 ? 6 : from === 2000 ? 3 : 0) })
+    const { data, error } = await fetchAllRowsParallel(src.makeQuery, { pageSize: 1000 })
+    expect(error).toBeNull()
+    expect(data.map(r => r.id)).toEqual(rows(3500).map(r => r.id))
+    expect(src.ranges).toEqual([[0, 999], [1000, 1999], [2000, 2999], [3000, 3999]])
+    // Page 1 alone asked for the count; the three later pages were all in flight together.
+    expect(src.opts[0]).toEqual({ count: 'exact' })
+    expect(src.opts.slice(1)).toEqual([undefined, undefined, undefined])
+    expect(src.maxLater()).toBe(3)
+    // fetchAllRows reads the same rows, one page after another.
+    const serial = makeSource(rows(3500))
+    expect((await fetchAllRows(serial.makeQuery, { pageSize: 1000 })).data).toEqual(data)
+  })
+
+  test('an error on any page is an error, never the pages that landed', async () => {
+    for (const bad of [0, 1000, 2000]) {
+      const src = makeCountedSource(rows(2500), { failOn: from => (from === bad ? { message: `page at ${from} died` } : null) })
+      const { data, error } = await fetchAllRowsParallel(src.makeQuery, { pageSize: 1000 })
+      expect(data).toBeNull()
+      expect(error.message).toBe(`page at ${bad} died`)
+    }
+    // Two failing pages: the lower one wins, even when it fails last.
+    const src = makeCountedSource(rows(3500), {
+      delayOf: from => (from === 1000 ? 8 : 0),
+      failOn: from => (from === 1000 ? { message: 'second died' } : from === 3000 ? { message: 'fourth died' } : null),
+    })
+    expect((await fetchAllRowsParallel(src.makeQuery, { pageSize: 1000 })).error.message).toBe('second died')
+  })
+
+  test('zero rows: one request, an empty list', async () => {
+    const src = makeCountedSource([])
+    expect(await fetchAllRowsParallel(src.makeQuery)).toEqual({ data: [], error: null })
+    expect(src.ranges).toEqual([[0, 999]])
+  })
+
+  test('exactly one page: a short page is one request; an exactly-full one keeps its empty probe', async () => {
+    const short = makeCountedSource(rows(384))
+    expect((await fetchAllRowsParallel(short.makeQuery)).data).toHaveLength(384)
+    expect(short.ranges).toEqual([[0, 999]])
+    const full = makeCountedSource(rows(1000))
+    expect((await fetchAllRowsParallel(full.makeQuery)).data).toHaveLength(1000)
+    expect(full.ranges).toEqual([[0, 999], [1000, 1999]])
+    // An exactly-full LAST page is probed too, as fetchAllRows does.
+    const two = makeCountedSource(rows(2000))
+    expect((await fetchAllRowsParallel(two.makeQuery)).data).toHaveLength(2000)
+    expect(two.ranges).toEqual([[0, 999], [1000, 1999], [2000, 2999]])
+  })
+
+  test('a count past maxRows is the row-cap error at once', async () => {
+    const src = makeCountedSource(rows(10000))
+    const { data, error } = await fetchAllRowsParallel(src.makeQuery, { pageSize: 1000, maxRows: 3000 })
+    expect(data).toBeNull()
+    expect(error.code).toBe(ROW_CAP_CODE)
+    expect(src.ranges).toEqual([[0, 999]])
+    // Exactly maxRows is a whole answer, confirmed by the same one-row probe fetchAllRows makes.
+    const exact = makeCountedSource(rows(3000))
+    const ok = await fetchAllRowsParallel(exact.makeQuery, { pageSize: 1000, maxRows: 3000 })
+    expect(ok.error).toBeNull()
+    expect(ok.data).toHaveLength(3000)
+    expect(exact.ranges).toEqual([[0, 999], [1000, 1999], [2000, 2999], [3000, 3000]])
+  })
+
+  test('rows added since the count are read on, not dropped', async () => {
+    const src = makeCountedSource(rows(2100), { count: 1500 })
+    const { data } = await fetchAllRowsParallel(src.makeQuery, { pageSize: 1000 })
+    expect(data.map(r => r.id)).toEqual(rows(2100).map(r => r.id))
+    expect(src.ranges).toEqual([[0, 999], [1000, 1999], [2000, 2999]])
+  })
+
+  test('a short page before the last starts the read again, one page at a time', async () => {
+    // The count promised 3 pages; the middle one came back short (rows deleted mid-read).
+    const all = rows(2500)
+    let call = 0
+    const makeQuery = selectOptions => ({
+      range: (from, to) => {
+        call++
+        const live = call <= 3 && from === 1000 ? all.slice(from, from + 400) : all.slice(from, to + 1)
+        return Promise.resolve({ data: live, error: null, count: selectOptions?.count === 'exact' ? 2500 : null })
+      },
+    })
+    const { data, error } = await fetchAllRowsParallel(makeQuery, { pageSize: 1000 })
+    expect(error).toBeNull()
+    expect(data.map(r => r.id)).toEqual(all.map(r => r.id))
+  })
+
+  test('no count in the answer: pages on one at a time, as fetchAllRows', async () => {
+    const { makeQuery, ranges } = makeSource(rows(1753))
+    const { data } = await fetchAllRowsParallel(makeQuery, { pageSize: 1000 })
+    expect(data).toHaveLength(1753)
+    expect(ranges).toEqual([[0, 999], [1000, 1999]])
+  })
 })

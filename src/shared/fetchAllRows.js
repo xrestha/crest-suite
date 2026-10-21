@@ -39,8 +39,13 @@ export function rowCapError(maxRows) {
 }
 
 export async function fetchAllRows(makeQuery, { pageSize = 1000, maxRows = 100000 } = {}) {
-  const out = []
-  for (let from = 0; from < maxRows; from += pageSize) {
+  return pageOnFrom(makeQuery, [], 0, { pageSize, maxRows })
+}
+
+// fetchAllRows' loop, from any offset: one page at a time, a short page ends it, an exactly-full page
+// asks for the next, and a read that runs past `maxRows` fails. `out` holds the rows already read.
+async function pageOnFrom(makeQuery, out, start, { pageSize, maxRows }) {
+  for (let from = start; from < maxRows; from += pageSize) {
     // Never ask past the ceiling, so the rows returned can never exceed it either.
     const to = Math.min(from + pageSize, maxRows) - 1
     const { data, error } = await makeQuery().range(from, to)
@@ -57,6 +62,54 @@ export async function fetchAllRows(makeQuery, { pageSize = 1000, maxRows = 10000
   if (error) return { data: null, error }
   if ((past || []).length > 0) return { data: null, error: rowCapError(maxRows) }
   return { data: out, error: null }
+}
+
+// fetchAllRows with the pages after the first asked for TOGETHER (S853, OWNER-DASHBOARD-9). Opt-in, for a
+// read on a page's critical path: the Owner Dashboard's month of `sales_entries` is ~360 rows a day on
+// a busy till, so day 25 was ten pages, each waiting for the one before it.
+//
+// `makeQuery(selectOptions)` must pass its argument to `.select(columns, selectOptions)`: page 1 is
+// asked with `{ count: 'exact' }`, so it brings the row count, and every other page is asked with no
+// options. The same two rules as fetchAllRows: a fresh builder per call, and a unique tiebreaker in
+// the sort. The answer is fetchAllRows' answer, rows in the same order:
+//   - a short first page is the whole list (one request, as before);
+//   - a count past `maxRows` is the row-cap error at once, never the rows so far;
+//   - the remaining pages go out together; the lowest-numbered failing page's error wins, and the
+//     read returns `{ data: null, error }`, never the pages that did land;
+//   - a FULL last page asks on, one page at a time, as fetchAllRows does: rows added since the count
+//     are read, not dropped, and an exactly-full list still costs its one empty request;
+//   - a SHORT page before the last means the rows moved while they were read (a delete), so the read
+//     starts again one page at a time rather than stitch two snapshots together;
+//   - no count in the answer (a makeQuery that ignores its argument) pages on one at a time.
+export async function fetchAllRowsParallel(makeQuery, { pageSize = 1000, maxRows = 100000 } = {}) {
+  const opts = { pageSize, maxRows }
+  const firstTo = Math.min(pageSize, maxRows) - 1
+  const head = await makeQuery({ count: 'exact' }).range(0, firstTo)
+  if (head.error) return { data: null, error: head.error }
+  const first = head.data || []
+  if (first.length < firstTo + 1) return { data: first, error: null }
+  const total = head.count
+  if (typeof total !== 'number' || !Number.isFinite(total)) return pageOnFrom(makeQuery, [...first], firstTo + 1, opts)
+  if (total > maxRows) return { data: null, error: rowCapError(maxRows) }
+
+  const ranges = []
+  for (let from = firstTo + 1; from < total; from += pageSize) ranges.push([from, Math.min(from + pageSize, maxRows) - 1])
+  if (ranges.length === 0) return pageOnFrom(makeQuery, [...first], firstTo + 1, opts)
+  const pages = await Promise.all(ranges.map(([from, to]) => makeQuery().range(from, to)))
+  const failed = pages.find(p => p.error)
+  if (failed) return { data: null, error: failed.error }
+
+  const out = [...first]
+  for (let i = 0; i < pages.length; i++) {
+    const batch = pages[i].data || []
+    const [from, to] = ranges[i]
+    out.push(...batch)
+    if (batch.length < to - from + 1) {
+      if (i === pages.length - 1) return { data: out, error: null }
+      return fetchAllRows(() => makeQuery(), opts)
+    }
+  }
+  return pageOnFrom(makeQuery, out, ranges[ranges.length - 1][1] + 1, opts)
 }
 
 // Same job for a read whose filter is `.in(column, ids)` with a long id list.

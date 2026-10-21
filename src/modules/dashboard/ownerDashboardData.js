@@ -9,7 +9,8 @@
  *                          (DASH-TRANSFERS, PNL-8)
  *   - operatingFigures     Spend %, Labour %, Prime %, True / Est. Net Margin %, Fixed Costs %
  *                          (OWNER-DASHBOARD-1, -8, PNL-1 parity)
- *   - cashCreditSplit      Purchases · Cash / Credit, the Payment Report's figures (OWNER-DASHBOARD-13)
+ *   - cashCreditSplit      Purchases · Cash / Credit, the Payment Report's figures (OWNER-DASHBOARD-13),
+ *                          a return against an earlier month's bill at that bill's discount (S853)
  *   - loadOverdueCreditBills  Overdue Payables valued as Outstanding Payables values them (OWNER-DASHBOARD-7)
  *   - trendWithBasis       the 12-month trend with a mark where a frozen report's method changed
  *                          (OWNER-DASHBOARD-11)
@@ -141,9 +142,13 @@ export function operatingFigures({ revenue, spend, labour, overhead = 0, taxFees
  * (FonePay counts with Cash). A transfer is not a bill and is not here. `purchases` need `id`,
  * `payment_method`, `discount_amount` and the bill keys; `returns` need `purchase_entry_id` and
  * `payment_method`.
+ *
+ * `priorBillLines` (S853): every line of each earlier-month bill a return points at
+ * (`readPriorBillLines` over `returnsAgainstEarlierBills`), so such a return comes off at its own
+ * bill's discounted price, as the Payment Report takes it off. Without them it came off at list price.
  */
-export function cashCreditSplit(purchases, returns, period) {
-  const { bills, returns: priced } = billPayables(purchases || [], returns || [], period)
+export function cashCreditSplit(purchases, returns, period, { priorBillLines } = {}) {
+  const { bills, returns: priced } = billPayables(purchases || [], returns || [], period, { priorBillLines })
   let cash = 0, credit = 0
   for (const b of bills) {
     if (b.method === 'Credit') credit += b.total
@@ -154,6 +159,19 @@ export function cashCreditSplit(purchases, returns, period) {
     else cash -= r.value
   }
   return { cash, credit }
+}
+
+/**
+ * The purchase lines this month's returns point at that sit in an EARLIER month (S756, D10), read off
+ * each return's own `purchase_entries(period_id)` embed, so the bills can be read as soon as the
+ * returns land, without waiting for the month's purchases. The same set `returnLinesOutsidePeriod`
+ * gives from the purchases: every line of this month is among them, so a line from another month is
+ * exactly a line that is not. An unlinked return has no line and is not listed.
+ */
+export function returnsAgainstEarlierBills(returns, periodId) {
+  return [...new Set((returns || [])
+    .filter(r => r.purchase_entry_id != null && r.purchase_entries?.period_id !== periodId)
+    .map(r => r.purchase_entry_id))]
 }
 
 // ── Overdue Payables ─────────────────────────────────────────────────────────────────────────────

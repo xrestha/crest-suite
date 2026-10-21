@@ -161,7 +161,8 @@ export function returnBase(r, factors) {
  * `prior` is `priorBillFactors(readPriorBillLines(...).data)` from purchaseTaxSplit.js; it is taken as
  * a finished Map rather than as lines because that function lives in the file that imports this one.
  * The period's own factors win on a collision. Every page that values returns (Vendor Report, Supplier
- * Contribution, Payment Summary, the Owner Report's vendor section) merges through here, so none of
+ * Contribution, Payment Summary, the Owner Report's vendor section, the Owner Dashboard's Cash / Credit
+ * through billPayables) merges through here, so none of
  * them can each decide the precedence differently.
  */
 export function mergeFactors(own, prior) {

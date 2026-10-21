@@ -1,7 +1,9 @@
 import {
   tileState, revenueOf, netSpendOf, operatingFigures, cashCreditSplit, overdueFromLines, trendWithBasis,
-  loadOverdueCreditBills,
+  loadOverdueCreditBills, returnsAgainstEarlierBills,
 } from './ownerDashboardData'
+import { billPayables, priorBillFactors } from '../ims/reports/purchaseTaxSplit'
+import { applyPriorBillFactors } from '../ims/reports/supplierAttribution'
 import { mtdClock } from './mtdClock'
 import { bsToAd } from '../../utils/bsCalendar'
 
@@ -128,6 +130,46 @@ describe('cashCreditSplit — the Payment Report\'s figures (OWNER-DASHBOARD-13)
     const r = cashCreditSplit(purchases, [], KARTIK)
     expect(r.cash).toBeCloseTo(9000 * 1.13, 6)
     expect(r.credit).toBe(0)
+  })
+
+  // S853 (D2). Kartik's return of 2 units against Ashwin's Credit bill: 15,000 with 1,500 off, so
+  // each line kept 90% of its list price, and the returned line carried VAT.
+  describe('a return against a bill from an earlier month', () => {
+    const ASHWIN_BILL = [
+      { id: 'old1', period_id: 'p6', qty: 10, rate: 1000, bs_day: 20, payment_method: 'Credit', discount_amount: 1500, purchase_group_id: 'b-old', vat_inclusive: true },
+      { id: 'old2', period_id: 'p6', qty: 1, rate: 5000, bs_day: 20, payment_method: 'Credit', discount_amount: 1500, purchase_group_id: 'b-old', vat_inclusive: false },
+    ]
+    const purchases = [{ id: 'l1', period_id: 'p7', qty: 10, rate: 1000, bs_day: 3, payment_method: 'Credit', discount_amount: 0, purchase_group_id: 'b1', vat_inclusive: false }]
+    const returns = [
+      { purchase_entry_id: 'old1', qty: 2, rate: 1000, bs_day: 5, payment_method: 'Credit', purchase_entries: { vat_inclusive: true, vat_is_cost: false, period_id: 'p6' } },
+      { purchase_entry_id: 'l1', qty: 1, rate: 1000, bs_day: 6, payment_method: 'Credit', purchase_entries: { vat_inclusive: false, vat_is_cost: false, period_id: 'p7' } },
+    ]
+
+    test('comes off at the discounted price of its own bill, VAT on that: Credit 6,966, not 6,740', () => {
+      // Before: 10,000 − 2,000 × 1.13 − 1,000 (the list price).
+      expect(cashCreditSplit(purchases, returns, KARTIK).credit).toBeCloseTo(6740, 6)
+      const r = cashCreditSplit(purchases, returns, KARTIK, { priorBillLines: ASHWIN_BILL })
+      // Now: 10,000 − 2,000 × 0.9 × 1.13 − 1,000.
+      expect(r.credit).toBeCloseTo(10000 - 2034 - 1000, 6)
+      expect(r.cash).toBe(0)
+    })
+
+    test('matches what the Payment Report arithmetic gives for the same month', () => {
+      // PaymentReport.js: billPayables, then applyPriorBillFactors over the earlier bills' lines.
+      const { bills, returns: listed } = billPayables(purchases, returns, KARTIK)
+      const priced = applyPriorBillFactors(listed, purchases, priorBillFactors(ASHWIN_BILL))
+      const credit = bills.filter(b => b.method === 'Credit').reduce((s, b) => s + b.total, 0)
+        - priced.filter(x => x.method === 'Credit').reduce((s, x) => s + x.value, 0)
+      expect(cashCreditSplit(purchases, returns, KARTIK, { priorBillLines: ASHWIN_BILL }).credit).toBeCloseTo(credit, 9)
+    })
+
+    test('returnsAgainstEarlierBills: the earlier lines, read off the embed, as returnLinesOutsidePeriod gives them', () => {
+      const unlinked = { purchase_entry_id: null, qty: 1, rate: 10, purchase_entries: null }
+      const twice = { ...returns[0], qty: 1 }
+      expect(returnsAgainstEarlierBills([...returns, unlinked, twice], 'p7')).toEqual(['old1'])
+      expect(returnsAgainstEarlierBills([returns[1]], 'p7')).toEqual([])
+      expect(returnsAgainstEarlierBills(null, 'p7')).toEqual([])
+    })
   })
 })
 

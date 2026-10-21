@@ -10,7 +10,7 @@ import {
   isVatReturn, isNonVatReturn, isUnlinkedReturn, annexure13Rows, normalisePan, billWiseVat, ONE_LAKH, summariseUnlinkedReturns,
   returnLinesOutsidePeriod, priorBillFactors, panWarning,
 } from './purchaseTaxSplit'
-import { allocateBillDiscounts } from './supplierAttribution'
+import { allocateBillDiscounts, applyPriorBillFactors } from './supplierAttribution'
 
 // One bill, two lines, one of each kind, with a bill-level discount — the shape the whole file is
 // about. `discount_amount` is repeated on every line because that is how the column is stored.
@@ -435,6 +435,49 @@ describe('billPayables — what a payment method actually cost', () => {
     const { bills } = billPayables(
       [{ ...VAT_LINE, purchase_group_id: 'G2', payment_method: null }], [], { bs_year: 2082, bs_month: 5 })
     expect(bills[0].method).toBe('Cash')
+  })
+
+  // S853 (D2). The return sits in Ashwin; its bill is Bhadra's 10,000 with 1,000 off. The Owner
+  // Dashboard's Cash / Credit priced it at the list rate; the Payment Report corrected it afterwards.
+  describe('a return against a bill from an earlier month (priorBillLines)', () => {
+    const LAST_MONTH = MIXED_BILL.map(l => ({ ...l, period_id: 'bhadra' }))
+    const THIS_MONTH = [{ ...VAT_LINE, id: 'n1', purchase_group_id: 'G2', discount_amount: 0, rate: 1000, period_id: 'ashwin' }]
+    const late = ret(LAST_MONTH[0], { id: 'late' })
+    const ASHWIN = { bs_year: 2082, bs_month: 6 }
+
+    it('without the option: the list rate, exactly as before', () => {
+      const r = billPayables(THIS_MONTH, [late], ASHWIN)
+      expect(r.returns[0].value).toBeCloseTo(6000 * 1.13, 6)
+      expect(billPayables(THIS_MONTH, [late], ASHWIN, {})).toEqual(r)
+      expect(billPayables(THIS_MONTH, [late], ASHWIN, { priorBillLines: [] })).toEqual(r)
+    })
+
+    it('with it: the discount of its own bill, the figure the Payment Report gives', () => {
+      const r = billPayables(THIS_MONTH, [late], ASHWIN, { priorBillLines: LAST_MONTH })
+      expect(r.returns[0].value).toBeCloseTo(5400 * 1.13, 6)
+      // PaymentReport.js: list-rate pricing, then applyPriorBillFactors.
+      const listed = billPayables(THIS_MONTH, [late], ASHWIN)
+      const report = applyPriorBillFactors(listed.returns, THIS_MONTH, priorBillFactors(LAST_MONTH))
+      expect(r.returns[0].value).toBeCloseTo(report[0].value, 9)
+      // The bills themselves are untouched.
+      expect(r.bills).toEqual(listed.bills)
+    })
+
+    it('the factors of this month win, and a same-month return is untouched', () => {
+      const own = ret(THIS_MONTH[0])
+      // A stray line carrying a this-month id, with a discount of its own.
+      const stray = [{ ...THIS_MONTH[0], purchase_group_id: 'GX', discount_amount: 500, period_id: 'bhadra' }]
+      const r = billPayables(THIS_MONTH, [own, late], ASHWIN, { priorBillLines: [...LAST_MONTH, ...stray] })
+      const byId = Object.fromEntries(r.returns.map(x => [x.id, x.value]))
+      expect(byId[own.id]).toBeCloseTo(1000 * 1.13, 6)
+      expect(byId.late).toBeCloseTo(5400 * 1.13, 6)
+    })
+  })
+
+  it('shares mergeFactors with supplierAttribution.js rather than keeping a copy', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'purchaseTaxSplit.js'), 'utf8')
+    expect(src).not.toMatch(/function mergeFactors/)
+    expect(src).toMatch(/import \{[^}]*\bmergeFactors\b[^}]*\} from '\.\/supplierAttribution'/)
   })
 })
 

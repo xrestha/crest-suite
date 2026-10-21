@@ -12,7 +12,6 @@ import { useAuth } from '../../context/AuthContext'
 import { useTheme } from '../../context/ThemeContext'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
-import { fetchAllRows } from '../../shared/fetchAllRows'
 import { settleWithin } from '../../utils/withTimeout'
 import { BS_MONTHS, bsDayBoundaryIso } from '../../utils/bsCalendar'
 import { useSettings } from '../../context/SettingsContext'
@@ -26,9 +25,8 @@ import SupportContactLine from '../../components/SupportContactLine'
 import { explodeRecipeIngredients, loadRecipeBook } from '../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildStockRows, summarizeReorder } from '../../modules/ims/stockcount/stockReportCalc'
-import { periodWastageValue, WASTAGE_VALUE_SELECT } from '../../modules/ims/reports/periodCost'
+import { periodWastageValue } from '../../modules/ims/reports/periodCost'
 import { SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../../modules/ims/reports/foodCostBasis'
-import { readPeriodTransfers } from '../../modules/ims/transfers/transferFlows'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
 import { splitOverheadBuckets, resolveOutletLabour, outletLabourNotes, labourNotJudgedText } from '../../modules/dashboard/labourSource'
 import { loadOutletLabour } from '../../modules/dashboard/loadOutletLabour'
@@ -36,6 +34,7 @@ import { mtdClock, countedDaysText } from '../../modules/dashboard/mtdClock'
 import {
   tileState, revenueOf, netSpendOf, operatingFigures, cashCreditSplit, loadOverdueCreditBills, trendWithBasis,
 } from '../../modules/dashboard/ownerDashboardData'
+import { startFirstWave, startMonthBatch } from '../../modules/dashboard/ownerDashboardLoad'
 import { loadDeliveryCommission, bsMonthWindow } from '../../shared/deliveryCommission'
 
 // Cost & Margin trend series. Fixed hex, for the reason DESIGN.md states by name: the semantic
@@ -58,13 +57,8 @@ const READ_TIMEOUT_MS = 20000
 // are prorated and labour is accrued to yesterday, so neither is lumpy any more (S849).
 const SETTLE_DAY = 10
 
-// One union read per table for the month (OWNER-DASHBOARD-9): the IMS figures and the reorder tile
-// used to read five of these twice.
-const PURCHASE_COLS = 'id, item_id, qty, rate, bs_day, payment_method, discount_amount, purchase_group_id, vendor_id, invoice_ref, vat_inclusive, vat_is_cost'
-const RETURN_COLS = 'item_id, qty, rate, bs_day, payment_method, purchase_entry_id, purchase_entries(vat_inclusive, vat_is_cost)'
-// `source` is SELECTED and comps are filtered in JS (revenueOf), never `.neq('source','pos_comp')`:
-// the column is nullable and `NULL <> 'pos_comp'` dropped every legacy row from revenue (S734).
-const SALES_COLS = 'recipe_id, qty_sold, unit_price, discount, source, bs_day, ingredient_deltas'
+// The reads themselves, and their columns, are in ownerDashboardLoad.js (S853, OWNER-DASHBOARD-9): one
+// union read per table for the month, and what starts beside what.
 
 // The page's sections. A tile renders a figure only when every section it depends on is `ok`.
 const SECTION_NAMES = ['period', 'ims', 'reorder', 'payables', 'labour', 'commission', 'trend']
@@ -130,12 +124,13 @@ export default function OwnerDashboard() {
   }, [canLoad, effectiveClientId, posOn]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function loadEverything() {
-    // The recipe book starts beside the period read; the reorder walk reads it from memory (S793).
-    const bookPromise = loadRecipeBook(scopedFrom)
-    bookPromise.catch(() => {}) // a failure is the reorder section's, reported where it is awaited
+    // The month read starts in this tick with every read that needs nothing from it (S853,
+    // OWNER-DASHBOARD-9): the recipe book (the reorder walk reads it from memory, S793), the HR staff
+    // reads behind the labour estimate, Overdue Payables and the trend.
+    const first = startFirstWave({ scopedFrom, read })
     loadPayables()
     loadTrend()
-    loadPeriod(bookPromise)
+    loadPeriod(first)
   }
 
   function retry(section) {
@@ -153,7 +148,7 @@ export default function OwnerDashboard() {
   }
 
   // ── The month: the open period, else the latest one (the reorder tile's fallback) ──
-  async function loadPeriod(bookPromise) {
+  async function loadPeriod({ months, book: bookPromise, masters }) {
     const id = begin('period')
     // Claim every dependent section now, so nothing in flight for an earlier load can land.
     const depIds = Object.fromEntries(PERIOD_DEPENDENT.map(n => [n, begin(n)]))
@@ -162,9 +157,8 @@ export default function OwnerDashboard() {
     // The previous load's month leaves the header with it (a client switch, a Retry).
     periodRef.current = null
     setPeriodInfo(null)
-    // Tens of rows at most: one per month the client has run. The newest first.
-    const res = await read(scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
-      .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }).limit(24), 'Months')
+    // Already in flight (startFirstWave): tens of rows at most, the newest first.
+    const res = await months
     if (!isCurrent('period', id)) return
     if (res.error) {
       // The dependents wait on the month: their tiles say "Couldn't load" through the period section.
@@ -191,67 +185,54 @@ export default function OwnerDashboard() {
       return
     }
     loadPeriodSections(open, ['ims', 'reorder'], bookPromise, clock)
-    loadLabour(open, clock)
+    loadLabour(open, clock, masters)
     loadCommission(open, clock)
   }
 
   // ── The month's batch: IMS figures and the reorder rows from ONE read per table ──
-  async function loadPeriodSections(period, which, bookPromise, clock) {
+  // Every read starts now (startMonthBatch) and each section awaits only its own, so the IMS figures
+  // never wait for the stock reads and the reorder tile never waits for the earlier-bill read.
+  function loadPeriodSections(period, which, bookPromise, clock) {
     const ids = Object.fromEntries(which.map(n => [n, begin(n)]))
     which.forEach(n => setSection(n, { status: 'loading' }))
     const wantIms = which.includes('ims')
     const wantReorder = which.includes('reorder')
-    const pid = period.id
-    const skip = Promise.resolve({ data: [], error: null })
-    const [purchases, returns, sales, recipes, wastages, transfers, overheads, opening, closing, items, pars, staffMeals] = await Promise.all([
-      // `discount_amount` + the bill keys feed allocateBillDiscounts (net of each bill's discount);
-      // `id` and `payment_method` feed the Payment Report's cash/credit split (billPayables).
-      read(fetchAllRows(() => supabase.from('purchase_entries').select(PURCHASE_COLS).eq('period_id', pid).order('id')), 'Purchases'),
-      // Paged (S734): subtracted from net purchases, so a truncation OVERSTATES Spend % so far.
-      read(fetchAllRows(() => scopedFrom('vendor_returns', RETURN_COLS).eq('period_id', pid).order('id')), 'Supplier returns'),
-      read(fetchAllRows(() => supabase.from('sales_entries').select(SALES_COLS).eq('period_id', pid).order('id')), 'Sales'),
-      // Paged, and a PRODUCER: the price fallback for a sales row with no unit_price (S734).
-      read(fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')), 'Recipes'),
-      // Each row carries its item's rate (WASTAGE_VALUE_SELECT): the Wastage Report's own total.
-      read(fetchAllRows(() => supabase.from('wastages').select(WASTAGE_VALUE_SELECT).eq('period_id', pid).order('id')), 'Wastage'),
-      // Stock received from / sent to the group's other outlets (PNL-8): in adds like a purchase, out
-      // comes off like a return. A failed read fails the month's figures, never a spend without it.
-      read(readPeriodTransfers(scopedFrom, [pid]), 'Stock transfers'),
-      // Deliberately not paged: tens of rows per month. EVERY bucket (S849, GAPS-4): the Labor tab is
-      // read so it can be named "not counted" — Crest HR is this page's labour figure.
-      wantIms ? read(scopedFrom('overheads', 'amount, bucket').eq('period_id', pid), 'Overheads') : skip,
-      // Six paged master/period reads for the reorder tile (S734): a row past a truncated read reads
-      // as a zero count and takes an item off the below-par count silently.
-      wantReorder ? read(fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', pid).order('id')), 'Opening stock') : skip,
-      wantReorder ? read(fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', pid).order('id')), 'Closing stock') : skip,
-      wantReorder ? read(fetchAllRows(() => scopedFrom('items', 'id, per_uom_rate, yield_pct').eq('is_active', true).eq('is_sub_recipe', false).order('id')), 'Items') : skip,
-      wantReorder ? read(fetchAllRows(() => scopedFrom('par_levels', 'item_id, par_qty').order('id')), 'Par levels') : skip,
-      wantReorder ? read(fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', pid).order('id')), 'Staff meals') : skip,
+    const batch = startMonthBatch({ supabase, scopedFrom, read, periodId: period.id, wantIms, wantReorder })
+    if (wantIms) settleIms(batch, period, clock, ids.ims)
+    if (wantReorder) settleReorder(batch, period, bookPromise, ids.reorder)
+  }
+
+  async function settleIms(batch, period, clock, id) {
+    const [purchases, returns, sales, recipes, wastages, transfers, overheads, priorBills] = await Promise.all([
+      batch.purchases, batch.returns, batch.sales, batch.recipes, batch.wastages, batch.transfers, batch.overheads, batch.priorBills,
     ])
+    if (!isCurrent('ims', id)) return
+    // The earlier-month bills (D2) fail the figures like any other read: never a Cash / Credit at list price.
+    const failed = [purchases, returns, sales, recipes, wastages, transfers, overheads, priorBills].find(r => r.error)
+    if (failed) { setSection('ims', { status: 'failed', error: failed.error }); return }
+    const priceMap = {}
+    ;(recipes.data || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price) || 0 })
+    const { overhead, taxFees, labor } = splitOverheadBuckets(overheads.data)
+    const cc = cashCreditSplit(purchases.data, returns.data, period, { priorBillLines: priorBills.data })
+    setSection('ims', {
+      status: 'ok',
+      data: {
+        revenue: revenueOf(sales.data, priceMap, clock),
+        spend: netSpendOf({ purchases: purchases.data, returns: returns.data, transfers: transfers.data, clock }),
+        overhead, taxFees, labourBucket: labor,
+        // Informational, like every Wastage tile: nothing on this page adds it to a cost.
+        wastage: periodWastageValue(wastages.data),
+        cash: cc.cash, credit: cc.credit,
+      },
+    })
+  }
 
-    if (wantIms && isCurrent('ims', ids.ims)) {
-      const failed = [purchases, returns, sales, recipes, wastages, transfers, overheads].find(r => r.error)
-      if (failed) setSection('ims', { status: 'failed', error: failed.error })
-      else {
-        const priceMap = {}
-        ;(recipes.data || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price) || 0 })
-        const { overhead, taxFees, labor } = splitOverheadBuckets(overheads.data)
-        const cc = cashCreditSplit(purchases.data, returns.data, period)
-        setSection('ims', {
-          status: 'ok',
-          data: {
-            revenue: revenueOf(sales.data, priceMap, clock),
-            spend: netSpendOf({ purchases: purchases.data, returns: returns.data, transfers: transfers.data, clock }),
-            overhead, taxFees, labourBucket: labor,
-            // Informational, like every Wastage tile: nothing on this page adds it to a cost.
-            wastage: periodWastageValue(wastages.data),
-            cash: cc.cash, credit: cc.credit,
-          },
-        })
-      }
-    }
-
-    if (!wantReorder || !isCurrent('reorder', ids.reorder)) return
+  async function settleReorder(batch, period, bookPromise, id) {
+    const [purchases, returns, sales, recipes, wastages, transfers, opening, closing, items, pars, staffMeals] = await Promise.all([
+      batch.purchases, batch.returns, batch.sales, batch.recipes, batch.wastages, batch.transfers,
+      batch.opening, batch.closing, batch.items, batch.pars, batch.staffMeals,
+    ])
+    if (!isCurrent('reorder', id)) return
     const failed = [purchases, returns, sales, recipes, wastages, transfers, opening, closing, items, pars, staffMeals].find(r => r.error)
     if (failed) { setSection('reorder', { status: 'failed', error: failed.error }); return }
     // The recipe walk reads the book in memory (`{ book }`, no extra round trips); a customized plate
@@ -264,7 +245,7 @@ export default function OwnerDashboard() {
         : Promise.resolve({}),
       loadDeltaExplosion(supabase, (sales.data || []).map(s => s.ingredient_deltas)),
     ])
-    if (!isCurrent('reorder', ids.reorder)) return
+    if (!isCurrent('reorder', id)) return
     const walkFailed = [walkRes, deltaRes].find(r => r.status === 'rejected')
     if (walkFailed) {
       console.error('Owner Dashboard: the recipe walk failed', walkFailed.reason)
@@ -281,13 +262,14 @@ export default function OwnerDashboard() {
   }
 
   // ── Labour: the one rule (GAPS-4, SU11 (a)) — finalized payroll, else the HR wage estimate ──
-  async function loadLabour(period, clock) {
+  // `masters`: the HR staff reads startFirstWave began beside the month read; a Retry reads them afresh.
+  async function loadLabour(period, clock, masters) {
     const id = begin('labour')
     setSection('labour', { status: 'loading' })
     // Accrued to yesterday (countedDays); a finalized run in the running month is scaled to the
     // finished days (SU4 (a)). The Labor tab is resolved at render from the overheads read.
     const { labour, parts, error } = await loadOutletLabour((t, c) => scopedFrom(t, c), {
-      period, hrOn: !!hrEnabled, fenced: false, throughDay: clock.countedDays, scale: clock.fraction, timeoutMs: READ_TIMEOUT_MS,
+      period, hrOn: !!hrEnabled, fenced: false, throughDay: clock.countedDays, scale: clock.fraction, timeoutMs: READ_TIMEOUT_MS, masters,
     })
     if (!isCurrent('labour', id)) return
     if (labour.source === 'failed') setSection('labour', { status: 'failed', error: error || { message: 'Labour could not be loaded' } })

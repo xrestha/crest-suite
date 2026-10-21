@@ -1,4 +1,4 @@
-import { loadOutletLabour, loadLabourEstimateInputs, loadGroupLabourInputs, groupRowInputs } from './loadOutletLabour'
+import { loadOutletLabour, loadLabourEstimateInputs, loadLabourMasters, loadGroupLabourInputs, groupRowInputs } from './loadOutletLabour'
 import { resolveOutletLabour } from './labourSource'
 import { estimateLabour } from './labourEstimate'
 
@@ -104,6 +104,60 @@ describe('loadOutletLabour', () => {
   test('the estimate accrues to throughDay', async () => {
     const { labour } = await loadOutletLabour(mockFrom({ hr_employees: staff }), { period: KARTIK, hrOn: true, throughDay: 11 })
     expect(labour.amount).toBeCloseTo(11000, 6)
+  })
+})
+
+// S853 (OWNER-DASHBOARD-9): the Owner Dashboard starts the staff reads beside its month read and hands
+// them in. Every other caller passes nothing and reads them inside, as before.
+describe('the staff reads, started early (masters)', () => {
+  test('loadLabourMasters: both reads, paged with a unique tiebreaker; a failure is an answer, not a throw', async () => {
+    const calls = []
+    const m = await loadLabourMasters(mockFrom({ hr_employees: staff }, { calls }))
+    expect(m).toEqual({ employees: staff, components: [], error: null })
+    expect(calls.map(c => c.table)).toEqual(['hr_employees', 'hr_salary_components'])
+    for (const c of calls) { expect(c.ranged).toBe(true); expect(c.ordered).toContain('id') }
+    expect(calls[1].filters).toContainEqual(['eq', 'type', 'earning'])
+    const failed = await loadLabourMasters(mockFrom({}, { fail: { hr_salary_components: true } }))
+    expect(failed).toMatchObject({ employees: null, components: null, error: { message: 'hr_salary_components failed' } })
+    const thrown = await loadLabourMasters(() => { throw new Error('no outlet') })
+    expect(thrown.error.message).toBe('no outlet')
+  })
+
+  test('handed in, they are not read again, and the figure is the same', async () => {
+    const calls = []
+    const from = mockFrom({ hr_employees: staff }, { calls })
+    const masters = loadLabourMasters(from)
+    const before = calls.length
+    const withMasters = await loadOutletLabour(from, { period: KARTIK, hrOn: true, throughDay: 11, masters })
+    const tables = calls.slice(before).map(c => c.table)
+    expect(tables).not.toContain('hr_employees')
+    expect(tables).not.toContain('hr_salary_components')
+    expect(tables).toEqual(expect.arrayContaining(['hr_payroll_runs', 'hr_overtime_entries', 'hr_attendance', 'hr_final_settlements']))
+    const without = await loadOutletLabour(mockFrom({ hr_employees: staff }), { period: KARTIK, hrOn: true, throughDay: 11 })
+    expect(withMasters.labour).toEqual(without.labour)
+    expect(withMasters.labour.amount).toBeCloseTo(11000, 6)
+  })
+
+  test('a failed staff read handed in fails the estimate exactly as a failed read inside does', async () => {
+    const masters = Promise.resolve({ employees: null, components: null, error: { message: 'hr_employees failed', code: 'XX000' } })
+    const handed = await loadOutletLabour(mockFrom({}), { period: KARTIK, hrOn: true, masters })
+    const inside = await loadOutletLabour(mockFrom({}, { fail: { hr_employees: true } }), { period: KARTIK, hrOn: true })
+    expect(handed.labour).toEqual(inside.labour)
+    expect(handed.labour.source).toBe('failed')
+    expect(handed.error).toEqual(inside.error)
+    // Beside a finalized run the estimate is not needed, so its failure is not one.
+    const tables = { hr_payroll_runs: [{ id: 'run1' }], hr_payslips: [{ gross: 1000, absence_deduction: 0, ot_amount: 0, ssf_employer: 0 }] }
+    const run = await loadOutletLabour(mockFrom(tables), { period: KARTIK, hrOn: true, masters })
+    expect(run.labour.source).toBe('payroll')
+  })
+
+  test('loadLabourEstimateInputs with masters reads only the three month reads', async () => {
+    const calls = []
+    const masters = { employees: staff, components: [], error: null }
+    const { inputs, error } = await loadLabourEstimateInputs(mockFrom({}, { calls }), KARTIK, { masters })
+    expect(error).toBeNull()
+    expect(inputs.employees).toEqual(staff)
+    expect(calls.map(c => c.table).sort()).toEqual(['hr_attendance', 'hr_final_settlements', 'hr_overtime_entries'])
   })
 })
 

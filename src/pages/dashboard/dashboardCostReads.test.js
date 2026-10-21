@@ -12,7 +12,8 @@
 // 3. TIER LABELS. Overheads is a Growth feature; two upsells said Pro.
 // 4. ONE READ PER TABLE (S849, OWNER-DASHBOARD-9). The Owner Dashboard's figures and its reorder tile
 //    read five tables twice; its purchase read is now one union of columns, and the recipe walk reads
-//    the recipe book from memory (`{ book }`). Its figure arithmetic lives in ownerDashboardData.js.
+//    the recipe book from memory (`{ book }`). Its figure arithmetic lives in ownerDashboardData.js and,
+//    since S853, its reads in ownerDashboardLoad.js (whose order ownerDashboardLoad.test.js pins).
 import fs from 'fs'
 import path from 'path'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
@@ -80,7 +81,9 @@ describe.each(['ClientDashboard.jsx'])('%s values purchases net of bill discount
 describe('OwnerDashboard values purchases net of bill discounts, from one read (S849)', () => {
   const page = flatten('OwnerDashboard.jsx')
   const data = flattenAt(['..', '..', 'modules', 'dashboard', 'ownerDashboardData.js'])
-  const constOf = name => (page.match(new RegExp(`const ${name} = '([^']*)'`)) || [])[1] || ''
+  // S853: the month's reads moved out of the page so their order can be tested.
+  const load = flattenAt(['..', '..', 'modules', 'dashboard', 'ownerDashboardLoad.js'])
+  const constOf = name => (load.match(new RegExp(`const ${name} = '([^']*)'`)) || [])[1] || ''
 
   test('the figures go through allocateBillDiscounts and lineCost (ownerDashboardData.js)', () => {
     expect(data).toMatch(/allocateBillDiscounts\(/)
@@ -91,21 +94,33 @@ describe('OwnerDashboard values purchases net of bill discounts, from one read (
   })
 
   test('ONE purchase_entries read for the month, with the bill keys, the VAT basis and the cash/credit columns', () => {
-    expect(readSites(page, 'purchase_entries')).toHaveLength(1)
+    expect(readSites(page, 'purchase_entries')).toHaveLength(0)
+    expect(readSites(load, 'purchase_entries')).toHaveLength(1)
     const cols = constOf('PURCHASE_COLS')
     for (const col of [...BILL_KEY, 'vat_inclusive', 'vat_is_cost', 'id', 'payment_method', 'item_id', 'qty', 'rate']) expect(cols).toContain(col)
-    expect(page).toMatch(/from\('purchase_entries'\)\.select\(PURCHASE_COLS\)/)
+    expect(load).toMatch(/from\('purchase_entries'\)\.select\(PURCHASE_COLS\)/)
+    expect(page).toMatch(/startMonthBatch\(\{/)
   })
 
   test("the returns read embeds its line's VAT basis and carries what billPayables needs", () => {
     const cols = constOf('RETURN_COLS')
-    expect(cols).toContain('purchase_entries(vat_inclusive, vat_is_cost)')
+    // `period_id` (S853, D2): which returns are against an earlier month's bill.
+    expect(cols).toContain('purchase_entries(vat_inclusive, vat_is_cost, period_id)')
     for (const col of ['purchase_entry_id', 'payment_method', 'bs_day']) expect(cols).toContain(col)
-    expect(page).toMatch(/scopedFrom\('vendor_returns', RETURN_COLS\)/)
+    expect(load).toMatch(/scopedFrom\('vendor_returns', RETURN_COLS\)/)
+  })
+
+  test('Cash / Credit takes a return against an earlier bill at that bill discount (S853, D2)', () => {
+    expect(load).toMatch(/readPrior\(ids\)/)
+    expect(page).toMatch(/cashCreditSplit\(purchases\.data, returns\.data, period, \{ priorBillLines: priorBills\.data \}\)/)
+  })
+
+  test('the month of sales is paged with every page after the first at once, on a unique tiebreaker', () => {
+    expect(load).toMatch(/fetchAllRowsParallel\(opts => supabase\.from\('sales_entries'\)\.select\(SALES_COLS, opts\)\.eq\('period_id', pid\)\.order\('id'\)\)/)
   })
 
   test('the recipe walk reads the recipe book in memory', () => {
-    expect(page).toMatch(/loadRecipeBook\(scopedFrom\)/)
+    expect(load).toMatch(/loadRecipeBook\(scopedFrom\)/)
     expect(page).toMatch(/explodeRecipeIngredients\(supabase, recipeIds, book \? \{ book \} : undefined\)/)
   })
 })

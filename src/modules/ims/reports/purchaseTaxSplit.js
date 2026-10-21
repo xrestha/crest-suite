@@ -27,7 +27,7 @@
 // discounted bill therefore drove the taxable base NEGATIVE by the discount — a negative input VAT
 // claim on a statutory report. Every return here is scaled by its own line's net factor, so a full
 // return nets to exactly zero.
-import { allocateBillDiscounts, netFactors, returnBase, VAT_RATE } from './supplierAttribution'
+import { allocateBillDiscounts, netFactors, returnBase, mergeFactors, VAT_RATE } from './supplierAttribution'
 import { calcBillTotals, billKeyOf, billInvoiceAmount, invoiceMismatch } from '../purchases/purchasesHelpers'
 
 // Defined in supplierAttribution.js since S792 (D32) — `allocateBillDiscounts`' `lineCost` needs it
@@ -63,13 +63,6 @@ export function returnLinesOutsidePeriod(entries, returns) {
 export function priorBillFactors(lines) {
   if (!lines || lines.length === 0) return new Map()
   return netFactors(allocateBillDiscounts(lines))
-}
-
-function mergeFactors(own, prior) {
-  if (!prior || prior.size === 0) return own
-  const out = new Map(prior)
-  for (const [k, v] of own) out.set(k, v)
-  return out
 }
 
 /** Whether the return's original purchase line carried VAT. `vendor_returns` has no column of its
@@ -355,8 +348,14 @@ export function billWiseVat(allocatedEntries) {
  *
  * `payment_method` is a BILL-level choice written onto every line of the bill, so a bill belongs
  * to exactly one method; NULL reads as Cash, the convention PURCHASE_PAYMENT_METHODS documents.
+ *
+ * `priorBillLines` (optional, S853): every line of each EARLIER-month bill a return points at
+ * (`readPriorBillLines`), so such a return comes back at its own bill's discounted price, as
+ * `splitPurchaseVat` values it; this period's own factors win. Without it a return against an earlier
+ * month's bill is priced at the list rate, as before; the Payment Report corrects that afterwards
+ * with `applyPriorBillFactors`, and the Owner Dashboard passes the lines in.
  */
-export function billPayables(entries, returns, period) {
+export function billPayables(entries, returns, period, { priorBillLines } = {}) {
   const p = period || { bs_year: 0, bs_month: 0 }
   const bills = new Map()
   for (const e of entries || []) {
@@ -369,7 +368,7 @@ export function billPayables(entries, returns, period) {
   }
   for (const b of bills.values()) b.total = calcBillTotals(b.lines, b.discount).grandTotal
 
-  const factors = netFactors(allocateBillDiscounts(entries || []))
+  const factors = mergeFactors(netFactors(allocateBillDiscounts(entries || [])), priorBillFactors(priorBillLines))
   // The money that comes back is the money that was paid: the discounted line value, plus its VAT
   // if the original line carried any.
   const priced = (returns || []).map(r => ({
