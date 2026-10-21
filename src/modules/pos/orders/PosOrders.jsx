@@ -1155,6 +1155,9 @@ export default function PosOrders({ billingStation = false } = {}) {
   // S843: a credit limit only warns (owner decision). What the customer already owes is read when a
   // bill for someone with a limit is about to go on Credit; a failed read says it could not check,
   // never that they owe nothing.
+  // S852: the read waits the till's own OPEN_READ_MS and no longer. Unbounded, a hung read meant the
+  // over-limit warning silently never showed. No answer is "not known": the line says the limit was
+  // not checked, and the bill can still go on Credit, as it can over a limit.
   const creditLimit = billCustomer?.credit_limit
   useEffect(() => {
     if (!billingOpen || splitMode || payMethod !== 'Credit' || deliveryPartner || creditLimit == null || !billCustomer) {
@@ -1162,11 +1165,12 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
     let cancelled = false
     const key = creditPartyKey({ delivery_partner: null, buyer_phone: billCustomer.phone || buyerPhone, buyer_name: billCustomer.name || buyerName })
-    supabase.rpc('pos_credit_open_bills', { p_party_key: key, p_client_id: clientId }).then(({ data, error }) => {
+    bounded(supabase.rpc('pos_credit_open_bills', { p_party_key: key, p_client_id: clientId }), 'Checking what this guest already owes', OPEN_READ_MS).then(({ data, error }) => {
       if (cancelled) return
       if (error) {
+        const who = billCustomer.name || 'this guest'
         setCreditOwedBefore(null)
-        setCreditOwedMsg(`Couldn't check what ${billCustomer.name || 'this guest'} already owes against their credit limit. ${errorText(error, 'staff')}`)
+        setCreditOwedMsg(`Credit limit not checked: what ${who} already owes could not be read, so it is not known whether this bill takes them past their ${fmtNpr(creditLimit)} limit. ${isTimeout(error) ? 'The server did not answer in time.' : errorText(error, 'staff')} You can still put it on Credit.`)
         return
       }
       setCreditOwedMsg('')
@@ -7683,6 +7687,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 {/* S843: a credit limit warns and never blocks (owner decision). */}
                 {!splitMode && payMethod === 'Credit' && !deliveryPartner && (creditWarning || creditOwedMsg) && (
                   <p role="status" style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '0 0 12px', lineHeight: 1.5 }}>
+                    <span aria-hidden="true">△ </span>
                     {creditWarning
                       ? `Over credit limit: ${billCustomer?.name || 'this guest'} already owes ${fmtNpr(creditWarning.before)}; this bill takes it to ${fmtNpr(creditWarning.after)}, ${fmtNpr(creditWarning.over)} over their ${fmtNpr(creditWarning.limit)} limit. You can still put it on Credit.`
                       : creditOwedMsg}
@@ -7746,7 +7751,11 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     <div style={{ background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', marginBottom: 12 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
                         <span style={{ color: 'var(--theme-text2)' }}>Remaining</span>
-                        <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: remaining > 0 ? 'var(--theme-amber-text)' : 'var(--theme-green-text)' }}>{fmtNpr(remaining)}</span>
+                        {/* S852: a shape beside the hue (the One Signal Meaning Rule): △ still to take, ✓ all taken.
+                            Overpaid is neither; its ▲ line below says so, so the figure stays plain ink. */}
+                        <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: remaining > 0 ? 'var(--theme-amber-text)' : tendersOverpaid ? 'var(--theme-text1)' : 'var(--theme-green-text)' }}>
+                          {remaining > 0 ? <span aria-hidden="true">△ </span> : !tendersOverpaid && <span aria-hidden="true">✓ </span>}{fmtNpr(remaining)}
+                        </span>
                       </div>
                       {tendersOverpaid && (
                         <p role="alert" style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-red-text)' }}>

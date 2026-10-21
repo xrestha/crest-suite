@@ -630,8 +630,8 @@ export default function PeriodComparison() {
                       </defs>
                     )}
                     <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} interval={0} />
-                    <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 9 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 44 : 32} />
+                    <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: big ? 11 : 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={8} />
+                    <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 44 : 32} />
                     <RTooltip
                       contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: big ? 12 : 11 }}
                       labelStyle={{ color: colors.text1 }}
@@ -682,7 +682,7 @@ export default function PeriodComparison() {
               <ResponsiveContainer width="100%" height={h}>
                 <LineChart data={chartPeriods} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                   <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
+                  <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={8} />
                   <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} domain={['auto', 'auto']} width={36} />
                   {/* The legend below this chart always read the client's own thresholds while
                       these lines and the dots below stayed on the pre-S551 hardcoded 30/38 — so a
@@ -734,7 +734,7 @@ export default function PeriodComparison() {
               <ResponsiveContainer width="100%" height={h}>
                 <BarChart data={categoryChartData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                   <CartesianGrid stroke={colors.border} strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval={0} />
+                  <XAxis dataKey="label" tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={8} />
                   <YAxis tick={{ fill: colors.text3, fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={36} />
                   <RTooltip
                     contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', fontSize: 11 }}

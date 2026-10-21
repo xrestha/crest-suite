@@ -101,7 +101,11 @@ function DateField({ idBase, label, value, onChange, disabled, error }) {
       </div>
       <FieldError id={`${idBase}-month`} message={error} />
       {dateIsSet(value) && !disabled && (
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onChange({ calendar: value.calendar, month: '', day: '', year: '' })}>
+        // The button leaves with the date it clears, so focus moves to the month it emptied (S852).
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+          onChange({ calendar: value.calendar, month: '', day: '', year: '' })
+          document.getElementById(`${idBase}-month`)?.focus()
+        }}>
           Clear the {lower}
         </button>
       )}
@@ -119,6 +123,15 @@ export default function CustomerEditModal({ customer, types, typesError = null, 
   const [error, setError] = useState(null)
   const [recordedBy, setRecordedBy] = useState({ loading: !!customer.consent_by, name: null, failed: false })
   const expiryTouched = useRef(false)
+  // Withdraw and Keep replace each other, so the pressed button leaves with its press and focus fell
+  // to the page behind the dialog. The one that takes its place is focused instead (S852).
+  const agreementFocus = useRef(null)
+  useEffect(() => {
+    const id = agreementFocus.current
+    if (!id) return
+    agreementFocus.current = null
+    document.getElementById(id)?.focus()
+  }, [form.withdraw])
 
   const typesById = useMemo(() => Object.fromEntries((types || []).map(t => [t.id, t])), [types])
   const canEditCard = canManage && Array.isArray(types)
@@ -280,7 +293,11 @@ export default function CustomerEditModal({ customer, types, typesError = null, 
                   <FieldError id="ce-expires" message={shown.expiresOn} />
                   {autoExpiry && autoExpiry !== form.expiresOn && (
                     <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 6 }}
-                      onClick={() => { expiryTouched.current = false; setForm(f => ({ ...f, expiresOn: autoExpiry })) }}>
+                      onClick={() => {
+                        expiryTouched.current = false
+                        setForm(f => ({ ...f, expiresOn: autoExpiry }))
+                        document.getElementById('ce-expires')?.focus() // it goes once used (S852)
+                      }}>
                       Use {formatAdAsBs(autoExpiry)} (from the card type)
                     </button>
                   )}
@@ -331,7 +348,8 @@ export default function CustomerEditModal({ customer, types, typesError = null, 
               form.withdraw ? (
                 <div className="note-banner" role="status" style={{ marginBottom: 12 }}>
                   <strong>Saving takes back their agreement and removes both dates.</strong>{' '}
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setForm(f => ({ ...f, withdraw: false }))}>
+                  <button id="ce-keep-agreement" type="button" className="btn btn-ghost btn-sm"
+                    onClick={() => { agreementFocus.current = 'ce-withdraw-agreement'; setForm(f => ({ ...f, withdraw: false })) }}>
                     Keep their agreement
                   </button>
                 </div>
@@ -345,8 +363,8 @@ export default function CustomerEditModal({ customer, types, typesError = null, 
                           : recordedBy.failed ? ' (who recorded it could not be read)' : ''
                     )}.
                   </p>
-                  <button type="button" className="btn btn-ghost btn-sm"
-                    onClick={() => { setShowErrors(false); setForm(f => ({ ...f, withdraw: true })) }}>
+                  <button id="ce-withdraw-agreement" type="button" className="btn btn-ghost btn-sm"
+                    onClick={() => { agreementFocus.current = 'ce-keep-agreement'; setShowErrors(false); setForm(f => ({ ...f, withdraw: true })) }}>
                     Withdraw agreement — this removes both dates
                   </button>
                 </div>

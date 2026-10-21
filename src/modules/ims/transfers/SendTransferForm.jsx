@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../../supabaseClient'
 import SearchableSelect from '../../../components/SearchableSelect'
 import QtyInput from '../../../components/QtyInput'
@@ -40,6 +40,8 @@ export default function SendTransferForm({
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState(null)
   const keyRef = useRef(0)
+  const removeButtons = useRef(new Map())            // pick key → its × button
+  const focusAfterRemove = useRef(null)              // a pick key, or 'pick' for the Item picker
 
   const itemsById = useMemo(() => new Map(items.map(i => [i.id, i])), [items])
   const toName = receivers.find(r => r.id === toId)?.name || ''
@@ -114,8 +116,20 @@ export default function SendTransferForm({
 
   function removePick(key) {
     changed()
+    // S852: the × leaves with its line, and focus fell to the page. It moves to the next line's ×
+    // (the one before, for the last line), or back to the Item picker once no line is left.
+    const at = picks.findIndex(p => p.key === key)
+    const neighbour = picks[at + 1] || picks[at - 1]
+    focusAfterRemove.current = neighbour ? neighbour.key : 'pick'
     setPicks(prev => prev.filter(p => p.key !== key))
   }
+  useEffect(() => {
+    const target = focusAfterRemove.current
+    if (target == null) return
+    focusAfterRemove.current = null
+    const el = target === 'pick' ? document.getElementById('transfer-pick') : removeButtons.current.get(target)
+    el?.focus()
+  }, [picks])
 
   async function preview() {
     const errs = {}
@@ -262,7 +276,8 @@ export default function SendTransferForm({
                     <td style={{ whiteSpace: 'nowrap' }}>{item?.uom || '—'}</td>
                     <td style={{ textAlign: 'right' }}>
                       <button type="button" className="btn btn-ghost btn-icon btn-icon--delete" aria-label={`Remove ${item?.name || 'line'}`}
-                        title={`Remove ${item?.name || 'line'}`} onClick={() => removePick(p.key)}>×</button>
+                        title={`Remove ${item?.name || 'line'}`} onClick={() => removePick(p.key)}
+                        ref={el => { if (el) removeButtons.current.set(p.key, el); else removeButtons.current.delete(p.key) }}>×</button>
                     </td>
                   </tr>
                 )

@@ -6,11 +6,15 @@ import Tabs from '../../../components/Tabs'
 import Modal from '../../../components/Modal'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import FieldError, { fieldAria } from '../../../components/FieldError'
-import { errorLine } from '../../../shared/errorText'
+import { errorLine, isNetworkError, isTimeoutError } from '../../../shared/errorText'
 import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { useIsOwnEmployee } from '../ownRecord'
 import { BS_MONTHS, formatAd } from '../../../utils/bsCalendar'
 import { changedEmployeeFields, newEmployeePayload, endDateHasPassed, endsBeforeJoining, rehireNeedsNewJoinDate, staleRehireEndDate, PAY_HISTORY_LABELS, OFF_PAYROLL_STATUSES, NOT_SAVED_RLS } from './employeeFormData'
+
+// A refusal proves nothing was written; a dropped connection or a timeout does not, because the
+// answer can be lost after the server committed (error-messages.md). So only a refusal may say so (S852).
+const unanswered = err => isNetworkError(err) || isTimeoutError(err)
 
 // The fields THIS form owns. Pay basis, basic salary, bank and SSF are not here on purpose: Pay
 // Setup owns them, and until S748 this form carried them anyway (spread in from the loaded row) and
@@ -258,7 +262,7 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
       const patch = changedEmployeeFields(employee, toSave, keys)
       if (Object.keys(patch).length > 0) {
         const { data: savedRows, error: err } = await scopedUpdate('hr_employees', patch).eq('id', employee.id).select('id')
-        if (err) { setError('The changes were not saved. ' + errorLine(err)); setSaving(false); return }
+        if (err) { setError((unanswered(err) ? 'The changes may or may not have saved: reload the page to check before saving again. ' : 'The changes were not saved. ') + errorLine(err)); setSaving(false); return }
         // A write RLS refuses is 0 rows and no error; writes here need HR manager rank (S798).
         if (!savedRows?.length) { setError('The changes were not saved. ' + NOT_SAVED_RLS); setSaving(false); return }
       }
@@ -302,21 +306,45 @@ export default function EmployeeForm({ clientId, employee, onSave, onClose }) {
       ),
       run: async () => {
         const { data: savedRows, error: err } = await scopedUpdate('hr_employees', { status: 'inactive' }).eq('id', employee.id).select('id')
-        if (err) { setError(`${employee.full_name} is still ${employee.status} — the change was not saved. ` + errorLine(err)); return }
+        if (err) { setError((unanswered(err) ? `It is not known whether ${employee.full_name} is now inactive: reload the page to check. ` : `${employee.full_name} is still ${employee.status} — the change was not saved. `) + errorLine(err)); return }
         if (!savedRows?.length) { setError(`${employee.full_name} is still ${employee.status} — the change was not saved. ` + NOT_SAVED_RLS); return }
         onSave()
       },
     })
   }
 
-  async function handleActivate() {
+  // Putting someone back on payroll is not a routine row edit, so it asks through the page's bounded
+  // confirm with the consequence in the body, like Deactivate (S852; it was a window.confirm).
+  function handleActivate() {
+    setError('')
     const rehire = rehireProblem('active', employee.join_date)
     if (rehire) { setError(rehire); return }
-    if (!window.confirm(`Reactivate ${employee.full_name}? They return to payroll, the Roster and Attendance.`)) return
-    const { data: savedRows, error: err } = await scopedUpdate('hr_employees', { status: 'active' }).eq('id', employee.id).select('id')
-    if (err) { setError(`${employee.full_name} is still inactive — the change was not saved. ` + errorLine(err)); return }
-    if (!savedRows?.length) { setError(`${employee.full_name} is still inactive — the change was not saved. ` + NOT_SAVED_RLS); return }
-    onSave(await unblockRehiredLogins('active', employee.join_date))
+    const endPassed = endDateHasPassed(employee.end_date, 'active', formatAd(new Date()))
+    askConfirm({
+      title: `Reactivate ${employee.full_name}?`,
+      confirmLabel: 'Reactivate', busyLabel: 'Saving…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            They go back on every payroll picker: Payroll, the Roster, Attendance and Final Settlement. Their record and
+            pay history are as they were, and Deactivate takes them off again.
+          </p>
+          {endPassed && (
+            <p style={{ margin: '0 0 8px' }}>
+              <strong>Their End Date has passed.</strong> Payroll pays them nothing after it, so if they are back at work, Edit
+              and clear the End Date after this.
+            </p>
+          )}
+          <p style={{ margin: 0 }}>A payroll month already finalized without them stays as it is until that payroll is reopened and generated again.</p>
+        </>
+      ),
+      run: async () => {
+        const { data: savedRows, error: err } = await scopedUpdate('hr_employees', { status: 'active' }).eq('id', employee.id).select('id')
+        if (err) { setError((unanswered(err) ? `It is not known whether ${employee.full_name} is now active: reload the page to check. ` : `${employee.full_name} is still inactive — the change was not saved. `) + errorLine(err)); return }
+        if (!savedRows?.length) { setError(`${employee.full_name} is still inactive — the change was not saved. ` + NOT_SAVED_RLS); return }
+        onSave(await unblockRehiredLogins('active', employee.join_date))
+      },
+    })
   }
 
   // Most HR tables cascade from hr_employees, but three deliberately do not: hr_tada_claims,

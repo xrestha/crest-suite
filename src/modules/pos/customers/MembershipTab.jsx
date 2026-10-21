@@ -1,4 +1,4 @@
-import { memo, useCallback, useDeferredValue, useMemo, useState } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -85,6 +85,34 @@ const MemberRows = memo(function MemberRows({ rows, typesById, todayIso, onEdit 
       </td>
     </tr>
   ))
+})
+
+// The members list on a phone (S852, the S796 phone-cards pattern): the table is seven columns wide,
+// so a member's card, its expiry and their credit limit sat past a phone's edge. One card per member,
+// fed the same rows as the table, so the two cannot disagree; CSS shows one or the other.
+const MemberCards = memo(function MemberCards({ rows, typesById, todayIso, onEdit }) {
+  return (
+    <ul className="phone-cards phone-only phone-cards--no-fab" aria-label="Members">
+      {rows.map(c => (
+        <li key={c.id} className="phone-card">
+          <div className="phone-card__top">
+            <span className="phone-card__title">{c.name}</span>
+            {c.membership_type_id && <CardBadge customer={c} typesById={typesById} todayIso={todayIso} />}
+          </div>
+          <div className="phone-card__meta">
+            <span style={{ whiteSpace: 'nowrap' }}>{c.phone}</span>
+            {c.card_no && <> · card <span style={{ whiteSpace: 'nowrap' }}>{c.card_no}</span></>}
+            {c.membership_type_id && <> · {c.card_expires_on ? `expires ${formatAdAsBs(c.card_expires_on)}` : 'never expires'}</>}
+            {c.credit_limit != null && <> · credit limit {npr(c.credit_limit)}</>}
+          </div>
+          {occasionDatesOf(c).length > 0 && <div className="phone-card__meta"><DatesCell customer={c} /></div>}
+          <div className="phone-card__actions">
+            <button type="button" className="btn btn-ghost" onClick={() => onEdit(c)} aria-label={`Edit ${c.name}`}>Edit</button>
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
 })
 
 // Add or change a card type. Writes nothing until Save; the tab asks first when a changed discount
@@ -204,6 +232,7 @@ export default function MembershipTab({ book, typesState, canManage = false, onC
   const [editing, setEditing] = useState(null)
   const [typeDialog, setTypeDialog] = useState(null) // { type } (null type = add)
   const [msg, setMsg] = useState(null)               // { kind: 'ok'|'error', text, detail, offerOff }
+  const msgRef = useRef(null)
   const onEdit = useCallback(c => { setMsg(null); setEditing(c) }, [])
 
   const rows = book.rows || NO_ROWS
@@ -232,6 +261,16 @@ export default function MembershipTab({ book, typesState, canManage = false, onC
 
   const bookLoading = book.loading
   const bookError = book.error
+
+  // S852: a deleted card type takes its row, and the ⋯ that focus went back to, with it once the list
+  // is read again, so focus fell to the page. The outcome line takes it then (CreditTab's outcomeRef):
+  // only when focus went nowhere, and only with no dialog open.
+  const confirmOpen = !!confirmEl
+  useEffect(() => {
+    if (!msg || editing || typeDialog || confirmOpen) return
+    const at = document.activeElement
+    if (!at || at === document.body || !at.isConnected) msgRef.current?.focus()
+  }, [msg, types, rows, editing, typeDialog, confirmOpen])
 
   // ── Card type writes ──
   // Returns null when it saved, else what to say in the dialog (which stays open with the form).
@@ -401,18 +440,22 @@ export default function MembershipTab({ book, typesState, canManage = false, onC
 
   return (
     <div>
-      {msg && (msg.kind === 'ok'
-        ? <p role="status" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-green-text)' }}>✓ {msg.text}</p>
-        : (
-          <div style={{ marginBottom: 12 }}>
-            <ActionError error={{ text: msg.text, detail: msg.detail }} className="action-error--top" />
-            {msg.offerOff && (
-              <button type="button" className="btn btn-ghost" onClick={() => askSwitchOff(msg.offerOff)}>
-                Switch {msg.offerOff.name} off instead
-              </button>
+      {msg && (
+        <div ref={msgRef} tabIndex={-1} style={{ outline: 'none' }}>
+          {msg.kind === 'ok'
+            ? <p role="status" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-green-text)' }}>✓ {msg.text}</p>
+            : (
+              <div style={{ marginBottom: 12 }}>
+                <ActionError error={{ text: msg.text, detail: msg.detail }} className="action-error--top" />
+                {msg.offerOff && (
+                  <button type="button" className="btn btn-ghost" onClick={() => askSwitchOff(msg.offerOff)}>
+                    Switch {msg.offerOff.name} off instead
+                  </button>
+                )}
+              </div>
             )}
-          </div>
-        ))}
+        </div>
+      )}
 
       {!canManage && (
         <p role="note" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-text2)' }}>
@@ -487,24 +530,27 @@ export default function MembershipTab({ book, typesState, canManage = false, onC
                     : 'No customers yet — the book fills itself from any bill closed with a name and phone.'}
               </p>
             ) : (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Customer</th>
-                      <th><Tip text="The card as the till sees it today. Expired: past its expiry date. Switched off: its type is off. Neither gets the card discount." width={300}>Card</Tip></th>
-                      <th>Card no.</th>
-                      <th>Expires</th>
-                      <th style={{ textAlign: 'right' }}><Tip text="The most this customer may owe on Credit bills. The till warns past it; it does not refuse the bill." width={260}>Credit limit</Tip></th>
-                      <th><Tip text="Birthday and anniversary, kept only with the customer's agreement. (BS) is the Nepali calendar, (AD) the English one." width={280}>Dates</Tip></th>
-                      <th><span className="sr-only">Edit</span></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <MemberRows rows={shownRows} typesById={typesById} todayIso={todayIso} onEdit={onEdit} />
-                  </tbody>
-                </table>
-              </div>
+              <>
+                <div className="table-wrap phone-hide">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Customer</th>
+                        <th><Tip text="The card as the till sees it today. Expired: past its expiry date. Switched off: its type is off. Neither gets the card discount." width={300}>Card</Tip></th>
+                        <th>Card no.</th>
+                        <th>Expires</th>
+                        <th style={{ textAlign: 'right' }}><Tip text="The most this customer may owe on Credit bills. The till warns past it; it does not refuse the bill." width={260}>Credit limit</Tip></th>
+                        <th><Tip text="Birthday and anniversary, kept only with the customer's agreement. (BS) is the Nepali calendar, (AD) the English one." width={280}>Dates</Tip></th>
+                        <th><span className="sr-only">Edit</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <MemberRows rows={shownRows} typesById={typesById} todayIso={todayIso} onEdit={onEdit} />
+                    </tbody>
+                  </table>
+                </div>
+                <MemberCards rows={shownRows} typesById={typesById} todayIso={todayIso} onEdit={onEdit} />
+              </>
             )}
           </div>
         </>

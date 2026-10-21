@@ -2,13 +2,13 @@ import fs from 'fs'
 import path from 'path'
 import { useState } from 'react'
 import { render, screen, fireEvent, act, within } from '@testing-library/react'
-import TillNotice, { noticeLines, TILL_NOTICE_Z } from './TillNotice'
+import TillNotice, { noticeLines, tabTargetPastNotice, TILL_NOTICE_Z } from './TillNotice'
 import Modal from '../../../components/Modal'
 
 // Owner decision (2026-10-15 audit): the till's browser pop-ups are an on-screen notice. window.alert
 // froze the whole page, so the guest-order chime and every poll stopped until OK was tapped.
 
-function Harness({ initial = null, withDialog = false }) {
+function Harness({ initial = null, withDialog = false, onDialogClose = () => {} }) {
   const [notice, setNotice] = useState(initial)
   const show = text => setNotice(prev => ({ id: (prev?.id || 0) + 1, text }))
   return (
@@ -16,7 +16,7 @@ function Harness({ initial = null, withDialog = false }) {
       <button type="button" onClick={() => show("Couldn't load bill 12 to reprint. The connection dropped.\n\nNothing was printed — try again.")}>Reprint</button>
       <button type="button" onClick={() => show("Couldn't read the open orders. Permission denied.\n\nNothing was cleared — the tables were left as they are.")}>Clear</button>
       {withDialog && (
-        <Modal title="Recent Bills — Today" onClose={() => {}} zIndex={2100}>
+        <Modal title="Recent Bills — Today" onClose={onDialogClose} zIndex={2100}>
           <button type="button" onClick={() => show('Nothing printed — this browser blocked the print window.')}>Reprint in dialog</button>
         </Modal>
       )}
@@ -89,6 +89,60 @@ describe('TillNotice', () => {
     expect(noticeLines('One.\n\n  Two.\n')).toEqual(['One.', 'Two.'])
     expect(noticeLines('Only one.')).toEqual(['Only one.'])
     expect(noticeLines('')).toEqual([])
+  })
+})
+
+// S852: the notice sits above every dialog so it can be read over the one it came from, which put its
+// ✕ outside that dialog's Tab trap. The ✕ joins the dialog's Tab cycle instead.
+describe('over an open dialog, the ✕ stays reachable from the keyboard', () => {
+  // jsdom lays nothing out, so offsetParent is null everywhere and both Tab traps would see no
+  // control at all. Every element gets a parent box for these tests.
+  let restore
+  beforeEach(() => {
+    const desc = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent')
+    Object.defineProperty(HTMLElement.prototype, 'offsetParent', { configurable: true, get() { return this.parentNode } }) // eslint-disable-line testing-library/no-node-access
+    restore = () => { if (desc) Object.defineProperty(HTMLElement.prototype, 'offsetParent', desc) }
+  })
+  afterEach(() => restore())
+
+  test('Tab past the last control reaches ✕, and Tab from ✕ goes back into the dialog', () => {
+    render(<Harness withDialog />)
+    const inDialog = screen.getByRole('button', { name: 'Reprint in dialog' })
+    inDialog.focus()
+    fireEvent.click(inDialog)
+    const dismiss = screen.getByRole('button', { name: 'Dismiss' })
+    expect(inDialog).toHaveFocus() // the notice never takes focus by itself
+    fireEvent.keyDown(inDialog, { key: 'Tab' })
+    expect(dismiss).toHaveFocus()
+    fireEvent.keyDown(dismiss, { key: 'Tab' })
+    const close = within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' })
+    expect(close).toHaveFocus()
+    fireEvent.keyDown(close, { key: 'Tab', shiftKey: true })
+    expect(dismiss).toHaveFocus()
+    fireEvent.keyDown(dismiss, { key: 'Tab', shiftKey: true })
+    expect(inDialog).toHaveFocus()
+  })
+
+  test('Escape on ✕ dismisses the notice, not the dialog, and focus goes back into it', () => {
+    const closed = []
+    render(<Harness withDialog onDialogClose={() => closed.push(1)} />)
+    const inDialog = screen.getByRole('button', { name: 'Reprint in dialog' })
+    inDialog.focus()
+    fireEvent.click(inDialog)
+    fireEvent.keyDown(inDialog, { key: 'Tab' })
+    const dismiss = screen.getByRole('button', { name: 'Dismiss' })
+    expect(dismiss).toHaveFocus()
+    fireEvent.keyDown(dismiss, { key: 'Escape' })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(closed).toEqual([])
+    expect(inDialog).toHaveFocus()
+  })
+
+  test('with no dialog open, Tab is left to the page', () => {
+    const btn = document.createElement('button')
+    document.body.appendChild(btn)
+    expect(tabTargetPastNotice({ from: btn, shift: false, dismiss: btn, dialog: null })).toBeNull()
+    btn.remove()
   })
 })
 

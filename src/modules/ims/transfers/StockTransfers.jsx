@@ -12,7 +12,7 @@
 //
 // Reads: Outgoing through the scoped layer (the header's client_id is the sender); Incoming through
 // transferFlows.readIncomingTransfers by to_client_id, the one documented exception to scopedDb.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -74,10 +74,15 @@ export default function StockTransfers() {
   const [exportPeriodId, setExportPeriodId] = useState('')
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState(null)
+  const outcomeRef = useRef(null)
+
+  const loadSeq = useRef(0)
 
   const load = useCallback(async () => {
     if (!clientId || !allowed) return
-    const key = req.begin(clientId)
+    // Keyed per load, not per outlet (S852): the lists now stay pressable while a re-read runs, so two
+    // reads can overlap, and only the newest may land (CreditTab's owedSeq).
+    const key = req.begin(`${clientId}#${++loadSeq.current}`)
     setLoading(true)
     let results
     try {
@@ -112,6 +117,17 @@ export default function StockTransfers() {
   }, [clientId, allowed, scopedFrom, req])
 
   useEffect(() => { load() }, [load])
+
+  // S852: Receive, Refuse, Cancel and Send each end by reading the lists again, and the row they were
+  // pressed on then leaves its list (or the Send tab closes), taking the focused button with it. The
+  // outcome line takes focus then (CreditTab's outcomeRef): only when focus went nowhere, and never
+  // while a dialog is open.
+  const confirmOpen = !!confirmEl
+  useEffect(() => {
+    if ((!notice && !actionError) || reasonDraft || confirmOpen) return
+    const at = document.activeElement
+    if (!at || at === document.body || !at.isConnected) outcomeRef.current?.focus()
+  }, [notice, actionError, data, tab, reasonDraft, confirmOpen])
 
   const fromName = useMemo(() => (
     (outlets || []).find(o => o.id === clientId)?.name
@@ -296,8 +312,13 @@ export default function StockTransfers() {
     { key: 'outgoing', label: lists.outWaiting.length ? `Outgoing (${lists.outWaiting.length} on the way)` : 'Outgoing' },
   ]
 
+  // A Receive on every row, so each names its transfer (WCAG 2.5.3: the name starts with the label).
   const incomingActions = t => (t.status !== 'on_the_way' ? {} : {
-    primary: { label: 'Receive', onClick: () => askReceive(t) },
+    primary: {
+      label: 'Receive',
+      ariaLabel: `Receive transfer from ${t.from_name || 'another outlet'}, sent ${bsDateLabel(t.sent_bs_year, t.sent_bs_month, t.sent_bs_day)}, ${npr(t.total_value)}`,
+      onClick: () => askReceive(t),
+    },
     menu: [{ key: 'refuse', label: 'Refuse…', danger: true, onSelect: () => openReason(t, 'refuse') }],
   })
   const outgoingActions = t => (t.status !== 'on_the_way' || !canCancel ? {} : {
@@ -313,7 +334,7 @@ export default function StockTransfers() {
           <h1 className="page-title">Stock Transfers</h1>
           <p className="page-subtitle">Send stock to another outlet of your group. It counts there once they press Received.</p>
         </div>
-        {!loading && !loadError && (data?.periods || []).length > 0 && (
+        {!!data && !loadError && (data.periods || []).length > 0 && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <label htmlFor="transfer-export-month" className="sr-only">Month to export</label>
             <select id="transfer-export-month" className="form-select form-input--auto" value={exportPeriodId}
@@ -335,11 +356,15 @@ export default function StockTransfers() {
 
       <Tabs idBase="stock-transfers" label="Stock transfers" tabs={tabs} active={tab} onChange={k => { setTab(k); setNotice(null) }} />
 
-      {notice && <p role="status" className="note-banner" style={{ margin: '12px 0' }}>{notice}</p>}
-      <ActionError error={actionError} className="action-error--top" />
+      <div ref={outcomeRef} tabIndex={-1} style={{ outline: 'none' }}>
+        {notice && <p role="status" className="note-banner" style={{ margin: '12px 0' }}>{notice}</p>}
+        <ActionError error={actionError} className="action-error--top" />
+      </div>
 
-      {loading ? (
-        <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
+      {/* S852: only the FIRST read shows Loading. A re-read after an action refreshes the lists in
+          place, so the table (and the place in it) stays on screen while it runs. */}
+      {loading && !data ? (
+        <p role="status" style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
       ) : loadError ? (
         <ReportLoadError error={loadError} />
       ) : tab === 'send' ? (

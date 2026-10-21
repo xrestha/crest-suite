@@ -29,7 +29,11 @@ function mockAnswer({ table, name, args, filters, payload, kind }) {
   if (table === 'clients') return { data: { name: 'Cafe Crest' }, error: null }
   if (table === 'pos_shifts') return { data: mockState.shiftOpen ? [{ id: 's1' }] : [], error: null }
   if (table === 'pos_customers') return { data: [{ id: 'c1', phone_canonical: '9841234567', credit_limit: 1000 }], error: null }
-  if (table === 'pos_credit_receipts') return { data: mockState.receipts, error: null }
+  if (table === 'pos_credit_receipts') {
+    // A receipt read for printing (by id) can be made to fail like a dead connection.
+    if (mockState.receiptReadError && filters.some(f => f[0] === 'eq' && f[1] === 'id')) return { data: null, error: mockState.receiptReadError }
+    return { data: mockState.receipts, error: null }
+  }
   if (table === 'pos_credit_receipt_lines') {
     if (filters.some(f => f[0] === 'in' && f[1] === 'receipt_id')) return { data: [{ id: 'l1', receipt_id: 'r7', order_id: 'o9' }], error: null }
     return { data: mockState.linesForLegacy, error: null }
@@ -83,6 +87,7 @@ beforeEach(() => {
   mockState.receipts = []
   mockState.legacy = []
   mockState.linesForLegacy = []
+  mockState.receiptReadError = null
   mockCalls.rpc = []
   mockCalls.update = []
   mockUuid = 0
@@ -156,6 +161,18 @@ describe('Receive payment', () => {
     expect(await screen.findByText(/The receipt did not print/)).toBeInTheDocument()
   })
 
+  test('the summary is shown at once, and announced only once the amount has stood still', async () => {
+    const dialog = await openReceive()
+    fireEvent.change(await within(dialog).findByLabelText(/Amount received/), { target: { value: '1200' } })
+    fireEvent.change(within(dialog).getByLabelText(/Paid by/), { target: { value: 'Cash' } })
+    const line = within(dialog).getByText(/NPR 1,200.00 from Hari by Cash: clears TI12-CAC-82\/83 in full/)
+    // The visible summary is not itself a live region, so a keystroke is not read out (S852).
+    expect(line.closest('[role="status"]')).toBeNull() // eslint-disable-line testing-library/no-node-access
+    const live = within(dialog).getAllByRole('status').find(el => el.classList.contains('sr-only'))
+    expect(live).toHaveTextContent(/^$/)
+    await waitFor(() => expect(live).toHaveTextContent(/NPR 1,200.00 from Hari by Cash: clears TI12-CAC-82\/83 in full/), { timeout: 3000 })
+  })
+
   test('Cash with no shift open says so up front', async () => {
     mockState.shiftOpen = false
     const dialog = await openReceive()
@@ -179,6 +196,25 @@ describe('Receive payment', () => {
     const ids = mockCalls.rpc.filter(c => c.name === 'record_credit_receipt').map(c => c.args.p_request_id)
     expect(ids).toEqual(['req-1', 'req-1', 'req-1'])
     expect(screen.queryByText(/Not known yet/)).not.toBeInTheDocument()
+  })
+})
+
+describe('Printing', () => {
+  test('a reprint that loses the connection says so in words, the raw error kept as fine print', async () => {
+    window.open.mockReturnValue({ document: { write() {}, open() {}, close() {} }, close() {}, focus() {}, print() {}, closed: false })
+    mockState.receiptReadError = { message: 'TypeError: Failed to fetch', details: '', hint: '', code: '' }
+    mockState.receipts = [{
+      id: 'r7', receipt_no: 7, invoice_fy: '82/83', party_key: 'phone:9841234567', party_name: 'Hari', party_phone: '9841234567',
+      method: 'Cash', reference: null, amount: 750, commission_total: 0, note: null, received_by: 'me',
+      received_at: new Date(NOW).toISOString(), print_count: 1, cancelled_at: null, cancelled_by: null, cancel_reason: null,
+    }]
+    renderTab()
+    fireEvent.click(await screen.findByRole('tab', { name: 'Collected' }))
+    const table = (await screen.findAllByRole('table'))[0]
+    fireEvent.click(within(table).getByRole('button', { name: 'Reprint receipt RC-7' }))
+    const headline = await screen.findByText(/^The receipt did not print\. .*connection dropped.* Press Reprint beside it under Collected to print it\.$/)
+    expect(headline).not.toHaveTextContent('TypeError')
+    expect(headline.closest('.action-error')).toHaveTextContent('TypeError: Failed to fetch') // eslint-disable-line testing-library/no-node-access -- the fine print
   })
 })
 

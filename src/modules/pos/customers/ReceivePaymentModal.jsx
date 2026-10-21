@@ -28,6 +28,8 @@ import { bsDay, openPrintWindow, closeQuietly } from './creditReceiptHtml'
 
 const LIST_READ_MS = 20000
 const READ_MS = SETTLE_READ_MS
+// How long the payment summary must stay unchanged before it is announced (S852).
+export const SUMMARY_SETTLE_MS = 800
 const money = n => `NPR ${npr2(n)}`
 
 export default function ReceivePaymentModal({ party, vatReg, prefix, deliveryPartners = [], settingsRead, onClose, onAnswered }) {
@@ -234,6 +236,15 @@ export default function ReceivePaymentModal({ party, vatReg, prefix, deliveryPar
     : null
   const owedTotal = load.bills.reduce((s, b) => s + toPaisa(b.owed), 0)
 
+  // S852: the summary re-words itself on every keystroke of an amount, and as a live region it was
+  // read out per digit. It is shown at once, and announced only once it has stood still for a moment.
+  const summaryText = summary ? summary.join(' ') : ''
+  const [announced, setAnnounced] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setAnnounced(summaryText), SUMMARY_SETTLE_MS)
+    return () => clearTimeout(t)
+  }, [summaryText])
+
   return (
     <Modal title={`Receive payment — ${party.name}`} onClose={() => { if (!busy) onClose() }} maxWidth={860} dirty={dirty}>
       <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-text2)' }}>
@@ -385,12 +396,14 @@ export default function ReceivePaymentModal({ party, vatReg, prefix, deliveryPar
           </div>
 
           {summary && (
-            <div role="status" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-text1)' }}>
+            <div style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-text1)' }}>
               {summary.map((line, i) => <p key={i} style={{ margin: i ? '6px 0 0' : 0 }}>{line}</p>)}
             </div>
           )}
         </fieldset>
       )}
+      {/* Mounted before it has anything to say, so a screen reader hears the first summary too. */}
+      <p role="status" className="sr-only">{announced}</p>
 
       <ActionError error={error} />
 

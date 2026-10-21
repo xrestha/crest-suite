@@ -17,6 +17,7 @@ import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/p
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { npr, npr2, nprExact } from '../../../shared/nepalMoney'
 import { nepalTime } from '../../../shared/nepalTime'
+import { isNetworkError } from '../../../shared/errorText'
 import { IDENTITY_BADGE } from '../posSignals'
 import {
   AGE_BUCKETS, ageingByParty, collectedRows, creditBillLabel, fromPaisa, groupByParty, legacySettlements,
@@ -44,6 +45,15 @@ const RECEIPT_COLS = 'id, invoice_fy, receipt_no, party_key, party_name, party_p
 const LEGACY_COLS = 'id, order_no, invoice_no, invoice_fy, invoice_prefix, closed_at, paid_amount, commission_amount, buyer_name, buyer_phone, delivery_partner, credit_settled_at, credit_settled_by, credit_settled_method, vat_registered'
 const rpcCall = (name, args, signal) => (signal ? supabase.rpc(name, args).abortSignal(signal) : supabase.rpc(name, args))
 const days = d => (d == null ? '—' : d === 0 ? 'today' : `${d} day${d === 1 ? '' : 's'}`)
+
+// Why a receipt did not print, as { text, detail } (S852). A plain { message } with no code that is a
+// sentence (creditReceiptPrint.js writes these) passes through; a dropped connection, a timeout, a
+// thrown Error or a "table: …" refusal is worded by the error table, its raw text kept as the detail.
+export function printFailure(err) {
+  const msg = err?.message || ''
+  const written = !!msg && !err.code && !(err instanceof Error) && !isNetworkError(err) && !/^[\w.]+:\s/.test(msg)
+  return written ? { text: msg, detail: '' } : asActionError(err)
+}
 
 export default function CreditTab({ vatReg = true, prefix = '', deliveryPartners = [], settingsRead = null, onOwedCount }) {
   const { clientId, profile, isAdmin } = useAuth()
@@ -242,10 +252,19 @@ export default function CreditTab({ vatReg = true, prefix = '', deliveryPartners
       return { printed: false, error: err, countError: null }
     }
   }
+  // S852: a failed print says so first, then why, then how to get the paper. A reason the print path
+  // wrote itself (the outlet's name unread, the window closed early) is shown as written; anything
+  // the connection or the server said goes through the error table, so a raw "TypeError: Failed to
+  // fetch" never reaches the line and stays as fine print. The payment itself is recorded either way:
+  // nothing on paper is the whole consequence, and Reprint prints it from what was stored.
   const printNote = p => {
     if (!p) return null
     if (p.printed) return { ok: true, text: 'The receipt went to the printer.', countError: p.countError }
-    return { ok: false, text: `The receipt did not print: ${p.error?.message && !p.error?.code ? p.error.message : asActionError(p.error).text} Press Reprint beside it under Collected.`, detail: p.error?.code ? asActionError(p.error).detail : '' }
+    if (p.error?.blocked) {
+      return { ok: false, text: 'The receipt did not print: the print window was blocked. Allow pop-ups for this site, then press Reprint beside it under Collected.', detail: '' }
+    }
+    const why = printFailure(p.error)
+    return { ok: false, text: `The receipt did not print. ${why.text} Press Reprint beside it under Collected to print it.`, detail: why.detail }
   }
 
   // ── Recording a payment ────────────────────────────────────────────────────────────────────────
@@ -437,7 +456,10 @@ export default function CreditTab({ vatReg = true, prefix = '', deliveryPartners
         </div>
         <div className="stat-card">
           <div className="stat-label"><Tip text="Owed on bills closed more than 90 days ago, counted in Nepal days." width={240}>Over 90 days</Tip></div>
-          <div className="stat-value" style={{ color: ageing.totals.over90 > 0 ? 'var(--theme-amber-text)' : undefined }}>{nprExact(ageing.totals.over90)}</div>
+          {/* S852: the amber says "owed past 90 days"; the △ says it to a reader who cannot tell the hue. */}
+          <div className="stat-value" style={{ color: ageing.totals.over90 > 0 ? 'var(--theme-amber-text)' : undefined }}>
+            {ageing.totals.over90 > 0 && <span aria-hidden="true">△ </span>}{nprExact(ageing.totals.over90)}
+          </div>
         </div>
       </div>
       {owed.limitsError && (
@@ -573,11 +595,14 @@ export default function CreditTab({ vatReg = true, prefix = '', deliveryPartners
                     <td style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>
                       {r.name}{r.kind === 'partner' && <span className={IDENTITY_BADGE} style={{ marginLeft: 6 }}>Delivery partner</span>}
                     </td>
-                    {AGE_BUCKETS.map(b => (
-                      <td key={b.key} style={{ textAlign: 'right', whiteSpace: 'nowrap', color: b.key === 'over90' && r.buckets[b.key] > 0 ? 'var(--theme-amber-text)' : undefined }}>
-                        {r.buckets[b.key] ? npr2(r.buckets[b.key]) : '—'}
-                      </td>
-                    ))}
+                    {AGE_BUCKETS.map(b => {
+                      const late = b.key === 'over90' && r.buckets[b.key] > 0
+                      return (
+                        <td key={b.key} style={{ textAlign: 'right', whiteSpace: 'nowrap', color: late ? 'var(--theme-amber-text)' : undefined }}>
+                          {late && <span aria-hidden="true">△ </span>}{r.buckets[b.key] ? npr2(r.buckets[b.key]) : '—'}
+                        </td>
+                      )
+                    })}
                     <td style={{ textAlign: 'right', fontWeight: 700, whiteSpace: 'nowrap' }}>{npr2(r.total)}</td>
                   </tr>
                 ))}

@@ -15,6 +15,28 @@ import { createPortal } from 'react-dom'
 // the guest-order banner (3000), and it starts below that banner, which publishes its own height.
 export const TILL_NOTICE_Z = 2200
 
+// What Modal's Tab trap counts as focusable (Modal.js FOCUSABLE), so the edges found here are its edges.
+const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+const OPEN_DIALOG = '[role="dialog"][aria-modal="true"]'
+const focusablesIn = el => Array.from(el.querySelectorAll(FOCUSABLE)).filter(n => n.offsetParent !== null)
+
+/**
+ * Where Tab or Shift+Tab should go from `from` while a notice stands over an open dialog (S852), or
+ * null to leave the key alone. The notice sits ABOVE every Modal on purpose (S844: so a Recent Bills
+ * reprint failure is read over the dialog it came from), which put its ✕ outside the dialog's Tab
+ * trap, unreachable by keyboard. Rather than sink the notice beneath the scrim, where it could not be
+ * read, the ✕ joins the dialog's Tab cycle: Tab past the dialog's last control reaches ✕, Shift+Tab
+ * before its first control too, and from ✕ Tab goes back into the dialog.
+ */
+export function tabTargetPastNotice({ from, shift, dismiss, dialog }) {
+  if (!dismiss || !dialog) return null
+  const items = focusablesIn(dialog)
+  if (from === dismiss) return (shift ? items[items.length - 1] : items[0]) || dialog
+  if (!dialog.contains(from) || items.length === 0) return null
+  const edge = shift ? items[0] : items[items.length - 1]
+  return from === edge ? dismiss : null
+}
+
 /** A notice's lines: the sentence, then the "Nothing was changed…" line after its blank line. */
 export function noticeLines(text) {
   return String(text || '').split(/\n\s*\n/).map(s => s.trim()).filter(Boolean)
@@ -28,6 +50,11 @@ export default function TillNotice({ notice, onDismiss }) {
   // Where focus was when this notice appeared, handed back on ✕: the dismiss button leaves with the
   // bar, and focus dropped to <body> would land behind an open dialog.
   const returnFocusRef = useRef(null)
+  const dismissRef = useRef(null)
+  // The dialog the ✕ was reached from by Tab, so leaving the ✕ goes back into that same dialog.
+  const fromDialogRef = useRef(null)
+  const onDismissRef = useRef(onDismiss)
+  onDismissRef.current = onDismiss
   const id = notice?.text ? notice.id : null
   useEffect(() => {
     if (id == null) return
@@ -35,12 +62,48 @@ export default function TillNotice({ notice, onDismiss }) {
     returnFocusRef.current = el && el !== document.body ? el : null
   }, [id])
 
-  if (id == null) return null
-  const dismiss = () => {
-    const back = returnFocusRef.current
-    onDismiss()
+  // S852: keep the ✕ reachable from the keyboard while a dialog's Tab trap holds focus (see
+  // tabTargetPastNotice). Capture phase, so this runs before Modal's own document listener, which
+  // then sees defaultPrevented and leaves the key alone. Escape on the ✕ dismisses the notice,
+  // not the dialog under it.
+  useEffect(() => {
+    if (id == null) return undefined
+    const onKeyDown = e => {
+      const dismissEl = dismissRef.current
+      if (!dismissEl || e.defaultPrevented) return
+      const from = document.activeElement
+      if (e.key === 'Escape' && from === dismissEl) {
+        e.preventDefault()
+        e.stopPropagation()
+        dismissNow()
+        return
+      }
+      if (e.key !== 'Tab') return
+      const dialogs = Array.from(document.querySelectorAll(OPEN_DIALOG))
+      const dialog = from === dismissEl
+        ? (fromDialogRef.current?.isConnected ? fromDialogRef.current : dialogs[dialogs.length - 1])
+        : from?.closest?.(OPEN_DIALOG)
+      const to = tabTargetPastNotice({ from, shift: e.shiftKey, dismiss: dismissEl, dialog })
+      if (!to) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (to === dismissEl) fromDialogRef.current = dialog
+      to.focus?.()
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function dismissNow() {
+    // Back to where focus was when the notice appeared, or else into the dialog the ✕ was reached from.
+    const back = returnFocusRef.current?.isConnected ? returnFocusRef.current : fromDialogRef.current
+    fromDialogRef.current = null
+    onDismissRef.current()
     if (back?.isConnected) back.focus?.()
   }
+
+  if (id == null) return null
+  const dismiss = dismissNow
   const lines = noticeLines(notice.text)
   const bar = (
     <div
@@ -64,7 +127,7 @@ export default function TillNotice({ notice, onDismiss }) {
           <p key={i} className="action-error-text" style={i ? { marginTop: 4 } : undefined}>{line}</p>
         ))}
       </div>
-      <button type="button" className="btn btn-ghost btn-sm till-hit" aria-label="Dismiss" title="Dismiss" onClick={dismiss}>
+      <button ref={dismissRef} type="button" className="btn btn-ghost btn-sm till-hit" aria-label="Dismiss" title="Dismiss" onClick={dismiss}>
         ✕
       </button>
     </div>

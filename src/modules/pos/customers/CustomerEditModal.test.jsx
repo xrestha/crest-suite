@@ -86,6 +86,18 @@ test('a recorded agreement names who recorded it, and withdrawing it removes bot
   })
 })
 
+test('Withdraw and Keep replace each other, and focus moves to the one that takes its place', async () => {
+  open(AGREED)
+  await screen.findByText(/recorded by Ram/)
+  const withdraw = screen.getByRole('button', { name: 'Withdraw agreement — this removes both dates' })
+  withdraw.focus()
+  fireEvent.click(withdraw)
+  const keep = screen.getByRole('button', { name: 'Keep their agreement' })
+  expect(keep).toHaveFocus()
+  fireEvent.click(keep)
+  expect(screen.getByRole('button', { name: 'Withdraw agreement — this removes both dates' })).toHaveFocus()
+})
+
 test('a manager gives a card: given today, expiring by the type, the number in capitals', async () => {
   const { saved } = open(PLAIN, { canManage: true })
   // A switched-off type is not offered to a customer who does not hold it.

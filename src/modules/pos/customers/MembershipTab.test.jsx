@@ -113,5 +113,36 @@ test('a supervisor sees the types and the members, and changes neither the types
   renderTab({ canManage: false })
   expect(screen.queryByRole('button', { name: '+ Add card type' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Switch off Gold' })).not.toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Edit Asha Rai' })).toBeInTheDocument()
+  // The table's Edit and the phone card's (S852); CSS shows one or the other.
+  expect(screen.getAllByRole('button', { name: 'Edit Asha Rai' })).toHaveLength(2)
+})
+
+test('the members list has a phone card per member, from the same rows as the table', () => {
+  renderTab()
+  const cards = screen.getByRole('list', { name: 'Members' })
+  expect(within(cards).getAllByRole('listitem')).toHaveLength(1) // card holders only, as the table
+  expect(cards).toHaveTextContent('Asha Rai')
+  expect(cards).toHaveTextContent('card GOLD-7')
+  expect(within(cards).getByRole('button', { name: 'Edit Asha Rai' })).toBeInTheDocument()
+})
+
+test('a deleted card type hands focus to what happened once its row has gone', async () => {
+  const props = {
+    book: { rows: ROWS.filter(r => r.id !== 'a'), loading: false, error: null, stale: null },
+    typesState: { types: [GOLD], byId: { t1: GOLD }, loading: false, error: null, stale: null, reload: () => {} },
+    canManage: true,
+    onCustomerSaved: () => {},
+  }
+  const { rerender } = render(<MembershipTab {...props} />)
+  const more = screen.getByRole('button', { name: 'More for Gold' })
+  more.focus()
+  fireEvent.click(more)
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete…' }))
+  const dialog = await screen.findByRole('dialog', { name: 'Delete the Gold card type?' })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Delete card type' }))
+  expect(await screen.findByText('✓ Gold deleted.')).toBeInTheDocument()
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  // The list is read again without Gold, and the ⋯ focus went back to leaves with its row.
+  rerender(<MembershipTab {...props} typesState={{ ...props.typesState, types: [], byId: {} }} />)
+  await waitFor(() => expect(document.activeElement).toHaveTextContent('Gold deleted.')) // eslint-disable-line testing-library/no-node-access
 })
