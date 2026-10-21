@@ -9,9 +9,13 @@ Suite Pro gate and its billing. Until S848, Suite items were filed in `IMS_TODO.
 **When an item here ships, record it in that session's CHANGELOG entry and mark the row ✅ with the
 session number** (or move it to a decisions record if one is started), so this file stays a to-do list.
 
+**S855 (2026-10-21, crest-v470):** the Owner Report supplier table now splits Net Spend into Cash, Credit and FonePay
+after discount (schema version 19). **Owner decision: once crest-v470 is live, Crest support presses Regenerate Snapshot
+again on the same eight reports** listed below; CASA ACAI CAFE Jestha 2083 stays as made.
+
 **S853 owner decisions (2026-10-21, asked in plain words):**
 - **Decided, no change:** the Fixed Assets Disposal Report keeps gain green / loss red.
-- **Build next:** `LegalReacceptance` telling a first acceptance from a repeat one exactly.
+- ✅ S855 **Build next:** `LegalReacceptance` telling a first acceptance from a repeat one exactly (from `legalAccepted`, per outlet).
 - ✅ **Done 2026-10-21:** all eight below were regenerated on the live app as Crest support and read back at v18
   (BLOOM CAFE Net Margin Shrawan 23.1% → 19.7%, Bhadra 21.9% → 18.0%; PKR 17.9% → 15.0%, 15.9% → 13.1%; CASA Ashadh
   −60.7% → −65.5%, Shrawan −32.5% → −23.0%, Bhadra −31.8% → −32.8%, Ashwin −34.2% → −34.4%).
@@ -23,7 +27,7 @@ session number** (or move it to a decisions record if one is started), so this f
 
 **S852 whole-product audit (2026-10-21, 13/20): ✅ done** in one release (crest-v467); the report and its Resolution table are `.impeccable/audit/2026-10-20T15-06-02Z__crest-suite-all-modules.md`. Filed from it, not fixed:
 - ✅ Decided S853, no change: Fixed Assets' Disposal Report colours gain / loss green / red by sign, a verdict on a plain fact.
-- ⚪ `LegalReacceptance` tells a first acceptance from a re-acceptance by `PRIOR_VERSIONS`; it is exact only once `AuthContext` exposes `legalAccepted`.
+- ✅ S855: `LegalReacceptance` tells a first acceptance from a re-acceptance by `PRIOR_VERSIONS`; it is exact only once `AuthContext` exposes `legalAccepted`. It now reads `legalAccepted` (the outlet ledger, every version).
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 

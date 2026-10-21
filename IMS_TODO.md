@@ -6,8 +6,12 @@ them sits the S793 load-time backlog (PERF-n), from measuring the module on a sl
 
 **When an item here ships, strike it in the same commit and move it to the CHANGELOG entry.**
 
+**S855 (2026-10-21): every S853 "Build next" item below shipped in one release (crest-v470)**: PERF-2, PERF-3 and
+PERF-4, the stock-count device screen, Budget vs Actual's open-month line, unsaved dish photos, and the Owner Report
+supplier split (the aging half was already fixed in S849). PERF-5 stays open.
+
 **S853 owner decisions (2026-10-21, asked in plain words):**
-- **Build next:** PERF-2, PERF-3 and PERF-4 together (PERF-4 touches the service worker, so it is planned with
+- ✅ S855 **Build next:** PERF-2, PERF-3 and PERF-4 together (PERF-4 touches the service worker, so it is planned with
   extra care); the stock-count login gate in the till's new shape; Budget vs Actual's provisional wording;
   unused dish photos left when a new recipe is cancelled; the Owner Report vendor section's pre-discount
   cash/credit split and its aging-vs-payments VAT mismatch.
@@ -17,7 +21,7 @@ them sits the S793 load-time backlog (PERF-n), from measuring the module on a sl
 **S852 whole-product audit (2026-10-21, 13/20): ✅ done** in one release (crest-v467); the report and its Resolution table are `.impeccable/audit/2026-10-20T15-06-02Z__crest-suite-all-modules.md`. Filed from it, not fixed:
 - ✅ Decided S853, no change: The live Menu Engineering page colours its quadrants green / purple / amber / red, while the Owner Report's quadrant names are ink since S852. Its scatter chart uses the hue as each quadrant's identity, so this needs a decision, not a sweep.
 - ✅ S853: `useFoodBeverageSplit` now clears `error` when the card stops asking for data and when a new load starts.
-- ⚪ The IMS stock-count login (`ImsCountLogin.jsx` ~200) still shows "This device isn't set up yet" as one centred paragraph; Crest POS's gate became numbered steps, "Ask the Owner" and the support line in S853 (`TillGate` in `PosLogin.jsx`).
+- ✅ S855 (`DeviceGate`, shared with the till): The IMS stock-count login (`ImsCountLogin.jsx` ~200) still shows "This device isn't set up yet" as one centred paragraph; Crest POS's gate became numbered steps, "Ask the Owner" and the support line in S853 (`TillGate` in `PosLogin.jsx`).
 
 **Status key:** 🔴 Not started · 🟡 Partial · ✅ Done · 🔵 Deferred · ⚪ Known, open
 
@@ -32,9 +36,9 @@ the S793 CHANGELOG entry.
 | # | Item | Status |
 | --- | --- | --- |
 | PERF-1 | The recipe walk fetched one sub-recipe level per round trip. The recipe book now loads in one request (`loadRecipeBook`, `useRecipeBook`). Stock Movements 12.5 s → 2.8 s, Variance 5.1 s → 2.5 s, Recipe Costing 5.0 s → 4.3 s. | ✅ S793 |
-| PERF-2 | Every period page spends its first round trip finding the open month (~0.6 s on ~35 pages). A shared period list would let their data reads start in the first level. Touches every page's `init()`, so it needs its own plan. | 🔴 |
-| PERF-3 | Item Master waits for the Used In count (a paged RPC, two levels) before showing the list. Painting first needs a "checking…" state in the delete guard, which must still refuse while the count is unknown. | 🔴 |
-| PERF-4 | The service worker deletes every cached JS chunk on every deploy, so a slow link re-downloads the whole app after each release, even chunks whose hashed name did not change. Keep hashed `/static/` files across deploys and prune to the new asset manifest. Read the production cache headers first; unmeasured. | 🔴 |
+| PERF-2 | Every period page spends its first round trip finding the open month (~0.6 s on ~35 pages). A shared period list would let their data reads start in the first level. Touches every page's `init()`, so it needs its own plan. | ✅ S855: `src/shared/periodList.js` (`initPeriodLoad`, `usePeriodList`); Layout reads it on mount; 30 pages and 2 widgets start their reads beside it |
+| PERF-3 | Item Master waits for the Used In count (a paged RPC, two levels) before showing the list. Painting first needs a "checking…" state in the delete guard, which must still refuse while the count is unknown. | ✅ S855: list first, scan pending/ok/failed, `deleteGuard` (`itemDeleteGuard.js`) |
+| PERF-4 | The service worker deletes every cached JS chunk on every deploy, so a slow link re-downloads the whole app after each release, even chunks whose hashed name did not change. Keep hashed `/static/` files across deploys and prune to the new asset manifest. Read the production cache headers first; unmeasured. | ✅ S855: measured live (`/static/` is `s-maxage=31536000, immutable`, a missing hash is a 404); fixed `crest-static` cache, new + previous build kept, prune skipped when unsure |
 | PERF-5 | The Dashboard's 12-month trend is the heaviest download (~180 KB, 4 levels on a first visit). It is cached on revisit, so it is lowest priority. The Dashboard, Reorder and Stock Report still walk recipes level by level and could take the book. | ⚪ |
 
 ---
@@ -296,8 +300,8 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
 - ✅ S756 stage 4 — POS parking auto-close cuts off at the actual 6 AM, like gate passes (owner decision).
 - ✅ S756 stage 4 — Stock Count export carries the letterhead (owner decision). Annual Summary year-total verdict: kept as built (owner decision).
 - ✅ S756 stage 4 — Stock Ageing count surpluses: kept cautious (owner decision, no change).
-- ⚪ Budget vs Actual's provisional line talks about spend rather than food cost — wording only.
-- ⚪ Dish photos uploaded to a NEW recipe that is then cancelled leave an unused file in storage.
+- ✅ S855: Budget vs Actual's provisional line talks about spend rather than food cost — wording only. Resolved as "actual net purchases read low": the page measures purchases, and D30 forbids a food-cost label on them.
+- ✅ S855 (`useUnsavedDishPhotos`): Dish photos uploaded to a NEW recipe that is then cancelled leave an unused file in storage.
 - ⚪ **S761 left the counter trim as a DISPLAY control, and the owner knows.** Only `closing_stock`
   carries counter-scoped RESTRICTIVE policies (`ims_count_scope_*`, migration `20260910120000`);
   `opening_stock`, `wastages` and `staff_meals` have none, so a count PIN's JWT can still write
@@ -312,7 +316,7 @@ Open question for an accountant, not engineering: IMS-only clients have no sales
   real look on a storeroom handset before the next month-end count.
 - ✅ S756 stage 4 — Payroll labour cost includes OVERTIME everywhere (owner decision): gross + overtime + employer SSF on Overheads, ClientDashboard, ConsolidatedPnl, Group Dashboard and the group P&L (migration `20260918170000`, applied live), matching the Owner Report and Owner Dashboard. `payrollCashCost` (absence subtracted) stays the cash-paid figure.
 - ✅ S853: `purchaseTaxSplit.js` imports the shared `mergeFactors`, and `billPayables` takes `{ priorBillLines }`; the Owner Dashboard Cash / Credit now uses it (it valued a return against an earlier bill at list price).
-- ⚪ Owner Report vendor section: cash/credit split is pre-discount, and its aging total is compared against payments that include VAT.
+- ✅ S855 (schema version 19, `vendorNetBasis.js`): Owner Report vendor section: cash/credit split is pre-discount, and its aging total is compared against payments that include VAT. The aging half was fixed in S849.
 
 - ✅ S756 stage 3 — D22 — ClientDashboard Fixed Costs % / Est. Net Margin use finalized payroll, and say "labour unreadable on this login" for an IMS staff login (Overheads does both now).
 - ✅ S756 stage 3 — VendorReport: `provisionalWhenOpen` on PeriodScope; SupplierContribution + VendorReport export gating on loading/biz.error.
