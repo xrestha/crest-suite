@@ -1,6 +1,6 @@
 import { nprOrDash } from '../../shared/nepalMoney'
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Navigate, Link } from 'react-router-dom'
+import { Navigate, Link, useSearchParams } from 'react-router-dom'
 import { TriangleAlert, Check } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../supabaseClient'
@@ -18,6 +18,7 @@ import Tip from '../../components/Tip'
 import ConfirmModal from '../../components/ConfirmModal'
 import ActionError, { asActionError } from '../../components/ActionError'
 import ReportLoadError from '../../components/ReportLoadError'
+import MonthStepper, { neighboursOf } from '../../components/MonthStepper'
 import { printWithTitle } from '../../utils/printTitle'
 import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
 import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '../../modules/ownerReport/generateMonthlyReport'
@@ -192,6 +193,11 @@ function MonthlyOwnerReportBody() {
   // outlet passes its gate (it needs Crest HR as well as IMS).
   const ownerDashboard = useSuiteAccess(SUITE_PAGES.ownerDashboard)
   const periodSelectRef = useRef(null)
+  // The month on screen lives in the address too (S858), as HR's Payroll and Attendance keep theirs
+  // (S804): a reload, Back or a link sent to the accountant opens the same month. Read once, for the
+  // first pick; `replace` so stepping through months does not fill the Back button.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const askedPeriodRef = useRef(searchParams.get('period'))
 
   const [periods, setPeriods] = useState([])
   const [periodsError, setPeriodsError] = useState(null)
@@ -220,6 +226,12 @@ function MonthlyOwnerReportBody() {
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
   const selectedRef = useRef(null)
   useEffect(() => { selectedRef.current = selectedPeriodId }, [selectedPeriodId])
+  // Whatever picked the month (the first load, the picker, ‹ ›, the open-month card), the address
+  // follows it, so a link copied at any moment names the month on screen.
+  useEffect(() => {
+    if (!selectedPeriodId || searchParams.get('period') === selectedPeriodId) return
+    setSearchParams(prev => { const next = new URLSearchParams(prev); next.set('period', selectedPeriodId); return next }, { replace: true })
+  }, [selectedPeriodId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!clientId) { setLoading(false); return }
@@ -233,7 +245,9 @@ function MonthlyOwnerReportBody() {
       if (res.error) { setPeriodsError(res.error); setLoading(false); return }
       const rows = res.data || []
       setPeriods(rows)
-      const first = rows.find(p => p.status === 'closed')?.id || rows[0]?.id || null
+      // A month named in the address wins when it is one of this outlet's; else the latest closed one.
+      const asked = askedPeriodRef.current && rows.find(p => p.id === askedPeriodRef.current)?.id
+      const first = asked || rows.find(p => p.status === 'closed')?.id || rows[0]?.id || null
       setSelectedPeriodId(prev => prev || first)
       if (!first) setLoading(false)
     })()
@@ -459,8 +473,10 @@ function MonthlyOwnerReportBody() {
   // any closed month has a report or gets one on first view), and the Owner Dashboard for this one.
   const latestClosed = periods.find(p => p.status === 'closed') || null
   const periodName = p => (p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : '')
+  const selectPeriod = id => setSelectedPeriodId(id)
+  const steps = neighboursOf(periods, selectedPeriodId, p => p.id, p => periodName(p))
   function showMonth(id) {
-    setSelectedPeriodId(id)
+    selectPeriod(id)
     // The button that was pressed goes away with the open-month card; focus stays on the month picker.
     periodSelectRef.current?.focus()
   }
@@ -584,18 +600,20 @@ function MonthlyOwnerReportBody() {
     <>
       <div className="no-print card" style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
         {/* Held while Regenerate runs (OWNER-REPORT-3), so its result cannot land under another month's label. */}
-        <select aria-label="Period" ref={periodSelectRef}
-          className="form-select" style={{ maxWidth: 220 }}
-          value={selectedPeriodId || ''} onChange={e => setSelectedPeriodId(e.target.value)}
-          disabled={regenerating}
-        >
-          {periods.length === 0 && <option value="">No periods yet</option>}
-          {periods.map(p => (
-            <option key={p.id} value={p.id}>
-              {BS_MONTHS[p.bs_month - 1]} {p.bs_year}{p.status === 'open' ? ' (Open)' : ''}
-            </option>
-          ))}
-        </select>
+        <MonthStepper prev={steps.prev} next={steps.next} onStep={selectPeriod} busy={regenerating}>
+          <select aria-label="Period" ref={periodSelectRef}
+            className="form-select" style={{ maxWidth: 220 }}
+            value={selectedPeriodId || ''} onChange={e => selectPeriod(e.target.value)}
+            disabled={regenerating}
+          >
+            {periods.length === 0 && <option value="">No periods yet</option>}
+            {periods.map(p => (
+              <option key={p.id} value={p.id}>
+                {BS_MONTHS[p.bs_month - 1]} {p.bs_year}{p.status === 'open' ? ' (Open)' : ''}
+              </option>
+            ))}
+          </select>
+        </MonthStepper>
         {report && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="btn btn-ghost" onClick={handleExport} disabled={!exportsReady}>Export Excel</button>

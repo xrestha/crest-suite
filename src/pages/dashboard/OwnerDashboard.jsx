@@ -659,7 +659,7 @@ export default function OwnerDashboard() {
               label: 'Net Margin % so far',
               onOpen: !canOverheads ? null
                 : figs?.fixedMissing ? () => navigate('/overheads')
-                : () => navigate('/pnl', { state: { periodId: openPeriod?.id } }),
+                : () => navigate(openPeriod ? `/pnl?period=${openPeriod.id}` : '/pnl'),
               tile: canOverheads ? tMargin : { state: 'ok' },
               tip: `What the business keeps from each NPR 100 of sales, after stock bought, wages, rent and other fixed costs, and fees${posOn ? ', and delivery commission' : ''}.`,
               value: !canOverheads ? '—' : ratioValue(marginFigure, figs?.firstDay),

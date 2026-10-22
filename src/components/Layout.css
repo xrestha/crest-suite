@@ -3915,6 +3915,13 @@ table.data-table td input[readonly] {
 }
 .amber-banner strong { color: var(--theme-amber-text); font-weight: 600; }
 
+/* MonthStepper (S858): ‹ picker ›, kept on one line. The picker inside keeps its own width; the two
+   .btn-icon squares carry the focus pair and the coarse touch floor. */
+.month-stepper { display: inline-flex; align-items: center; gap: 4px; flex-wrap: nowrap; max-width: 100%; }
+.month-stepper > select { min-width: 0; }
+.month-stepper--fields { align-items: flex-end; gap: 8px; flex-wrap: wrap; }
+.month-stepper--fields > .btn-icon { margin-bottom: 3px; }
+
 /* The Owner Dashboard's opening answer: one sentence in the Owner Report's voice with the margin at
    full weight inside it, then the ratios that explain it on one line. Flat ground over the 2px
    section rule, not a tile: a big number in a box is the hero-metric template, and this is a

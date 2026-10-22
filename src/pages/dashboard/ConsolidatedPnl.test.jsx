@@ -5,7 +5,7 @@
  * markers, a no-period column, stock on the way, and a failed read as an error card.
  */
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 let mockAuth = {}
@@ -121,24 +121,42 @@ test('the operator reads the viewed group by its id', async () => {
   expect(seen).toEqual(['g9'])
 })
 
-// S857: the Owner Dashboard's Net Margin tile opens /pnl on the month it showed, with
-// `state.periodId`, instead of the latest closed month the page defaults to.
+// S857/S858: the address names the statement (`?period=<id>`, `?fy=<start>`), so the Owner
+// Dashboard's Net Margin tile, a reload or a shared link opens the month it meant, instead of the
+// latest closed month the page defaults to.
 const P7 = { id: 'p7', bs_year: 2083, bs_month: 6, status: 'open' }
-const renderAt = state => render(
-  <MemoryRouter initialEntries={[{ pathname: '/pnl', state }]}><ConsolidatedPnl /></MemoryRouter>,
+const renderAt = search => render(
+  <MemoryRouter initialEntries={[`/pnl${search}`]}><ConsolidatedPnl /></MemoryRouter>,
 )
 
 test('opens on the month the Owner Dashboard sent, provisional while it is open', async () => {
   mockTables.monthly_periods = { data: [P7, P], error: null }
-  renderAt({ periodId: 'p7' })
+  renderAt('?period=p7')
   expect(await screen.findByText(/Provisional/)).toBeTruthy()
   expect(screen.getByLabelText('Period').value).toBe('period:p7')
 })
 
 test('a month that is not in this outlet list is ignored: the latest closed month opens', async () => {
   mockTables.monthly_periods = { data: [P7, P], error: null }
-  renderAt({ periodId: 'someone-else' })
+  renderAt('?period=someone-else')
   expect(await screen.findByText('Delivery commission')).toBeTruthy()
   expect(screen.getByLabelText('Period').value).toBe('period:p6')
   expect(screen.queryByText(/Provisional/)).toBeNull()
+})
+
+test('a fiscal year named in the address opens that year', async () => {
+  mockTables.monthly_periods = { data: [P7, P], error: null }
+  renderAt('?fy=2083')
+  await screen.findByLabelText('Period')
+  expect(await screen.findByDisplayValue(/Fiscal year 2083\/84/)).toBeTruthy()
+})
+
+test('the previous-month button steps to the month before, and stops at the first month', async () => {
+  mockTables.monthly_periods = { data: [P7, P], error: null }
+  renderAt('?period=p7')
+  await screen.findByText(/Provisional/)
+  fireEvent.click(screen.getByRole('button', { name: /^Previous month: / }))
+  expect(screen.getByLabelText('Period').value).toBe('period:p6')
+  const none = screen.getByRole('button', { name: 'No earlier month' })
+  expect(none.getAttribute('aria-disabled')).toBe('true')
 })

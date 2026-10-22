@@ -22,7 +22,7 @@
 // whole shelf. An open month can still be picked; it renders unjudged (no colour) and provisional. A page
 // that sends a month along (the Owner Dashboard's Net Margin tile, S857) opens on that month instead.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Navigate, useLocation } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { supabase } from '../../supabaseClient'
@@ -41,6 +41,7 @@ import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
 import { UncountedItemsBanner } from '../../shared/uncountedItems'
 import SuiteGate, { SUITE_PAGES, useSuiteAccess } from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
+import MonthStepper, { neighboursOf } from '../../components/MonthStepper'
 import ReportPage from '../../components/ReportPage'
 import PeriodScope from '../../components/PeriodScope'
 import { printWithTitle } from '../../utils/printTitle'
@@ -83,12 +84,13 @@ export default function ConsolidatedPnl() {
   const { scopedFrom } = db
   const biz = useBizInfo()
   const periodReq = useLatestRequest()
-  // S857: the Owner Dashboard's Net Margin tile opens this page with `state.periodId`, the month the
-  // tile showed, so the owner lands on that month and not on the latest closed one. Read once, on the
-  // first render; used only while the id is in this outlet's own period list (a stale or foreign id
-  // falls back to the closed-month default), and it picks a month exactly as the selector does.
-  const location = useLocation()
-  const askedPeriodRef = useRef(location.state?.periodId || null)
+  // The selection lives in the address (S858): `?period=<id>` for a month, `?fy=<start>` for a fiscal
+  // year, as HR's pages keep theirs (S804). So a reload, Back or a link sent to the accountant opens the
+  // same statement, and the Owner Dashboard's Net Margin tile links straight to the month it showed
+  // (S857 passed it in navigation state, which a copied link loses). Read once, for the first pick;
+  // used only when it names one of this outlet's own months or years, else the closed-month default.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const askedRef = useRef({ period: searchParams.get('period'), fy: searchParams.get('fy') })
 
   // In a group the page is the matrix (PNL-13: the client row's group, never a sibling read that can
   // fail). For the operator AuthContext's groupId is the VIEWED client's group (ACCESS-8), read through
@@ -369,11 +371,13 @@ export default function ConsolidatedPnl() {
     const list = p || []
     setPeriods(list)
     // Closed-period default — COGS subtracts a closing count that an open month does not have — unless
-    // the page was opened on a month of this outlet's (askedPeriodRef above).
-    const asked = askedPeriodRef.current ? list.find(x => x.id === askedPeriodRef.current) : null
+    // the address names a month or fiscal year of this outlet's (askedRef above).
+    const askedFy = Number(askedRef.current.fy)
+    const fyKnown = askedRef.current.fy && list.some(x => fiscalYearOf(x.bs_year, x.bs_month).fyStart === askedFy)
+    const asked = askedRef.current.period ? list.find(x => x.id === askedRef.current.period) : null
     const target = asked || list.find(x => x.status === 'closed') || list[0]
     if (!target) { setSelectedKey(null); setLoading(false); return }
-    const key = periodReq.begin(`period:${target.id}`)
+    const key = periodReq.begin(fyKnown ? `fy:${askedFy}` : `period:${target.id}`)
     setSelectedKey(key)
     await loadSelection(key, list)
     if (periodReq.isCurrent(key)) setLoading(false)
@@ -395,8 +399,26 @@ export default function ConsolidatedPnl() {
     if (periodReq.isCurrent(key)) setLoading(false)
   }
 
+  // Whatever picked the statement (the first load, the picker, ‹ ›), the address follows it, so a link
+  // copied at any moment names what is on screen. `replace`: stepping must not fill the Back button.
+  useEffect(() => {
+    if (!selectedKey) return
+    const [kind, value] = [selectedKey.startsWith('fy:') ? 'fy' : 'period', selectedKey.replace(/^(fy|period):/, '')]
+    if (searchParams.get(kind) === value && !searchParams.get(kind === 'fy' ? 'period' : 'fy')) return
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.delete(kind === 'fy' ? 'period' : 'fy')
+      next.set(kind, value)
+      return next
+    }, { replace: true })
+  }, [selectedKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
   /* ── Derived render state ──────────────────────────────────────────────────────────────────── */
   const sel = describe(selectedKey)
+  // Keys in the picker's own form (`period:<id>`, `fy:<start>`), so a step is exactly a pick.
+  const steps = selectedKey?.startsWith('fy:')
+    ? neighboursOf(fyStarts, selectedKey, x => `fy:${x}`, x => `Fiscal year ${fyLabel(x)}`)
+    : neighboursOf(periods, selectedKey, p => `period:${p.id}`, p => monthName(p.bs_year, p.bs_month))
   const isCurrent = !!result && result.builtFor === selectedKey
   const scope = sel?.scope || ''
   const cols = isCurrent && result.kind === 'group' ? result.cols : []
@@ -469,23 +491,28 @@ export default function ConsolidatedPnl() {
       <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
         disabled={busy || !!loadError || isEmpty || !isCurrent || !biz.ready}
         title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
-      <select aria-label="Period" className="form-select" value={selectedKey || ''}
-        onChange={e => handleSelect(e.target.value)}>
-        <optgroup label="Months">
-          {periods.map(p => (
-            <option key={p.id} value={`period:${p.id}`}>
-              {monthName(p.bs_year, p.bs_month)} {p.status === 'open' ? '(open)' : '(closed)'}
-            </option>
-          ))}
-        </optgroup>
-        {fyStarts.length > 0 && (
-          <optgroup label="Fiscal years">
-            {fyStarts.map(s => (
-              <option key={s} value={`fy:${s}`}>Fiscal year {fyLabel(s)} (Shrawan–Ashadh)</option>
+      {/* ‹ › step within what is on screen (S858): month to month, or fiscal year to fiscal year. Never
+          disabled while a statement loads: a disabled button drops the focus a keyboard user just put on
+          it, and useLatestRequest already lets only the last step win (S601). */}
+      <MonthStepper prev={steps.prev} next={steps.next} onStep={handleSelect} unit={selectedKey?.startsWith('fy:') ? 'fiscal year' : 'month'}>
+        <select aria-label="Period" className="form-select" value={selectedKey || ''}
+          onChange={e => handleSelect(e.target.value)}>
+          <optgroup label="Months">
+            {periods.map(p => (
+              <option key={p.id} value={`period:${p.id}`}>
+                {monthName(p.bs_year, p.bs_month)} {p.status === 'open' ? '(open)' : '(closed)'}
+              </option>
             ))}
           </optgroup>
-        )}
-      </select>
+          {fyStarts.length > 0 && (
+            <optgroup label="Fiscal years">
+              {fyStarts.map(s => (
+                <option key={s} value={`fy:${s}`}>Fiscal year {fyLabel(s)} (Shrawan–Ashadh)</option>
+              ))}
+            </optgroup>
+          )}
+        </select>
+      </MonthStepper>
     </>
   )
 

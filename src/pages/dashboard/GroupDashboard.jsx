@@ -1,10 +1,11 @@
 import { nprOrDash } from '../../shared/nepalMoney'
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../supabaseClient'
 import SuiteGate, { SUITE_PAGES, useSuiteAccess } from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
+import MonthStepper from '../../components/MonthStepper'
 import ReportLoadError from '../../components/ReportLoadError'
 import ActionError from '../../components/ActionError'
 import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
@@ -138,8 +139,21 @@ export default function GroupDashboard() {
   const [switching, setSwitching] = useState(null)
   const [switchError, setSwitchError] = useState('')
   const today = nepalBsToday()
-  const [bsYear, setBsYear] = useState(today.year)
-  const [bsMonth, setBsMonth] = useState(today.month)
+  // The month on screen lives in the address as `?month=YYYY-MM` in BS (S858): a reload, Back or a
+  // shared link opens the same month. Read once; a month outside the year list falls back to today.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const askedMonth = (() => {
+    const m = /^(\d{4})-(\d{1,2})$/.exec(searchParams.get('month') || '')
+    const y = m ? Number(m[1]) : NaN, mo = m ? Number(m[2]) : NaN
+    return y >= today.year - 1 && y <= today.year + 1 && mo >= 1 && mo <= 12 ? { y, mo } : null
+  })()
+  const [bsYear, setBsYear] = useState(askedMonth ? askedMonth.y : today.year)
+  const [bsMonth, setBsMonth] = useState(askedMonth ? askedMonth.mo : today.month)
+  useEffect(() => {
+    const value = `${bsYear}-${String(bsMonth).padStart(2, '0')}`
+    if (searchParams.get('month') === value) return
+    setSearchParams(prev => { const next = new URLSearchParams(prev); next.set('month', value); return next }, { replace: true })
+  }, [bsYear, bsMonth]) // eslint-disable-line react-hooks/exhaustive-deps
   const [rows, setRows] = useState([])
   // The clock the rows were computed on, kept with them so a figure and its rules cannot disagree.
   const [clock, setClock] = useState(() => mtdClock({ bs_year: today.year, bs_month: today.month }, today))
@@ -442,6 +456,13 @@ export default function GroupDashboard() {
   )
 
   const years = [today.year - 1, today.year, today.year + 1]
+  // The months either side of the one on screen, from the first month of the year list up to the
+  // running month (a later month has nothing in it yet). Keys are `YYYY-M`.
+  const monthStep = (y, m, d) => { const n = (y * 12 + m - 1) + d; return { y: Math.floor(n / 12), m: (n % 12) + 1 } }
+  const inRange = ({ y, m }) => y * 12 + m >= years[0] * 12 + 1 && y * 12 + m <= today.year * 12 + today.month
+  const stepOf = d => { const t = monthStep(bsYear, bsMonth, d); return inRange(t) ? { key: `${t.y}-${t.m}`, label: `${BS_MONTHS[t.m - 1]} ${t.y}` } : null }
+  const steps = { prev: stepOf(-1), next: stepOf(1) }
+  const stepTo = key => { const [y, m] = key.split('-').map(Number); setBsYear(y); setBsMonth(m) }
 
   // The no-group card says the next step for whoever is reading: the Owner asks their consultant;
   // Crest support sets groups up itself (never "contact your consultant" to the consultant).
@@ -463,18 +484,21 @@ export default function GroupDashboard() {
       {/* flex-end, not center: the two labelled fields are taller than the button, and
           centring would float the button halfway up their labels. */}
       <div className="card no-print" style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <div className="form-field" style={{ margin: 0 }}>
-          <label htmlFor="group-bs-month">Month</label>
-          <select id="group-bs-month" className="form-select" style={{ maxWidth: 140 }} value={bsMonth} onChange={e => setBsMonth(Number(e.target.value))}>
-            {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-          </select>
-        </div>
-        <div className="form-field" style={{ margin: 0 }}>
-          <label htmlFor="group-bs-year">Year</label>
-          <select id="group-bs-year" className="form-select" style={{ maxWidth: 120 }} value={bsYear} onChange={e => setBsYear(Number(e.target.value))}>
-            {years.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
-        </div>
+        {/* ‹ › step month and year together (S858), so Baisakh steps back to Chaitra of the year before. */}
+        <MonthStepper prev={steps.prev} next={steps.next} onStep={stepTo} className="month-stepper--fields">
+          <div className="form-field" style={{ margin: 0 }}>
+            <label htmlFor="group-bs-month">Month</label>
+            <select id="group-bs-month" className="form-select" style={{ maxWidth: 140 }} value={bsMonth} onChange={e => setBsMonth(Number(e.target.value))}>
+              {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+            </select>
+          </div>
+          <div className="form-field" style={{ margin: 0 }}>
+            <label htmlFor="group-bs-year">Year</label>
+            <select id="group-bs-year" className="form-select" style={{ maxWidth: 120 }} value={bsYear} onChange={e => setBsYear(Number(e.target.value))}>
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+        </MonthStepper>
         <button className="btn btn-ghost" onClick={refresh} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
       </div>
 
