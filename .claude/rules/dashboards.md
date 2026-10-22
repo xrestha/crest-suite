@@ -177,7 +177,8 @@ History: docs/rules-archive/dashboards.md#owner-report-snapshot
 - The page leads with one sentence (`verdict()`, `.owner-verdict`): how much of every NPR 100 sold the business keeps, then `Look at:` the ratios outside their band, or why nothing is judged. It is built only from the tiles' own figures and withholds a verdict exactly when they do (`periodTooEarly`, `labourWithheld`, `fixedMissing`); never give it a number the tiles do not show.
 - The margin is "Net Margin" on every owner page (owner decision S857); the Owner Dashboard says "Net Margin % so far". Tile labels say "so far", not "(MTD)".
 - The Operations tiles are a `Needs you` list (`needsRow`, Home's `.home-attention` grammar); a zero row stays, in grey.
-- The Net Margin tile opens `/pnl` with `state.periodId` (the open month), which `ConsolidatedPnl` reads as its first selection; with no fixed costs entered it opens Overheads.
+- The Net Margin tile opens `/pnl?period=<open month id>`; with no fixed costs entered it opens Overheads.
+- The owner pages keep their selection in the address (S858): `?period=<id>` on the Owner Report and Profit & Loss (`?fy=<start>` for a P&L fiscal year), `?month=YYYY-MM` (BS) on the Group Console, written with `replace`. Each picker sits in `MonthStepper` (‹ ›, `src/components/MonthStepper.jsx`), which never disables for a load in flight: a disabled button drops keyboard focus, and `useLatestRequest` already lets the last step win.
 
 Why: the S857 critique found nine equal tiles with the margin fifth, below the fold on a phone, and four names for one figure across the owner pages.
 
