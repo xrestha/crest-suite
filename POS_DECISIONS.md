@@ -1189,7 +1189,7 @@ same ground is not re-walked; full detail in README S652/S653/S654.
 
 - [x] ~~Build-your-own dishes~~ — **shipped S760 (2026-09-15), from Aashish's handwritten sketch.
   Migration `20260920100000` applied live the same day after a live diff and a rolled-back dry run;
-  the browser pass is still open in POS_TODO.md.** Acai bowl, pizza, salad: size → base → sauces → toppings → checkout.
+  the browser pass was pressed on BLOOM CAFE in S856 (2026-10-22): a Large took 1.5x stock at bill close.** Acai bowl, pizza, salad: size → base → sauces → toppings → checkout.
   Owner decisions: a MARK on the recipe, not a new category (category drives tickets, codes and
   report splits); a size carries a portion factor and each group chooses whether it scales stock, or
   stock and price; the guest QR menu walks a marked dish step by step while the till keeps its one

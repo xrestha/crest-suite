@@ -166,6 +166,9 @@ subject matter:
   `useBuildCostRanges` is the one loader; Recipe Costing and Menu Pricing's IMS branch both render
   it. **Do not teach `calcRecipeCost`/`recipeCost.js` about options** — a third engine is how the
   same dish comes to cost two amounts on two screens.
+  **A typical build a guest could not order is costed as the cheapest one (S856, `typicalFilled`).**
+  With no sales yet the typical build is the pre-selected choices, which can leave a required base
+  empty, and that plate costed at the fixed part alone read NPR 0 and 0.0% ✓.
 - **So the menu reports do not RATE it (S792, RECIPES-1).** The fixed part alone made an acai bowl
   a 2.7% ✓ Star and Top Contributor. `isCostedByBuild()` (`buildYourOwnRating.js`, only while
   Customization is on) makes it "Not rated — costed by build" on Menu Engineering (`me_class` NULL),
