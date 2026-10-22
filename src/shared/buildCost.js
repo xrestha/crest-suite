@@ -18,7 +18,7 @@
 // included — so a plate is costed from the same raw items the stock posting depletes. There is no
 // third copy of either.
 
-import { sizeFactor, scaledQty, optionsPriceDelta, cheapestValidSelection } from './optionPricing'
+import { sizeFactor, scaledQty, optionsPriceDelta, cheapestValidSelection, selectionProblems } from './optionPricing'
 import { deltaItems } from '../utils/orderLineIngredients'
 
 const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0)
@@ -97,12 +97,21 @@ export function buildCostRange({ dishGroups, basePrice, fixedCost, typicalIds = 
   const sizeIds = new Set(sizeGroup ? sizeGroup.options.map(o => o.id) : [])
   const nonSize = (typicalIds || []).filter(id => !sizeIds.has(id))
 
-  const rows = sizes.map(size => ({
-    size: size ? size.name : null,
-    portion: size ? (size.portion_factor == null ? 1 : num(size.portion_factor)) : 1,
-    cheapest: priceBuild(cheapestSelection(dishGroups, size), shared),
-    typical: priceBuild(withSize(nonSize, size), shared),
-  }))
+  const rows = sizes.map(size => {
+    const cheapestIds = cheapestSelection(dishGroups, size)
+    const asked = withSize(nonSize, size)
+    // A typical build nobody could order is filled from the cheapest valid one (S856, found live on
+    // a Test Bowl): with no sales yet the caller passes the pre-selected choices, which can leave a
+    // required base empty, and that plate was costed at the fixed cost alone, NPR 0 and 0.0% ✓.
+    const typicalFilled = selectionProblems(dishGroups, asked).length > 0
+    return {
+      size: size ? size.name : null,
+      portion: size ? (size.portion_factor == null ? 1 : num(size.portion_factor)) : 1,
+      cheapest: priceBuild(cheapestIds, shared),
+      typical: priceBuild(typicalFilled ? cheapestIds : asked, shared),
+      typicalFilled,
+    }
+  })
 
   const costs = rows.flatMap(r => [r.cheapest.cost, r.typical.cost])
   const fcs = rows.flatMap(r => [r.cheapest.fcPct, r.typical.fcPct]).filter(v => v != null)
@@ -112,6 +121,7 @@ export function buildCostRange({ dishGroups, basePrice, fixedCost, typicalIds = 
     highCost: costs.length ? Math.max(...costs) : num(fixedCost),
     lowFc: fcs.length ? Math.min(...fcs) : null,
     highFc: fcs.length ? Math.max(...fcs) : null,
+    typicalFilled: rows.some(r => r.typicalFilled),
   }
 }
 

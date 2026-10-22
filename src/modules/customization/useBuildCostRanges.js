@@ -110,9 +110,14 @@ export function useBuildCostRanges({ enabled, recipes, fixedCostOf }) {
       })
       out[r.id] = {
         ...range,
-        typicalSource: t
-          ? `the most-picked build in the last ${TYPICAL_WINDOW_DAYS} days (${t.plates} of ${t.total} plates)`
-          : 'the dish’s pre-selected choices (not enough recent orders to learn from)',
+        typicalSource: range.typicalFilled
+          // S856: the build that would have been shown is not one a guest can order.
+          ? (t
+            ? `the cheapest build a guest can order, because the most-picked build in the last ${TYPICAL_WINDOW_DAYS} days no longer fits the choices`
+            : 'the cheapest build a guest can order, because the pre-selected choices leave a required choice empty (not enough recent orders to learn from)')
+          : t
+            ? `the most-picked build in the last ${TYPICAL_WINDOW_DAYS} days (${t.plates} of ${t.total} plates)`
+            : 'the dish’s pre-selected choices (not enough recent orders to learn from)',
       }
     }
     return out

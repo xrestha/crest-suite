@@ -11,8 +11,8 @@ PERF-4, the stock-count device screen, Budget vs Actual's open-month line, unsav
 supplier split (the aging half was already fixed in S849). PERF-5 stayed open.
 
 **S856 (2026-10-21, crest-v471): PERF-5 shipped**, so the S793 load-time list is done. What is left in this file is
-not engineering: a count-PIN sign-in on a real storeroom phone (S761, below) and the accountant's question about a
-sales-side VAT view for IMS-only clients. **Owner decisions (S856, asked in plain words):** the phone check is done
+not engineering: a count-PIN sign-in on a real storeroom phone (S761, below, done the same day) and the accountant's
+question about a sales-side VAT view for IMS-only clients (closed 2026-10-22: not needed). **Owner decisions (S856, asked in plain words):** the phone check is done
 together with the owner, step by step; the VAT question goes to the accountant first, in one note with POS's Tier-1
 certification question, and nothing is built until they answer. The phone check ran later the same day: see the S761 row below.
 
@@ -286,7 +286,7 @@ access. High-severity claims were spot-checked against source before any decisio
 | D27 | Gate passes | Day boundary **6 AM Nepal time**; **void with reason** keeping the number. ✅ S756 |
 | D28 | Accountant extras | **Bill-wise sheet** in VAT export; **Sales import warns** when the file's date range ≠ selected day. ✅ S756 |
 
-Open question for an accountant, not engineering: IMS-only clients have no sales-side VAT view (net VAT payable) anywhere in Crest.
+~~Open question for an accountant, not engineering: IMS-only clients have no sales-side VAT view (net VAT payable) anywhere in Crest.~~ ✅ Closed S856 (2026-10-22, owner answer, asked in plain words): not needed. An IMS-only client bills its guests with other software, which already gives its sales VAT book.
 
 ---
 

@@ -1799,7 +1799,7 @@ export default function PosTableManagement() {
       {qrTable && (
         <Modal title={`${qrTable.name} — Guest Menu QR`} maxWidth={480} onClose={() => setQrTable(null)}>
           <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 18px' }}>
-            Print this and place it on the table — scanning it opens a read-only menu, no app or login needed.
+            Print this and place it on the table: scanning it opens the menu for this table, where guests can order. Their order waits for Accept on the till. No app or login needed.
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
             {qrDataUrl ? (

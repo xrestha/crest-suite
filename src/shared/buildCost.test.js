@@ -90,6 +90,26 @@ describe('build-your-own cost (S760)', () => {
     expect(r.highFc).toBeCloseTo((296 / 600) * 100)
   })
 
+  // S856 (found live on BLOOM CAFE's Test Bowl): with no sales the caller passes the pre-selected
+  // choices, here the size alone. That plate has no base, which the dish requires, so it was costed
+  // at the fixed cost only and the range read NPR 0 with a 0.0% food cost.
+  it('a typical build missing a required pick falls back to the cheapest valid build', () => {
+    const r = buildCostRange({ dishGroups, basePrice: 450, fixedCost: 0, typicalIds: [], ctx })
+    expect(r.typicalFilled).toBe(true)
+    for (const row of r.rows) {
+      expect(row.typicalFilled).toBe(true)
+      expect(row.typical).toEqual(row.cheapest)
+    }
+    expect(r.lowCost).toBeGreaterThan(0)       // Small with acai: 0.75 × 120 g × 1.2 = 108
+    expect(r.lowCost).toBeCloseTo(108)
+    expect(r.lowFc).toBeGreaterThan(0)
+  })
+
+  it('a valid typical build is kept as given', () => {
+    const r = buildCostRange({ dishGroups, basePrice: 450, fixedCost: 20, typicalIds: ['acai', 'honey', 'banana', 'granola'], ctx })
+    expect(r.typicalFilled).toBe(false)
+  })
+
   it('a dish with no size group is one row', () => {
     const dg = dishGroups.filter(d => d.group.kind !== 'size')
     const r = buildCostRange({ dishGroups: dg, basePrice: 450, fixedCost: 20, typicalIds: [], ctx })

@@ -35,10 +35,11 @@ the room map (its own project; cancelled S856) and a browser pass of the new scr
   window had paused the page; Send's tip covered the message line on a phone.
 - **Open from the live check:** (1) ✅ the Z-report's Comp Food Cost counted whole Complimentary bills only, so a
   comped dish on a paid bill (the Test Combo) was in no comp cost: owner decision, count them too (S856,
-  crest-v471, `dishCompTotal`). (2) A percent discount skips
-  combo dishes by design (pos-combos.md); check that the discount box says so to a cashier. (3) Still not
-  pressed: the Billing refusal for a bill closed on another till, build-your-own, a guest QR combo, the
-  non-Suite upsell.
+  crest-v471, `dishCompTotal`). (2) ✅ A percent discount skips
+  combo dishes by design (pos-combos.md), and the discount box already says so on a bill with a combo
+  (2026-10-22). (3) ✅ Pressed 2026-10-22: the Billing refusal for a bill closed on another till,
+  build-your-own (1.5x stock on a Large, TI2644, reversed by Credit Note 5) and a guest QR combo. Still
+  open: the non-Suite upsell, since BLOOM has no login without Suite (owner: skip it for now).
 
 **S853 owner decisions (2026-10-21, asked in plain words) on the open items below:**
 - **Build next:** one Send on the order screen (food to the kitchen, drinks to the bar), with holding a course
@@ -905,11 +906,13 @@ In this order. Service charge was offered and **not** chosen.
   - **Browser checks, never pressed (needs the owner, a staff PIN and a till):** the cart's choices
     line and the choice window's scroll-to-short-group on a refused Add (S759); the S760
     build-your-own pass: the template, a Large bowl on the till, stock taken at 1.5× at bill close,
-    and the cost range on Recipe Costing and Menu Pricing (IMS branch). **Do it on BLOOM CAFE** (a
+    and the cost range on Recipe Costing and Menu Pricing (IMS branch). ✅ The S760 pass was pressed
+    on BLOOM CAFE 2026-10-22 (S856): template, Large on the till, 150 GM / 15 GM at close; the cost
+    range showed a typical build at NPR 0, fixed in crest-v471 (`typicalFilled`). **Do it on BLOOM CAFE** (a
     test outlet with Customization on), not CASA ACAI CAFE as first written: CASA is a paying
     customer, and the template writes onto its menu. The guest steps were pressed in S767.
   - ~~Release 2: combos~~ — shipped S839 (both kinds; see POS_DECISIONS.md A and `docs/pos-combos.md`).
-    S856 pressed the combo half on BLOOM CAFE (above); the guest QR combo is still open.
+    S856 pressed the combo half on BLOOM CAFE (above), and the guest QR combo on 2026-10-22.
     Left open from it (the till floor 455, `20261014170000`, and `admin-user-ops` v71 are live):
     **browser checks** on BLOOM CAFE (set up a combo, ring one on the till with a
     swap and a dish's own choice, Pay with a discount on a mixed bill, comp and move it, a guest QR combo,
@@ -960,9 +963,10 @@ when these were filed. Every item below assumes they are.
 
 ## B. Reports — compliance-adjacent
 
-- [ ] ⚪ Tier-1 software-certification legal question (needs an accountant's answer, not code). **S856:** asked
-  in one note with IMS's sales-side VAT question. The hard-delete-on-edit row that sat here was kept as is
-  (S856) and moved to POS_DECISIONS.md D.
+- [ ] 🔴 **IRD approval for the till** (was the Tier-1 software-certification question). Answered by the owner
+  2026-10-22: it is needed. A project now; see "IRD approval for the till" at the end of this file. The
+  hard-delete-on-edit row that sat here was kept as is (S856) and moved to POS_DECISIONS.md D, but an
+  approval may require keeping every version, so it is the first thing the project re-reads.
 
 ## B3. Quality passes on POS itself (added S652–S654, 2026-08-30)
 
@@ -1081,10 +1085,14 @@ Nothing open. QR payment auto-confirmation was dropped and barcode support found
 
 Full double-entry accounting / Chart of Accounts / Debtors-Creditors, multi-warehouse, batch/lot tracking, Production Entry transactions — confirmed general-ERP scope creep, not aligned with Crest's F&B cost-intelligence positioning.
 
-## One item here is not engineering
+## IRD approval for the till (owner answer, 2026-10-22)
 
-⚪ Tier-1 software-certification needs an accountant's answer (S856: asked with IMS's sales-side VAT
-question). QR payment auto-confirmation, the other item that sat here, was dropped in S856.
+The Tier-1 question is answered: the owner says Crest's till needs IRD approval (the tax office's
+billing-software listing) before a client of that size uses it. It is now a project, not a question:
+find out the current IRD requirements and the turnover line, list what the till must change (likely
+candidates: keeping every version of an edited sale and purchase line, the central billing system
+link, the invoice and credit-note layout), plan it, and apply. QR payment auto-confirmation, the
+other item that sat here, was dropped in S856.
 
 ---
 
