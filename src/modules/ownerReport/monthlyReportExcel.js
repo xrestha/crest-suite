@@ -1,9 +1,9 @@
-// Excel export for a Monthly Owner/Manager Report snapshot — same book_new/aoa_to_sheet/
+// Excel export for a Monthly Owner Report snapshot — same book_new/aoa_to_sheet/
 // sheet_add_json + letterhead pattern as SalesReport.jsx/CoversReport.jsx, one sheet per section
 // actually present in the snapshot (report.snapshot.modulesIncluded).
 import * as XLSX from 'xlsx'
 import { BS_MONTHS } from '../../utils/bsCalendar'
-import { failedSectionKeys, sectionList, trendUnavailableText } from './sectionNames'
+import { failedSectionKeys, sectionList, trendUnavailableText, priorFailedSections } from './sectionNames'
 
 const round2 = n => (n == null ? '' : Math.round(n * 100) / 100)
 const pct    = n => (n == null ? '' : Math.round(n * 10) / 10)
@@ -311,7 +311,8 @@ export function exportMonthlyReportExcel(report, bizInfo) {
       const basisOf = s => (s?.combined?.foodCostBasis === 'cogs' ? 'cogs' : 'purchases')
       const basisDiffers = basisOf(snapshot) !== basisOf(t.snapshot)
       const d = t.deltas || {}
-      const priorMissing = t.snapshot?.sectionErrors || []
+      // Either stored shape of the prior's failed sections (S857, priorFailedSections).
+      const priorMissing = priorFailedSections(t.snapshot)
       const whyNot = kind => {
         if (kind !== 'revenue' && kind !== 'labour' && priorMissing.includes('ims')) return `not compared: ${priorLabel}'s report is missing its Crest IMS section`
         if ((kind === 'food' || kind === 'prime' || kind === 'margin') && basisDiffers) return 'not compared: different food-cost basis'
@@ -325,7 +326,8 @@ export function exportMonthlyReportExcel(report, bizInfo) {
       const row = (metric, cur, prior, delta, isPct, kind) => trendRows.push({
         Comparison: label, Metric: metric, 'This Period': isPct ? pct(cur) : round2(cur), Prior: `${priorLabel}: ${isPct ? pct(prior) : round2(prior)}`,
         Change: whyNot(kind)
-          || (delta == null ? '' : isPct ? `${delta.toFixed(1)}pp${unjudged(kind) ? ' (not judged: closing count incomplete)' : ''}` : `${round2(delta.absoluteChange)} (${delta.pctChange != null ? delta.pctChange.toFixed(1) + '%' : ''})`),
+          // "points", never "pp" (S857), as on the page: a change in a % figure is in percentage points.
+          || (delta == null ? '' : isPct ? `${delta.toFixed(1)} points${unjudged(kind) ? ' (not judged: closing count incomplete)' : ''}` : `${round2(delta.absoluteChange)} (${delta.pctChange != null ? delta.pctChange.toFixed(1) + '%' : ''})`),
       })
       // v18: labour, Prime and Net Margin can come without Crest HR (the Labor tab), so each row
       // shows when either side has its figure.

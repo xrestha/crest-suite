@@ -1,6 +1,6 @@
 import { nprOrDash } from '../../shared/nepalMoney'
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, Link } from 'react-router-dom'
 import { TriangleAlert, Check } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../supabaseClient'
@@ -13,7 +13,7 @@ import { gapHeadline } from '../../shared/uncountedItems'
 import { descendingBand, lcBand, pcBand, nmBand } from '../../shared/operatingBands'
 import { BS_MONTHS } from '../../utils/bsCalendar'
 import { withTimeout, settleWithin, isTimeout } from '../../utils/withTimeout'
-import SuiteGate, { SUITE_PAGES } from '../../components/SuiteGate'
+import SuiteGate, { SUITE_PAGES, useSuiteAccess } from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
 import ConfirmModal from '../../components/ConfirmModal'
 import ActionError, { asActionError } from '../../components/ActionError'
@@ -23,7 +23,8 @@ import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
 import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '../../modules/ownerReport/generateMonthlyReport'
 import { buildExecutiveSummary } from '../../modules/ownerReport/reportNarrative'
 import { reportMadeText } from '../../modules/ownerReport/reportMadeLine'
-import { failedSectionKeys, sectionLabel, sectionList, newlyMissingSections, trendUnavailableText } from '../../modules/ownerReport/sectionNames'
+import { failedSectionKeys, sectionLabel, sectionList, newlyMissingSections, trendUnavailableText, priorFailedSections } from '../../modules/ownerReport/sectionNames'
+import { lastMonthFigures } from '../../modules/ownerReport/lastMonthFigures'
 import { loadProfileNames } from '../../shared/profileNames'
 import './MonthlyOwnerReport.css'
 
@@ -36,10 +37,6 @@ const num = n => (n == null ? '—' : Math.round(n).toLocaleString('en-IN'))
 const READ_MS = 20000
 const MAKE_MS = 90000
 
-const sectionTitleStyle = {
-  fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
-  color: 'var(--theme-accent-ink)', margin: '0 0 8px', paddingBottom: 4, borderBottom: '1px solid var(--theme-border-lt)',
-}
 // A printed qualifier under a figure or a table (a Tip does not print).
 const noteStyle = { fontSize: 12, color: 'var(--theme-text2)', margin: '8px 0 0', lineHeight: 1.5 }
 const warnNoteStyle = { ...noteStyle, color: 'var(--theme-amber-text)' }
@@ -90,6 +87,14 @@ function DirectionMark({ good, rose }) {
   )
 }
 
+// The Financial Summary's Last month cell (S857): the figure frozen in this report's own Trend copy
+// of last month (lastMonthFigures), or a dash whose Tip says why. Plain text and no band: the verdict
+// belongs to this month's figure, and nothing in a cell is a button, so it prints whole.
+function LastMonthCell({ cell, show }) {
+  if (cell?.value != null) return <td className="owner-report-last">{show(cell.value)}</td>
+  return <td className="owner-report-last">{cell?.why ? <Tip text={cell.why} width={260}>—</Tip> : '—'}</td>
+}
+
 // Trend row for a money-basis metric — `delta` is the {absoluteChange, pctChange} shape
 // computeMonthlyReport.js's buildDeltas() returns, or null if either side is missing.
 // Only used for Revenue and POS Net Sales, where up is unambiguously good.
@@ -114,7 +119,8 @@ function TrendRow({ label, cur, prior, delta, fmtFn }) {
 }
 
 // Trend row for a percentage-point metric (Food Cost %, Labor Cost %, etc.) — `delta` here is a
-// plain number (percentage-POINT change), not the {absoluteChange,pctChange} money shape.
+// plain number (percentage-POINT change), not the {absoluteChange,pctChange} money shape. Printed
+// as "points", never "pp" (S857): the Change header's Tip says once what a point is.
 // `higherIsBetter` flips the color logic for Net Margin % (up = good), vs the default (down =
 // good) for cost metrics like Food/Labor/Prime Cost %. `unjudged` (S849, OWNER-REPORT-12): page 1
 // withholds the verdict on this figure for one of the two months, so the change is shown with no
@@ -128,7 +134,7 @@ function TrendPctRow({ label, cur, prior, delta, higherIsBetter = false, unjudge
       <td style={{ textAlign: 'right', fontWeight: 600 }}>{cur == null ? '—' : `${cur.toFixed(1)}%`}</td>
       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{prior == null ? '—' : `${prior.toFixed(1)}%`}</td>
       <td style={{ textAlign: 'right', fontWeight: 600, color }}>
-        {delta == null ? '—' : <>{`${delta >= 0 ? '+' : ''}${delta.toFixed(1)}pp`}<DirectionMark good={good} rose={delta > 0} /></>}
+        {delta == null ? '—' : <><span className="owner-report-nowrap">{`${delta >= 0 ? '+' : ''}${delta.toFixed(1)} points`}</span><DirectionMark good={good} rose={delta > 0} /></>}
       </td>
     </tr>
   )
@@ -158,8 +164,10 @@ export default function MonthlyOwnerReport() {
   return (
     <div>
       <div className="page-header owner-report-page-header">
-        <h1 className="page-title">Monthly Owner/Manager Report</h1>
-        <p className="page-subtitle">Frozen figures made when each month closes, or the first time the Owner opens it — Crest IMS, HR &amp; POS combined.</p>
+        {/* S857: one name for the page (the nav, SuiteGate and the palette say "Monthly Owner Report"
+            too; only the Owner and Crest support open it), and the subtitle states its tense. */}
+        <h1 className="page-title">Monthly Owner Report</h1>
+        <p className="page-subtitle">Last month as it stood when it closed, frozen to print and keep. Crest IMS, HR and POS together.</p>
       </div>
       <SuiteGate page={SUITE_PAGES.ownerReport}>
         {() => <MonthlyOwnerReportBody key={clientId || 'none'} />}
@@ -180,6 +188,10 @@ function MonthlyOwnerReportBody() {
   // `ready` gate (S849, OWNER-REPORT-18): the hand-rolled read dropped both errors and printed a
   // blank business name into the workbook.
   const biz = useBizInfo()
+  // The open month's way forward (S857): the Owner Dashboard shows the month so far, when this
+  // outlet passes its gate (it needs Crest HR as well as IMS).
+  const ownerDashboard = useSuiteAccess(SUITE_PAGES.ownerDashboard)
+  const periodSelectRef = useRef(null)
 
   const [periods, setPeriods] = useState([])
   const [periodsError, setPeriodsError] = useState(null)
@@ -232,11 +244,13 @@ function MonthlyOwnerReportBody() {
   // Who made a report, for the header's "when it was made" line (D42), read the way a reload reads
   // it: from the row's `generated_by`, which the database stamps (S849, GAPS-11), so the operator
   // reads "Crest support" everywhere and a failed write never names its presser. A failed or empty
-  // names read leaves the name out rather than printing a dash as if nobody made it; it is bounded
-  // (loadProfileNames), and it never blocks the report already on screen.
+  // names read leaves the name out rather than printing a dash as if nobody made it, and it never
+  // blocks the report already on screen. Bounded by the page's own READ_MS (S857, the critique
+  // found it unbounded at the call site): loadProfileNames settles a timeout or a rejection into
+  // `error`, so a hung read only drops the name from the "made by" line.
   async function makerName(id) {
     if (!id) return ''
-    const { map: names, error: namesErr } = await loadProfileNames(supabase, clientId, [id])
+    const { map: names, error: namesErr } = await loadProfileNames(supabase, clientId, [id], { ms: READ_MS, label: 'Reading who made the report' })
     if (namesErr) { console.error('Owner Report: could not read who made it', namesErr); return '' }
     return names[id] || ''
   }
@@ -430,12 +444,26 @@ function MonthlyOwnerReportBody() {
   const liveFcT = fcThresholds(settings)
   const fcFrozen = !!snapshot?.combined?.fcThresholds
   const fcT = snapshot?.combined?.fcThresholds || liveFcT
-  const execSummary = snapshot ? buildExecutiveSummary(snapshot, periodLabel, { fcT: liveFcT }) : ''
+  // canOverheads: without the Overheads feature the page gives Net Margin no verdict, nor does the prose.
+  const execSummary = snapshot ? buildExecutiveSummary(snapshot, periodLabel, { fcT: liveFcT, canOverheads }) : ''
+  // The Financial Summary's Last month column (S857): the copy of last month this report froze in its
+  // Trend entry, never re-read; a dash with its reason where the method changed.
+  const lm = snapshot ? lastMonthFigures(snapshot) : null
   // When and how this snapshot was made, in BS and Nepal time (S792, D42) — and, when it was made
   // at the first view rather than at the close, a plain sentence saying what that means.
   const made = report ? reportMadeText({
     generatedAt: report.generated_at, source: report.generation_source, byName: generatorName, monthLabel: periodLabel,
   }) : null
+
+  // The open month's two ways forward (S857): the latest closed month (the list is newest first, and
+  // any closed month has a report or gets one on first view), and the Owner Dashboard for this one.
+  const latestClosed = periods.find(p => p.status === 'closed') || null
+  const periodName = p => (p ? `${BS_MONTHS[p.bs_month - 1]} ${p.bs_year}` : '')
+  function showMonth(id) {
+    setSelectedPeriodId(id)
+    // The button that was pressed goes away with the open-month card; focus stays on the month picker.
+    periodSelectRef.current?.focus()
+  }
 
   async function handleExport() {
     setExportError(null)
@@ -517,26 +545,25 @@ function MonthlyOwnerReportBody() {
   const pnlCostsInNet = s => s?.combined?.netMarginPnlCosts === true
   const netMarginTip = (() => {
     const food = cogsBasis ? 'food used (COGS)' : 'net purchases'
+    // One or two plain sentences each (S857); the full method is on the Help page.
     if (pnlCostsInNet(snapshot)) {
-      return 'Revenue minus food used (COGS), raw stock wasted, staff meals, delivery commission, labour, overheads and tax & fees (card and bank fees, the accountant, licences), as a % of revenue — the same costs Consolidated P&L subtracts.'
+      return 'Revenue minus every recorded cost, as a % of revenue: food used, raw stock wasted, staff meals, delivery commission, labour, overheads, and tax and fees. As on Consolidated P&L.'
     }
     if (taxFeesInNet(snapshot)) {
-      return `Revenue minus ${food}, labor cost, overheads and tax & fees, as a % of revenue — the rule this report was made under. Raw stock wasted, staff meals and delivery commission were not subtracted then, so this margin reads higher than Consolidated P&L's by them; Regenerate Snapshot to include them.`
+      return `Revenue minus ${food}, labour, overheads, and tax and fees, as a % of revenue. Older rule: raw stock wasted, staff meals and delivery commission are not taken off, so it reads high.`
     }
-    return `Revenue minus ${food}, labor cost and overheads, as a % of revenue — the rule this report was generated under. Tax & Fees, raw stock wasted, staff meals and delivery commission were not subtracted then, so this margin reads higher than Consolidated P&L's by them; Regenerate Snapshot to include them.`
+    return `Revenue minus ${food}, labour and overheads, as a % of revenue. Older rule: tax and fees, raw stock wasted, staff meals and delivery commission are not taken off, so it reads high.`
   })()
-  // Labor Cost %'s tip says what labour is in this report (OWNER-REPORT-10).
+  // Labor Cost %'s tip says what labour is in this report (OWNER-REPORT-10), in one or two sentences.
   const laborTip = lab?.source === 'overheads'
-    ? 'What was typed on the Overheads Labor tab for the month, as a % of revenue: this outlet had no Crest HR when the report was made, so the Labor tab is its labour.'
+    ? 'The Overheads Labor tab for the month, as a % of revenue. This outlet had no Crest HR when the report was made.'
     : lab?.source === 'none'
-      ? 'No labour was entered on the Overheads Labor tab for this month, and this outlet had no Crest HR when the report was made, so there is no Labor Cost %.'
-      : lab && labourEstimated
-        ? 'The Crest HR wage estimate, as a % of revenue: payroll was not finalized when this report was made. Pay for the days each person was employed (unpaid days on the attendance sheet taken off), overtime and employer SSF, plus festival, incentive and final-settlement pay finalized this month. Regenerate Snapshot after Finalize for the exact figure.'
-        : labourEstimated
-          ? 'An estimate, as a % of revenue: payroll was not finalized when this report was made. Regenerate Snapshot after Finalize for the exact figure.'
-          : earnedLabour(snapshot)
-            ? 'Finalized payroll — pay earned (gross less unpaid days) + overtime + employer SSF — plus festival allowance, incentives and leavers\' final pay finalized this month, as a % of revenue.'
-            : 'Gross + overtime + employer SSF, as a % of revenue — the rule this report was generated under.'
+      ? 'No labour was entered on the Overheads Labor tab, and this outlet had no Crest HR when the report was made.'
+      : labourEstimated
+        ? 'An estimate of wages from Crest HR, as a % of revenue, because payroll was not finalized. Finalize payroll, then Regenerate Snapshot, for the exact figure.'
+        : earnedLabour(snapshot)
+          ? 'Finalized payroll as a % of revenue: pay earned, overtime and employer SSF, plus festival, incentive and final-settlement pay finalized this month.'
+          : 'Gross pay, overtime and employer SSF, as a % of revenue (the older rule this report was made under).'
   // COGS rests on the closing count: an item with stock and no count is counted as all used. While
   // that gap is material the three ratios that contain food cost are shown without a verdict, as on
   // Monthly Summary (S756, D6). Only a v9 snapshot carries the gap. A food cost at or below zero is
@@ -557,7 +584,7 @@ function MonthlyOwnerReportBody() {
     <>
       <div className="no-print card" style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
         {/* Held while Regenerate runs (OWNER-REPORT-3), so its result cannot land under another month's label. */}
-        <select aria-label="Period"
+        <select aria-label="Period" ref={periodSelectRef}
           className="form-select" style={{ maxWidth: 220 }}
           value={selectedPeriodId || ''} onChange={e => setSelectedPeriodId(e.target.value)}
           disabled={regenerating}
@@ -574,7 +601,7 @@ function MonthlyOwnerReportBody() {
             <button className="btn btn-ghost" onClick={handleExport} disabled={!exportsReady}>Export Excel</button>
             <button
               className="btn btn-ghost" disabled={!exportsReady}
-              onClick={() => printWithTitle(`Owner Report — ${periodLabel} — ${biz.name}`)}
+              onClick={() => printWithTitle(`Monthly Owner Report — ${periodLabel} — ${biz.name}`)}
             >
               Print / Save as PDF
             </button>
@@ -647,16 +674,32 @@ function MonthlyOwnerReportBody() {
         </div>
       )}
 
+      {/* An open month has no report yet (S857): it was a dead end. Name the month, then the two
+          ways forward: the latest closed month report, and this month so far on the Owner Dashboard. */}
       {!loading && !generating && !pageError && !needsMaking && selectedPeriod && selectedPeriod.status !== 'closed' && !report && (
-        <div className="card">
-          <p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>
-            This month is still open — its report is made when the month is closed.
+        <div className="card owner-report-open-month">
+          <p>
+            <strong>{periodName(selectedPeriod)} is still open.</strong> Its report is made when the month is closed, and keeps the figures as they were that day.
           </p>
+          {(latestClosed || ownerDashboard.allowed) && (
+            <div className="owner-report-open-month__actions">
+              {latestClosed && (
+                <button className="btn btn-primary" onClick={() => showMonth(latestClosed.id)}>
+                  Show the {periodName(latestClosed)} report
+                </button>
+              )}
+              {ownerDashboard.allowed && (
+                <Link to="/owner-dashboard" className="btn btn-ghost">
+                  See {BS_MONTHS[selectedPeriod.bs_month - 1]} so far on the Owner Dashboard
+                </Link>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {!loading && !generating && report && snapshot && (
-        <div className="card owner-report-doc" style={{ maxWidth: 760, margin: '0 auto', padding: '22px 30px' }}>
+        <div className="card owner-report-doc">
           {/* Running footer, so a sheet separated from page 1 still says which business and
               period it belongs to — and, since S778, which page of how many. It lives in the page's
               bottom MARGIN. It used to be a position: fixed div, and Chrome paints a table that runs
@@ -667,7 +710,7 @@ function MonthlyOwnerReportBody() {
               chunk's stylesheet stays in the document after you leave, re-margining every later
               print in the session. Chromium (Chrome, Edge) draws margin boxes; a browser that does
               not prints the report without a footer. */}
-          <style>{pageFooterCss(`${biz.name || '—'} · Monthly Owner/Manager Report · ${periodLabel}`)}</style>
+          <style>{pageFooterCss(`${biz.name || '—'} · Monthly Owner Report · ${periodLabel}`)}</style>
           {/* Letterhead */}
           <div className="owner-report-letterhead" style={{ textAlign: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid var(--theme-border)' }}>
             <h2 style={{ margin: '0 0 3px', fontSize: 17, fontWeight: 800, letterSpacing: '0.02em' }}>{biz.name || '—'}</h2>
@@ -675,7 +718,7 @@ function MonthlyOwnerReportBody() {
               {biz.vatReg ? 'VAT No' : 'PAN No'}: {biz.vat || '—'}{biz.address ? ` · ${biz.address}` : ''}
             </p>
             <div style={{ fontSize: 13, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', margin: '0 0 4px' }}>
-              Monthly Owner/Manager Report
+              Monthly Owner Report
             </div>
             {/* When it was made, as a BS date and Nepal time (S792, D42). It printed the viewer's
                 clock and calendar and "Source: Backfill", which told nobody that a report made at
@@ -708,18 +751,14 @@ function MonthlyOwnerReportBody() {
           {/* A section that failed when the report was made, named in words, printed under the
               header, with the repair beside it (S849, OWNER-REPORT-2 / -1). It used to be a
               no-print note at the foot of the page naming code keys ("hr, laborAnalytics"), so a
-              printed report with no payroll in it looked complete. Print hides the button. */}
+              printed report with no payroll in it looked complete. Print hides the button. S857: the
+              shared .amber-banner, not a hand-rolled rounded amber box. */}
           {failedKeys.length > 0 && (
-            <div className="owner-report-section" role="note" style={{
-              marginBottom: 16, padding: '10px 12px', borderRadius: 6,
-              border: '1px solid color-mix(in srgb, var(--theme-amber) 35%, transparent)',
-              background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)',
-              display: 'flex', gap: 12, alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap',
-            }}>
-              <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: 'var(--theme-amber-text)', flex: '1 1 320px' }}>
-                △ Not in this report: {sectionList(failedKeys)} could not be worked out when it was made, so
-                {failedKeys.length === 1 ? ' its figures are' : ' their figures are'} missing here — not zero.
-                {' '}Regenerate Snapshot makes the report again from today's data.
+            <div className="owner-report-section amber-banner owner-report-missing" role="note">
+              <p>
+                <strong>△ Not in this report:</strong> {sectionList(failedKeys)} could not be worked out when it was made, so
+                {failedKeys.length === 1 ? ' its figures are' : ' their figures are'} missing here, not zero.
+                {' '}Regenerate Snapshot makes the report again from the data as it is today.
               </p>
               {(isAdmin || isOwner) && (
                 <button className="btn btn-ghost btn-sm" onClick={() => setConfirmRegenerate(true)} disabled={regenerating}>
@@ -733,22 +772,32 @@ function MonthlyOwnerReportBody() {
                 this point is pure data tables, per the hybrid format chosen for this report. */}
             {execSummary && (
               <div className="owner-report-section">
-                <h3 style={sectionTitleStyle}>Executive Summary</h3>
+                <h3 className="owner-report-section-title">Executive Summary</h3>
                 <p style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--theme-text1)', margin: 0 }}>{execSummary}</p>
               </div>
             )}
 
-            {/* Financial Summary — Metric / Actual / Target, matching the "KPI, target, actual"
-                shape a real restaurant management report uses, not a KPI-tile dashboard. */}
+            {/* Financial Summary — Metric / This month / Last month / Target, the "KPI, actual,
+                target" shape a real restaurant management report uses, not a KPI-tile dashboard.
+                Last month sits beside this month since S857 (it was only in Trend, at the back). */}
             <div className="owner-report-section">
-              <h3 style={sectionTitleStyle}>Financial Summary</h3>
+              <h3 className="owner-report-section-title">Financial Summary</h3>
               <div className="table-wrap">
                 <table className="data-table owner-report-table">
-                  <thead><tr><th>Metric</th><th style={{ textAlign: 'right' }}>Actual</th><th style={{ textAlign: 'right' }}>Target</th></tr></thead>
+                  <thead><tr>
+                    <th>Metric</th>
+                    <th style={{ textAlign: 'right' }}>This month<span style={subStyle}>{periodLabel}</span></th>
+                    <th style={{ textAlign: 'right' }}>
+                      {lm?.available ? 'Last month' : <Tip text={lm?.why || ''} width={260}>Last month</Tip>}
+                      {lm?.label && <span style={subStyle}>{lm.label}</span>}
+                    </th>
+                    <th style={{ textAlign: 'right' }}>Target</th>
+                  </tr></thead>
                   <tbody>
                     <tr>
                       <td>Revenue</td>
                       <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmt(snapshot.combined?.revenueTotal)}</td>
+                      <LastMonthCell cell={lm?.rows.revenue} show={fmt} />
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>—</td>
                     </tr>
                     {snapshot.ims && (
@@ -756,8 +805,8 @@ function MonthlyOwnerReportBody() {
                         <td>
                           <Tip
                             text={cogsBasis
-                              ? `Food used (COGS) ÷ revenue × 100. Food used = ${COGS_FORMULA} — the same figure Monthly Summary shows for this month.`
-                              : 'Net purchases ÷ revenue × 100 — the rule this report was generated under. Regenerate Snapshot to use the food actually used (COGS), as Monthly Summary does.'}
+                              ? `Food used (COGS) ÷ revenue × 100, as on Monthly Summary. Food used = ${COGS_FORMULA}.`
+                              : 'Net purchases ÷ revenue × 100, the older rule this report was made under. Newer reports use food used (COGS), as Monthly Summary does.'}
                             width={280}
                           >
                             {cogsBasis ? 'Food Cost %' : 'Food Cost % (on purchases)'}
@@ -767,6 +816,7 @@ function MonthlyOwnerReportBody() {
                           {pct(snapshot.combined?.foodCostPct)} {fcCellOf(snapshot.combined?.foodCostPct).mark}
                           {fcNotPositive && <span style={subStyle}>not judged: a count or a bill is missing</span>}
                         </td>
+                        <LastMonthCell cell={lm?.rows.foodCost} show={pct} />
                         {/* The client's own target (OWNER-REPORT-5): frozen with a v18 report, today's
                             Settings for an older one. It printed a fixed "28–35%". */}
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>
@@ -791,6 +841,7 @@ function MonthlyOwnerReportBody() {
                           {labourSub && <span style={subStyle}>{labourSub}</span>}
                           {labourNotJudgedSub && <span style={subStyle}>{labourNotJudgedSub}</span>}
                         </td>
+                        <LastMonthCell cell={lm?.rows.labour} show={pct} />
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>25–30%</td>
                       </tr>
                     )}
@@ -801,6 +852,7 @@ function MonthlyOwnerReportBody() {
                           {pct(snapshot.combined?.primeCostPct)} {pcCellOf(snapshot.combined?.primeCostPct).mark}
                           {snapshot.combined?.primeCostPct != null && labourSub && <span style={subStyle}>{labourSub}</span>}
                         </td>
+                        <LastMonthCell cell={lm?.rows.prime} show={pct} />
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>≤60–65%</td>
                       </tr>
                     )}
@@ -823,12 +875,25 @@ function MonthlyOwnerReportBody() {
                             <span style={subStyle}>delivery commission could not be read</span>
                           )}
                         </td>
+                        <LastMonthCell cell={lm?.rows.netMargin} show={pct} />
                         <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>≥20%</td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
+              {/* S857: a Tip does not print, so a dash left by a change of method is said once on paper. */}
+              {lm?.available && [
+                lm.rows.revenue,
+                snapshot.ims && lm.rows.foodCost,
+                labourShown && lm.rows.labour,
+                snapshot.ims && labourShown && lm.rows.prime,
+                snapshot.ims && labourShown && lm.rows.netMargin,
+              ].some(c => c?.changed) && (
+                <p style={noteStyle}>
+                  Last month shows — where Crest changed how a figure is worked out between the two months. The Trend section says which.
+                </p>
+              )}
               {/* v18 (SU11): the Labor tab is never a second labour figure beside Crest HR. Named, printed. */}
               {lab?.laborTabNotCounted > 0 && (
                 <p style={noteStyle}>
@@ -858,7 +923,7 @@ function MonthlyOwnerReportBody() {
 
             {snapshot.ims && (
               <div className="owner-report-section">
-                <h3 style={sectionTitleStyle}>Crest IMS</h3>
+                <h3 className="owner-report-section-title">Crest IMS</h3>
                 <div className="table-wrap">
                   <table className="data-table owner-report-table"><tbody>
                     <Row label="Opening Stock" value={fmt(snapshot.ims.openingStockValueTotal)}
@@ -870,7 +935,7 @@ function MonthlyOwnerReportBody() {
                     {/* v18 (PNL-8): stock moved between outlets, inside Purchases above. Shown only when there was any. */}
                     {(snapshot.ims.transferIn > 0 || snapshot.ims.transferOut > 0) && (
                       <Row label="Stock transfers in / out" value={`${fmt(snapshot.ims.transferIn)} / ${fmt(snapshot.ims.transferOut)}`}
-                        tip="Stock received from your other outlets (counted once the branch confirmed it arrived) and stock sent to them, at the sender's rate. Both are inside Purchases above; neither is in the Cash or Credit split below, since no supplier was paid." />
+                        tip="Stock received from and sent to your other outlets, at the sending outlet rate. Both are inside Purchases above, and neither is in Cash or Credit Purchases." />
                     )}
                     {/* What the figure counts depends on when it was frozen (S792, FIGURES-5): from v10
                         it is the Wastage Report's own total; before, active items only. */}
@@ -885,14 +950,14 @@ function MonthlyOwnerReportBody() {
                     {snapshot.ims.staffMealsValueTotal != null && (
                       <Row label="Staff Meals" value={fmt(snapshot.ims.staffMealsValueTotal)}
                         tip={pnlCostsInNet(snapshot)
-                          ? 'Value of food logged as staff meals this period. Like wastage, it is taken out of Food Used (COGS) below and shown on its own line, and Net Margin takes it off as a cost, as Consolidated P&L does.'
-                          : 'Value of food logged as staff meals this period. Like wastage, it is taken out of Food Used (COGS) below and shown on its own line. This report was made before Net Margin took it off; Regenerate Snapshot to include it.'} />
+                          ? 'Food logged as staff meals, at each item rate. It is kept out of Food Used (COGS), and Net Margin takes it off as a cost, as Consolidated P&L does.'
+                          : 'Food logged as staff meals, at each item rate, kept out of Food Used (COGS). This report was made before Net Margin took it off as a cost.'} />
                     )}
                     <Row label="Closing Stock" value={fmt(snapshot.ims.closingStockValueTotal)}
                       tip="Value of stock physically counted at period close (qty × per-unit rate) — becomes next period's Opening Stock." />
                     {snapshot.ims.cogsTotal != null && (
                       <Row label="Food Used (COGS)" value={fmt(snapshot.ims.cogsTotal)}
-                        tip={`${COGS_FORMULA}, valued like Monthly Summary — the numerator of Food Cost %. Prep (sub-recipes) counted at Stock Count is left out, as on Monthly Summary, so the rows above add up to it exactly only when no prep was counted.`} />
+                        tip={`${COGS_FORMULA}, as on Monthly Summary. Prep (sub-recipes) is left out, so the rows above add up to it exactly only when no prep was counted.`} />
                     )}
                     <Row label="Cash Purchases" value={fmt(snapshot.ims.cashNet)} />
                     <Row label="Credit Purchases" value={fmt(snapshot.ims.creditNet)} />
@@ -904,8 +969,8 @@ function MonthlyOwnerReportBody() {
                     {/* v18 (OWNER-REPORT-8): what is still owed per bill, as Outstanding Payables values it. */}
                     <Row label="Unpaid Credit (this period)" value={fmt(snapshot.ims.payables?.unpaidTotal)}
                       tip={snapshot.ims.payables?.basis === 'owed'
-                        ? `What is still owed on this month's credit bills, VAT, discount and returns included, when this report was made (${num(snapshot.ims.payables?.unpaidCount)} bill${snapshot.ims.payables?.unpaidCount === 1 ? '' : 's'}) — a period-bound figure, not a live 'days overdue' count.`
-                        : "This period's Credit purchases still unpaid as of generation, line by line at quantity × rate (before VAT, discounts and returns) — the rule this report was made under. Regenerate Snapshot to value each bill at what is owed."} />
+                        ? `Still owed on the credit bills of this month when the report was made (${num(snapshot.ims.payables?.unpaidCount)} bill${snapshot.ims.payables?.unpaidCount === 1 ? '' : 's'}), with VAT, discounts and returns counted. It does not change later.`
+                        : 'Credit purchases of this month still unpaid when the report was made, at quantity × rate before VAT, discounts and returns (an older rule).'} />
                     {/* v12 (S798 2e): the two non-labour cost lines Net Margin subtracts, so the margin
                         can be traced. Absent on an older snapshot, which froze no Tax & Fees. */}
                     {canOverheads && snapshot.ims.taxFeesTotal != null && <>
@@ -920,11 +985,11 @@ function MonthlyOwnerReportBody() {
                         traced. Absent on an older report, which did not subtract them. */}
                     {snapshot.ims.cogsWastageTotal != null && (
                       <Row label="Stock wasted (raw items)" value={fmt(snapshot.ims.cogsWastageTotal)}
-                        tip="The raw-ingredient part of Wastage Value, at each item's rate. Net Margin takes it off as a cost, as Consolidated P&L does. Wasted prep is not here: the raw items it was made from are already inside Food Used." />
+                        tip="The raw-ingredient part of Wastage Value, which Net Margin takes off as a cost. Wasted prep is left out: its raw items are already in Food Used." />
                     )}
                     {dc && (
                       <Row label="Delivery commission" value={fmt(dc.amount)}
-                        tip="What Foodmandu, Pathao or another delivery partner kept from bills sold this month, as recorded when you took their payment in Customers → Credit. Net Margin takes it off, as Consolidated P&L does. A bill not settled when this report was made has no commission in it." />
+                        tip="What delivery partners such as Foodmandu or Pathao kept from bills sold this month. Net Margin takes it off; a bill not settled when the report was made has none in it." />
                     )}
                   </tbody></table>
                 </div>
@@ -938,7 +1003,7 @@ function MonthlyOwnerReportBody() {
 
             {snapshot.hr && (
               <div className="owner-report-section">
-                <h3 style={sectionTitleStyle}>
+                <h3 className="owner-report-section-title">
                   Crest HR
                   {snapshot.hr.payrollSource && (
                     <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 'normal', color: 'var(--theme-text3)', marginLeft: 8 }}>
@@ -953,10 +1018,11 @@ function MonthlyOwnerReportBody() {
                         An estimate has no unpaid-day figure (null), so the row is not shown. */}
                     {snapshot.hr.payroll?.absenceDeduction != null && (
                       <Row label="Less unpaid days" value={`− ${fmt(snapshot.hr.payroll.absenceDeduction)}`}
-                        tip="Unpaid leave and absent days, and the days before a joiner started or after a leaver's last day, which the payroll did not pay. Taken off so labour is what was earned, as on the payroll sheet's Cost to business." />
+                        tip="Days the payroll did not pay: unpaid leave, absent days, and days before joining or after leaving. Taken off so labour is what was earned." />
                     )}
                     <Row label="Overtime" value={`${num(snapshot.hr.payroll?.ot?.hours)} hrs — ${fmt(snapshot.hr.payroll?.ot?.amount)}`} />
-                    <Row label="Employer SSF" value={fmt(snapshot.hr.payroll?.ssfEmployer)} />
+                    <Row label="Employer SSF" value={fmt(snapshot.hr.payroll?.ssfEmployer)}
+                      tip="What the business pays into the Social Security Fund for staff enrolled in it, on top of their pay. It counts as labour." />
                     {/* v13 (H18): pay finalized outside the monthly run, in the month it was paid. */}
                     {snapshot.hr.payroll?.other?.festival > 0 && (
                       <Row label={snapshot.hr.payroll.other.festivalName ? `${snapshot.hr.payroll.other.festivalName} Allowance` : 'Festival Allowance'}
@@ -968,25 +1034,25 @@ function MonthlyOwnerReportBody() {
                     )}
                     {snapshot.hr.payroll?.other?.settlement > 0 && (
                       <Row label="Leavers' Final Pay" value={fmt(snapshot.hr.payroll.other.settlement)}
-                        tip="Final Settlements finalized this month: the leaver's last part-month (earned pay and overtime), employer SSF, leave encashment, festival share, notice pay and gratuity, less any notice deduction. Travel claims are not labour." />
+                        tip="Final Settlements finalized this month: the last part-month of pay, leave encashment, gratuity and the rest. Travel claims are not counted." />
                     )}
                     <Row label={earnedLabour(snapshot) ? 'Total Labour Cost' : 'Total Payroll Cost'} value={fmt(snapshot.hr.payroll?.total)}
                       tip={earnedLabour(snapshot)
-                        ? 'Pay earned (gross less unpaid days) + overtime + employer SSF, plus festival allowance, incentives and leavers\' final pay finalized this month — the figure Labor Cost % divides by revenue.'
-                        : 'Gross pay + overtime + employer SSF — the rule this report was generated under. Unpaid days were not taken off and festival, incentive and final-settlement pay was not counted; Regenerate Snapshot to apply the current rule.'} />
+                        ? 'Pay earned, overtime and employer SSF, plus festival, incentive and final-settlement pay finalized this month. Labor Cost % is this divided by revenue.'
+                        : 'Gross pay, overtime and employer SSF (an older rule). Unpaid days are not taken off, and festival, incentive and final-settlement pay are not counted.'} />
                     {/* v18 (OWNER-REPORT-7): employed at any time in the month, by join and End
                         Dates — not by today's status, which counted nobody who had left since. */}
                     {snapshot.hr.headcount?.basis === 'dates'
                       ? <Row label="Staff Employed" value={num(snapshot.hr.headcount.employed)}
                           tip="Everyone employed at any time in the month, joiners and leavers included, by their join and End Dates." />
                       : <Row label="Active Headcount" value={num(snapshot.hr.headcount?.active)}
-                          tip="Staff whose status was active or on probation when this report was made — the rule it was made under, so someone who left after the month and before the report is not counted. Regenerate Snapshot to count by dates." />}
+                          tip="Staff active or on probation when the report was made (an older rule), so someone who left after the month is not counted." />}
                     <Row label="New Hires / Terminations" value={`${num(snapshot.hr.headcount?.newHires)} / ${num(snapshot.hr.headcount?.terminations)}`} />
                     {/* v18 (OWNER-REPORT-13): over the days staff were due to work. */}
                     <Row label="Attendance Rate" value={snapshot.hr.attendance?.rate != null ? pct(snapshot.hr.attendance.rate) : 'N/A'}
                       tip={snapshot.hr.attendance?.basis === 'working_days'
-                        ? 'Days present ÷ days staff were due to work (weekly offs and public holidays left out). Paid leave counts as present, unpaid leave as absent. Only meaningful when the daily Attendance Sheet is used.'
-                        : 'Best-effort — only meaningful for clients using the daily Attendance Sheet. This report was made under the earlier rule, which includes weekly offs and holidays in the days counted, so it reads low.'} />
+                        ? 'Days present ÷ days staff were due to work (weekly offs and holidays left out); paid leave counts as present. Useful only with the daily Attendance Sheet.'
+                        : 'An older rule that counts weekly offs and holidays as days to work, so it reads low. Useful only with the daily Attendance Sheet.'} />
                   </tbody></table>
                 </div>
                 {snapshot.hr.headcount?.noEndDate > 0 && (
@@ -1016,11 +1082,11 @@ function MonthlyOwnerReportBody() {
 
             {snapshot.pos && (
               <div className="owner-report-section">
-                <h3 style={sectionTitleStyle}>Crest POS</h3>
+                <h3 className="owner-report-section-title">Crest POS</h3>
                 <div className="table-wrap" style={{ marginBottom: 8 }}>
                   <table className="data-table owner-report-table"><tbody>
                     <Row label="Net Sales" value={fmt(snapshot.pos.totalNetSales)}
-                      tip="Independently derived from the Bill Register — will not tie out to the penny with Revenue above, which comes from Sales Entries instead. Different discount/VAT rounding basis, same underlying bills." />
+                      tip="From the Bill Register. It will not match Revenue above exactly: Revenue comes from Sales Entries, rounded differently on discount and VAT." />
                     <Row label="Bills / Qty Sold" value={`${num(snapshot.pos.billCount)} / ${num(snapshot.pos.totalQty)}`} />
                     {/* v15 (S809 3m): the credit notes Net Sales is after. Absent on an older report. */}
                     {snapshot.pos.creditNotes?.count > 0 && (
@@ -1033,8 +1099,8 @@ function MonthlyOwnerReportBody() {
                     <Row label="Comped Bills"
                       value={`${num(snapshot.pos.compedBillsTotal?.count)} — ${fmt(snapshot.pos.compedBillsTotal?.potentialValue)} potential value${compExVat ? ', before VAT' : ', incl. VAT'}`}
                       tip={compExVat
-                        ? "Bills and dishes given away free (staff meals, goodwill, promo) — 'potential value' is what they would have sold for at menu price, before VAT: the Sales Exceptions basis, since VAT on a sale that never happened was never revenue."
-                        : "Bills and dishes given away free (staff meals, goodwill, promo) — 'potential value' is what they would have cost the guest at full price, VAT included. This report was made before Crest valued comps before VAT; reports made since show the figure before VAT, as Sales Exceptions does."} />
+                        ? 'Bills and dishes given free (staff meals, goodwill, promotions). Potential value is their menu price before VAT, as on Sales Exceptions.'
+                        : 'Bills and dishes given free (staff meals, goodwill, promotions). Potential value here is the full price with VAT, an older rule; newer reports show it before VAT.'} />
                     <Row label="Voids / Write-offs" value={`${num(snapshot.pos.voidsWriteoffsTotal?.count)} — ${fmt(snapshot.pos.voidsWriteoffsTotal?.amount)}`}
                       color={snapshot.pos.voidsWriteoffsTotal?.count > 0 ? 'var(--theme-red-text)' : undefined}
                       tip="Void = cancelled before payment (e.g. a wrong order). Write-off = billed but never collected. Both are lost potential revenue." />
@@ -1042,14 +1108,14 @@ function MonthlyOwnerReportBody() {
                         older report keeps its own count and its own tip, with the note below. */}
                     {posSeated && (
                       <Row label="Guests Seated" value={num(snapshot.pos.covers.totalCovers)}
-                        tip="Guests seated at tables this month: the covers entered for each table's order, a bill later cancelled by a credit note included. Takeaway and delivery bills have no guests, so they are not counted. The same count as the Covers Report." />
+                        tip="Guests seated at tables this month, as on the Covers Report. Takeaway and delivery are not counted; a bill later cancelled by a credit note still is." />
                     )}
                     <Row label="Avg Check / Cover" value={fmt(snapshot.pos.covers?.avgCheckPerCover)}
                       tip={posSeated
                         ? 'Average spend per seated guest: dine-in Net Sales (after any credit notes on dine-in bills) ÷ guests seated. Takeaway and delivery are left out of both, as on the Covers Report.'
                         : "Average spend per guest ('cover' = one seated diner), not per bill — a table of 4 sharing one bill counts as 4 covers."} />
                     <Row label="Avg Bill Value" value={fmt(snapshot.pos.covers?.avgBillValue)}
-                      tip="Net Sales ÷ Bills, the two figures above: the average paid bill this month, takeaway and delivery included. It is per bill, not per guest, so a table of 4 on one bill counts once; Avg Check / Cover is the per-guest figure." />
+                      tip="Net Sales ÷ Bills: the average paid bill, takeaway and delivery included. It is per bill; Avg Check / Cover is per guest." />
                   </tbody></table>
                 </div>
                 {!posSeated && (
@@ -1098,7 +1164,7 @@ function MonthlyOwnerReportBody() {
               const quadrantStyle = { color: 'var(--theme-text1)', fontWeight: 700 }
               return (
                 <div className="owner-report-section owner-report-page-break">
-                  <h3 style={sectionTitleStyle}>Menu Engineering Matrix</h3>
+                  <h3 className="owner-report-section-title">Menu Engineering Matrix</h3>
                   <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '0 0 8px' }}>
                     Classified by Food Cost % (≤{me.fcCutoffPct}% = high profit) × Qty Sold vs. the period's median ({num(me.medianQty)}).
                   </p>
@@ -1137,7 +1203,9 @@ function MonthlyOwnerReportBody() {
                   {me.dogs?.length > 0 && (
                     <div className="table-wrap">
                       <table className="data-table owner-report-table">
-                        <thead><tr><th>Dogs (lowest contribution)</th><th style={{ textAlign: 'right' }}>Qty Sold</th><th style={{ textAlign: 'right' }}>Food Cost %</th><th style={{ textAlign: 'right' }}>Total Contribution</th></tr></thead>
+                        <thead><tr><th>Dogs (lowest contribution)</th><th style={{ textAlign: 'right' }}>Qty Sold</th><th style={{ textAlign: 'right' }}>Food Cost %</th><th style={{ textAlign: 'right' }}>
+                          <Tip text="Selling price less ingredient cost, times the number sold: what the dish added towards your other costs and profit." width={260}>Total Contribution</Tip>
+                        </th></tr></thead>
                         <tbody>
                           {me.dogs.map(i => (
                             <tr key={i.recipeId}><td>{i.name}</td><td style={{ textAlign: 'right' }}>{num(i.qtySold)}</td><td style={{ textAlign: 'right' }}>{pct(i.fcPct)}</td><td style={{ textAlign: 'right' }}>{fmt(i.totalContribution)}</td></tr>
@@ -1152,7 +1220,7 @@ function MonthlyOwnerReportBody() {
 
             {snapshot.laborAnalytics && (
               <div className="owner-report-section">
-                <h3 style={sectionTitleStyle}>Labor Analytics</h3>
+                <h3 className="owner-report-section-title">Labor Analytics</h3>
                 <div className="table-wrap">
                   <table className="data-table owner-report-table"><tbody>
                     <Row label="Actual Hours Worked" value={`${num(snapshot.laborAnalytics.actualHoursWorked)} hrs`}
@@ -1162,7 +1230,7 @@ function MonthlyOwnerReportBody() {
                     {snapshot.laborAnalytics.workingDays != null && (
                       <Row label="Days without clock times" value={`${num(snapshot.laborAnalytics.workingDaysWithoutHours)} of ${num(snapshot.laborAnalytics.workingDays)} worked days`}
                         color={snapshot.laborAnalytics.hoursWithheld ? 'var(--theme-amber-text)' : undefined}
-                        tip="Days marked Present (or a half day) in Attendance with no start and end time, so they add 0 hours. When more than half the worked days are like this, Schedule Variance and Sales per Labor Hour are not shown: the hours total counts only the few days that have times." />
+                        tip="Days marked Present or half day with no start and end time, so they add no hours. If more than half are like this, Schedule Variance and Sales per Labor Hour are not shown." />
                     )}
                     <Row label="Scheduled Hours (Roster)" value={`${num(snapshot.laborAnalytics.scheduledHours)} hrs`} />
                     <Row label="Schedule Variance" value={snapshot.laborAnalytics.hoursWithheld ? 'Hours not recorded'
@@ -1183,7 +1251,7 @@ function MonthlyOwnerReportBody() {
               const inv = snapshot.inventoryDepth
               return (
                 <div className="owner-report-section owner-report-page-break">
-                  <h3 style={sectionTitleStyle}>Inventory Depth</h3>
+                  <h3 className="owner-report-section-title">Inventory Depth</h3>
 
                   {inv.turnover && (
                     <div className="table-wrap" style={{ marginBottom: 8 }}>
@@ -1195,7 +1263,8 @@ function MonthlyOwnerReportBody() {
                             : 'Stock consumed (waste included) ÷ average inventory value this period — the rule this report was made under. Higher means stock is moving faster.'} />
                         <Row label="Days on Hand" value={inv.turnover.daysOnHand != null ? `${inv.turnover.daysOnHand.toFixed(1)} days` : '—'}
                           tip="How many days your average inventory would last at this period's usage rate. Lower means you're restocking more often." />
-                        <Row label="Average Inventory Value" value={fmt(inv.turnover.avgInventoryValue)} />
+                        <Row label="Average Inventory Value" value={fmt(inv.turnover.avgInventoryValue)}
+                          tip="Opening stock plus closing stock, divided by 2. Turnover and Days on Hand are worked out from it." />
                       </tbody></table>
                     </div>
                   )}
@@ -1239,7 +1308,8 @@ function MonthlyOwnerReportBody() {
                             tip={streak ? `Nothing used for ${deadAfter} or more counted months in a row, ending with this period.` : 'Zero usage this period despite stock on hand (the one-month rule this snapshot was generated under).'} />
                           <Row label="Slow Stock Items" value={num(ds.slowCount)} color={ds.slowCount > 0 ? 'var(--theme-amber-text)' : undefined}
                             tip={streak ? 'Nothing used for one or two counted months, or less than 20% of available stock used this period.' : 'Used less than 20% of available stock this period.'} />
-                          <Row label="Total Value at Risk" value={fmt(ds.totalValueAtRisk)} color={ds.totalValueAtRisk > 0 ? 'var(--theme-red-text)' : undefined} />
+                          <Row label="Total Value at Risk" value={fmt(ds.totalValueAtRisk)} color={ds.totalValueAtRisk > 0 ? 'var(--theme-red-text)' : undefined}
+                            tip="The closing stock of every Dead and Slow item, at its rate: money sitting on the shelf that is not being used." />
                         </tbody></table>
                       </div>
                       {ds.items?.length > 0 && (
@@ -1248,7 +1318,7 @@ function MonthlyOwnerReportBody() {
                             <thead><tr>
                               <th>Dead/Slow Item</th><th style={{ textAlign: 'right' }}>Status</th>
                               {streak && <th>Still For</th>}
-                              <th style={{ textAlign: 'right' }}>Value at Risk</th>
+                              <th style={{ textAlign: 'right' }}><Tip text="This item closing stock, at its rate." width={220}>Value at Risk</Tip></th>
                               {streak && <th>Suggested Next Step</th>}
                             </tr></thead>
                             <tbody>
@@ -1302,7 +1372,7 @@ function MonthlyOwnerReportBody() {
                           <Row label={judgedAtTol ? `Items Flagged (Theoretical vs Actual, ±${v.tolerancePct}%)` : 'Items Flagged (Theoretical vs Actual, ±10%)'}
                             value={nothingJudged ? '—' : num(v.flaggedCount)}
                             tip={judgedAtTol
-                              ? `Items whose actual use differed from what recipes × sales say by more than ±${v.tolerancePct}% (your Settings tolerance when this was generated) and by at least NPR ${num(v.floorValue)}. Staff meals are part of actual use; credit notes do not reduce what recipes say. ${nothingJudged ? 'No item had a closing count, so nothing could be judged.' : ''}`
+                              ? `Items whose use differed from recipes × sales by more than ±${v.tolerancePct}% (your tolerance when the report was made) and by at least NPR ${num(v.floorValue)}.${nothingJudged ? ' No item had a closing count, so nothing was judged.' : ''}`
                               : 'Items where actual usage differed from recipe-theoretical usage by more than 10% (the rule this report was generated under).'} />
                           <Row label="Total Variance Value"
                             value={nothingJudged ? '—' : `${fmt(v.totalVarianceValue)}${totalBand?.mark ? ` ${totalBand.mark}` : ''}`}
@@ -1313,7 +1383,12 @@ function MonthlyOwnerReportBody() {
                       {flaggedRows.length > 0 && (
                         <div className="table-wrap" style={{ marginBottom: 8 }}>
                           <table className="data-table owner-report-table">
-                            <thead><tr><th>Item</th><th style={{ textAlign: 'right' }}>Actual</th><th style={{ textAlign: 'right' }}>Theoretical</th><th style={{ textAlign: 'right' }}>Variance %</th><th style={{ textAlign: 'right' }}>Value</th></tr></thead>
+                            <thead><tr>
+                              <th>Item</th><th style={{ textAlign: 'right' }}>Actual</th>
+                              <th style={{ textAlign: 'right' }}><Tip text="What your recipes say the dishes sold should have used. Actual is what the stock counts show was used." width={260}>Theoretical</Tip></th>
+                              <th style={{ textAlign: 'right' }}><Tip text="(Actual − Theoretical) ÷ Theoretical. ▲ means more was used than recipes explain, ▼ less." width={260}>Variance %</Tip></th>
+                              <th style={{ textAlign: 'right' }}>Value</th>
+                            </tr></thead>
                             <tbody>
                               {flaggedRows.slice(0, 10).map(i => (
                                 <tr key={i.itemId}>
@@ -1348,9 +1423,10 @@ function MonthlyOwnerReportBody() {
                         <table className="data-table owner-report-table"><tbody>
                           <Row label={`Shrinkage Trend (${sh.periodsAnalyzed}-period window)`} value={`${num(sh.consistentCount)} consistent, ${num(sh.anyFlaggedCount)} flagged`}
                             tip={judgedAtTol
-                              ? `Items over-used, beyond what recipes × sales explain, in closed months ending with this one. A month counts only when the item was counted and over-used by more than ±${sh.tolerancePct}% and at least NPR ${num(sh.floorValue)}. "Consistent" = in two-thirds or more of the months it could be judged.`
+                              ? `Items used beyond what recipes × sales explain, over the closed months up to this one. Consistent means in two-thirds or more of the months that could be judged.`
                               : 'Items with unexplained over-consumption across multiple closed periods ending at this one — distinct from a single period\'s Variance above.'} />
-                          <Row label="Total Shrinkage Loss Value" value={fmt(sh.totalLossValue)} color={sh.totalLossValue > 0 ? 'var(--theme-red-text)' : undefined} />
+                          <Row label="Total Shrinkage Loss Value" value={fmt(sh.totalLossValue)} color={sh.totalLossValue > 0 ? 'var(--theme-red-text)' : undefined}
+                            tip="The value of the stock used beyond what recipes explain, added up for every flagged item over the months in this window." />
                         </tbody></table>
                       </div>
                     </>
@@ -1374,15 +1450,15 @@ function MonthlyOwnerReportBody() {
               const alignRight = { textAlign: 'right' }
               return (
                 <div className="owner-report-section">
-                  <h3 style={sectionTitleStyle}>Vendor &amp; Purchasing</h3>
+                  <h3 className="owner-report-section-title">Vendor &amp; Purchasing</h3>
                   <div className="table-wrap" style={{ marginBottom: 8 }}>
                     <table className="data-table owner-report-table">
                       <thead><tr>
                         <th>Vendor</th>
                         <th style={alignRight}>
                           <Tip width={280} text={splitNet
-                            ? 'What each supplier cost this month: list price less the bill discount and returns, before VAT, as on the Vendor Report. Cash, Credit and FonePay split it by how each bill and each return was paid, so the three add up to it.'
-                            : 'What each supplier cost this month: list price less the bill discount and returns, before VAT. Cash, Credit and FonePay on this report are before the bill discount, so they can add up to more.'}>
+                            ? 'What each supplier cost this month after discounts and returns, before VAT, as on the Vendor Report. Cash, Credit and FonePay add up to it.'
+                            : 'What each supplier cost this month after discounts and returns, before VAT. Cash, Credit and FonePay here are before the discount, so they can add up to more.'}>
                             Net Spend
                           </Tip>
                         </th>
@@ -1421,12 +1497,12 @@ function MonthlyOwnerReportBody() {
                           it can be more than the Credit column above (S855). */}
                       <Row label="Unpaid Credit — Current (≤30d)" value={fmt(vp.billAging.current)}
                         tip={vp.billAging.basis === 'owed'
-                          ? 'What is still owed on the credit bills of this month (VAT added, discount and returns taken off, less payments), by how old each bill was when this report was made. It includes VAT and the Credit column above does not (apart from VAT your outlet cannot claim back), so Unpaid Credit can be more than Credit.'
+                          ? 'Still owed on the credit bills of this month, by bill age when the report was made. It includes VAT and the Credit column does not, so it can be more than Credit.'
                           : 'This month\'s credit lines at quantity × rate less payments (before VAT, discounts and returns) — the rule this report was made under — by how old each bill was when it was made.'} />
                       <Row label="Unpaid Credit — 31–60 days" value={fmt(vp.billAging.d31_60)} color={vp.billAging.d31_60 > 0 ? 'var(--theme-amber-text)' : undefined} />
                       <Row label="Unpaid Credit — 61–90 days" value={fmt(vp.billAging.d61_90)} color={vp.billAging.d61_90 > 0 ? 'var(--theme-amber-text)' : undefined} />
                       <Row label="Unpaid Credit — 90+ days" value={fmt(vp.billAging.d90plus)} color={vp.billAging.d90plus > 0 ? 'var(--theme-red-text)' : undefined}
-                        tip="Bill-age since purchase date, pinned to when this report was generated — not a live count. No vendor payment-terms field exists in this system, so this is not a true SLA measure." />
+                        tip="Bill age from the purchase date, as it was when the report was made. Crest does not record supplier payment terms, so an old bill is not always a late one." />
                     </tbody></table>
                   </div>
                 </div>
@@ -1435,7 +1511,7 @@ function MonthlyOwnerReportBody() {
 
             {snapshot.trend && (
               <div className="owner-report-section owner-report-page-break">
-                <h3 style={sectionTitleStyle}>Trend</h3>
+                <h3 className="owner-report-section-title">Trend</h3>
                 {['vsLastPeriod', 'vsSameMonthLastYear'].map(key => {
                   const t = snapshot.trend[key]
                   const label = key === 'vsLastPeriod' ? 'vs Last Period' : 'vs Same Month Last Year'
@@ -1452,8 +1528,10 @@ function MonthlyOwnerReportBody() {
                   const curGap = !!snapshot.ims?.countGap?.material && cogsBasis
                   const priorGap = t?.snapshot?.countGapMaterial === true
                   const unjudged = !!d.verdictWithheld || curGap || priorGap
-                  // OWNER-REPORT-2: the prior froze without its Crest IMS section.
-                  const priorMissingIms = (t?.snapshot?.sectionErrors || []).includes('ims')
+                  // OWNER-REPORT-2: the prior froze without its Crest IMS section. Read through
+                  // priorFailedSections (S857), which also takes the `{ key: message }` object a
+                  // pre-v10 entry holds; `.includes` on that object threw.
+                  const priorMissingIms = priorFailedSections(t?.snapshot).includes('ims')
                   return (
                     <div key={key} style={{ marginBottom: 14 }}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--theme-text2)', marginBottom: 6 }}>{label}</div>
@@ -1463,7 +1541,12 @@ function MonthlyOwnerReportBody() {
                         <div className="table-wrap">
                           <table className="data-table owner-report-table">
                             <thead>
-                              <tr><th>Metric</th><th style={{ textAlign: 'right' }}>This Period</th><th style={{ textAlign: 'right' }}>{priorLabel}</th><th style={{ textAlign: 'right' }}>Change</th></tr>
+                              <tr>
+                                <th>Metric</th><th style={{ textAlign: 'right' }}>This Period</th><th style={{ textAlign: 'right' }}>{priorLabel}</th>
+                                <th style={{ textAlign: 'right' }}>
+                                  <Tip text="For a % figure the change is in points: 30% to 32% is +2.0 points. For money it is the amount, then its % change." width={260}>Change</Tip>
+                                </th>
+                              </tr>
                             </thead>
                             <tbody>
                               <TrendRow label="Revenue" cur={snapshot.combined?.revenueTotal} prior={t.snapshot?.combined?.revenueTotal} delta={d.revenueTotal} fmtFn={fmt} />

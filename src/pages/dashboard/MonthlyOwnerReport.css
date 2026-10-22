@@ -1,6 +1,19 @@
-/* Monthly Owner/Manager Report — document-style layout. Everything here is scoped under
+/* Monthly Owner Report — document-style layout. Everything here is scoped under
    .owner-report-doc / .owner-report-table / .owner-report-section so it never touches the
    shared .card/.data-table styles used across 15+ other report pages elsewhere in the app. */
+
+/* The document's measure and margins (S857: they were inline, where no media query reaches them, so
+   a 375px phone kept 30px a side for a four-column table). Print zeroes both in the block below. */
+.card.owner-report-doc {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 22px 30px;
+}
+@media screen and (max-width: 600px) {
+  .card.owner-report-doc {
+    padding: 16px 12px;
+  }
+}
 
 .owner-report-table th,
 .owner-report-table td {
@@ -9,6 +22,74 @@
 
 .owner-report-section {
   margin-bottom: 18px;
+}
+
+/* A section heading (S857: was an inline object in accent ink, ten times a document). Ink, not the
+   accent: the accent is kept for what can be pressed or is current. */
+.owner-report-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--theme-text1);
+  margin: 0 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--theme-border-lt);
+}
+
+/* The Financial Summary's Last month column (S857): a reference figure beside this month's, so it is
+   quieter than the bold Actual and carries no band colour. */
+.owner-report-table td.owner-report-last {
+  text-align: right;
+  color: var(--theme-text2);
+}
+
+/* A figure and its unit kept on one line ("+2.0 points"). */
+.owner-report-nowrap {
+  white-space: nowrap;
+}
+
+/* "Not in this report" (S857): the shared .amber-banner, laid out as the sentence then its
+   Regenerate button, which wraps under it on a phone. */
+.owner-report-missing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.owner-report-missing p {
+  margin: 0;
+  flex: 1 1 260px;
+}
+
+/* An open month has no report yet (S857): the fact, then the two ways forward, wrapping under it on
+   a phone. A .btn on a react-router Link keeps the button look, not the link underline. */
+.owner-report-open-month {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+}
+.owner-report-open-month p {
+  margin: 0;
+  flex: 1 1 280px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--theme-text2);
+}
+.owner-report-open-month strong {
+  color: var(--theme-text1);
+  font-weight: 600;
+}
+.owner-report-open-month__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.owner-report-open-month__actions a.btn {
+  text-decoration: none;
 }
 
 /* This is now a genuine multi-page document (Financial Summary + Menu Engineering + Labor +
@@ -44,7 +125,7 @@
     page-break-after: avoid;
   }
 
-  /* Read as a plain printed page, not a floating rounded UI card. */
+  /* Read as a plain printed page, not an on-screen card: no border, shadow or padding, full width. */
   .owner-report-doc {
     border: none !important;
     box-shadow: none !important;
@@ -54,8 +135,9 @@
   }
 
   /* Tip's dashed hover-underline is a screen-only affordance (nothing to hover on paper) —
-     strip it so table labels don't look like broken/incomplete text once printed. */
-  .owner-report-doc td span {
+     strip it so table labels and headings don't look like broken/incomplete text once printed. */
+  .owner-report-doc td span,
+  .owner-report-doc th span {
     border-bottom: none !important;
     cursor: default !important;
   }

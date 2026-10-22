@@ -49,6 +49,17 @@ export function failedSectionKeys(snapshot) {
   return [...new Set([...top, ...sub])]
 }
 
+/**
+ * The sections the PRIOR month in a Trend entry froze without (S857). A Trend copy (v18,
+ * trendSnapshotOf) keeps them as an array of keys; the whole prior snapshot an entry held before v10
+ * keeps the `{ key: message }` object, on which `.includes` threw.
+ */
+export function priorFailedSections(prior) {
+  const e = prior?.sectionErrors
+  if (!e) return []
+  return Array.isArray(e) ? e : Object.keys(e)
+}
+
 // Whether a snapshot HAS a section: present, and not recorded as failed.
 function hasSection(snapshot, key) {
   if (!snapshot) return false
