@@ -172,6 +172,15 @@ Why: every other page here re-queries the open period on each load; this one kee
 
 History: docs/rules-archive/dashboards.md#owner-report-snapshot
 
+## The Owner Dashboard opens with its answer (S857)
+
+- The page leads with one sentence (`verdict()`, `.owner-verdict`): how much of every NPR 100 sold the business keeps, then `Look at:` the ratios outside their band, or why nothing is judged. It is built only from the tiles' own figures and withholds a verdict exactly when they do (`periodTooEarly`, `labourWithheld`, `fixedMissing`); never give it a number the tiles do not show.
+- The margin is "Net Margin" on every owner page (owner decision S857); the Owner Dashboard says "Net Margin % so far". Tile labels say "so far", not "(MTD)".
+- The Operations tiles are a `Needs you` list (`needsRow`, Home's `.home-attention` grammar); a zero row stays, in grey.
+- The Net Margin tile opens `/pnl` with `state.periodId` (the open month), which `ConsolidatedPnl` reads as its first selection; with no fixed costs entered it opens Overheads.
+
+Why: the S857 critique found nine equal tiles with the margin fifth, below the fold on a phone, and four names for one figure across the owner pages.
+
 ## Owner-level pages carry a role guard
 
 - `/owner-dashboard`, `/owner-report`, `/pnl` and `/group-dashboard` each run `if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />` after their hooks (S601, S617). `SuiteGate` checks `suite_plan` and `ProtectedRoute` a session; neither checks a role. The rule lives in root `CLAUDE.md` and `.claude/rules/access-control.md` ("A page reachable by URL needs the guard its nav item implies").
