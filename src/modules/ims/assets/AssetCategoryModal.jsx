@@ -4,6 +4,8 @@ import Tip from '../../../components/Tip'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { POOL_SHORT_LABELS, POOL_EXAMPLES } from './taxPoolConstants'
+import { settleWithin } from '../../../utils/withTimeout'
+import { answerLost, ASSET_CALL_MS } from './assetReads'
 
 // `_key` is a row's identity on screen, stable while rows are added, removed and saved; `id` is its
 // database id, null until the insert lands.
@@ -47,9 +49,15 @@ export default function AssetCategoryModal({ categories, onClose, onSaved }) {
   async function removeRow(idx) {
     const row = rows[idx]
     if (row.id) {
-      const { error: delErr } = await scopedDelete('assets_categories').eq('id', row.id)
+      // Bounded (S857), like every other read and write on the page (ASSETS-15).
+      const { error: delErr } = await settleWithin(scopedDelete('assets_categories').eq('id', row.id), ASSET_CALL_MS, 'Removing the category')
       if (delErr) {
         const { text, detail } = asActionError(delErr)
+        // No answer is not a refusal: the delete may have landed after the clock ran out.
+        if (answerLost(delErr)) {
+          setError({ text: `No answer came back, so whether "${row.name || 'that category'}" was removed is not known. Close this window and open Manage Categories again to see what is stored.`, detail })
+          return
+        }
         setError({ text: `"${row.name || 'That category'}" could not be removed — it is probably still assigned to one or more assets. ${text}`, detail })
         return
       }
@@ -66,13 +74,20 @@ export default function AssetCategoryModal({ categories, onClose, onSaved }) {
         default_useful_life_years: row.default_useful_life_years === '' ? null : parseFloat(row.default_useful_life_years),
         tax_pool_hint: row.tax_pool_hint || null,
       }
-      const { data: inserted, error: err } = row.id
-        ? await scopedUpdate('assets_categories', payload).eq('id', row.id)
-        : await scopedInsert('assets_categories', payload, { single: true })
+      // Bounded (S857): a write that never answers used to hold Save on "Saving…" for good.
+      const { data: inserted, error: err } = await settleWithin(row.id
+        ? scopedUpdate('assets_categories', payload).eq('id', row.id)
+        : scopedInsert('assets_categories', payload, { single: true }), ASSET_CALL_MS, 'Saving the category')
       if (!err) setRows(prev => afterCategorySaved(prev, row, inserted?.id))
       if (err) {
         // The loop saves row by row, so anything before this one is already committed.
         const { text, detail } = asActionError(err)
+        // A lost answer may still have saved this row, and a new row saved twice is two categories:
+        // send the reader to look rather than to press Save again (errorText: never "not saved").
+        if (answerLost(err)) {
+          setError({ text: `Stopped at "${row.name.trim()}": no answer came back, so whether it saved is not known. Categories above it in the list were saved, and the ones below it were not sent. Close this window and open it again to check before saving again.`, detail })
+          setSaving(false); return
+        }
         setError({ text: `Stopped at "${row.name.trim()}" — any categories above it in the list were saved, and it and anything below it were not.
 
 ${text}`, detail })
@@ -94,9 +109,9 @@ ${text}`, detail })
                 <Tip text="Default useful life (years) for a new asset in this category — overridable per asset." width={240}>Useful Life (yrs)</Tip>
               </th>
               <th style={{ width: 160 }}>
-                <Tip text="For the annual tax filing (Tax Depreciation (IRD) tab). Nepal groups assets into 5 pools by type instead of depreciating each item alone. This seeds each new asset's own Tax Pool field — still editable per asset. Not sure? Leave it blank for now." width={300}>Tax Pool</Tip>
+                <Tip text="For the yearly tax filing. Nepal groups assets into 5 pools by type. New assets in this category start in this pool, and you can change it per asset. Not sure? Leave it blank." width={300}>Tax Pool</Tip>
               </th>
-              <th style={{ width: 40 }}></th>
+              <th style={{ width: 40 }}><span className="sr-only">Remove</span></th>
             </tr>
           </thead>
           <tbody>

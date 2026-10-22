@@ -98,7 +98,7 @@ function PoolTable({ lines, print }) {
       <thead>
         <tr>
           <th>{print ? 'Pool' : <Tip text="All figures in NPR." width={180}>Pool</Tip>}</th>
-          {th('Opening WDV', "What this pool was worth at the start of the fiscal year — last year's posted Closing WDV carried forward. If last year has no posted schedule, it is the value typed in from last year's tax return (Pools A–D), or what Pool E's assets have not yet claimed; a pool with neither opens at 0, and a note above the table says so.", 300)}
+          {th('Opening WDV', 'Opening written-down value (WDV): what the pool was worth for tax at the start of the year. It is the closing WDV of last year carried forward, or the value typed in from the tax return of last year.', 300)}
           {th('Repair carried in', "Last year's repair spend above its 7% cap (or the figure typed from last year's tax return), which joins this year's pool at full value (Section 16(3)).")}
           {print ? (
             <>
@@ -106,14 +106,14 @@ function PoolTable({ lines, print }) {
               <th style={right}>Additions (⅔ rate)</th>
               <th style={right}>Additions (⅓ rate)</th>
             </>
-          ) : th('Additions', 'Cost of anything new bought into this pool during the fiscal year. Bought by the end of Poush it counts in full this year; from Magh to Chaitra two-thirds, from Baisakh to Ashadh one-third, and the rest of it joins next year. Hover a figure for its split.', 300)}
+          ) : th('Additions', 'Cost of new things bought into this pool this year. Bought by the end of Poush it counts in full; Magh to Chaitra, two-thirds; Baisakh to Ashadh, one-third. Hover a figure for its split.', 300)}
           {th('Disposals', 'Money received from selling or scrapping equipment in this pool during the fiscal year.', 260)}
           {th('Depreciation base', "What the pool's rate is applied to this year: Opening + Repair carried in + Additions at their counted share − Disposals. Never below 0.")}
-          {th('Repair (Deductible / Capitalized)', "Repair/maintenance spend on this pool — the first number is what you can deduct this year (capped at 7% of the pool's depreciation base); the second, if shown, is the extra that joins next year's pool instead.", 300)}
+          {th('Repair (Deductible / Capitalized)', 'Repair and maintenance spend on this pool. The first number is deductible this year, up to 7% of the depreciation base. The second, if shown, joins the pool next year instead.', 300)}
           {th('Depreciation', "The tax-deductible depreciation for this pool this year, at Nepal's statutory rate for that pool. A pool left with less than NPR 2,000 is written off in full.", 260)}
           {showWriteOff && th('Write-off', 'What was left of a pool whose every asset was sold or scrapped this year: deductible this year instead of being depreciated later (Schedule 2 §4(2)).')}
           {showWriteOff && th('Income', "Disposal proceeds above what the pool was worth: business income this year (Schedule 2 §4(1)). A pool's value never goes below 0.")}
-          {th('Closing WDV', "What this pool is worth at the end of the fiscal year (WDV = Written-Down Value), and next year's Opening WDV: Opening + Repair carried in + Additions − Disposals − Depreciation − Write-off + Income.", 300)}
+          {th('Closing WDV', 'What the pool is worth for tax at the end of the year, and the opening WDV of next year. Opening + Repair carried in + Additions − Disposals − Depreciation − Write-off + Income.', 300)}
         </tr>
       </thead>
       <tbody>
@@ -591,15 +591,15 @@ ${text}`, detail })
   return (
     <div>
       <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 12, fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-        ⚠ {DISCLAIMER_TEXT}
+        △ {DISCLAIMER_TEXT}
       </div>
 
       <p className="no-print" style={{ fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.6, marginBottom: 20, maxWidth: 760 }}>
-        This tab is for your <strong style={{ color: 'var(--theme-text1)' }}>annual tax filing</strong> — hand it to your
-        accountant, or use it yourself if you file directly. It's separate from the <strong style={{ color: 'var(--theme-text1)' }}>Depreciation Runs</strong> tab,
-        which is for your own internal books and will show a different number — that's expected. Nepal's tax rules don't
-        depreciate each item you own separately; instead every asset is grouped into one of five government-defined
-        "pools" (hover any Pool name below for what belongs in it, in plain terms).
+        {/* S857: the book-versus-tax sentence moved to the line under the tab row (FixedAssets.js),
+            which says it for both tabs; this keeps only what is particular to the tax tab. */}
+        This tab is for your <strong style={{ color: 'var(--theme-text1)' }}>annual tax filing</strong>: hand it to your
+        accountant, or use it yourself if you file directly. Nepal tax rules do not depreciate each item on its own; every
+        asset is grouped into one of five government-defined "pools" (hover a Pool name below for what belongs in it).
       </p>
 
       <div className="card no-print" style={{ marginBottom: 20 }}>
@@ -642,7 +642,7 @@ ${text}`, detail })
       {(repost.list.length > 0 || repost.error) && (
         <div className="card no-print" style={{ marginBottom: 20 }}>
           <h3 style={{ fontSize: 13, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
-            <Tip text="A posted schedule stays as filed. When an opening value it used was corrected, or the year before was posted again, it no longer matches what that year would open from today, so it is listed here until it is posted again." width={320}>Schedules to post again</Tip>
+            <Tip text="A posted schedule stays as filed. It is listed here when an opening value it used was corrected, or the year before it was posted again, until you post it again." width={320}>Schedules to post again</Tip>
           </h3>
           {repost.error ? (
             <div>
@@ -684,7 +684,7 @@ ${text}`, detail })
       {/* Repair/maintenance expense ledger — feeds the Section 16 cap check */}
       <div className="card no-print" style={{ marginBottom: 20 }}>
         <h3 style={{ fontSize: 13, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
-          <Tip text="Fixing or maintaining something you already own — e.g. servicing an oven, repainting, fixing a fridge compressor. Buying a brand new item is NOT a repair expense; that's a new asset in the Register tab instead." width={300}>Repair &amp; Maintenance Expenses</Tip> — FY {fyLabel}
+          <Tip text="Fixing or looking after something you already own, such as servicing an oven or repainting. A brand new item is not a repair: add it as a new asset on the Register tab." width={300}>Repair &amp; Maintenance Expenses</Tip> — FY {fyLabel}
         </h3>
         <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 12px', lineHeight: 1.5 }}>
           Nepal tax law only lets you deduct repair costs up to 7% of a pool's depreciation base for the year — spend more than
@@ -715,7 +715,7 @@ ${text}`, detail })
         {repairExpenses.length > 0 && (
           <div className="table-wrap">
             <table className="data-table" style={{ fontSize: 12 }}>
-              <thead><tr><th>Pool</th><th>Date</th><th style={{ textAlign: 'right' }}>Amount</th><th>Description</th><th></th></tr></thead>
+              <thead><tr><th>Pool</th><th>Date</th><th style={{ textAlign: 'right' }}>Amount</th><th>Description</th><th><span className="sr-only">Actions</span></th></tr></thead>
               <tbody>
                 {repairExpenses.map(e => (
                   <tr key={e.id}>

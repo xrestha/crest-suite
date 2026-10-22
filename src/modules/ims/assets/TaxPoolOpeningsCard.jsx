@@ -277,7 +277,7 @@ export default function TaxPoolOpeningsCard({ fyLabel, priorLabel, canEdit, onCh
   return (
     <div className="card no-print" style={{ marginBottom: 20 }}>
       <h3 style={{ fontSize: 13, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
-        <Tip text="If your business owned assets before it started using Crest, its pools did not start at zero. Copy each pool's Closing WDV from last year's filed tax return here, once. Crest then carries the pools forward itself, year by year, as you post." width={320}>Opening values (from last year's tax return)</Tip> — FY {fyLabel}
+        <Tip text="If you owned assets before Crest, your tax pools did not start at zero. Copy the closing written-down value of each pool from the tax return of last year here, once." width={320}>Opening values (from last year's tax return)</Tip> — FY {fyLabel}
       </h3>
       <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 12px', lineHeight: 1.5, maxWidth: 760 }}>
         For the first year Crest works out. Used only while FY {priorLabel} has no posted schedule here — a posted schedule
@@ -306,9 +306,9 @@ export default function TaxPoolOpeningsCard({ fyLabel, priorLabel, canEdit, onCh
               <thead>
                 <tr>
                   <th>Pool</th>
-                  <th style={{ textAlign: 'right' }}><Tip text={`The pool's Closing WDV at the end of FY ${priorLabel}, from the tax return you filed for that year. Leave it blank for a pool you had nothing in.`} width={280}>Opening WDV</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text={`The closing written-down value of the pool at the end of FY ${priorLabel}, from the tax return you filed for that year. Leave it blank for a pool you had nothing in.`} width={280}>Opening written-down value</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Repair and maintenance spend above the 7% cap in the year before, which the law adds to this year's pool (Section 16). It is on last year's return; 0 if there was none." width={280}>Repair carried forward</Tip></th>
-                  <th></th>
+                  <th><span className="sr-only">Notes</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -322,7 +322,7 @@ export default function TaxPoolOpeningsCard({ fyLabel, priorLabel, canEdit, onCh
                       <td>{POOL_LABELS[p]}</td>
                       <td style={{ textAlign: 'right' }}>
                         {editable
-                          ? <QtyInput value={d.wdv} onChange={v => setField(p, 'wdv', v)} className="form-input" style={{ width: 130, textAlign: 'right' }} aria-label={`Pool ${p} opening WDV (NPR)`} />
+                          ? <QtyInput value={d.wdv} onChange={v => setField(p, 'wdv', v)} className="form-input" style={{ width: 130, textAlign: 'right' }} aria-label={`Pool ${p} opening written-down value (NPR)`} />
                           : <span style={{ whiteSpace: 'nowrap' }}>{d.wdv === '' ? '—' : nprInt(d.wdv)}</span>}
                       </td>
                       <td style={{ textAlign: 'right' }}>
@@ -372,7 +372,7 @@ export default function TaxPoolOpeningsCard({ fyLabel, priorLabel, canEdit, onCh
                       <th>Date</th>
                       <th>By</th>
                       <th>Pool</th>
-                      <th style={{ textAlign: 'right' }}>Opening WDV</th>
+                      <th style={{ textAlign: 'right' }}><Tip text="Written-down value: what a tax pool is still worth after the depreciation already claimed. Shown as the old figure, then the new one." width={280}>Opening written-down value</Tip></th>
                       <th style={{ textAlign: 'right' }}>Repair carried forward</th>
                       <th>Reason</th>
                     </tr>
@@ -404,7 +404,7 @@ export default function TaxPoolOpeningsCard({ fyLabel, priorLabel, canEdit, onCh
                 <tr>
                   <th>Pool</th>
                   <th style={{ textAlign: 'right' }}>Saved now</th>
-                  <th style={{ textAlign: 'right' }}><Tip text={`The right Closing WDV at the end of FY ${priorLabel}, from the tax return filed for that year. Leave blank to leave the pool as it is.`} width={280}>New opening WDV</Tip></th>
+                  <th style={{ textAlign: 'right' }}><Tip text={`The right closing written-down value of the pool at the end of FY ${priorLabel}, from the tax return filed for that year. Leave blank to leave the pool as it is.`} width={280}>New opening written-down value</Tip></th>
                   <th style={{ textAlign: 'right' }}><Tip text="Repair spend above the 7% cap in the year before, as on last year's return; 0 if there was none." width={260}>New repair carried forward</Tip></th>
                 </tr>
               </thead>
@@ -421,7 +421,7 @@ export default function TaxPoolOpeningsCard({ fyLabel, priorLabel, canEdit, onCh
                       {correctable(p) ? (
                         <>
                           <td style={{ textAlign: 'right' }}>
-                            <QtyInput value={d.wdv} onChange={v => setCDraft(x => ({ ...x, [p]: { ...x[p], wdv: v } }))} className="form-input" style={{ width: 130, textAlign: 'right' }} aria-label={`Pool ${p} corrected opening WDV (NPR)`} />
+                            <QtyInput value={d.wdv} onChange={v => setCDraft(x => ({ ...x, [p]: { ...x[p], wdv: v } }))} className="form-input" style={{ width: 130, textAlign: 'right' }} aria-label={`Pool ${p} corrected opening written-down value (NPR)`} />
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <QtyInput value={d.repair} onChange={v => setCDraft(x => ({ ...x, [p]: { ...x[p], repair: v } }))} className="form-input" style={{ width: 130, textAlign: 'right' }} aria-label={`Pool ${p} corrected repair carried forward (NPR)`} />

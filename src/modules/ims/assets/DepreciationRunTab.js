@@ -1,4 +1,4 @@
-import { nprInt } from '../../../shared/nepalMoney'
+import { nprInt, npr } from '../../../shared/nepalMoney'
 import { useMemo, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -6,6 +6,8 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import Tabs, { TabPanel } from '../../../components/Tabs'
+import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import QtyInput from '../../../components/QtyInput'
@@ -13,7 +15,6 @@ import {
   computeDepreciationPreview, bookPositionsByAsset, bookValue, effectiveDepreciation,
   regularOverrideError, adjustmentOverrideError, chargeGaps, addDaysIso, bsSpanLabel,
 } from './depreciationCompute'
-import { chipKeys } from '../../../shared/rovingFocus'
 import { formatAdAsBs, bsToAd, daysInBsMonth, formatAd, getBsToday, getBsFiscalYear, getBsFiscalYearStart, BS_MONTHS } from '../../../utils/bsCalendar'
 import { nepalBsLong, nepalTime } from '../../../shared/nepalTime'
 import { settleWithin } from '../../../utils/withTimeout'
@@ -34,6 +35,19 @@ const reversedIdOf = run => {
   return m ? m[1] : null
 }
 const runLabel = r => `${fmtDate(r.period_start)} – ${fmtDate(r.period_end)}`
+const assetsText = n => `${n} asset${n === 1 ? '' : 's'}`
+
+// S857: charging a period and reversing a run are two sections of this tab, each with its own form
+// and table, so the row is a real tab list. It was a hand-rolled chip row (role="group" +
+// aria-pressed), which told a screen reader it narrowed one view.
+const RUN_TABS = [
+  { key: 'regular', label: 'Depreciation run' },
+  { key: 'adjust', label: 'Adjustment (reverse a run)' },
+]
+
+// What a payload charges in total: the override where one is set, else the computed figure. A
+// reversal is all overrides, so its total is negative (depreciation written back).
+const payloadTotal = payload => payload.reduce((s, l) => s + (l.override_amount != null ? l.override_amount : (l.depreciation_amount || 0)), 0)
 
 // S849 (ASSETS-8): the period can be filled from a BS month (its 1st to its last day) or a whole
 // fiscal year (1 Shrawan to the last day of Ashadh), instead of hunting both ends in the AD boxes.
@@ -71,19 +85,23 @@ function readPostedSchedule(scopedFrom) {
 // locks the resulting rows). Deliberately never uses sessionDataCache — a preview must always
 // compute from live, current data right before a Post, never a stale cached baseline (the same
 // "batch action trusting on-screen state" risk flagged for Stock.js's Save All).
-export default function DepreciationRunTab({ assets, onReload }) {
+export default function DepreciationRunTab({ assets, onReload, onOpenTab }) {
   const { clientId, hasImsAccess } = useAuth()
   const { scopedFrom } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
   // 'regular' charges a period; 'adjust' reverses a posted run (D24, S756). Posted rows are
   // immutable in the database, so a reversal is the only correction the books can carry.
   const [mode, setMode] = useState('regular')
+  // Stored AD date strings, as before. BsCalendarPicker picks a BS day and hands back
+  // formatAd(bsToAd(...)) (S857): a BS product had asked for these two in AD boxes.
   const [periodStart, setPeriodStart] = useState('')
   const [periodEnd, setPeriodEnd] = useState('')
   const [lines, setLines] = useState(null)
   const [loading, setLoading] = useState(false)
   const [posting, setPosting] = useState(false)
-  const [msg, setMsg] = useState('')
+  // S857: what the last post wrote (amount, assets, BS period, which kind), for the success panel.
+  // It was a 12px green "Posted" beside the button, which said neither what nor what next.
+  const [posted, setPosted] = useState(null)
   // Errors moved out of `msg` and into their own state (S658): the toolbar span they shared is one
   // line beside the Post button, which is fine for "Posted — schedule locked" and much too small
   // for a failure that has to say what happened AND carry its technical detail.
@@ -107,8 +125,14 @@ export default function DepreciationRunTab({ assets, onReload }) {
 
   function switchMode(next) {
     if (next === mode) return
-    setMode(next); setLines(null); setMsg(''); setErr(null); setAdjSkipped([]); setRecheck(null)
+    setMode(next); setLines(null); setPosted(null); setErr(null); setAdjSkipped([]); setRecheck(null)
     if (next === 'adjust' && runs === null) loadRuns()
+  }
+
+  // After a reversal: the right figures for the same dates, as a normal run, from the success panel.
+  function startCorrectRun(p) {
+    switchMode('regular')
+    setPeriodStart(p.start); setPeriodEnd(p.end)
   }
 
   async function loadRuns() {
@@ -127,13 +151,13 @@ export default function DepreciationRunTab({ assets, onReload }) {
   function fillPeriod(value) {
     const pick = [...presets.years, ...presets.months].find(x => x.value === value)
     if (!pick) return
-    setPeriodStart(pick.start); setPeriodEnd(pick.end); setLines(null); setErr(null); setMsg('')
+    setPeriodStart(pick.start); setPeriodEnd(pick.end); setLines(null); setErr(null); setPosted(null)
   }
 
   async function preview() {
     if (!periodStart || !periodEnd) { setErr('Pick both a period start and end date before previewing the run.'); return }
     if (periodEnd < periodStart) { setErr('The period end is before its start. Swap the two dates.'); return }
-    setLoading(true); setMsg(''); setErr(null); setRecheck(null)
+    setLoading(true); setPosted(null); setErr(null); setRecheck(null)
 
     // ASSETS-12: the register is read again with the posted schedule, so the run is built from the
     // assets that are active NOW. Both bounded (ASSETS-15).
@@ -184,7 +208,7 @@ export default function DepreciationRunTab({ assets, onReload }) {
   // that line charged, opening from the asset's CURRENT NBV (which may already include later runs).
   async function previewReversal() {
     if (!chosenRun) { setErr('Choose the posted run to reverse.'); return }
-    setLoading(true); setMsg(''); setErr(null); setAdjSkipped([]); setRecheck(null)
+    setLoading(true); setPosted(null); setErr(null); setAdjSkipped([]); setRecheck(null)
     const [runRes, postedRes, registerRes] = await Promise.all([
       settleWithin(fetchAllRows(() => scopedFrom('assets_depreciation_schedule').eq('run_id', chosenRun.id).order('id')), ASSET_CALL_MS, 'Reading that run'),
       settleWithin(readPostedSchedule(scopedFrom), ASSET_CALL_MS, 'Reading the posted depreciation'),
@@ -239,6 +263,9 @@ export default function DepreciationRunTab({ assets, onReload }) {
   const invalidOverride = mode === 'regular'
     ? (lines || []).some(l => l.override_amount !== '' && !l.override_reason?.trim())
     : !adjReason.trim()
+  // S857: while one of these holds, Post is aria-disabled rather than disabled, so it keeps its
+  // Tip and its focus, and pressing it says which one (post()). `disabled` is only for a post in flight.
+  const postBlocked = !canPost || !lines || lines.length === 0 || anyLineError || invalidOverride
 
   function buildPayload() {
     return lines
@@ -260,7 +287,10 @@ export default function DepreciationRunTab({ assets, onReload }) {
   }
 
   async function post() {
-    if (!lines || lines.length === 0) return
+    // S857: the button stays pressable while something is missing (aria-disabled), so every
+    // precondition is answered here, in words, rather than by a button that does nothing.
+    if (!canPost) { setErr('Only a Manager or Owner login can post a depreciation run. Ask one of them to post it.'); return }
+    if (!lines || lines.length === 0) { setErr('There is nothing to post for this period.'); return }
     if (anyLineError) { setErr('Some lines have an amount outside what that line allows — the message under each one says the limit.'); return }
     if (invalidOverride) {
       setErr(mode === 'adjust'
@@ -268,16 +298,36 @@ export default function DepreciationRunTab({ assets, onReload }) {
         : 'Every line you have overridden needs a reason — the reason is what an auditor reads to understand why the computed figure was changed.')
       return
     }
-    setMsg(''); setErr(null)
+    setPosted(null); setErr(null)
+
+    // S857: every post asks first, in ONE dialog that names the money, the assets and the BS
+    // period. A regular run with no overlap used to post at a single press, permanently: it was
+    // the one irreversible write in Suite Pro without a confirm.
+    const lockLine = (
+      <p style={{ margin: 0 }}>
+        Once posted, the run is locked. It cannot be edited afterwards; it can only be reversed by a new adjustment run.
+      </p>
+    )
 
     if (mode === 'adjust') {
       const payload = buildPayload()
       if (payload.length === 0) { setErr('Every line is set to 0, so there is nothing to reverse.'); return }
+      const summary = { reversal: true, amount: -payloadTotal(payload), count: payload.length, start: chosenRun.period_start, end: chosenRun.period_end }
       askConfirm({
         title: 'Post this reversal?',
-        body: <p style={{ margin: 0 }}>A new run is posted for {runLabel(chosenRun)} that writes NPR {fmt(-payload.reduce((s, l) => s + l.override_amount, 0))} of depreciation back onto {payload.length} asset{payload.length === 1 ? '' : 's'}. It is locked once posted, like every run; the run it reverses stays on the record beside it.</p>,
+        danger: true,
+        body: (
+          <>
+            <p style={{ margin: '0 0 8px' }}>
+              This writes <strong>{npr(summary.amount)}</strong> of depreciation back onto <strong>{assetsText(summary.count)}</strong>,
+              for <strong>{fmtDate(summary.start)} to {fmtDate(summary.end)}</strong>. The run it reverses stays on the record beside it.
+            </p>
+            {lockLine}
+          </>
+        ),
         confirmLabel: 'Post reversal',
-        run: () => submit(chosenRun.period_start, chosenRun.period_end, payload, `${ADJ_PREFIX}${chosenRun.id} (${chosenRun.period_start} to ${chosenRun.period_end})`),
+        busyLabel: 'Posting…',
+        run: () => submit(chosenRun.period_start, chosenRun.period_end, payload, `${ADJ_PREFIX}${chosenRun.id} (${chosenRun.period_start} to ${chosenRun.period_end})`, summary),
       })
       return
     }
@@ -285,6 +335,7 @@ export default function DepreciationRunTab({ assets, onReload }) {
     // A period can be posted twice, and each post charges its depreciation again, permanently —
     // the schedule is immutable and there is deliberately no unique period constraint, because a
     // correction is a new run. So look before posting and make a second charge a decision (S756).
+    // The overlap is folded into the one confirm below rather than asked as a second question (S857).
     setPosting(true)
     const { data: overlapping, error: overlapErr } = await settleWithin(scopedFrom('assets_depreciation_runs', 'id, period_start, period_end, posted_at, notes')
       .eq('status', 'posted').lte('period_start', periodEnd).gte('period_end', periodStart)
@@ -297,33 +348,45 @@ export default function DepreciationRunTab({ assets, onReload }) {
       return
     }
     const payload = buildPayload()
+    const summary = { reversal: false, amount: payloadTotal(payload), count: payload.length, start: periodStart, end: periodEnd }
     const earlier = (overlapping || []).filter(r => !reversedIdOf(r))
-    if (earlier.length === 0) { await submit(periodStart, periodEnd, payload, null); return }
     const reversedSet = new Set((overlapping || []).map(reversedIdOf).filter(Boolean))
     askConfirm({
-      title: 'This period already has depreciation posted',
-      danger: true,
+      title: earlier.length > 0 ? 'This period already has depreciation posted' : 'Post this depreciation run?',
+      danger: earlier.length > 0,
       body: (
         <>
-          <p style={{ margin: '0 0 8px' }}>These posted runs cover some of the same dates:</p>
-          <ul style={{ margin: '0 0 8px', paddingLeft: 18 }}>
-            {earlier.map(r => (
-              <li key={r.id}>
-                {runLabel(r)}, posted {fmtPosted(r.posted_at)}
-                {r.notes?.startsWith('Disposal:') ? ' (charged at a disposal)' : ''}
-                {reversedSet.has(r.id) ? ' — already reversed by an adjustment' : ''}
-              </li>
-            ))}
-          </ul>
-          <p style={{ margin: 0 }}>Posting now charges depreciation for the overlapping days again, on top of what is already there, and it cannot be edited afterwards. If one of those runs was wrong, reverse it with an adjustment run first.</p>
+          <p style={{ margin: '0 0 8px' }}>
+            This posts <strong>{npr(summary.amount)}</strong> of depreciation on <strong>{assetsText(summary.count)}</strong>,
+            for <strong>{fmtDate(summary.start)} to {fmtDate(summary.end)}</strong>.
+          </p>
+          {earlier.length > 0 && (
+            <>
+              <p style={{ margin: '0 0 8px' }}>These posted runs already cover some of the same dates:</p>
+              <ul style={{ margin: '0 0 8px', paddingLeft: 18 }}>
+                {earlier.map(r => (
+                  <li key={r.id}>
+                    {runLabel(r)}, posted {fmtPosted(r.posted_at)}
+                    {r.notes?.startsWith('Disposal:') ? ' (charged at a disposal)' : ''}
+                    {reversedSet.has(r.id) ? ' — already reversed by an adjustment' : ''}
+                  </li>
+                ))}
+              </ul>
+              <p style={{ margin: '0 0 8px' }}>
+                Posting now charges the overlapping days again, on top of what is already there. If one of those runs was wrong, reverse it with an adjustment run first.
+              </p>
+            </>
+          )}
+          {lockLine}
         </>
       ),
-      confirmLabel: 'Post anyway',
-      run: () => submit(periodStart, periodEnd, payload, null),
+      confirmLabel: earlier.length > 0 ? 'Post depreciation again' : 'Post depreciation',
+      busyLabel: 'Posting…',
+      run: () => submit(periodStart, periodEnd, payload, null, summary),
     })
   }
 
-  async function submit(start, end, payload, notes) {
+  async function submit(start, end, payload, notes, summary) {
     setPosting(true); setErr(null); setRecheck(null)
     const { error } = await settleWithin(supabase.rpc('post_asset_depreciation_run', {
       p_client_id: clientId, p_period_start: start, p_period_end: end,
@@ -364,7 +427,7 @@ export default function DepreciationRunTab({ assets, onReload }) {
 ${text}`, detail })
       return
     }
-    setMsg(notes ? 'ok:Reversal posted — the depreciation is written back and locked.' : 'ok:Posted — depreciation schedule locked for this period.')
+    setPosted(summary)
     setLines(null)
     if (notes) { setRunId(''); setAdjReason(''); setAdjSkipped([]); loadRuns() }
     onReload()
@@ -387,13 +450,17 @@ ${text}`, detail })
 
   return (
     <div>
-      <div className="tab-bar" style={{ marginBottom: 12 }} role="group" aria-label="Run type" onKeyDown={chipKeys}>
-        <button type="button" className={`tab-btn${mode === 'regular' ? ' tab-btn--active' : ''}`} aria-pressed={mode === 'regular'} onClick={() => switchMode('regular')}>Depreciation run</button>
-        <Tip text="Reverses a posted run that was wrong. Posted runs can never be edited, so the correction is a new run that writes the depreciation back — then post the right figures as a normal run." width={300}>
-          <button type="button" className={`tab-btn${mode === 'adjust' ? ' tab-btn--active' : ''}`} aria-pressed={mode === 'adjust'} onClick={() => switchMode('adjust')}>Adjustment (reverse a run)</button>
-        </Tip>
-      </div>
+      <Tabs
+        idBase="deprec-mode"
+        hasPanel
+        label="Run type"
+        style={{ marginBottom: 12 }}
+        tabs={RUN_TABS}
+        active={mode}
+        onChange={switchMode}
+      />
 
+      <TabPanel idBase="deprec-mode" active={mode}>
       <div className="card" style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           {mode === 'regular' ? (
@@ -410,15 +477,17 @@ ${text}`, detail })
                   </optgroup>
                 </select>
               </div>
+              {/* BS pickers (S857): the value stays the stored AD string, converted by the picker
+                  through formatAd(bsToAd(...)), never toISOString. */}
               <div className="form-field">
                 <label htmlFor="deprec-f1">Period Start</label>
-                <input id="deprec-f1" type="date" className="form-input" value={periodStart} onChange={e => { setPeriodStart(e.target.value); setLines(null) }} />
-                {periodStart && <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{fmtDate(periodStart)}</span>}
+                <BsCalendarPicker id="deprec-f1" value={periodStart} placeholder="Pick a BS date"
+                  onChange={v => { setPeriodStart(v); setLines(null); setPosted(null) }} />
               </div>
               <div className="form-field">
                 <label htmlFor="deprec-f2">Period End</label>
-                <input id="deprec-f2" type="date" className="form-input" value={periodEnd} onChange={e => { setPeriodEnd(e.target.value); setLines(null) }} />
-                {periodEnd && <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>{fmtDate(periodEnd)}</span>}
+                <BsCalendarPicker id="deprec-f2" value={periodEnd} placeholder="Pick a BS date"
+                  onChange={v => { setPeriodEnd(v); setLines(null); setPosted(null) }} />
               </div>
               <button className="btn btn-primary" onClick={preview} disabled={loading}>{loading ? 'Computing…' : 'Preview'}</button>
             </>
@@ -439,24 +508,55 @@ ${text}`, detail })
                 <label htmlFor="deprec-adj-reason">Reason</label>
                 <input id="deprec-adj-reason" className="form-input" value={adjReason} onChange={e => setAdjReason(e.target.value)} placeholder="Required — why this run is being reversed" />
               </div>
-              <button className="btn btn-primary" onClick={previewReversal} disabled={loading || !runId}>{loading ? 'Computing…' : 'Preview reversal'}</button>
+              {/* Pressable with no run chosen, so the press can say so (previewReversal). */}
+              <button className="btn btn-primary" onClick={previewReversal} disabled={loading} aria-disabled={!runId ? 'true' : undefined}>{loading ? 'Computing…' : 'Preview reversal'}</button>
             </>
           )}
           {lines && (
+            // S857: aria-disabled, not disabled, while something is missing: a disabled button
+            // takes no focus, so its Tip (the one place saying why) was out of reach, and the
+            // hand-faked opacity said nothing to a screen reader. The press now says what is missing.
             <Tip text={canPost ? 'Writes the schedule rows and locks them — corrections after this need a new adjustment run, never an edit to this one.' : 'Only a Manager or Owner login can post a depreciation run.'} width={280}>
-              <button className="btn btn-primary" onClick={post} disabled={!canPost || posting || invalidOverride || anyLineError} style={{ opacity: canPost ? 1 : 0.5 }}>
+              <button className="btn btn-primary" onClick={post} disabled={posting} aria-disabled={postBlocked ? 'true' : undefined}>
                 {posting ? 'Posting…' : mode === 'adjust' ? 'Post reversal' : 'Post'}
               </button>
             </Tip>
           )}
-          {msg && <span style={{ fontSize: 12, color: 'var(--theme-green-text)' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>
+        {mode === 'adjust' && (
+          <p className="page-footnote">
+            Posted runs can never be edited. To correct one, reverse it here, then post the right figures as a normal depreciation run.
+          </p>
+        )}
         {mode === 'adjust' && adjSkipped.length > 0 && (
           <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--theme-amber-text)', lineHeight: 1.6 }}>
             △ Left out because they are no longer active — their disposal already fixed their book value: {adjSkipped.join(', ')}.
           </p>
         )}
         <ActionError error={err} />
+        {/* S857: what was posted and what to do next, announced. The preview table closes on a
+            post, so this is the only record on screen of what just became permanent. */}
+        {posted && (
+          <div role="status" className="note-banner" style={{ margin: '12px 0 0' }}>
+            <strong>✓ {posted.reversal ? 'Reversal posted' : 'Depreciation posted'}.</strong>{' '}
+            {npr(posted.amount)} {posted.reversal ? 'written back onto' : 'charged on'} {assetsText(posted.count)},
+            for {fmtDate(posted.start)} to {fmtDate(posted.end)}. It is locked now.{' '}
+            {posted.reversal
+              ? 'Next, post the right figures for these dates as a normal depreciation run.'
+              : 'Next, check the new book values on the Valuation Report.'}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+              {posted.reversal && (
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => startCorrectRun(posted)}>Post the right figures</button>
+              )}
+              {onOpenTab && (
+                <button type="button" className={`btn btn-sm ${posted.reversal ? 'btn-ghost' : 'btn-primary'}`} onClick={() => onOpenTab('valuation')}>Open the Valuation Report</button>
+              )}
+              {onOpenTab && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpenTab('register')}>Open the asset register</button>
+              )}
+            </div>
+          </div>
+        )}
         {recheck && (
           <div role="status" className="note-banner" style={{ margin: '10px 0 0' }}>
             {recheck.error
@@ -500,7 +600,7 @@ ${text}`, detail })
                   <th style={{ textAlign: 'right' }}>{mode === 'adjust' ? 'Charged by that run' : 'Computed Depreciation'}</th>
                   <th style={{ textAlign: 'right', width: 150 }}>
                     {mode === 'adjust'
-                      ? <Tip text="Minus what that run charged, to reverse it in full. Enter a smaller negative amount to reverse part of it, or 0 to leave this asset out. A part reversal takes back the LAST days of the run: e.g. a fridge sold halfway through a year's run — reverse half the charge and it stays charged for the first half only." width={300}>Reversal</Tip>
+                      ? <Tip text="Minus what that run charged reverses it in full. A smaller negative amount reverses part of it, taken off the last days of the run. Enter 0 to leave this asset out." width={300}>Reversal</Tip>
                       : <Tip text="Leave blank to use the computed figure. Set an amount (e.g. for impairment) and you must also give a reason. It cannot be negative or take the asset below its salvage value." width={280}>Override</Tip>}
                   </th>
                   {mode === 'regular' && <th style={{ width: 220 }}>Reason</th>}
@@ -552,6 +652,7 @@ ${text}`, detail })
           </div>
         )
       )}
+      </TabPanel>
       {confirmEl}
     </div>
   )

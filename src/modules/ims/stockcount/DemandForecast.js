@@ -64,8 +64,10 @@ function newestRunOnly(rows) {
 // Throws on any failed read; the caller turns that into its own notice rather than an empty shelf.
 // Returns `{ onHandById: null, period: null }` when the client has no period at all.
 async function loadOnHand(scopedFrom, items) {
-  const { data: periods, error: pErr } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
-    .order('bs_year', { ascending: false }).order('bs_month', { ascending: false })
+  // Bounded (S857): this read had no limit, so a hung request held the buying list on "Working out
+  // ingredients…" for good. A timeout throws like any failed read, into the caller's In store notice.
+  const { data: periods, error: pErr } = await settleWithin(scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
+    .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }), 20000, 'Reading the stock months')
   if (pErr) throw pErr
   const period = (periods || []).find(p => p.status === 'open') || (periods || [])[0]
   if (!period) return { onHandById: null, period: null, parById: null, periods: periods || [] }
@@ -317,7 +319,8 @@ function DemandForecastBody() {
       try {
         let periods = stock.periods
         if (!periods?.length) {
-          const { data, error } = await scopedFrom('monthly_periods', 'id, bs_year, bs_month')
+          // Bounded like the In-store read above (S857): an unanswered read left the buying list loading.
+          const { data, error } = await settleWithin(scopedFrom('monthly_periods', 'id, bs_year, bs_month'), 20000, 'Loading the months')
           if (error) throw error
           periods = data || []
         }
@@ -670,7 +673,7 @@ function DemandForecastBody() {
   // What a cover counts (S835, owner decision D43): the same sentence as Roster.jsx's
   // COVERS_COUNT_TIP, on the staffing screens that read this figure. Change both together.
   const coversHeader = hasPos
-    ? <Tip text="Average covers on this weekday, from closed POS bills. Scaled by the holiday multiplier where one is set. Covers: Seated guests on dine-in bills, and each takeaway or delivery order as one. The Owner Report's Guests Seated counts dine-in guests only." width={280}>Forecast Covers</Tip>
+    ? <Tip text="Average covers on this weekday from closed POS bills, with any holiday multiplier. Covers: Seated guests on dine-in bills, and each takeaway or delivery order as one. The Owner Report's Guests Seated counts dine-in guests only." width={280}>Forecast Covers</Tip>
     : null
 
   // A Forecast use figure, with the guests' choices named on hover where they are part of it
@@ -705,7 +708,7 @@ function DemandForecastBody() {
         {/* The Tip sits beside the heading, not in it, so the heading's name is only its text (S852). */}
         <div className="page-title-row">
           <h1 className="page-title">Demand Forecast</h1>
-          <Tip text="Predicts per-dish plates, revenue and (with POS) covers for the days ahead, from the last 8 same-weekday days in your sales history, weighted so recent weeks count more. A simple, auditable model — not a trained AI — so you can see exactly why a number was predicted. Below the days, the same forecast is exploded into the raw ingredients it will consume." width={340}>
+          <Tip text="Predicts each day ahead: plates per dish, revenue and, with Crest POS, covers. It uses the same weekday in your recent sales, recent weeks counting more." width={300}>
             <span aria-hidden="true">ⓘ</span><span className="sr-only">About Demand Forecast</span>
           </Tip>
         </div>
@@ -732,11 +735,11 @@ function DemandForecastBody() {
             ? 'Waiting for the weather, so the rebuild can allow for the rainy days in your sales history. It takes a moment.'
             : 'Rebuilds the forecast from your latest sales data. Run this whenever you want an up-to-date prediction — it does not run automatically. The Owner and an inventory supervisor or manager can run it.'}>
             <button className="btn btn-primary" onClick={handleRecompute} disabled={recomputing || weatherPending}>
-              {recomputing ? 'Recomputing…' : weatherPending ? 'Loading weather…' : '↻ Recompute Forecast'}
+              {recomputing ? 'Recomputing…' : weatherPending ? 'Loading weather…' : 'Recompute Forecast'}
             </button>
           </Tip>
-          <button className="btn btn-ghost" onClick={handleExport} disabled={emitBlocked || !!ingredients.error}>📊 Export Excel</button>
-          <button className="btn btn-ghost" onClick={handlePrint} disabled={emitBlocked}>🖨 Print</button>
+          <button className="btn btn-ghost" onClick={handleExport} disabled={emitBlocked || !!ingredients.error}>Export Excel</button>
+          <button className="btn btn-ghost" onClick={handlePrint} disabled={emitBlocked}>Print</button>
         </div>
         {/* This horizon's latest Recompute (FORECAST-8, GAPS-13): when by the server's clock, who
             (the stamp trigger writes the name; "Crest support" for the operator), and what it did. */}
@@ -752,12 +755,14 @@ function DemandForecastBody() {
         )}
       </div>
 
-      <p className="no-print" style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '0 0 20px' }}>
-        {horizon === 30
-          ? 'Days 8–30 repeat the weekly pattern learned from the last 8 weeks; only holiday multipliers differ between one Wednesday and the next. '
-          : ''}
-        {!hasPos && 'Covers are counted from POS bills. This outlet has no Crest POS, so the forecast is dishes and revenue only, with revenue priced at the current menu rather than measured.'}
-      </p>
+      {/* S857: the one note that changes how the table reads; the longer explanation is in Help.
+          It was a 12px paragraph above three more notes, all before the first figure. */}
+      {(horizon === 30 || !hasPos) && (
+        <div className="note-banner no-print">
+          {horizon === 30 && 'Days 8 to 30 repeat the weekly pattern; only holidays change one week from the next. '}
+          {!hasPos && 'No Crest POS here, so there are no covers and revenue is priced at the current menu.'}
+        </div>
+      )}
 
       {msg && (
         <p role={msg.startsWith('ok:') ? 'status' : 'alert'} className="no-print" style={{
@@ -766,26 +771,23 @@ function DemandForecastBody() {
         }}>{msg.replace(/^(error|warn|ok):/, '')}</p>
       )}
 
-      {biz.error && (
-        <p role="alert" className="no-print" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
-          This outlet's name could not be loaded, so Print and Excel are switched off rather than producing a sheet
-          with a blank letterhead. The forecast below is unaffected. Reload the page to try again.
-        </p>
-      )}
-      {!loading && !loadError && namesError && (
-        <p role="alert" className="no-print" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
-          The dish names could not be loaded, so dishes below read "Dish name unavailable" and Print and Excel are
-          switched off. The quantities are unaffected. Reload the page to try again.
-        </p>
+      {/* Two failed reads with one consequence, so one banner (S857). */}
+      {(biz.error || (!loading && !loadError && namesError)) && (
+        <div role="alert" className="amber-banner no-print">
+          <strong>△ Print and Excel are off.</strong>{' '}
+          {biz.error ? 'The outlet name could not be loaded. ' : ''}
+          {!loading && !loadError && namesError ? 'The dish names could not be loaded, so dishes read "Dish name unavailable". ' : ''}
+          Reload the page to try again.
+        </div>
       )}
       {/* The stored forecast is older than the days it covers (S756). Nothing re-runs it on its own,
           so say how much of it has gone by and what that does to the ingredient list. */}
       {!loading && !loadError && stale.dropped > 0 && forecast.length > 0 && (
-        <p role="alert" className="no-print" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-amber-text)' }}>
-          △ This forecast was made{madeLabel ? ` on ${madeLabel}` : ''}, and {stale.dropped} of its {stale.total} days
-          have already passed. Only the {forecast.length} day{forecast.length === 1 ? '' : 's'} from today {forecast.length === 1 ? 'is' : 'are'} shown,
-          and Ingredients to buy covers only {forecast.length === 1 ? 'that day' : 'those'}. Click Recompute Forecast for a full {horizonLabel.toLowerCase()}.
-        </p>
+        <div role="alert" className="amber-banner no-print">
+          <strong>△ {stale.dropped} of the {stale.total} days in this forecast have passed.</strong>{' '}
+          {madeLabel ? `It was made on ${madeLabel}. ` : ''}Only the days from today are shown, and the buying list covers only those.
+          Press Recompute Forecast for a full {horizonLabel.toLowerCase()}.
+        </div>
       )}
 
       {loading ? (
@@ -811,7 +813,7 @@ function DemandForecastBody() {
                 <th>Date (BS)</th><th>Day</th>
                 {hasPos && <th style={{ textAlign: 'right' }}>{coversHeader}</th>}
                 <th style={{ textAlign: 'right' }}><Tip text="Before VAT and after bill discounts — the same Revenue figure Owner Dashboard and Sales Entries use, so it can be compared with them and with the Labor Forecast's cost %." width={260}>Forecast Revenue</Tip></th>
-                <th></th>
+                <th><span className="sr-only">Holiday</span></th>
               </tr>
             </thead>
             <tbody>
@@ -849,7 +851,7 @@ function DemandForecastBody() {
                       <td>{f.holiday && (
                         f.holiday.multiplier != null
                           ? <Tip text={`Adjusted ×${f.holiday.multiplier} for ${f.holiday.name} — set in Holiday Calendar. Covers, revenue, and item quantities above already reflect this.`}><span className="badge badge-gray">{f.holiday.name} ×{f.holiday.multiplier}</span></Tip>
-                          : <Tip text={`No demand multiplier set for ${f.holiday.name} in Holiday Calendar — this forecast is NOT adjusted for it. Treat it as a floor, not a ceiling, on a festival day.`}><span className="badge badge-amber">⚠ {f.holiday.name}</span></Tip>
+                          : <Tip text={`No demand multiplier set for ${f.holiday.name} in Holiday Calendar — this forecast is NOT adjusted for it. Treat it as a floor, not a ceiling, on a festival day.`}><span className="badge badge-amber">△ {f.holiday.name}</span></Tip>
                       )}</td>
                     </tr>
                     {(plates.length > 0 || occasional.length > 0) && (
@@ -918,7 +920,7 @@ function DemandForecastBody() {
             <h2 style={{ margin: 0, fontSize: 18, color: 'var(--theme-text1)' }}>
               Ingredients to buy — {horizonLabel.toLowerCase()}
             </h2>
-            <Tip text="Every dish above, multiplied through its recipe (and any sub-recipes, adjusted for yield) at the per-portion quantities in Recipe Costing, then summed per raw item for the days shown. With Crest Customization it also adds the choices guests usually make on each dish (toppings, add-ons, a build-your-own bowl's contents), learned per plate from the till sales of the 12 weeks the forecast learned from. In store is the same on-hand figure Stock Report and Reorder Report show; Keep is the item's par level from the Reorder Report, the minimum you want left on the shelf; To buy covers the forecast and keeps that par." width={340}>
+            <Tip text="Every dish above, worked through its recipe (sub-recipes and yields included) and added up per raw item for the days shown. With Crest Customization it adds the choices guests usually make." width={300}>
               <span aria-hidden="true">ⓘ</span><span className="sr-only">About the ingredients to buy</span>
             </Tip>
           </div>
@@ -966,13 +968,13 @@ function DemandForecastBody() {
                 <thead>
                   <tr>
                     <th>Item</th><th>Category</th>
-                    <th style={{ textAlign: 'right' }}><Tip text={`Total the forecast will use over the ${forecast.length} day${forecast.length === 1 ? '' : 's'} shown, in the item's base unit: the recipes, plus the choices guests usually make where there are any (hover a figure to see that part)${rainDays.length ? `. On the rainy days named above it is bought at ${rainPct}% of a dry day` : ''}${wetHistory.length ? `. Where the days it learned from were rainy, it is worked from a dry day's level so that rain is not counted twice` : ''}. Never below zero.`} width={300}>Forecast use</Tip></th>
-                    <th style={{ textAlign: 'right' }}><Tip text={`What is on the shelf now — the same figure as Stock Report's On-hand${stockPeriodLabel ? ` for ${stockPeriodLabel}` : ''}: the closing count where one is entered, otherwise opening + net purchases − usage − wastage − staff meals. A dash means it could not be worked out.`} width={300}>In store</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text={`What the forecast will use over the ${forecast.length} day${forecast.length === 1 ? '' : 's'} shown, in the base unit: recipes plus usual guest choices (hover a figure for that part). Never below zero.${rainChangedList ? ' Rain is allowed for as the note above says.' : ''}`} width={300}>Forecast use</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text={`On the shelf now (Stock Report On-hand${stockPeriodLabel ? `, ${stockPeriodLabel}` : ''}): the closing count if entered, else opening + net purchases − usage − wastage − staff meals. A dash: not known.`} width={300}>In store</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="The item's par level — the least you want left on the shelf — set on the Reorder Report. The list buys enough to keep it. A dash means no par is set." width={260}>Keep</Tip></th>
                     <th style={{ textAlign: 'right' }}><Tip text="Forecast use + Keep − In store, never below zero. Zero means what is on the shelf already covers the forecast and the par." width={240}>To buy</Tip></th>
-                    <th><Tip text="What to order: whole packs where Item Master has a pack size (for example a 25 kg sack), otherwise To buy rounded up to a whole unit. This is what a purchase order started from here asks for, and what the value is worked out on." width={280}>Order</Tip></th>
+                    <th><Tip text="What to order: whole packs where Item Master has a pack size (such as a 25 kg sack), else To buy rounded up to a whole unit. A purchase order started here asks for this." width={280}>Order</Tip></th>
                     <th>Unit</th>
-                    <th style={{ textAlign: 'right' }}><Tip text="What will arrive (the whole packs, or To buy where there is no pack size) × the item's current per-unit rate from Item Master. A dash means the item has no rate yet, or what is in store is unknown." width={280}>≈ Value</Tip></th>
+                    <th style={{ textAlign: 'right' }}><Tip text="What will arrive, times the current per-unit rate in Item Master. A dash means the item has no rate yet, or what is in store is unknown." width={280}>≈ Value</Tip></th>
                   </tr>
                 </thead>
                 <tbody>

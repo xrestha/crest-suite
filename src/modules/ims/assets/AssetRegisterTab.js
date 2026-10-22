@@ -176,17 +176,18 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
           <table className="data-table">
             <thead>
               <tr>
+                {/* S857: a Tip on each header that is not self-explaining (it was 1 of 11). */}
                 <th>Code</th>
                 <th>Name</th>
                 <th>Category</th>
                 <th style={{ textAlign: 'right' }}>Qty</th>
-                <th style={{ textAlign: 'right' }}>Unit Cost</th>
-                <th style={{ textAlign: 'right' }}>Total Cost</th>
-                <th>Acquired</th>
-                <th style={{ textAlign: 'right' }}><Tip text="Total cost less any depreciation already taken before Crest, less every depreciation charge posted for the asset, reversals included, whatever period each one covers." width={270}>Current NBV</Tip></th>
-                <th style={{ textAlign: 'right' }}>% Depreciated</th>
-                <th>Status</th>
-                <th></th>
+                <th style={{ textAlign: 'right' }}><Tip text="The cost of one. All money in this table is in NPR." width={220}>Unit Cost</Tip></th>
+                <th style={{ textAlign: 'right' }}><Tip text="Qty times Unit Cost: what you paid for all of them." width={220}>Total Cost</Tip></th>
+                <th><Tip text="The date the asset was bought, shown in BS." width={220}>Acquired</Tip></th>
+                <th style={{ textAlign: 'right' }}><Tip text="Net book value: what the asset is worth on your books now. Total cost, less depreciation taken before Crest, less every posted run (reversals included)." width={270}>Current NBV</Tip></th>
+                <th style={{ textAlign: 'right' }}><Tip text="How much of the cost has been written off so far, as a share of Total Cost." width={240}>% Depreciated</Tip></th>
+                <th><Tip text="Active assets are charged by each depreciation run. Disposed (sold or scrapped) and Written Off assets are not." width={260}>Status</Tip></th>
+                <th><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>

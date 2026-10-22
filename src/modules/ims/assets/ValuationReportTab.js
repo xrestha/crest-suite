@@ -13,6 +13,8 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { formatAdAsBs } from '../../../utils/bsCalendar'
 import { nepalBsLong } from '../../../shared/nepalTime'
+import { settleWithin } from '../../../utils/withTimeout'
+import { ASSET_CALL_MS } from './assetReads'
 
 const fmt = nprInt
 // A stored AD date (a period end) as the BS date it falls on (S792, COSTS-11).
@@ -36,9 +38,10 @@ export default function ValuationReportTab({ assets }) {
   async function load() {
     setLoading(true)
     // Paged, with tiebreakers: one row per asset per run crosses the 1000-row cap, and a truncated
-    // read values the assets past the cut at full cost (S756).
-    const { data, error } = await fetchAllRows(() => scopedFrom('assets_depreciation_schedule', 'id, asset_id, period_start, period_end, depreciation_amount, override_amount')
-      .eq('is_posted', true).order('period_end', { ascending: true }).order('id'))
+    // read values the assets past the cut at full cost (S756). Bounded (S857): a read that never
+    // answers is a failed read on ReportLoadError's timeout sentence, not "Loading…" for good.
+    const { data, error } = await settleWithin(fetchAllRows(() => scopedFrom('assets_depreciation_schedule', 'id, asset_id, period_start, period_end, depreciation_amount, override_amount')
+      .eq('is_posted', true).order('period_end', { ascending: true }).order('id')), ASSET_CALL_MS, 'Reading the posted depreciation')
     if (error) { setLoadError(error); setLoading(false); return }
     setLoadError(null)
     setPosted(data || [])
@@ -59,7 +62,7 @@ export default function ValuationReportTab({ assets }) {
     <div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16 }} className="no-print">
         <div className="form-field">
-          <label htmlFor="valuat-f1"><Tip text="The end of any period a depreciation run has been posted for. Every asset owned on this date is counted — including one sold or written off later — at its cost less the depreciation posted for periods ending on or before it, reversals included." width={290}>As Of</Tip></label>
+          <label htmlFor="valuat-f1"><Tip text="The end of a period with a posted depreciation run. Every asset owned on that date counts, even one sold later, at its cost less the depreciation up to that date." width={290}>As Of</Tip></label>
           <select id="valuat-f1" className="form-select" value={asOf} onChange={e => setAsOf(e.target.value)} disabled={periodOptions.length === 0}>
             {periodOptions.length === 0 && <option value="">No posted periods yet</option>}
             {periodOptions.map(d => <option key={d} value={d}>{fmtDate(d)}</option>)}
@@ -80,15 +83,15 @@ export default function ValuationReportTab({ assets }) {
         <div id="valuation-print-area">
           <div className="stat-grid stat-grid--pair">
             <div className="stat-card">
-              <div className="stat-label">Total Portfolio Cost</div>
+              <div className="stat-label"><Tip text="What you paid for every asset you owned on the As Of date, including ones sold or written off later." width={260}>Total Portfolio Cost</Tip></div>
               <div className="stat-value">NPR {fmt(valuation.totalCost)}</div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">Accumulated Depreciation</div>
+              <div className="stat-label"><Tip text="All the value written off these assets up to the As Of date: the posted runs, less any reversals, plus depreciation taken before Crest." width={270}>Accumulated Depreciation</Tip></div>
               <div className="stat-value" style={{ color: 'var(--theme-text1)' }}>NPR {fmt(valuation.accumulatedDepreciation)}</div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">Net Book Value</div>
+              <div className="stat-label"><Tip text="What these assets are worth on your books on the As Of date: Total Portfolio Cost less Accumulated Depreciation." width={260}>Net Book Value</Tip></div>
               <div className="stat-value" style={{ color: 'var(--theme-text1)' }}>NPR {fmt(valuation.nbv)}</div>
             </div>
           </div>
@@ -103,7 +106,8 @@ export default function ValuationReportTab({ assets }) {
                   <XAxis type="number" tick={{ fontSize: 11, fill: 'var(--theme-text2)' }} />
                   <YAxis dataKey="categoryName" type="category" width={140} tick={{ fontSize: 11, fill: 'var(--theme-text2)' }} />
                   <Tooltip formatter={v => `NPR ${fmt(v)}`} contentStyle={{ background: 'var(--theme-card)', border: '1px solid var(--theme-border)', fontSize: 12 }} />
-                  <Bar dataKey="nbv" fill="#c9a84c" radius={[0, 4, 4, 0]} {...chartMotion()} />
+                  {/* Square ends (S857): Modernist is zero-radius, and a rounded bar end was the one curve on the tab. */}
+                  <Bar dataKey="nbv" fill="#c9a84c" {...chartMotion()} />
                 </BarChart>
               </ResponsiveContainer>
             )}

@@ -175,15 +175,15 @@ The asset is still on the register as active.`, detail })
           <div className="stat-value">NPR {fmt(asset.total_cost)}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Total cost less any depreciation already taken before Crest, less every depreciation charge posted for this asset, reversals included, whatever period each one covers." width={270}>Current NBV</Tip></div>
+          <div className="stat-label"><Tip text="Net book value: what this asset is worth on your books now. Total cost, less depreciation taken before Crest, less every posted run (reversals included)." width={270}>Current NBV</Tip></div>
           <div className="stat-value" style={{ color: 'var(--theme-text1)' }}>{figuresReal ? `NPR ${fmt(currentNbv)}` : '—'}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Accumulated Depreciation</div>
+          <div className="stat-label"><Tip text="All the value written off this asset so far: every posted run, less any reversals, plus depreciation taken before Crest." width={260}>Accumulated Depreciation</Tip></div>
           <div className="stat-value" style={{ color: 'var(--theme-text1)' }}>{figuresReal ? `NPR ${fmt(accumulatedDepreciation)}` : '—'}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">% Depreciated</div>
+          <div className="stat-label"><Tip text="Accumulated Depreciation as a share of Total Cost. It stops short of 100% when the asset has a salvage value." width={260}>% Depreciated</Tip></div>
           <div className="stat-value">{figuresReal ? `${pctDepreciated.toFixed(1)}%` : '—'}</div>
         </div>
       </div>
@@ -193,7 +193,7 @@ The asset is still on the register as active.`, detail })
         <span>Acquired: <strong style={{ color: 'var(--theme-text1)' }}>{fmtDate(asset.acquisition_date)}</strong></span>
         {/* D40: part of Accumulated Depreciation above, but in no run in the history below. */}
         {(parseFloat(asset.opening_accumulated_depreciation) || 0) > 0 && (
-          <span><Tip text="Depreciation already charged before this business used Crest, typed in from last year's books on the asset form. It is in Accumulated Depreciation above but in no run below, and Crest's runs charge from the day after its date." width={290}>Taken before Crest</Tip>: <strong style={{ color: 'var(--theme-text1)' }}>NPR {fmt(asset.opening_accumulated_depreciation)}</strong> to {fmtDate(asset.opening_as_of)}</span>
+          <span><Tip text="Depreciation charged before you used Crest, typed in on the asset form. It counts in Accumulated Depreciation but in no run below. Runs charge from the day after its date." width={290}>Taken before Crest</Tip>: <strong style={{ color: 'var(--theme-text1)' }}>NPR {fmt(asset.opening_accumulated_depreciation)}</strong> to {fmtDate(asset.opening_as_of)}</span>
         )}
         <span>Location: <strong style={{ color: 'var(--theme-text1)' }}>{asset.location || '—'}</strong></span>
         {/* A status is a state, not a verdict (S852): ink, like the facts beside it. */}
@@ -280,7 +280,7 @@ The asset is still on the register as active.`, detail })
           {disposalCalc && (
             <div style={{ marginTop: 12, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.7 }}>
               <div>
-                <Tip text="Straight-line depreciation for the days not yet charged — since the last posted run, or since acquisition (or the date of any depreciation taken before Crest) — at the same rate every run uses and never below salvage value. A run you reversed in part counts only for the days its remaining charge covers. It is posted as its own locked run when you confirm." width={300}>Depreciation to the disposal date</Tip>:{' '}
+                <Tip text="Depreciation for the days not yet charged, up to the disposal date, at the same rate as every run and never below salvage value. It is posted as its own locked run when you confirm." width={300}>Depreciation to the disposal date</Tip>:{' '}
                 <strong style={{ color: 'var(--theme-text1)' }}>NPR {fmt(disposalCalc.extraDepreciation)}</strong>
                 {disposalCalc.line ? ` (${fmtDate(disposalCalc.periodStart)} – ${fmtDate(disposalCalc.periodEnd)})` : ' — nothing left to charge'}
               </div>

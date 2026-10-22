@@ -260,7 +260,7 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
         </div>
 
         <div className="form-field">
-          <label htmlFor="assetf-f10"><Tip text="For the Tax Depreciation (IRD) tab only. Nepal groups assets into 5 pools by type. It fills from the category and can be changed per asset. Not sure yet? '— Not tracked —' leaves the asset out of the tax schedule until you choose; that tab lists such assets before you post." width={320}>Tax Pool</Tip></label>
+          <label htmlFor="assetf-f10"><Tip text="For the Tax Depreciation tab only. Nepal groups assets into 5 pools by type. This fills from the category and you can change it; Not tracked keeps the asset out of the tax schedule." width={320}>Tax Pool</Tip></label>
           <select id="assetf-f10" className="form-select" value={form.tax_pool} onChange={e => set('tax_pool', e.target.value)}>
             <option value="">— Not tracked —</option>
             {['A', 'B', 'C', 'D', 'E'].map(p => <option key={p} value={p}>{POOL_LABELS[p]}</option>)}
@@ -284,11 +284,11 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
             books. Without this it would depreciate from full cost a second time. */}
         <div className="form-field" style={{ gridColumn: '1 / -1', marginTop: 4 }}>
           <h4 style={{ margin: 0, fontSize: 12, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            <Tip text="Only for something you owned before you started using Crest. Copy its accumulated depreciation from last year's books (your accountant's fixed-asset schedule), so Crest carries on from there instead of depreciating it from full cost again. Leave it at 0 for anything bought since." width={320}>Already in use before Crest?</Tip>
+            <Tip text="Only for something you owned before Crest. Copy its accumulated depreciation from the books of last year, so Crest does not depreciate it from full cost again. Leave 0 for anything bought since." width={320}>Already in use before Crest?</Tip>
           </h4>
         </div>
         <div className="form-field">
-          <label htmlFor="assetf-f15"><Tip text="Book depreciation already charged on this asset before Crest, up to the date beside it. Its book value becomes cost less this, less what Crest posts. It is not an expense of any period here, so the Overheads depreciation line does not count it." width={300}>Depreciation already taken (NPR)</Tip></label>
+          <label htmlFor="assetf-f15"><Tip text="Book depreciation charged on this asset before Crest, up to the date beside it. Its book value is cost less this, less what Crest posts." width={300}>Depreciation already taken (NPR)</Tip></label>
           <QtyInput id="assetf-f15" value={form.opening_accumulated_depreciation} onChange={v => set('opening_accumulated_depreciation', v)} className="form-input" style={{ width: '100%' }} {...fieldAria('assetf-f15', fieldErr.opening_accumulated_depreciation)} />
           <FieldError id="assetf-f15" message={fieldErr.opening_accumulated_depreciation} />
         </div>

@@ -21,6 +21,14 @@ const TABS = [
   { key: 'tax',         label: 'Tax Depreciation (IRD)' },
 ]
 
+// S857: "Depreciation Runs" and "Tax Depreciation (IRD)" sit side by side with nothing saying how
+// they differ, and they give different figures on purpose. One plain line under the row, for the
+// active tab, says which books each is for.
+const TAB_NOTES = {
+  depreciation: 'Book depreciation, for your own accounts: each asset loses value over its useful life. The tax figure for the IRD is on the Tax Depreciation tab, and it will differ.',
+  tax: 'Tax depreciation, for your yearly tax return: the IRD groups assets into five pools. It differs from the book figure on Depreciation Runs, and that is expected.',
+}
+
 // Single tabbed page, one nav entry, one feature flag — matches OutstandingPayables.js's
 // activeTab + tab-bar pattern rather than 4-5 separate routes, since all sub-views share the
 // same category/asset data loaded once here.
@@ -81,6 +89,13 @@ export default function FixedAssets() {
     hasLoadedOnce.current = true
   }
 
+  // A tab opened from inside another (the depreciation success panel, S857). The button pressed
+  // unmounts with its tab, so focus goes to the new tab rather than dropping to the page top.
+  function openTab(key) {
+    setActiveTab(key)
+    requestAnimationFrame(() => document.getElementById(`fixed-assets-tab-${key}`)?.focus())
+  }
+
   // Defensive route guard even though the nav item already hides for sub-supervisor accounts
   // (mirrors PayrollRun.jsx's convention of guarding the route itself, not just its nav entry).
   if (!canView) return <Navigate to="/dashboard" replace />
@@ -109,6 +124,9 @@ export default function FixedAssets() {
       />
 
       <TabPanel idBase="fixed-assets" active={activeTab}>
+      {TAB_NOTES[activeTab] && (
+        <p className="page-footnote no-print" style={{ margin: '0 0 16px' }}>{TAB_NOTES[activeTab]}</p>
+      )}
       {loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Loading…</p></div>
       ) : loadError ? (
@@ -122,7 +140,7 @@ export default function FixedAssets() {
             <AssetRegisterTab categories={categories} assets={assets} onReload={load} />
           )}
           {activeTab === 'depreciation' && (
-            <DepreciationRunTab assets={assets} onReload={load} />
+            <DepreciationRunTab assets={assets} onReload={load} onOpenTab={openTab} />
           )}
           {activeTab === 'valuation' && (
             <ValuationReportTab assets={assets} />
