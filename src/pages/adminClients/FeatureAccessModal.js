@@ -203,7 +203,7 @@ export default function FeatureAccessModal({ client, onClose }) {
           : null
         const suiteFeatures = [
           { key: 'owner_dashboard', label: 'Owner Dashboard' },
-          { key: 'monthly_owner_report', label: 'Monthly Owner/Manager Report' },
+          { key: 'monthly_owner_report', label: 'Monthly Owner Report' },
           { key: 'multi_outlet', label: 'Multi-Outlet Group Console' },
           { key: 'demand_forecast', label: 'Demand Forecast' },
           { key: 'fixed_asset_register', label: 'Fixed Assets' },

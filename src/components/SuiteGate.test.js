@@ -91,3 +91,23 @@ describe('SUITE_PAGES', () => {
     }
   })
 })
+
+// S857: the Owner's offer on each Suite page. One entry per page, a title held to the /login copy
+// rule (two short sentences, about 16 words at most), three things the page gives, and an example
+// whose figures say they are made up.
+describe('SUITE_OFFERS', () => {
+  const { SUITE_OFFERS } = require('./SuiteGate')
+
+  it('has an offer for each of the six Suite pages', () => {
+    expect(Object.keys(SUITE_OFFERS).sort()).toEqual(Object.values(SUITE_PAGES).map(p => p.featureKey).sort())
+  })
+
+  it('keeps each title to two short sentences', () => {
+    for (const offer of Object.values(SUITE_OFFERS)) {
+      expect(offer.title.split(/\s+/).length).toBeLessThanOrEqual(16)
+      expect(offer.title.split('. ').length).toBeLessThanOrEqual(2)
+      expect(offer.gets).toHaveLength(3)
+      expect(offer.example.rows.length).toBeGreaterThan(0)
+    }
+  })
+})

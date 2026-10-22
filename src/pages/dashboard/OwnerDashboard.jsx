@@ -1,6 +1,6 @@
 import { npr } from '../../shared/nepalMoney'
 import { useEffect, useRef, useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { TriangleAlert } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer, ReferenceLine,
@@ -18,6 +18,7 @@ import { useSettings } from '../../context/SettingsContext'
 import { fcBand } from '../../shared/imsFormulas'
 import { lcBand, pcBand, nmBand, bandFigure } from '../../shared/operatingBands'
 import Tip from '../../components/Tip'
+import PeriodScope from '../../components/PeriodScope'
 import SuiteGate, { SUITE_PAGES, useSuiteAccess } from '../../components/SuiteGate'
 import ChartCard from '../../components/ChartCard'
 import ActionError, { asActionError } from '../../components/ActionError'
@@ -71,8 +72,8 @@ const SECTION_CONSEQUENCE = {
   ims: 'Sales, purchases and fixed costs could not be loaded, so Revenue, Spend % so far, the margins, Wastage and Cash / Credit are not shown.',
   reorder: 'The stock position could not be loaded, so Items Below Par is not shown.',
   payables: 'Unpaid supplier bills could not be loaded, so Overdue Payables is not shown.',
-  labour: 'Labour could not be loaded, so Labor Cost %, Prime Cost % and True Net Margin % are not shown.',
-  commission: 'Delivery-partner commission could not be loaded, so True Net Margin % is not shown.',
+  labour: 'Labour could not be loaded, so Labor Cost %, Prime Cost % and Net Margin % are not shown.',
+  commission: 'Delivery-partner commission could not be loaded, so Net Margin % is not shown.',
 }
 
 // Owner Dashboard — the cross-module month-to-date view: Crest IMS + HR, with till sales arriving
@@ -81,7 +82,7 @@ const SECTION_CONSEQUENCE = {
 export default function OwnerDashboard() {
   const { profile, clientId, hasFeature, loading: authLoading, isAdmin, isOwner, imsEnabled, hrEnabled, posEnabled } = useAuth()
   const canOverheads = hasFeature('overheads')
-  // 'growth' → 'Growth' — the plan Overheads is sold on, for the upsell line under True Net Margin.
+  // 'growth' → 'Growth' — the plan Overheads is sold on, for the upsell line under Net Margin.
   const overheadsTier = (t => (t ? t[0].toUpperCase() + t.slice(1) : ''))(FEATURE_TIER.overheads)
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom } = useScopedDb()
@@ -169,8 +170,11 @@ export default function OwnerDashboard() {
     const rows = res.data || []
     const open = rows.find(r => r.status === 'open') || null
     const latest = rows[0] || null
+    // The month the Owner Report opens on (its own default, S857): the header's link names it, because
+    // "View Full Monthly Report" beside the open month's name opened a different, closed month.
+    const latestClosed = rows.find(r => r.status === 'closed') || null
     const clock = mtdClock(open)
-    const info = { open, latest, clock }
+    const info = { open, latest, latestClosed, clock }
     periodRef.current = info
     setPeriodInfo(info)
     setSection('period', { status: 'ok', data: info })
@@ -355,6 +359,27 @@ export default function OwnerDashboard() {
   const primeFigure = settledFigure(figs?.primePct ?? null, pcBand, periodTooEarly || labourWithheld)
   const marginFigure = settledFigure(figs?.marginPct ?? null, nmBand, periodTooEarly || labourWithheld || !!figs?.fixedMissing)
 
+  // ── The page's answer, in one sentence (S857, the Suite Pro critique) ──
+  // Nine equal tiles put the margin fifth, below the fold on a phone, so the page opens with the
+  // sentence an owner would say out loud, in the Owner Report's voice. It is built only from figures
+  // the tiles already show and withholds a verdict exactly when they do: nothing here is a new number.
+  const notJudgedWhy = !canOverheads ? null
+    : periodTooEarly ? `Not judged before day ${SETTLE_DAY}: stock is bought in lumps early in the month.`
+    : figs?.fixedMissing ? `Not judged: no rent or other fixed costs are entered for ${monthName} yet.`
+    : labour?.verdictWithheld ? `${labourNotJudgedText(labour)}.`
+    : lumpAheadOfRevenue ? 'Not judged while the month runs: lump-sum pay is counted in full.'
+    : null
+  // The ratios outside their target, worst first, as their banded figures (mark included). A ratio
+  // the tiles leave unjudged is never listed, so the two can never disagree.
+  const lookAt = [
+    !periodTooEarly && { label: SPEND_SO_FAR_LABEL, pct: figs?.spendPct, bander: fcCardBand },
+    !labourWithheld && { label: 'Labor Cost %', pct: figs?.labourPct, bander: lcBand },
+    !periodTooEarly && !labourWithheld && { label: 'Prime Cost %', pct: figs?.primePct, bander: pcBand },
+  ].filter(r => r && r.pct != null)
+    .map(r => ({ ...r, fig: bandFigure(r.pct, r.bander) }))
+    .filter(r => r.fig.band.key === 'watch' || r.fig.band.key === 'high')
+    .sort((a, b) => (a.fig.band.key === 'high' ? 0 : 1) - (b.fig.band.key === 'high' ? 0 : 1))
+
   const T = deps => tileState(sections, deps)
   const tRevenue = T(['period', 'ims'])
   const tLabour = T(['period', 'ims', 'labour'])
@@ -382,43 +407,63 @@ export default function OwnerDashboard() {
   const failedSections = SECTION_NAMES.filter(n => sections[n].status === 'failed')
   const stillLoading = SECTION_NAMES.some(n => sections[n].status === 'loading')
 
-  // Label / value / subtext styles, one definition for every card (sizes from the DESIGN.md ramp).
-  const kpiLabelStyle = { fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }
-  const kpiSubtextStyle = { fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }
-  // tabular-nums: five percentages sit in one row to be compared against each other.
-  const kpiValueStyle = (size, weight = 700) => ({ fontSize: size, fontWeight: weight, lineHeight: 1.1, fontVariantNumeric: 'tabular-nums' })
   const skeleton = <span className="skeleton" style={{ display: 'inline-block', width: '3em', height: '0.85em', verticalAlign: 'middle' }} />
 
-  // One KPI card. A card that opens a page holds a Tip (a control of its own), so it cannot be
-  // role="button" (OWNER-DASHBOARD-16, page-layout.md): the card keeps the mouse click and the figure
-  // is the real button, named "<label>: <value>". A tile whose section failed shows a dash and
-  // "Couldn't load · Retry", the Retry reloading only that section (OWNER-DASHBOARD-2/-6).
-  // Called as a function, not mounted as a JSX element: a component declared inside the page would be a
-  // new type on every render, remounting each card (and dropping focus from a pressed Retry).
-  function kpiCard({ label, tip, tipWidth = 260, srLabel, onOpen, tile, value, valueStyle, valueTitle, size = 24, sub, extra = [], noneText = 'No open month' }) {
+  // One KPI card, on the shared stat-card classes (S857: it typed its own label, figure and sub-line
+  // styles, the figure at a weight DESIGN.md does not have). A card that opens a page holds a Tip (a
+  // control of its own), so it cannot be role="button" (OWNER-DASHBOARD-16, page-layout.md): the card
+  // keeps the mouse click and the figure is the real button, named "<label>: <value>". A tile whose
+  // section failed shows a dash and "Couldn't load · Retry", the Retry reloading only that section
+  // (OWNER-DASHBOARD-2/-6). Called as a function, not mounted as a JSX element: a component declared
+  // inside the page would be a new type on every render, remounting each card (and dropping focus from
+  // a pressed Retry).
+  function kpiCard({ label, tip, tipWidth = 260, srLabel, onOpen, tile, value, valueStyle, valueTitle, sub, extra = [], noneText = 'No open month', compact = false }) {
     const state = tile.state
     const shown = state === 'loading' ? skeleton : state === 'ok' ? value : '—'
-    const style = { ...kpiValueStyle(size), ...(state === 'ok' ? valueStyle : { color: 'var(--theme-text2)' }) }
+    const style = state === 'ok' ? valueStyle : { color: 'var(--theme-text2)' }
+    const cardClass = ['stat-card', compact && 'stat-card--compact', onOpen && 'interactive-card'].filter(Boolean).join(' ')
     return (
-      <div className={onOpen ? 'stat-card interactive-card' : 'stat-card'} onClick={onOpen} style={onOpen ? { cursor: 'pointer' } : undefined}>
-        <div style={kpiLabelStyle}>{tip ? <Tip text={tip} width={tipWidth}>{label}</Tip> : label}</div>
+      <div className={cardClass} onClick={onOpen} style={onOpen ? { cursor: 'pointer' } : undefined}>
+        <div className="stat-label">{tip ? <Tip text={tip} width={tipWidth}>{label}</Tip> : label}</div>
         {onOpen ? (
           <button type="button" className="stat-card__open" onClick={e => { e.stopPropagation(); onOpen() }}>
             <span className="sr-only">{srLabel || label}: </span>
-            <span style={style} title={state === 'ok' ? valueTitle : undefined}>{shown}</span>
+            <span className="stat-value" style={style} title={state === 'ok' ? valueTitle : undefined}>{shown}</span>
           </button>
         ) : (
-          <div style={style} title={state === 'ok' ? valueTitle : undefined}>{shown}</div>
+          <div className="stat-value" style={style} title={state === 'ok' ? valueTitle : undefined}>{shown}</div>
         )}
-        <div style={kpiSubtextStyle}>
+        <div className="stat-sub">
           {state === 'failed' ? (
             // A real button with the touch floor (S852): an 11px underlined word was the only way to
             // reload a failed tile on a phone.
             <>Couldn't load · <button type="button" className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); retry(tile.failed) }}>Retry</button></>
           ) : state === 'none' ? noneText : state === 'loading' ? ' ' : sub}
         </div>
-        {state === 'ok' && extra.filter(Boolean).map((line, i) => <div key={i} style={kpiSubtextStyle}>{line}</div>)}
+        {state === 'ok' && extra.filter(Boolean).map((line, i) => <div key={i} className="stat-sub">{line}</div>)}
       </div>
+    )
+  }
+
+  // One "Needs you" row (S857): what the Operations tiles said as equal boxes, said as a count and a
+  // sentence with the page that clears it, in Home's Needs-attention grammar (HomeAttention.jsx). A
+  // zero still shows, in grey, because "nothing below par" is the answer an owner opens this to hear.
+  function needsRow({ key, tile, count, tone = 'red', text, to, linkText, noneText }) {
+    const state = tile.state
+    const badge = state === 'ok' && count > 0 ? (tone === 'red' ? 'badge-red' : 'badge-amber') : 'badge-gray'
+    return (
+      <li key={key} className="home-attention__row">
+        <span className={badge} style={{ minWidth: 28, textAlign: 'center' }}>
+          {state === 'ok' ? (count > 99 ? '99+' : count) : '—'}
+        </span>
+        <span className="home-attention__text">
+          {state === 'loading' ? skeleton
+            : state === 'failed' ? <>Couldn't load · <button type="button" className="btn btn-ghost btn-sm" onClick={() => retry(tile.failed)}>Retry</button></>
+            : state === 'none' ? noneText
+            : text}
+        </span>
+        {state === 'ok' && <Link to={to} className="dash-tile-link" style={{ marginTop: 0 }}>{linkText} →</Link>}
+      </li>
     )
   }
 
@@ -426,8 +471,53 @@ export default function OwnerDashboard() {
   // ProtectedRoute nor SuiteGate checks a ROLE. After every hook (rules of hooks).
   if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />
 
-  const firstDayNote = 'Ratios start after today — the first full day'
+  const firstDayNote = 'Ratios start after today, the first full day'
   const ratioValue = (fig, firstDay) => (firstDay ? '—' : fig.text)
+  const latestClosed = periodInfo?.latestClosed || null
+
+  // The answer the page opens with (S857). Same sections and the same withholding as the tiles: a
+  // failed read says so in its banner and the sentence steps aside; loading is a shimmer.
+  function verdict() {
+    if (!openPeriod || tRevenue.state === 'failed') return null
+    if (tRevenue.state === 'loading' || (canOverheads && tMargin.state === 'loading')) {
+      return (
+        <div className="owner-verdict" aria-hidden="true">
+          <p className="owner-verdict__line"><span className="skeleton" style={{ display: 'inline-block', width: '60%', height: '0.9em' }} /></p>
+        </div>
+      )
+    }
+    const why = []
+    let line
+    if (figs?.firstDay) {
+      line = `${monthName} has just started. Its first figures come after today, the first full day.`
+    } else if (!(ims?.revenue.counted > 0)) {
+      line = `No sales are recorded for the finished days of ${monthName} yet.`
+    } else if (!canOverheads || figs?.marginPct == null) {
+      line = <>{monthName} so far: <span className="owner-verdict__figure">{npr(ims.revenue.all)}</span> sold.</>
+      why.push(!canOverheads
+        ? `Net Margin needs Overheads (${overheadsTier}), where rent and other fixed costs are entered.`
+        : 'Net Margin could not be worked out: the message above says which figure is missing.')
+    } else {
+      const m = figs.marginPct
+      const per100 = Math.round(Math.abs(m))
+      line = per100 === 0
+        ? `${monthName} so far, sales only just cover the costs.`
+        : <>{monthName} so far, you {m < 0 ? 'lose' : 'keep'} <span className="owner-verdict__figure">NPR {per100}</span> of every NPR 100 you sell.</>
+      why.push(<>Net Margin <b style={{ color: marginFigure.color }} title={marginFigure.title}>{marginFigure.text}</b></>)
+      if (notJudgedWhy) why.push(notJudgedWhy)
+      else if (lookAt.length === 0) why.push('Nothing is outside its target.')
+      else why.push(<>Look at: {lookAt.map((r, i) => (
+        <span key={r.label}>{i > 0 ? ', ' : ''}{r.label} <b style={r.fig.style} title={r.fig.title}>{r.fig.text}</b></span>
+      ))}</>)
+    }
+    if (daysText) why.push(daysText)
+    return (
+      <div className="owner-verdict">
+        <p className="owner-verdict__line">{line}</p>
+        {why.length > 0 && <p className="owner-verdict__why">{why.map((w, i) => <span key={i}>{w}</span>)}</p>}
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -437,16 +527,22 @@ export default function OwnerDashboard() {
           : failedSections.length > 0 ? `Dashboard loaded — ${failedSections.length} section${failedSections.length === 1 ? '' : 's'} could not load`
           : 'Dashboard data loaded'}
       </div>
-      <div className="page-header">
-        <h1 className="page-title">Owner Dashboard</h1>
-        <p className="page-subtitle">
-          Cross-module month-to-date view — Crest IMS + HR, till sales included
-          {openPeriod && ` · ${periodLabel} · Open`}
-          {' · '}
-          <button className="btn-linklike" onClick={() => navigate('/owner-report')}>
-            View Full Monthly Report →
-          </button>
-        </p>
+      {/* The page says its tense (S857): this one is the month so far; the Owner Report is a closed
+          month, frozen. The link names the month it opens, which is the report's own default. Both the
+          chip and the link come from the gated load, so neither shows above the upsell card. */}
+      <div className="page-header page-header--split">
+        <div>
+          <h1 className="page-title">Owner Dashboard</h1>
+          <p className="page-subtitle">This month so far: Crest IMS and Crest HR together, till sales included.</p>
+          {openPeriod && <div className="page-scope-row"><PeriodScope label={periodLabel} status="open" provisionalWhenOpen /></div>}
+        </div>
+        {latestClosed && (
+          <div className="no-print">
+            <button type="button" className="btn btn-ghost" onClick={() => navigate('/owner-report')}>
+              {BS_MONTHS[latestClosed.bs_month - 1]} Owner Report →
+            </button>
+          </div>
+        )}
       </div>
 
       {/* A render prop: nothing in the tile tree is evaluated behind the upsell card (OD-15). */}
@@ -474,10 +570,9 @@ export default function OwnerDashboard() {
 
           {/* The operator passes the Suite gate whatever the modules; the load needs both. */}
           {!modulesOn && (
-            <div className="card dash-row" style={{ borderColor: 'color-mix(in srgb, var(--theme-amber) 15%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 5%, transparent)' }}>
-              <p style={{ color: 'var(--theme-amber-text)', margin: 0, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <TriangleAlert size={15} aria-hidden="true" /> Owner Dashboard needs both Crest IMS and Crest HR enabled — this property has {imsEnabled ? 'only IMS' : hrEnabled ? 'only HR' : 'neither'}.
-              </p>
+            <div className="amber-banner" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <TriangleAlert size={15} aria-hidden="true" style={{ color: 'var(--theme-amber-text)', flexShrink: 0 }} />
+              <span><strong>Owner Dashboard needs both Crest IMS and Crest HR.</strong> This property has {imsEnabled ? 'only IMS' : hrEnabled ? 'only HR' : 'neither'}.</span>
             </div>
           )}
 
@@ -499,16 +594,20 @@ export default function OwnerDashboard() {
           )}
 
           {modulesOn && (<>
-          <h2 className="sr-only">Profitability (month-to-date)</h2>
+          {verdict()}
+
+          {/* Visible headings since S857: the two groups were sr-only, so a sighted owner saw nine
+              tiles of equal weight and no reason for where one row ended. */}
+          <h2 className="dash-heading">{monthName ? `${monthName} so far` : 'This month so far'}</h2>
           <div className="stat-grid dash-section">
             {kpiCard({
-              label: "Revenue (MTD)",
+              label: 'Revenue so far',
               onOpen: () => navigate('/sales'),
               tile: tRevenue,
-              tip: "Sales before VAT and after discounts; comped dishes left out; till bills included, one row per bill line. The POS Dashboard's Revenue includes VAT, so it reads about 13% higher.",
+              tip: 'Sales before VAT and after discounts, till bills included and comped dishes left out. The POS Dashboard shows sales with VAT, so it reads about 13% higher.',
               value: npr(ims?.revenue.all),
               valueStyle: { color: 'var(--theme-text1)' },
-              sub: "Before VAT · from sales entries →",
+              sub: 'Before VAT · Sales →',
             })}
 
             {kpiCard({
@@ -517,20 +616,20 @@ export default function OwnerDashboard() {
               onOpen: () => navigate('/variance'),
               tile: tRevenue,
               tipWidth: 280,
-              tip: `${SPEND_SO_FAR_TIP} Purchases here are net of bill discounts and returns, plus stock received from your other outlets and less stock sent to them, over the days already finished. Coloured against your food cost target as a guide — watch above ${fcBand(null, settings).warn}%, too high above ${fcBand(null, settings).critical}%, set in Settings → Thresholds.`,
+              tip: `${SPEND_SO_FAR_TIP} Your target is ${fcBand(null, settings).warn}% or less, set in Settings → Thresholds.`,
               value: ratioValue(spendFigure, figs?.firstDay),
               valueStyle: { color: figs?.firstDay ? 'var(--theme-text2)' : spendFigure.color },
               valueTitle: spendFigure.title,
-              sub: figs?.firstDay ? firstDayNote : clock?.running ? `${daysText} · your target ≤${fcBand(null, settings).warn}% →` : `Your target ≤${fcBand(null, settings).warn}% →`,
+              sub: figs?.firstDay ? firstDayNote : clock?.running ? `${daysText} · target ≤${fcBand(null, settings).warn}% →` : `Target ≤${fcBand(null, settings).warn}% →`,
               extra: [transfersLine],
             })}
 
             {kpiCard({
-              label: "Labor Cost % (MTD)",
+              label: 'Labor Cost % so far',
               onOpen: () => navigate('/hr/payroll'),
               tile: tLabour,
-              tipWidth: 300,
-              tip: "Labour as a % of revenue over the days already finished. When this month's Payroll Run is finalized, it is that run's Cost to business — pay earned + overtime + employer SSF — counted for the days that have passed while the month runs. Until then it is an estimate: each person's pay for the days that have passed — monthly staff less unpaid days on the attendance sheet; daily and hourly staff for the days or hours on the sheet, and a full day for any day not yet marked — plus overtime from approved entries and from the attendance sheet (an approved entry replaces the sheet on its day), plus employer SSF for staff enrolled with an SSF number. The Overheads Labor tab is never added. Festival allowance, incentives and leavers' final settlements finalized for this month are added in full and named; while the month runs that lump carries no verdict. Healthy range for Nepal F&B: 25-30% of revenue.",
+              tipWidth: 280,
+              tip: 'Wages as a % of sales over the finished days. It is your finalized payroll once the month is run, and an estimate from your staff list and attendance until then. Healthy for Nepal F&B: 25-30%.',
               value: ratioValue(labourFigure, figs?.firstDay),
               valueStyle: { color: figs?.firstDay ? 'var(--theme-text2)' : labourFigure.color },
               valueTitle: labourFigure.title,
@@ -542,10 +641,10 @@ export default function OwnerDashboard() {
             })}
 
             {kpiCard({
-              label: "Prime Cost % (MTD)",
+              label: 'Prime Cost % so far',
               tile: tLabour,
-              tipWidth: 280,
-              tip: "Spend % so far + Labor Cost % — the two controllable costs combined, the number operators actually benchmark against. For the running month the food half is what you have spent on stock, not what you used, because the month has not been counted yet. Industry standard: 60-65% of revenue.",
+              tipWidth: 260,
+              tip: 'Spend % so far plus Labor Cost %: the two costs you control, together. Target: 60-65% of sales or less.',
               value: ratioValue(primeFigure, figs?.firstDay),
               valueStyle: { color: figs?.firstDay ? 'var(--theme-text2)' : primeFigure.color },
               valueTitle: primeFigure.title,
@@ -554,20 +653,23 @@ export default function OwnerDashboard() {
             })}
 
             {/* `canOverheads` gates the FIGURE, not just its colour: without Overheads this is not a
-                margin at all. */}
+                margin at all. It opens this month's statement on Profit & Loss (S857), which explains
+                the figure; with no fixed costs entered yet it opens Overheads, where they go. */}
             {kpiCard({
-              label: "True Net Margin % (MTD)",
-              onOpen: canOverheads ? () => navigate('/overheads') : null,
+              label: 'Net Margin % so far',
+              onOpen: !canOverheads ? null
+                : figs?.fixedMissing ? () => navigate('/overheads')
+                : () => navigate('/pnl', { state: { periodId: openPeriod?.id } }),
               tile: canOverheads ? tMargin : { state: 'ok' },
-              tip: `Revenue minus what you have spent on stock so far (net purchases, stock moved between your outlets included), labour, overheads and tax & fees (card and bank fees, the accountant, licences)${posOn ? ', and delivery-partner commission (Foodmandu, Pathao) on bills sold this month' : ''}, as a % of revenue — what the business keeps. For the month in progress, rent and other fixed costs are counted for the days that have passed, so the margin is the month's real rate. The stock half is spend, not stock used, until the month's count closes it.`,
+              tip: `What the business keeps from each NPR 100 of sales, after stock bought, wages, rent and other fixed costs, and fees${posOn ? ', and delivery commission' : ''}.`,
               value: !canOverheads ? '—' : ratioValue(marginFigure, figs?.firstDay),
               valueStyle: { color: !canOverheads || figs?.firstDay ? 'var(--theme-text2)' : marginFigure.color },
               valueTitle: canOverheads ? marginFigure.title : undefined,
-              sub: !canOverheads ? `Requires Overheads (${overheadsTier}) →`
+              sub: !canOverheads ? `Requires Overheads (${overheadsTier})`
                 : figs?.firstDay ? firstDayNote
-                : figs?.fixedMissing ? `Not judged — no fixed costs entered for ${monthName} yet · Overheads →`
-                : clock?.running ? `Fixed costs for ${daysText.replace(/^Days?/, m => m.toLowerCase())} · ${labourNotes.short}`
-                : `After food, labour & overhead · ${labourNotes.short}`,
+                : figs?.fixedMissing ? `Not judged: no fixed costs entered for ${monthName} yet · Overheads →`
+                : clock?.running ? `Fixed costs for ${daysText.replace(/^Days?/, m => m.toLowerCase())} · ${labourNotes.short} · Profit & Loss →`
+                : `After food, labour and overheads · ${labourNotes.short} · Profit & Loss →`,
               extra: canOverheads ? [
                 labour?.verdictWithheld ? labourNotJudgedText(labour) : '',
                 posOn && commission && (commission.amount > 0 || commission.unsettledBills > 0)
@@ -577,80 +679,80 @@ export default function OwnerDashboard() {
             })}
           </div>
 
-          <h2 className="sr-only">Operations</h2>
-          <div className="stat-grid dash-section">
+          {/* What the four Operations tiles said as equal boxes, as a list of what to act on (S857).
+              "below", not "at or below" (S696): an item exactly at par has what you want on hand. */}
+          <h2 className="dash-heading">Needs you</h2>
+          <ul className="home-attention dash-section">
+            {needsRow({
+              key: 'reorder',
+              tile: tReorder,
+              count: reorder?.count,
+              text: reorder?.count > 0
+                ? <>{reorder.count === 1 ? 'item is' : 'items are'} below par{reorder.estValueTotal > 0 ? ` · ${npr(reorder.estValueTotal)} to restock` : ''}{reorderFallback ? ` · as at the end of ${BS_MONTHS[reorder.period.bs_month - 1]}` : ''}</>
+                : <>No item is below par{reorderFallback ? ` at the end of ${BS_MONTHS[reorder.period.bs_month - 1]}` : ''}.</>,
+              to: '/reorder',
+              linkText: 'Reorder Report',
+              noneText: 'No month to count stock in.',
+            })}
+            {needsRow({
+              key: 'payables',
+              tile: tPayables,
+              count: payables?.overdueCount,
+              text: payables?.overdueCount > 0
+                ? <>supplier {payables.overdueCount === 1 ? 'bill is' : 'bills are'} over 60 days unpaid · {npr(payables.overdueTotal)} owed</>
+                : 'No supplier bill is over 60 days unpaid.',
+              to: '/payables',
+              linkText: 'Outstanding Payables',
+            })}
+          </ul>
+
+          {/* Two figures to read rather than act on, at the dense tier. */}
+          <div className="stat-grid stat-grid--compact dash-section">
             {kpiCard({
-              label: "Wastage Value (MTD)",
+              compact: true,
+              label: 'Wastage so far',
               onOpen: () => navigate('/wastage-report'),
               tile: tRevenue,
-              size: 22,
-              tip: "Everything logged as waste this month, valued at each item's rate: raw items, prep (sub-recipes) and hidden items alike — the same total as the Wastage Report and the main Dashboard.",
+              tip: 'Everything logged as waste this month, at each item rate: the same total as the Wastage Report.',
               value: npr(ims?.wastage),
               valueStyle: { color: 'var(--theme-text1)' },
-              sub: "This period →",
+              sub: 'Wastage Report →',
             })}
-
-            {/* "below", not "at or below" (S696): an item exactly at par has what you want on hand. */}
             {kpiCard({
-              label: "Items Below Par",
-              onOpen: () => navigate('/reorder'),
-              tile: tReorder,
-              size: 22,
-              tip: "Items whose current stock is below their par level — an item exactly at par is fine. A live inventory position, not a monthly total; the same count as the Reorder Report.",
-              value: reorder ? reorder.count : '—',
-              valueStyle: { color: reorder?.count > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' },
-              noneText: "No month to count",
-              sub: reorderFallback ? `As at the end of ${BS_MONTHS[reorder.period.bs_month - 1]} ${reorder.period.bs_year} →`
-                : reorder?.estValueTotal > 0 ? `${npr(reorder.estValueTotal)} to restock →` : 'Full Report →',
-            })}
-
-            {kpiCard({
-              label: "Overdue Payables",
-              onOpen: () => navigate('/payables'),
-              tile: tPayables,
-              size: 22,
-              tipWidth: 280,
-              tip: "Credit bills with money still owed more than 60 days after the bill date — what the supplier invoiced, after discounts and returns, VAT included; the same figure as Outstanding Payables.",
-              value: npr(payables?.overdueTotal),
-              valueStyle: { color: payables?.overdueTotal > 0 ? 'var(--theme-red-text)' : 'var(--theme-text1)' },
-              sub: payables?.overdueCount > 0 ? `${payables.overdueCount} bill${payables.overdueCount === 1 ? '' : 's'} →` : 'Full Report →',
-            })}
-
-            {kpiCard({
-              label: "Purchases · Cash / Credit",
+              compact: true,
+              label: 'Purchases · Cash / Credit',
               onOpen: () => navigate('/payments'),
               tile: tRevenue,
-              size: 18,
-              tipWidth: 280,
-              tip: "What this month's bills cost by how they were paid, VAT included and after bill discounts; each return comes off the method it was paid by — the Payment Report's figures. FonePay counts with Cash.",
+              tipWidth: 260,
+              tip: 'What the bills of this month cost, by how they were paid, VAT included and after discounts. FonePay counts as cash.',
               value: // Each amount is the unbreakable atom; the slash is where a break belongs.
                 <>
                   <span style={{ whiteSpace: 'nowrap' }}>{npr(ims?.cash)}</span>
                   {' / '}
                   <span style={{ whiteSpace: 'nowrap' }}>{npr(ims?.credit)}</span>
                 </>,
-              valueStyle: { color: 'var(--theme-text1)' },
-              sub: "Cash / Credit →",
+              valueStyle: { color: 'var(--theme-text1)', fontSize: 18 },
+              sub: 'Payment Report →',
             })}
           </div>
 
           {sections.trend.status === 'loading' ? (
             <div className="card card--compact">
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Cost &amp; Margin — Trend</div>
+              <h3 className="dash-card-title">Cost &amp; Margin — Trend</h3>
               <span className="skeleton" style={{ display: 'inline-block', width: '100%', height: '4em' }} />
             </div>
           ) : sections.trend.status === 'failed' ? (
             <div className="card card--compact">
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Cost &amp; Margin — Trend</div>
+              <h3 className="dash-card-title">Cost &amp; Margin — Trend</h3>
               <ActionError error={(() => { const a = asActionError(sections.trend.error, 'operator'); return { text: `The trend could not be loaded. ${a.text}`, detail: a.detail } })()} />
               <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => retry('trend')}>Retry</button>
             </div>
           ) : !hasTrendData ? (
             <div className="card card--compact">
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Cost &amp; Margin — Trend</div>
+              <h3 className="dash-card-title">Cost &amp; Margin — Trend</h3>
               <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>
-                Your cost and margin history appears here once your first period closes. Each closed
-                period adds a point, so the trend builds up month by month.
+                Your cost and margin history appears here once your first month closes. Each closed
+                month adds a point, so the trend builds up month by month.
               </p>
             </div>
           ) : (
@@ -665,14 +767,12 @@ export default function OwnerDashboard() {
               </>}
               // Visible, not sr-only: each point is the figure FROZEN on that month's Owner Report, and
               // reports already made keep their method. A dashed vertical line marks each month whose
-              // method differs from the month before (OWNER-DASHBOARD-11).
+              // method differs from the month before (OWNER-DASHBOARD-11). One sentence since S857; the
+              // list of what changed when is in Help.
               footer={<>
-                <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--theme-text2)', lineHeight: 1.5 }}>
-                  Each month shows the figures frozen on its Owner Report. Where a dashed line crosses the chart
-                  the method changed: Food Cost and Prime Cost moved to stock used ÷ sales, Net Margin began taking
-                  off Tax &amp; Fees and then wasted stock, staff meals and delivery commission, and Labour moved to
-                  pay earned plus bonuses and final pay — so a line can step there with nothing in the kitchen having
-                  changed.
+                <p className="page-footnote" style={{ margin: '8px 0 0' }}>
+                  Each point is the figure frozen on the Owner Report of that month. A dashed line marks a
+                  month where the method changed, so a step there is not a change in the kitchen.
                 </p>
                 <p className="sr-only">{trendSummary}</p>
               </>}

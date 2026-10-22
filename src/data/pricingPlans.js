@@ -173,7 +173,7 @@ export const SUITE_ADDON = {
   requiresLabel: 'Requires Crest IMS (Owner Dashboard also needs Crest HR) · added on top of your modules',
   features: [
     'Owner Dashboard — live margin & labour cost %, from Crest IMS and Crest HR together',
-    'Monthly Owner/Manager Report — frozen snapshot per closed period',
+    'Monthly Owner Report — frozen snapshot per closed period',
     'Multi-Outlet Group Console — every branch on one screen',
     'Demand Forecast — plates, revenue and (with Crest POS) covers for the next 7 or 30 days, and what to buy',
     'Fixed Assets — depreciation, valuation & Nepal statutory tax pools',

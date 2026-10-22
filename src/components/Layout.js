@@ -150,7 +150,7 @@ const REPORTS = [
 // PRO-badged group is on all of them.
 const SUITE_NAV = [
   { to: '/owner-dashboard', label: 'Owner Dashboard', icon: Crown,      ownerOnly: true },
-  { to: '/owner-report',    label: 'Owner Report',    icon: ScrollText, ownerOnly: true, longLabel: 'Monthly Owner/Manager Report' },
+  { to: '/owner-report',    label: 'Owner Report',    icon: ScrollText, ownerOnly: true, longLabel: 'Monthly Owner Report' },
   { to: '/pnl',             label: 'Profit & Loss',   icon: Scale,      ownerOnly: true, longLabel: 'Consolidated Profit & Loss' },
   // Gated on having a group as well, not on Suite: a single-outlet client has nothing to roll up.
   { to: '/group-dashboard', label: 'Group Console',   icon: Network,    ownerOnly: true, needsGroup: true },
