@@ -52,7 +52,7 @@ History: docs/rules-archive/dashboards.md#s734-nullable-source-undercount
 - X-axis ticks show the BS weekday initial under each day number (S/M/T/W/T/F/S, Sunday first, duplicate letters intended) through a custom Recharts `tick` using `bsToAd(...).getDay()`.
 - The tooltip arrow on the actual rows is shape = fact, colour = verdict, with opposite polarity: above target is green for Sales and red for Purchases. The full rule is `.claude/rules/design-system.md`, "A signal colour is a verdict" (S634); don't restate or re-derive it.
 - The food-cost band on every dashboard tile comes from the client's own `fc_warning_pct` / `fc_critical_pct` (35/45 are only defaults) via `fcBand()`, with a ✓/△/▲ marker so the verdict is not colour-only.
-- A figure containing the prorated labour estimate (Prime Cost %, True Net Margin %) discloses that inline under the number, never only in a hover.
+- A figure containing the prorated labour estimate (Prime Cost %, Net Margin %) discloses that inline under the number, never only in a hover.
 
 Why: the dotted line is a target precisely because it does not follow the data, and a print or screenshot loses the hover.
 
@@ -227,7 +227,7 @@ History: docs/rules-archive/dashboards.md#s643-mrr-arithmetic
 
 - `fcBand(pct, settings)` (`shared/imsFormulas.js`) bands Food Cost %; `lcBand` / `pcBand` / `nmBand` (`shared/operatingBands.js`) band Labour (30/37), Prime (60/65) and True Net Margin (≥20/≥10) (S660). Never an inline ternary: any page banding these imports them.
 - Render `bandFigure(pct, bander).text`, never `bander(pct).color`. The helper appends ✓/△/▲ so a call site cannot keep the colour and drop the shape.
-- `canOverheads` gates the FIGURE, not just its colour: without Overheads, True Net Margin stays unbanded and unmarked.
+- `canOverheads` gates the FIGURE, not just its colour: without Overheads, Net Margin stays unbanded and unmarked.
 - A shared band needs a shared numerator (S692). `Roster.jsx`'s Labor Forecast reads `lcBand`, and `loadedHourlyRateOf` (`laborForecast.js`) mirrors `computeMonthlyReport.js`'s per-hour estimate, with past days divided by `sales_entries` revenue. Detail: `.claude/rules/hr-payroll.md`. Every estimate charges employer SSF only with `ssf_enrolled` and `ssf_no`: `isSsfContributor()` in `computeMonthlyReport.js` and `OwnerDashboard.jsx`, the same test inline in `laborForecast.js`. The two prorated estimates charge it on BASIC through one helper, `estimatedEmployerSsf` (`labourSource.js`, S798 4b): min(basic × days ÷ month days, cap), the engine's order.
 - Sales per Labour Hour has two homes that must mean the same thing (S693): the Owner Report's `ims.revenueTotal / actualHoursWorked` for one closed period (`computeLaborAnalyticsSection.js`), and Roster's Labor Forecast over a trailing 120 days. State their real differences rather than smoothing them: the roster figure uses roster hours where Attendance has not arrived (scaled by a measured bias) and excludes outlier days. If either definition moves, move both.
 
@@ -321,7 +321,7 @@ History: docs/rules-archive/dashboards.md#s734-two-revenue-tiles
 ## Load guard and settle guard on the Owner Dashboard
 
 - Every dashboard with several loaders has a load-cancellation guard. `OwnerDashboard` keeps a request counter per section (S849 OWNER-DASHBOARD-6), so Retry reloads one section, and re-checks after every await before any setter. A single check at the top of the function misses the later awaits.
-- A page that labels tiles "(MTD)" carries the settle guard (`periodTooEarly`), applied per metric by asking whether the numerator accrues on the same clock as the denominator. Every ratio counts the finished days (day 1 reads "Ratios start after today"). Spend % so far, Prime Cost % and True Net Margin % are withheld before day 10; Labor Cost % is judged from day 2, because it accrues on the same clock as the revenue it divides. Greying it "for consistency" would be its own lie.
+- A page whose tiles are month-to-date ("so far" on the Owner Dashboard since S857, "(MTD)" before) carries the settle guard (`periodTooEarly`), applied per metric by asking whether the numerator accrues on the same clock as the denominator. Every ratio counts the finished days (day 1 reads "Ratios start after today"). Spend % so far, Prime Cost % and True Net Margin % are withheld before day 10; Labor Cost % is judged from day 2, because it accrues on the same clock as the revenue it divides. Greying it "for consistency" would be its own lie.
 
 Why: an admin switching "view as" mid-load let the previous tenant's revenue, payroll and payables repaint under the new client's name, and a day-3 outlet that had just bought the month's rice wore a red ▲ on Food Cost %.
 

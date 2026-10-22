@@ -1,13 +1,32 @@
 # Crest Suite — Consolidated To-Do List
 
 Open work on **Crest Suite** (sold as Crest Suite Pro): the owner layer on top of IMS, HR and POS.
-Its pages are the Owner Dashboard, the Monthly Owner/Manager Report, Consolidated Profit & Loss, the
+Its pages are the Owner Dashboard, the Monthly Owner Report, Consolidated Profit & Loss, the
 Group Console (with Outlet Access, HQ push and Item Prices), Demand Forecast and Fixed Assets, plus the
 Suite Pro gate and its billing. Until S848, Suite items were filed in `IMS_TODO.md`, `HR_TODO.md` and
 `POS_TODO.md`; those stay where they are (two are cross-referenced below as KNOWN).
 
 **When an item here ships, record it in that session's CHANGELOG entry and mark the row ✅ with the
 session number** (or move it to a decisions record if one is started), so this file stays a to-do list.
+
+**S857–S858 (2026-10-22, crest-v472 and v473): the Suite Pro design critique and every fix it asked for.**
+`/impeccable critique` scored the six pages 25/40 with four P1s (snapshot
+`.impeccable/critique/2026-10-22T04-59-03Z__crest-suite-pro.md`). Owner decisions, asked in plain words: the
+profit figure is **Net Margin** on every owner page; the upgrade screen shows the **price per outlet** and an
+**example with made-up figures**; long tips become one or two plain sentences and the method detail moves to Help.
+- ✅ S857 Owner Dashboard opens with one sentence (what the month keeps, then Look at), visible headings, a Needs
+  you list; Net Margin opens this month on Profit & Loss.
+- ✅ S857 The upgrade screen is an offer (problem and relief, what the page gives, price, example, Call Crest).
+- ✅ S857 Depreciation asks before every post (amount, assets, BS period); BS period dates; a Post that explains.
+- ✅ S857 Owner Report: one name, a Last month column from the frozen trend, a three-sentence summary, a way
+  forward from an open month. Group Console phone cards; push actions in plain words. P&L says its tense.
+- ✅ S858 Owner Report, P&L and Group Console keep the month in the address and step it with ‹ ›; every Fixed
+  Assets date is BS; the Tax pool Post and the disposal Confirm explain themselves; Demand Forecast lost its
+  ~180 Tab stops.
+- **Open:** a browser pass on a phone (the Group Console cards, the four-column Financial Summary at 375px) and
+  a re-run of `/impeccable critique` to score the fixes; Print and Export that wait for the business name still
+  use `disabled` (Tax pool tab and several report pages); a keyboard user gets one explanation per forecast day,
+  not each dish average.
 
 **S855 (2026-10-21, crest-v470):** the Owner Report supplier table now splits Net Spend into Cash, Credit and FonePay
 after discount (schema version 19). **Owner decision: once crest-v470 is live, Crest support presses Regenerate Snapshot

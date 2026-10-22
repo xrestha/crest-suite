@@ -5,11 +5,11 @@ paths:
   - "src/pages/Periods.js"
 ---
 
-# Monthly Owner/Manager Report (frozen snapshot)
+# Monthly Owner Report (frozen snapshot)
 
 > Moved out of the root CLAUDE.md (2026-08-18 /doctor pass) so it loads only when working on these files. Root CLAUDE.md keeps the universal invariants.
 
-### Monthly Owner/Manager Report (frozen snapshot, added S434)
+### Monthly Owner Report (frozen snapshot, added S434; named Monthly Owner/Manager Report until S857)
 
 `monthly_owner_reports` (one row per `client_id`+`period_id`, `UNIQUE` constraint enforces it) stores a `snapshot` jsonb captured at generation time — combined IMS + HR + POS figures for a closed period, computed by `src/modules/ownerReport/computeMonthlyReport.js` and written by `generateMonthlyReport.js`. Auto-generation only ever `INSERT`s (a repeat attempt 23505s and is swallowed); the only overwrite path is the explicit "Regenerate Snapshot" button on the report page, open to the Owner and Crest admin (S756), which always confirms first. **Since S849 the database holds that** (OWNER-REPORT-4, SU9 a): `owner_report_1_same_client` refuses a report filed for another business's month, and `owner_report_2_guard` (BEFORE INSERT OR UPDATE OR DELETE, browser roles only) lets only the Owner or operator write, stamps `generated_at` / `generated_by` (the browser never sends them), makes every UPDATE a `manual_regenerate`, refuses a change of client, period or month and an insert or regenerate for a month that is not closed, and refuses DELETE; `authenticated` has no DELETE grant. The operator's restore keeps a backed-up row as it was. No history row is kept. RLS blocks every staff-account type regardless of module rank (same `no_self_service_accounts`/`no_pos_pin_staff`/`no_ims_staff`/`no_hr_role_staff` RESTRICTIVE pattern as the codebase's other sensitive tables) — this table carries HR payroll/headcount detail alongside IMS/POS financials, owner/admin only.
 

@@ -266,8 +266,8 @@ changes what a page DOES, support follows the viewed client's `clientModules`: `
   any routed or navigated `featureKey` with no label. Help's Module Guide files IMS pages by the same
   catalog's `FEATURE_TIER` (S849 DOCS-1, `helpFeatureTiers.test.js`).
 - **`SuiteGate` makes an offer, not a padlock (S857).** For the Owner: `SUITE_OFFERS` (title held to the /login copy rule, three things the page gives, an EXAMPLE with made-up figures that reads nothing), the price from `useSettings().pricing.suite`, and Call Crest as the primary action. Never let the example read the client's data: an Owner without Suite sends no Suite read (S849 ACCESS-9).
-- **The buyer is the audience for a pitch.** The upgrade teaser, its account-menu row and the
-  "View plans →" plus contact block on `SuiteGate` and `PremiumGate` render for `isOwner` only, from
+- **The buyer is the audience for a pitch.** The upgrade teaser, its account-menu row, `PremiumGate`'s
+  "View plans →" plus contact block and `SuiteGate`'s offer (S857) render for `isOwner` only, from
   one `upgrade` object in `Layout.js`; anyone else gets one sentence: *it is switched on for the whole
   outlet, not per login — ask the account owner*.
 - **`/pricing` reads the session.** Signed in, "Login →" becomes "Back to Crest →" and every buy

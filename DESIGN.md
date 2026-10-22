@@ -1390,11 +1390,41 @@ of colour blindness and a monochrome print, and cannot fail a contrast check bec
 text — joined by the word OPEN and a `△`. `provisionalWhenOpen` is opt-in, because on a data-entry
 screen an open period is the normal working state and flagging it would be noise.
 
+### The owner pages open with their answer (S857)
+
+The Owner Dashboard's first line is a sentence, not a tile: **`.owner-verdict`** says how much of every
+NPR 100 sold the business keeps ("Bhadra so far, you keep NPR 8 of every NPR 100 you sell"), at 22px
+over the 2px section rule, then one line of the banded Net Margin and either `Look at:` (the ratios
+marked △ or ▲, worst first) or why nothing is judged yet. It is built only from the tiles' own figures
+and withholds a verdict exactly when they do. A big number in a box would be the hero-metric template;
+this is the sentence an owner reads aloud to a partner, in the voice of the Owner Report. The margin is
+**Net Margin** on every owner page, and the dashboard's tiles say "so far", never "(MTD)".
+
+**The Suite Pro offer** (`SuiteGate`, `.suite-offer`) replaces the padlock card an Owner without Suite
+met on every Suite page. Pitch on the left — the problem then the relief in two short sentences, three
+lines of what the page gives over 1px rules, the price per outlet from Plan Pricing — and on the right
+an EXAMPLE drawn like the page (2px head rule, tabular figures) whose header says EXAMPLE and whose
+caption says the figures are made up. Call Crest is the primary button. It stacks under 768px. It reads
+nothing, so an Owner without Suite still sends no Suite read.
+
+### Stepping between months (S858)
+
+On the owner pages the month on screen lives in the address — `?period=<id>` on the Owner Report and
+Profit & Loss (`?fy=<start>` for a fiscal year), `?month=YYYY-MM` in BS on the Group Console — so a
+reload, Back or a link sent to the accountant opens the same month. Each picker sits inside
+**`MonthStepper`**: a `.btn-icon` ‹ and › either side, named for where they go ("Previous month:
+Shrawan 2083"). At an end of the list a button stays where it is, `aria-disabled` and named "No earlier
+month", so the picker never moves under a thumb; it is never `disabled` for a load in flight, because
+that drops the focus a keyboard user just put on it. `.month-stepper--fields` lines the buttons up with
+labelled boxes (the Group Console's Month and Year).
+
 ### Page-state banners
 
 Red says you cannot; amber says you can, but this is not the usual case. An amber banner is what an
 admin editing a closed month gets — the action is permitted and the notice must not read as a
-block.
+block. Since S857 it is a class, **`.amber-banner`**: the whole border tinted to 35% amber, an 8%
+fill, text2 copy and a `strong` lead in amber-text. Three Suite pages had typed their own copies at
+three different tints.
 
 The third form says neither: **`.note-banner`** (S796) is an instruction or a plain fact about the
 page — "enter quantities in the item's UOM", "labour comes from your finalized payroll run". It is
