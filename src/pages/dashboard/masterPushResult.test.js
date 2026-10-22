@@ -1,4 +1,4 @@
-import { readPushResult, countOf, countsLine, pushOutcome, PUSH_NOT_RUN_TEXT, PUSH_UNKNOWN_TEXT } from './masterPushResult'
+import { readPushResult, countOf, countsLine, actionWords, pushOutcome, PUSH_NOT_RUN_TEXT, PUSH_UNKNOWN_TEXT } from './masterPushResult'
 
 const total = n => ({ row_no: 0, row_kind: 'total', row_n: n })
 const summary = (row_no, tid, tname, entity, action, n) => ({ row_no, row_kind: 'summary', target_client_id: tid, target_client_name: tname, entity, action, row_n: n })
@@ -59,9 +59,22 @@ describe('readPushResult', () => {
     expect(r.rows).toHaveLength(2)
   })
 
-  test('countsLine names each action with its count', () => {
-    expect(countsLine({ create: 12, update: 3, conflict: 1, adopt: 0 })).toBe('12 create · 3 update · 1 conflict')
+  test('countsLine names each action with its count, in plain words (S857)', () => {
+    expect(countsLine({ create: 12, update: 3, conflict: 1, adopt: 0 })).toBe('12 to add · 3 to update · 1 blocked at the branch')
+    expect(countsLine({ create: 12, update: 3, adopt: 2 }, { applied: true })).toBe('12 added · 3 updated · 2 matched by name')
+    expect(countsLine({ somethingNew: 4 })).toBe('4 somethingNew')
     expect(countsLine({})).toBe('')
+  })
+
+  test('actionWords never shows the database code for an action it knows (S857)', () => {
+    for (const a of ['create', 'adopt', 'update', 'replaced', 'partial', 'skipped', 'change', 'conflict', 'hide', 'warning']) {
+      expect(actionWords(a)).not.toBe(a)
+      expect(actionWords(a, { applied: true })).not.toBe(a)
+    }
+    expect(actionWords('adopt')).toBe('matched by name: will follow HQ')
+    expect(actionWords('conflict', { applied: true })).toBe('blocked at the branch: skipped')
+    expect(actionWords('create', { applied: true })).toBe('added')
+    expect(actionWords('unknown')).toBe('unknown')
   })
 })
 

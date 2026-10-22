@@ -120,3 +120,25 @@ test('the operator reads the viewed group by its id', async () => {
   expect(await screen.findByText(/No outlet in your group has Crest Suite Pro/)).toBeTruthy()
   expect(seen).toEqual(['g9'])
 })
+
+// S857: the Owner Dashboard's Net Margin tile opens /pnl on the month it showed, with
+// `state.periodId`, instead of the latest closed month the page defaults to.
+const P7 = { id: 'p7', bs_year: 2083, bs_month: 6, status: 'open' }
+const renderAt = state => render(
+  <MemoryRouter initialEntries={[{ pathname: '/pnl', state }]}><ConsolidatedPnl /></MemoryRouter>,
+)
+
+test('opens on the month the Owner Dashboard sent, provisional while it is open', async () => {
+  mockTables.monthly_periods = { data: [P7, P], error: null }
+  renderAt({ periodId: 'p7' })
+  expect(await screen.findByText(/Provisional/)).toBeTruthy()
+  expect(screen.getByLabelText('Period').value).toBe('period:p7')
+})
+
+test('a month that is not in this outlet list is ignored: the latest closed month opens', async () => {
+  mockTables.monthly_periods = { data: [P7, P], error: null }
+  renderAt({ periodId: 'someone-else' })
+  expect(await screen.findByText('Delivery commission')).toBeTruthy()
+  expect(screen.getByLabelText('Period').value).toBe('period:p6')
+  expect(screen.queryByText(/Provisional/)).toBeNull()
+})

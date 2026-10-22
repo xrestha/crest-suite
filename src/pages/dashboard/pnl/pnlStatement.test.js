@@ -168,7 +168,7 @@ describe('statementRows', () => {
     expect(rows[0]).toMatchObject({ Line: 'Status', 'BLOOM CAFE - PKR': 'no period' })
     for (const r of rows.slice(1)) expect(r['BLOOM CAFE - PKR']).toBe('')
     expect(rows[rows.length - 1].Line).toBe('Depreciation (memo, not subtracted)')
-    expect(rows.find(r => r.Line === 'Cost of Goods Sold')['BLOOM CAFE']).toBeLessThan(0)
+    expect(rows.find(r => r.Line === 'Cost of Goods Sold (food used)')['BLOOM CAFE']).toBeLessThan(0)
   })
 
   it('adds a column per month for a fiscal year', () => {

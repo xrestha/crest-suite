@@ -72,7 +72,9 @@ export default function GroupItemPrices({ bsYear, bsMonth, readGroupId = null, r
       <div style={{ marginBottom: 12 }}>
         <h2 style={{ fontSize: 15, fontWeight: 700, margin: '0 0 4px', color: 'var(--theme-text1)' }}>
           Same item, different price{' '}
-          <Tip text="Items count as the same only when your HQ has pushed them to a branch (Push master data, below) — two items that merely share a name are never compared, because renaming either one would then mix up two different things. Prices are before VAT and after each bill's discount, averaged over what that outlet paid for the item this month — free lines (a sample, a 'buy 10 get 1') are left out — so a VAT-registered outlet and a PAN-only one buying at the same price show the same price. Only outlets whose own Crest Suite Pro is live are included." width={340}>ⓘ</Tip>
+          {/* S857: two plain sentences; the rest of the method (never by name, free lines left out,
+              VAT and PAN outlets alike, live Suite only) is on the Help page. */}
+          <Tip text="Only items your HQ pushed to the branches count as the same item. Prices are before VAT and after each bill discount, averaged over the month." width={300}>ⓘ</Tip>
         </h2>
         <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0 }}>
           What each outlet paid in {monthLabel} for the same item, cheapest marked. A higher price can have a reason — a smaller order, a nearer supplier, a better grade — so this shows where to ask, not who is wrong.
@@ -103,7 +105,7 @@ export default function GroupItemPrices({ bsYear, bsMonth, readGroupId = null, r
                     <th key={c.id} style={{ textAlign: 'right' }}>{c.name}</th>
                   ))}
                   <th style={{ textAlign: 'right' }}>
-                    <Tip text="For each outlet that paid more than the lowest price: (its price − the lowest price) × what it bought, added up. What the group paid above its own best price for this item this month." width={280}>Above the lowest</Tip>
+                    <Tip text="What the group paid above its own lowest price for this item this month." width={280}>Above the lowest</Tip>
                   </th>
                 </tr>
               </thead>

@@ -248,7 +248,8 @@ export default function OutletAccessPanel({ outlets, readGroupId = null, readOnl
                     <span>{o.name}</span>
                   </th>
                 ))}
-                <th />
+                {/* S857: the Save column had a blank header, read as nothing by a screen reader. */}
+                <th><span className="sr-only">Save</span></th>
               </tr>
             </thead>
             <tbody>
@@ -272,11 +273,11 @@ export default function OutletAccessPanel({ outlets, readGroupId = null, readOnl
                       // A till PIN works only on its own outlet's tablets (S809 ACCESS-4): set_active_outlet
                       // refuses it every other outlet, and set_outlet_access refuses to grant one.
                       if (kind === 'till_pin') {
-                        return fixedCell(o.id, `A till PIN works only on its own outlet's tablets, so it cannot be given ${o.name}. If this person also works there, add them under ${o.name}'s POS Staff with a PIN of their own.`, 'till only')
+                        return fixedCell(o.id, `A till PIN works only on the tablets of its own outlet, so it cannot be given ${o.name}. To let this person bill there too, add them to POS Staff at ${o.name} with a PIN of their own.`, 'till only')
                       }
                       // S849 GROUP-3: a stock-count PIN likewise counts only into its own outlet's month.
                       if (kind === 'count_pin') {
-                        return fixedCell(o.id, `A stock-count PIN works only on its own outlet's tablets, so it cannot be given ${o.name}. If this person also counts there, add a count PIN for them in ${o.name}'s Stock Count → Settings.`, 'count tablet only')
+                        return fixedCell(o.id, `A stock-count PIN works only on the tablets of its own outlet, so it cannot be given ${o.name}. To let this person count there too, add a count PIN for them at ${o.name} in Stock Count → Settings.`, 'count tablet only')
                       }
                       return (
                         <td key={o.id} style={{ textAlign: 'center' }}>

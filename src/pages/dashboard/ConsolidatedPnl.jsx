@@ -19,9 +19,10 @@
 //   Depreciation — a memo under Net Profit, never subtracted (PNL-3).
 //
 // Defaults to the most recent CLOSED period: COGS subtracts closing stock, so an open month's figure is a
-// whole shelf. An open month can still be picked; it renders unjudged (no colour) and provisional.
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Navigate } from 'react-router-dom'
+// whole shelf. An open month can still be picked; it renders unjudged (no colour) and provisional. A page
+// that sends a month along (the Owner Dashboard's Net Margin tile, S857) opens on that month instead.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { supabase } from '../../supabaseClient'
@@ -41,6 +42,7 @@ import { UncountedItemsBanner } from '../../shared/uncountedItems'
 import SuiteGate, { SUITE_PAGES, useSuiteAccess } from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
 import ReportPage from '../../components/ReportPage'
+import PeriodScope from '../../components/PeriodScope'
 import { printWithTitle } from '../../utils/printTitle'
 import { withTimeout, settleWithin } from '../../utils/withTimeout'
 import { suiteLive } from '../../utils/subscription'
@@ -81,6 +83,12 @@ export default function ConsolidatedPnl() {
   const { scopedFrom } = db
   const biz = useBizInfo()
   const periodReq = useLatestRequest()
+  // S857: the Owner Dashboard's Net Margin tile opens this page with `state.periodId`, the month the
+  // tile showed, so the owner lands on that month and not on the latest closed one. Read once, on the
+  // first render; used only while the id is in this outlet's own period list (a stale or foreign id
+  // falls back to the closed-month default), and it picks a month exactly as the selector does.
+  const location = useLocation()
+  const askedPeriodRef = useRef(location.state?.periodId || null)
 
   // In a group the page is the matrix (PNL-13: the client row's group, never a sibling read that can
   // fail). For the operator AuthContext's groupId is the VIEWED client's group (ACCESS-8), read through
@@ -360,8 +368,10 @@ export default function ConsolidatedPnl() {
     if (error) { setLoadError(error); setPeriods([]); setLoading(false); return }
     const list = p || []
     setPeriods(list)
-    // Closed-period default — COGS subtracts a closing count that an open month does not have.
-    const target = list.find(x => x.status === 'closed') || list[0]
+    // Closed-period default — COGS subtracts a closing count that an open month does not have — unless
+    // the page was opened on a month of this outlet's (askedPeriodRef above).
+    const asked = askedPeriodRef.current ? list.find(x => x.id === askedPeriodRef.current) : null
+    const target = asked || list.find(x => x.status === 'closed') || list[0]
     if (!target) { setSelectedKey(null); setLoading(false); return }
     const key = periodReq.begin(`period:${target.id}`)
     setSelectedKey(key)
@@ -447,11 +457,6 @@ export default function ConsolidatedPnl() {
   // The `micro` step from DESIGN.md's ramp — 10px is only ever legal as micro-caps.
   const colMarkerStyle = { display: 'block', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }
   const markerColor = tone => (tone === 'warn' ? 'var(--theme-amber-text)' : 'var(--theme-text3)')
-  const warnStyle = {
-    background: 'color-mix(in srgb, var(--theme-amber) 13%, transparent)',
-    border: '1px solid var(--theme-amber)', borderRadius: 'var(--radius-md)',
-    padding: '10px 14px', marginBottom: 16, fontSize: 13, color: 'var(--theme-amber-text)',
-  }
   const net = LINES.find(l => l.key === 'netProfit')
   const gross = LINES.find(l => l.key === 'grossProfit')
   const busy = loading || (!!selectedKey && !isCurrent && !loadError)
@@ -460,10 +465,10 @@ export default function ConsolidatedPnl() {
     <>
       <button className="btn btn-ghost" style={{ fontSize: 12 }}
         disabled={busy || !!loadError || isEmpty || !isCurrent}
-        onClick={() => printWithTitle(`Profit & Loss - ${scope}`)}>🖨 Print</button>
+        onClick={() => printWithTitle(`Profit & Loss - ${scope}`)}>Print</button>
       <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
         disabled={busy || !!loadError || isEmpty || !isCurrent || !biz.ready}
-        title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>↓ Export Excel</button>
+        title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
       <select aria-label="Period" className="form-select" value={selectedKey || ''}
         onChange={e => handleSelect(e.target.value)}>
         <optgroup label="Months">
@@ -484,10 +489,11 @@ export default function ConsolidatedPnl() {
     </>
   )
 
+  // `.amber-banner` (S857): the shared "you can, but this is not the usual case" box, not a hand-typed copy.
   const banners = (
     <>
       {isCurrent && stmt?.open && (
-        <div style={warnStyle}>
+        <div className="amber-banner">
           <strong>Provisional — {grouped ? 'at least one outlet’s month is still open.' : sel?.kind === 'fy' ? 'a month of the year is still open.' : 'this month is still open.'}</strong>{' '}
           Closing stock has not been counted yet, so COGS treats closing stock as zero and overstates the true
           figure. Gross and Net Profit carry no colour until the month is closed.
@@ -496,7 +502,7 @@ export default function ConsolidatedPnl() {
       {/* A statement that silently omits labour overstates Net Profit by exactly that much. With HR off,
           the only labour this page can see is Overheads' Labor tab — say so above the figures (S683). */}
       {!hrOn && !grouped && (
-        <div style={warnStyle}>
+        <div className="amber-banner">
           <strong>Labour is from Overheads only.</strong>{' '}
           Crest HR is not enabled, so no payroll feeds this statement — the Labour line is whatever was
           entered in Overheads&apos; Labor tab for the month{stmt?.labourInfo?.source === 'overheads' || stmt?.labour ? '' : ', which is currently nothing'}.
@@ -538,7 +544,8 @@ export default function ConsolidatedPnl() {
         <div className="stat-value" style={{ color: lineColor(net, stmt.netProfit, lineWithheld(net, stmt)) }}>
           {npr(stmt.netProfit)}
         </div>
-        <div className="stat-sub">{verdictSub(stmt, net) || `${pctOf(stmt.netProfit, stmt.revenue)} net margin`}</div>
+        {/* "Net Margin" is the figure's one name on every owner page (S857). */}
+        <div className="stat-sub">{verdictSub(stmt, net) || `Net Margin ${pctOf(stmt.netProfit, stmt.revenue)}`}</div>
       </div>
     </div>
   ) : null
@@ -622,7 +629,7 @@ export default function ConsolidatedPnl() {
           ))}
           <tr>
             <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>
-              <Tip text="Posted Fixed Asset depreciation for the month, pro-rated by days from runs longer than the month. Shown, never subtracted: Net Profit above is before depreciation, interest and income tax." width={300}>
+              <Tip text="Depreciation posted in Fixed Assets for the month. Shown for reference only: Net Profit above is before depreciation." width={300}>
                 Depreciation (memo, not subtracted)
               </Tip>
             </td>
@@ -673,7 +680,7 @@ export default function ConsolidatedPnl() {
             ))}
             <tr>
               <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>
-                <Tip text="Posted Fixed Asset depreciation for the period, pro-rated by days from runs longer than the month, the way Overheads shows it. Shown, never subtracted: Net Profit above is before depreciation, interest and income tax." width={300}>
+                <Tip text="Depreciation posted in Fixed Assets for the period. Shown for reference only: Net Profit above is before depreciation." width={300}>
                   Depreciation (memo, not subtracted)
                 </Tip>
               </td>
@@ -692,7 +699,11 @@ export default function ConsolidatedPnl() {
     <SuiteGate page={SUITE_PAGES.consolidatedPnl} entitled={groupSuiteLive}>
       <ReportPage
         title="Profit &amp; Loss"
-        subtitle={grouped ? `Every outlet side by side, one statement — ${scope}` : `One statement across every module — ${scope}`}
+        // S857: the subtitle says what kind of page this is; the period it covers is the chip below it.
+        subtitle={grouped
+          ? 'Any month or fiscal year, set out as accounts for every outlet and the group: revenue down to net profit.'
+          : 'Any month or fiscal year, set out as accounts: revenue down to net profit.'}
+        scope={scope ? <PeriodScope label={scope} status={sel?.open ? 'open' : 'closed'} provisionalWhenOpen /> : null}
         actions={actions}
         noPeriod={!busy && !loadError && periods.length === 0}
         noPeriodWhat="the P&L statement"
@@ -700,7 +711,8 @@ export default function ConsolidatedPnl() {
         loadingText="Building the statement…"
         error={loadError}
         empty={isEmpty}
-        emptyIcon="📄"
+        // No pictograph: a screen reader read the old page emoji aloud (S857).
+        emptyIcon={null}
         emptyText={grouped
           ? `No outlet in your group has Crest Suite Pro for ${scope}.`
           : `No figures recorded for ${scope} yet.`}

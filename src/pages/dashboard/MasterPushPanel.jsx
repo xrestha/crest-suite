@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../../supabaseClient'
-import Tip from '../../components/Tip'
 import ReportLoadError from '../../components/ReportLoadError'
 import ActionError from '../../components/ActionError'
 import { errorInfo } from '../../shared/errorText'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { settleWithin } from '../../utils/withTimeout'
 import { useConfirm, CONFIRM_TIMEOUT_MS } from '../../shared/hooks/useConfirm'
-import { readPushResult, countOf, countsLine, pushOutcome, PUSH_UNKNOWN_TEXT } from './masterPushResult'
+import { readPushResult, countOf, countsLine, actionWords, pushOutcome, PUSH_UNKNOWN_TEXT } from './masterPushResult'
 
 // HQ -> branch master-data push (S617). The UI half of push_master_data().
 //
@@ -25,25 +24,30 @@ import { readPushResult, countOf, countsLine, pushOutcome, PUSH_UNKNOWN_TEXT } f
 // Entities map to the RPC's p_entities. 'prices' is deliberately separable from 'recipes': a
 // branch in a mall legitimately charges more than one on a high street, so pushing the recipe
 // definition must not drag its selling price along unless that was actually asked for.
+//
+// S857: each option carries a one-line `hint` shown under it, not a Tip inside its label (a Tip there
+// was a second Tab stop per checkbox and unreadable on a phone). The rules the old tips spelled out
+// (what each push keeps, switches off or leaves alone) are on the Help page; the preview names every
+// record they touch before anything is written.
 const ENTITY_CHOICES = [
   {
     key: 'items',
     keys: ['categories', 'items'],
     label: 'Items & categories',
-    tip: 'The item master and its categories. Purchases, stock count and every IMS report key off items, so this is what makes branch figures comparable at all. A branch keeps its own purchase rate — only the definition is pushed.',
+    hint: 'The item list and its categories. Each branch keeps its own purchase rate.',
   },
   {
     key: 'recipes',
     keys: ['recipes'],
     label: 'Recipes & ingredients',
     // S849 GROUP-2 (owner SU2 a) and GROUP-12 (owner SU8 a).
-    tip: 'Recipe cards and their ingredient lines, remapped to each branch’s own items. A dish whose recipe uses an ingredient this branch does not have is left exactly as the branch has it and listed as skipped, so nothing is lost; a dish new to the branch is added with the lines that match, and the preview names what is missing. The Veg / Egg / Non-veg mark follows HQ, and the preview names every dish whose mark changes. A new dish takes HQ’s description but not its photo — add the photo at the branch. Each branch keeps its own On POS and Active switch for a dish it already has; a new dish starts as it is at HQ, except that it arrives off the till, unpriced, when HQ has no price for it or the branch charges VAT differently.',
+    hint: 'Recipe cards and their ingredients. A dish that needs an item the branch does not have is left as the branch has it.',
   },
   {
     key: 'prices',
     keys: ['prices'],
     label: 'Selling prices',
-    tip: 'Also overwrite each branch’s menu prices with HQ’s, and the extra charge on each Crest Customization choice when Choices is ticked. Leave this off if branches price differently — the recipe itself still gets standardised either way. A dish HQ has not priced keeps the branch’s price.',
+    hint: 'Also copies the HQ menu prices. Leave it off if branches charge differently. Needs Recipes & ingredients.',
     requires: 'recipes',
   },
   // S838: Crest Customization. Needs Recipes, because the groups sit on dishes and a choice's
@@ -52,7 +56,7 @@ const ENTITY_CHOICES = [
     key: 'options',
     keys: ['options'],
     label: 'Choices and combos (sizes, add-ons, build-your-own, combos)',
-    tip: 'Crest Customization’s choice groups and choices, what each one takes from stock, the groups on each dish, the build-your-own mark, and combos with their picks and dishes. A new choice or combo arrives at HQ’s price; after that its price follows Selling prices, and whether it is switched on stays the branch’s own. A choice or combo HQ deletes is switched off at the branch, never deleted, so past bills keep its name. A group the branch made itself is left alone. A new combo whose dish is not at the branch yet arrives switched off, and the preview names the dish.',
+    hint: 'A choice or combo that HQ deletes is switched off at the branch, never deleted. Needs Recipes & ingredients.',
     requires: 'recipes',
   },
 ]
@@ -173,6 +177,19 @@ export default function MasterPushPanel({ outlets, groupId, readOnly = false }) 
     const skippedChoices = countOf(plan, 'choice stock lines', 'skipped')
     const partial = countOf(plan, 'ingredients', 'partial') + countOf(plan, 'choice stock lines', 'partial')
     const marks = countOf(plan, 'food marks', 'change')
+    // S857: one consequence per line, each with its own plural, where it had been one paragraph of
+    // "record(s)" clauses. A count of zero says nothing, so it is left out.
+    const consequences = [
+      c.create && s(c.create, 'new record will be added', 'new records will be added'),
+      c.adopt && `${s(c.adopt, 'record', 'records')} with the same name at the branch will be matched and take the HQ version`,
+      c.update && `${s(c.update, 'record', 'records')} will be overwritten with the HQ version`,
+      c.hide && `${s(c.hide, 'choice, combo or group', 'choices, combos or groups')} that HQ no longer has will be switched off`,
+      skippedDishes && `${s(skippedDishes, 'dish stays', 'dishes stay')} as the branch has ${skippedDishes === 1 ? 'it' : 'them'}, because an ingredient is missing there`,
+      skippedChoices && `${s(skippedChoices, 'choice keeps', 'choices keep')} the branch stock lines, because an ingredient is missing there`,
+      partial && `${s(partial, 'new dish or choice arrives', 'new dishes or choices arrive')} without the lines the branch cannot match (listed above)`,
+      marks && `${s(marks, 'dish changes', 'dishes change')} food mark (listed above)`,
+      c.conflict && `${s(c.conflict, 'record is', 'records are')} blocked at the branch and will be skipped; each row above says what is in the way`,
+    ].filter(Boolean)
     ask({
       title: 'Push master data',
       confirmLabel: 'Push now',
@@ -180,19 +197,14 @@ export default function MasterPushPanel({ outlets, groupId, readOnly = false }) 
       danger: true,
       body: (
         <>
-          <p style={{ margin: 0 }}>
-            {c.create || 0} record(s) will be created, {c.adopt || 0} existing record(s)
-            will be taken over by HQ, and {c.update || 0} will be overwritten with HQ’s
-            version across {targets.length} branch{targets.length === 1 ? '' : 'es'}.
-            {c.hide ? ` ${c.hide} choice(s), combo(s) or group(s) HQ no longer has will be switched off.` : ''}
-            {skippedDishes ? ` ${s(skippedDishes, 'dish', 'dishes')} will be left as the branch has ${skippedDishes === 1 ? 'it' : 'them'} because an ingredient is missing there.` : ''}
-            {skippedChoices ? ` ${s(skippedChoices, 'choice keeps', 'choices keep')} the branch’s own stock lines for the same reason.` : ''}
-            {partial ? ` ${s(partial, 'new dish or choice arrives', 'new dishes or choices arrive')} without the lines the branch cannot match — listed above.` : ''}
-            {marks ? ` ${s(marks, 'dish changes', 'dishes change')} food mark — listed above.` : ''}
-            {c.conflict ? ` ${c.conflict} record(s) in conflict will be skipped — each row says what stands in the way.` : ''}
-          </p>
+          <p style={{ margin: 0 }}>Into {s(targets.length, 'branch', 'branches')}:</p>
+          <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+            {consequences.length === 0
+              ? <li>No record will be added or overwritten.</li>
+              : consequences.map(t => <li key={t}>{t}.</li>)}
+          </ul>
           <p style={{ margin: '10px 0 0', color: 'var(--theme-text2)' }}>
-            Branch purchase rates are not touched. This cannot be undone from here — a branch would
+            Branch purchase rates are not touched. This cannot be undone from here: a branch would
             have to re-enter anything it had changed.
           </p>
         </>
@@ -247,16 +259,30 @@ export default function MasterPushPanel({ outlets, groupId, readOnly = false }) 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
                 {ENTITY_CHOICES.map(c => {
                   const blocked = c.requires && !picked[c.requires]
+                  const id = `push-what-${c.key}`
+                  // One Tab stop per option: the checkbox, described by the visible hint under it
+                  // (S857). The hint stays at full strength when the option is blocked, because it
+                  // is what says why; the old 0.5 opacity on the whole row took the text under AA.
                   return (
-                    <label key={c.key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: blocked ? 'not-allowed' : 'pointer', opacity: blocked ? 0.5 : 1 }}>
+                    <div key={c.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                       <input
+                        id={id}
                         type="checkbox"
                         checked={!!picked[c.key] && !blocked}
                         disabled={blocked || busy}
                         onChange={() => toggleEntity(c.key)}
+                        aria-describedby={`${id}-hint`}
+                        style={{ marginTop: 3 }}
                       />
-                      <Tip text={c.tip} width={320}>{c.label}</Tip>
-                    </label>
+                      <div style={{ minWidth: 0 }}>
+                        <label htmlFor={id} style={{ fontSize: 13, color: blocked ? 'var(--theme-text3)' : 'var(--theme-text1)', cursor: blocked ? 'not-allowed' : 'pointer' }}>
+                          {c.label}
+                        </label>
+                        <span id={`${id}-hint`} style={{ display: 'block', fontSize: 12, lineHeight: 1.5, color: 'var(--theme-text2)', maxWidth: '60ch' }}>
+                          {c.hint}
+                        </span>
+                      </div>
+                    </div>
                   )
                 })}
               </div>
@@ -309,11 +335,11 @@ export default function MasterPushPanel({ outlets, groupId, readOnly = false }) 
                 {applied ? 'Done — ' : 'Preview — '}
                 {Object.keys(plan.counts).length === 0
                   ? (applied ? 'nothing needed changing; these branches already matched HQ.' : 'nothing to change; these branches already match HQ.')
-                  : countsLine(plan.counts)}
+                  : countsLine(plan.counts, { applied })}
               </p>
               {plan.byBranch.length > 1 && (
                 <ul style={{ margin: '0 0 8px', paddingLeft: 18, fontSize: 12, color: 'var(--theme-text2)' }}>
-                  {plan.byBranch.map(b => <li key={b.id}>{b.name}: {countsLine(b.counts)}</li>)}
+                  {plan.byBranch.map(b => <li key={b.id}>{b.name}: {countsLine(b.counts, { applied })}</li>)}
                 </ul>
               )}
               {applied && plan.rows.length > 0 && (
@@ -344,7 +370,9 @@ export default function MasterPushPanel({ outlets, groupId, readOnly = false }) 
                         <tr key={r.row_no ?? i}>
                           <td style={{ whiteSpace: 'nowrap' }}>{r.target_client_name}</td>
                           <td style={{ whiteSpace: 'nowrap' }}>{r.entity}</td>
-                          <td><span className={ACTION_STYLE[r.action] || 'badge-gray'}>{r.action}</span></td>
+                          {/* Plain words, never the database code (S857); `.badge-sentence` keeps the
+                              badge from capitalising every word of a phrase. */}
+                          <td><span className={`${ACTION_STYLE[r.action] || 'badge-gray'} badge-sentence`}>{actionWords(r.action, { applied })}</span></td>
                           <td>{r.record_name}</td>
                           <td style={{ color: 'var(--theme-text2)', fontSize: 12 }}>{r.detail || '—'}</td>
                         </tr>

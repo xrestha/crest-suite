@@ -76,10 +76,54 @@ export function readPushResult(rows) {
 // How many records an action covers for one entity (0 when none).
 export const countOf = (result, entity, action) => result?.byEntity?.[entity]?.[action] || 0
 
-// "12 create · 3 update · 1 conflict" — a count line from { [action]: n }.
-export const countsLine = counts => Object.entries(counts || {})
+// The plan actions in plain words (S857, the Suite critique: the preview showed the database codes,
+// so an owner read "adopt" and "conflict"). Every action push_master_data can plan or report, as
+// [before the push, after it]: a preview says what will happen, a finished push what did. An action
+// this table does not know (a newer database) falls back to its own code, so it still shows.
+//   create    a record new to the branch
+//   adopt     the first push into a branch that already has the record: matched by name, once
+//   update    a linked record overwritten with the HQ version
+//   replaced  a list (ingredient lines, choice stock lines, a dish's choice groups) set to HQ's
+//   partial   a new dish or choice written without the lines the branch cannot match
+//   skipped   the branch's own dish or stock lines kept whole (an ingredient is missing there)
+//   change    a dish's Veg / Egg / Non-veg mark changes at the branch
+//   conflict  another branch record (a name, a code) is in the way, so this one is not written
+//   hide      a choice, group or combo HQ deleted, switched off at the branch
+//   warning   a choice that would take a dish below zero at the branch
+const ACTION_WORDS = {
+  create: ['will be added', 'added'],
+  adopt: ['matched by name: will follow HQ', 'matched by name: now follows HQ'],
+  update: ['will be updated', 'updated'],
+  replaced: ['will match HQ', 'now matches HQ'],
+  partial: ['will be added without some lines', 'added without some lines'],
+  skipped: ['kept unchanged at the branch', 'kept unchanged at the branch'],
+  change: ['food mark will change', 'food mark changed'],
+  conflict: ['blocked at the branch: skipped', 'blocked at the branch: skipped'],
+  hide: ['will be switched off', 'switched off'],
+  warning: ['check this', 'check this'],
+}
+// The same actions as a count: "12 to add", "12 added".
+const COUNT_WORDS = {
+  create: ['to add', 'added'],
+  adopt: ['to match by name', 'matched by name'],
+  update: ['to update', 'updated'],
+  replaced: ['to match HQ', 'now match HQ'],
+  partial: ['to add without some lines', 'added without some lines'],
+  skipped: ['kept unchanged at the branch', 'kept unchanged at the branch'],
+  change: ['food marks to change', 'food marks changed'],
+  conflict: ['blocked at the branch', 'blocked at the branch'],
+  hide: ['to switch off', 'switched off'],
+  warning: ['to check', 'to check'],
+}
+
+// One plan row's action as the table's badge says it.
+export const actionWords = (action, { applied = false } = {}) => ACTION_WORDS[action]?.[applied ? 1 : 0] || action
+
+// "12 to add · 3 to update · 1 blocked at the branch" (a preview), or "12 added · 3 updated · …" (a
+// finished push) — a count line from { [action]: n }.
+export const countsLine = (counts, { applied = false } = {}) => Object.entries(counts || {})
   .filter(([, n]) => n > 0)
-  .map(([k, n]) => `${n} ${k}`)
+  .map(([k, n]) => `${n} ${COUNT_WORDS[k]?.[applied ? 1 : 0] || k}`)
   .join(' · ')
 
 // A Postgres SQLSTATE is five characters (42501, 23505, 57014, P0001); PostgREST's own refusals are

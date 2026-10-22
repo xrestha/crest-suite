@@ -19,23 +19,25 @@ export const pctOf = (part, whole) => (whole > 0 && part != null ? `${((part / w
 export const LINES = [
   { key: 'revenue', label: 'Revenue',
     tip: 'All sales for the period at the price actually charged (manual Sales Entry and POS together, counted once), net of discounts. Complimentary items are excluded — they were never paid for.' },
-  { key: 'cogs', label: 'Cost of Goods Sold', cost: true,
-    tip: `${COGS_FORMULA}. Valued at each item's per-unit rate. Sub-recipes are excluded (their raw ingredients are already counted) — same convention as Monthly Summary, so the two pages tie. Stock moved between your outlets counts like a purchase when it arrives and like a supplier return when it is sent. Stock is valued at today's item prices, so a closed month's figure moves when a price changes.` },
+  // S857: the accounting name stays, with the plain words beside it, once, so the table, the group
+  // matrix and the workbook all say it. The method detail that was here is on the Help page.
+  { key: 'cogs', label: 'Cost of Goods Sold (food used)', cost: true,
+    tip: `COGS, the food and drink stock used up to make what you sold: ${COGS_FORMULA}. The same figure as Monthly Summary.` },
   { key: 'grossProfit', label: 'Gross Profit', strong: true },
   { key: 'wastageVal', label: 'Wastage', cost: true,
-    tip: 'Recorded wastage of raw items, valued at cost, broken out of COGS so spoiled stock is visible. Wasted prep is already inside COGS through its ingredients, so the Wastage Report and the dashboards\' Wastage Value can be higher.' },
+    tip: 'Raw items thrown away, valued at cost and kept out of COGS so spoiled stock is visible. Wasted prep is already inside COGS through its ingredients.' },
   { key: 'staffMealsVal', label: 'Staff Meals', cost: true,
     tip: 'Food consumed by staff, valued at cost — spent stock that earned no revenue, shown as its own line.' },
   { key: 'deliveryCommission', label: 'Delivery commission', cost: true,
-    tip: 'What Foodmandu, Pathao or another delivery partner kept from bills sold this month, as recorded when you took their payment in Customers → Credit. A bill not settled yet has no commission in it.' },
+    tip: 'What Foodmandu, Pathao or another delivery partner kept from bills sold this month. A bill not settled yet has no commission in it.' },
   { key: 'labour', label: 'Labour', cost: true,
-    tip: "On an outlet that runs Crest HR: the finalized payroll (pay earned + overtime + employer SSF, plus the month's festival allowance, incentives and final settlements); until it is finalized, the HR estimate from the staff list, marked as an estimate. A Labor tab entry is then shown as not counted. On an outlet without HR: the Overheads Labor tab. Never both." },
+    tip: 'Wages for the month: the finalized Crest HR payroll, or the HR estimate until payroll is finalized. An outlet without Crest HR uses the Overheads Labor tab, never both.' },
   { key: 'overheads', label: 'Overheads', cost: true,
     tip: "The Overheads page's 'overhead' bucket — rent, utilities, and other fixed costs. Labour and Tax & Fees buckets are their own lines." },
   { key: 'taxFees', label: 'Tax & Fees', cost: true,
     tip: "The Overheads page's 'tax & fees' bucket." },
   { key: 'netProfit', label: 'Net Profit', strong: true,
-    tip: 'What is left after every cost on the statement below, before depreciation, interest and income tax. This is the bottom line of the same table, not a second calculation.' },
+    tip: 'What is left after every cost above, before depreciation, interest and income tax. Net Margin is this figure as a share of revenue.' },
 ]
 
 const num = v => {

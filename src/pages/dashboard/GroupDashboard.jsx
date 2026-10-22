@@ -77,6 +77,10 @@ const fmtNpr = nprOrDash
 
 const READ_TIMEOUT_MS = 20000
 
+// The ratio's one name on every owner page (S857): the Owner Dashboard, Home and the Owner Report say
+// "Labor Cost %", and this page said "Labour %" for the same figure. The money column stays "Labour".
+const LABOUR_PCT_LABEL = 'Labor Cost %'
+
 // FOOD COST AND LABOUR BAND THROUGH THE SHARED DEFINITIONS, NOT A LOCAL LADDER (S734).
 //
 // This page had its own `pctColor(v, good, warn)`, called with `(35, 45)` for food cost and
@@ -331,33 +335,33 @@ export default function GroupDashboard() {
   const markOf = (marks, id) => marks.low === id ? 'Lowest' : marks.high === id ? 'Highest' : null
   const columnLabel = columnBasis === 'mixed' ? `${FOOD_COST_LABEL} / ${SPEND_SO_FAR_LABEL}`
     : columnBasis === 'cogs' ? FOOD_COST_LABEL : SPEND_SO_FAR_LABEL
-  const runningNote = clock.running
-    ? ` On the month still running a ${SPEND_SO_FAR_LABEL} counts the finished days only (today counts once it is over), and carries no colour or mark before day ${SETTLE_DAY}, as on each outlet's own dashboard.`
-    : ''
-  const columnTip = (columnBasis === 'mixed'
-    ? `Each outlet's own figure, for this outlet alone — the line under it says which. An outlet that has closed ${BS_MONTHS[bsMonth - 1]} shows its ${FOOD_COST_LABEL}: ${FOOD_COST_TIP} One still in the month shows its ${SPEND_SO_FAR_LABEL}: ${SPEND_SO_FAR_TIP}`
-    : `${columnBasis === 'cogs' ? FOOD_COST_TIP : SPEND_SO_FAR_TIP} For this outlet alone.`) + runningNote
-  const groupTip = `${groupRatio.basis === 'cogs' ? FOOD_COST_TIP : SPEND_SO_FAR_TIP} ` +
-    (groupRatio.basis === 'cogs'
-      ? 'Every included outlet has closed this month, so this is the group’s Food Cost %: all outlets’ stock used ÷ all outlets’ revenue.'
-      : mixedBases
-        ? 'Some outlets have closed this month and some have not, so the group figure is Spend % so far over all of them — a total mixing one outlet’s stock used with another’s purchases would be neither figure. Each outlet’s own figure is in the table.'
-        : 'The group figure: all outlets’ net purchases ÷ all outlets’ revenue.') +
-    ` Computed on the group totals, not as an average of each outlet's percentage — a small outlet must not swing the group figure as hard as a large one. Coloured against your own Settings food cost thresholds as a guide: watch above ${fcBandOf(groupFc).warn}%, too high above ${fcBandOf(groupFc).critical}%.` +
-    runningNote
+  // Tips are one or two plain sentences (S857, the Suite critique: this one ran to 900 characters).
+  // The method detail they carried (group totals, never an average; the Settings thresholds; the
+  // running month's finished days and day-10 settle) is on the Help page. One basis keeps
+  // foodCostBasis.js's shared definition; the mixed case says which figure each row shows.
+  const monthName = BS_MONTHS[bsMonth - 1]
+  const columnTip = columnBasis === 'mixed'
+    ? `Each outlet shows its own figure, and the line under it says which: ${FOOD_COST_LABEL} once it has closed ${monthName}, ${SPEND_SO_FAR_LABEL} while it is still open.`
+    : columnBasis === 'cogs' ? FOOD_COST_TIP : SPEND_SO_FAR_TIP
+  const groupTip = groupRatio.basis === 'cogs'
+    ? `Food used (COGS) ÷ revenue, for all outlets added together. Every outlet has closed ${monthName}, so this is final.`
+    : mixedBases
+      ? `Some outlets have not closed ${monthName}, so the group shows ${SPEND_SO_FAR_LABEL}: stock bought ÷ revenue. Each outlet figure is in the table below.`
+      : `Stock bought ÷ revenue, for all outlets added together. ${FOOD_COST_LABEL} takes over once every outlet closes the month.`
   // One cost-ratio cell: bandCell's figure and colour, the ratio's own name under it when the
-  // column holds both kinds, and — for a Food Cost % — the COGS it came from on hover, since the
-  // Net Purchases column beside it is not what it divides.
+  // column holds both kinds, and — for a Food Cost % — the COGS it came from, since the Net
+  // Purchases column beside it is not what it divides. S857: that COGS line is visible text, plain
+  // words first; it was a hover title, which a phone and a keyboard never reach.
+  const subLine = { fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }
+  const cogsText = (ratio, cogs) => (ratio?.basis === 'cogs' && cogs != null ? `Food used (COGS) ${fmtNpr(cogs)}` : null)
   const ratioCell = (ratio, cogs) => {
     const c = bandCell(ratio?.pct ?? null, fcBandOf, costBandWithheld(ratio, clock))
-    const title = ratio?.basis === 'cogs' && cogs != null
-      ? [c.title, `Stock used (COGS) ${fmtNpr(cogs)}`].filter(Boolean).join(' · ')
-      : c.title
-    if (!mixedBases || !ratio) return { ...c, title }
+    const name = mixedBases && ratio ? ratio.label : null
+    const used = cogsText(ratio, cogs)
+    if (!name && !used) return c
     return {
       ...c,
-      title,
-      children: <>{c.children}<div style={{ fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>{ratio.label}</div></>,
+      children: <>{c.children}{name && <div style={subLine}>{name}</div>}{used && <div style={subLine}>{used}</div>}</>,
     }
   }
   // A neutral chip under the figure: the band already carries the verdict, this only ranks.
@@ -371,6 +375,71 @@ export default function GroupDashboard() {
   const costSub = !clock.running ? null
     : clock.firstDay ? FIRST_DAY_TEXT
     : [daysText, groupCostWithheld ? `no colour before day ${SETTLE_DAY}` : null].filter(Boolean).join(' · ')
+
+  // One row's figures and verdicts, worked out once (S857) so the table row and its phone card are
+  // drawn from the same values through the same helpers, and cannot disagree.
+  const changeColor = change => (change.good == null ? 'var(--theme-text3)' : change.good ? 'var(--theme-green-text)' : 'var(--theme-red-text)')
+  const coversText = r => (rowFigure(r, 'covers') == null ? '—' : rowFigure(r, 'covers').toLocaleString('en-IN'))
+  const groupTotalLabel = `Group total (${included.length} outlet${included.length === 1 ? '' : 's'})`
+  const viewOf = r => {
+    const fcRatio = ratioOf(r)
+    const lump = labourWithheld(r.labour, clock)
+    const hover = r.labour ? labourHover(r.labour) : []
+    if (lump) hover.push('Paid in a month still running and not spread over it, so this row is not judged until the month ends')
+    const inMonth = r.is_included && r.has_period !== false
+    const labourNote = inMonth && r.labour?.note
+      ? [r.labour.note, daysText && r.labour.hasFigure ? daysText : null].filter(Boolean).join(' · ')
+      : null
+    return {
+      r, fcRatio, inMonth, labourNote,
+      change: revenueChange(r, clock, prevLabel),
+      canGo: !isAdmin && canSwitchOutlet && r.client_id !== clientId,
+      // S798 3c / S849: the short note inline, every sentence the row owes in its Tip.
+      labourNoteBody: labourNote && hover.length > 0
+        ? <Tip text={hover.map(t => `${t[0].toUpperCase()}${t.slice(1)}.`).join(' ')} width={280}>{labourNote}</Tip>
+        : labourNote,
+      labourNoteColor: r.labour?.hasFigure && !lump ? 'var(--theme-text2)' : 'var(--theme-amber-text)',
+      labourAmount: inMonth && r.labour?.hasFigure ? fmtNpr(r.labour.amount) : '—',
+      costCell: withMark(ratioCell(fcRatio, r.cogs), markOf(costMarks, r.client_id)),
+      costFigure: bandCell(fcRatio?.pct ?? null, fcBandOf, costBandWithheld(fcRatio, clock)),
+      costMark: markOf(costMarks, r.client_id),
+      labourCell: bandCell(rowLabourPct(r, clock), lcBand, labourBandWithheld(r.labour, clock)),
+      labourMark: markOf(labourMarks, r.client_id),
+    }
+  }
+  const views = loading ? [] : rows.map(viewOf)
+  // The marks beside an outlet name, for the table cell (`gap` 6) and the phone card's own line (0).
+  const rowBadges = (r, gap) => [
+    r.client_id === clientId && <span key="viewing" className="badge-yellow" style={{ marginLeft: gap }}>Viewing</span>,
+    !r.is_included && <span key="suite" className="badge-gray" style={{ marginLeft: gap }}>No Suite Pro</span>,
+    r.is_included && r.has_period === false && <span key="period" className="badge-amber" style={{ marginLeft: gap }}>No period</span>,
+    r.is_included && r.period_status === 'closed' && r.has_closing === false && (
+      <Tip key="count" text={`Closed ${monthName} without a closing stock count, so its Food Cost % reads high. Enter the count in Stock Count at that outlet, then Resync Opening Stock in Periods.`} width={280}
+        style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: gap }}>
+        <span className="badge-amber">No count</span>
+      </Tip>
+    ),
+  ].filter(Boolean)
+  // A banded figure on a phone card's line: the same colour, band title and ✓/△/▲ as the table
+  // cell (bandCell), and the Lowest / Highest chip beside it.
+  const cardFigure = (cell, mark) => (
+    <>
+      <span style={{ color: cell.style.color, fontWeight: 600, whiteSpace: 'nowrap' }} title={cell.title}>{cell.children}</span>
+      {mark && <span className="badge-gray" style={{ fontSize: 10, marginLeft: 6 }}>{mark}</span>}
+    </>
+  )
+  // A phone card's money, one tap away: the columns the card's first lines leave out.
+  const moneyLines = ({ purchases, cogs, labour, labourNote, covers }) => (
+    <details className="phone-card__lines">
+      <summary>Purchases, labour and covers</summary>
+      <ul>
+        <li><span>Net Purchases</span><span>{fmtNpr(purchases)}</span></li>
+        {cogs != null && <li><span>Food used (COGS)</span><span>{fmtNpr(cogs)}</span></li>}
+        <li><span>Labour{labourNote}</span><span>{labour}</span></li>
+        <li><span>Covers</span><span>{covers}</span></li>
+      </ul>
+    </details>
+  )
 
   const years = [today.year - 1, today.year, today.year + 1]
 
@@ -413,20 +482,18 @@ export default function GroupDashboard() {
 
       {/* Coverage first, not as a footnote. A group total that silently omits an outlet is
           worse than no total, so the reader is told what this figure covers before they
-          read it. */}
+          read it. `.amber-banner` (S857) is the shared box; this was a hand-typed copy at its own tint. */}
       {!loading && !error && (excluded.length > 0 || noPeriod.length > 0) && (
-        <div className="card" style={{ marginBottom: 16, background: 'color-mix(in srgb, var(--theme-amber) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 30%, transparent)' }}>
-          <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: 'var(--theme-amber-text)' }}>
-            Showing {included.length} of {rows.length} outlets
-          </p>
+        <div className="amber-banner">
+          <strong>Showing {included.length} of {rows.length} outlets</strong>
           {excluded.length > 0 && (
-            <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.5 }}>
+            <p style={{ margin: '6px 0 0' }}>
               {excluded.map(r => r.client_name).join(', ')} {excluded.length === 1 ? 'is not on Crest Suite Pro, or its Suite Pro has' : 'are not on Crest Suite Pro, or their Suite Pro has'} lapsed —
               add it there to include {excluded.length === 1 ? 'its' : 'their'} revenue in these totals.
             </p>
           )}
           {noPeriod.length > 0 && (
-            <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.5 }}>
+            <p style={{ margin: '6px 0 0' }}>
               {noPeriod.map(r => r.client_name).join(', ')} {noPeriod.length === 1 ? 'has' : 'have'} no period open for
               {' '}{monthLabel} yet, so {noPeriod.length === 1 ? 'its row shows' : 'their rows show'} dashes
               and {noPeriod.length === 1 ? 'it counts' : 'they count'} as zero in the totals above — any till bills
@@ -443,7 +510,7 @@ export default function GroupDashboard() {
           models-arguing the class comment warns about. dash-section for the mobile rhythm. */}
       {!error && <div className="stat-grid dash-section">
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Sum of every included outlet's Inventory sales for this BS month: before VAT, after discounts, complimentary dishes left out, credit notes taken off once they reach Inventory. A till bill is in it once it has been posted to Inventory, which happens as it is paid while the month is open there. A bill still waiting to be posted (the till floor's Post to Inventory, or Periods → Post POS bills to Inventory) is not in it yet. On the month still running it is everything so far, today included." width={300}>Group Revenue</Tip></div>
+          <div className="stat-label"><Tip text="Sales of all included outlets this month, before VAT and after discounts. A till bill counts once it is posted to Inventory." width={300}>Group Revenue</Tip></div>
           <div className="stat-value">{loading ? <StatSkeleton /> : fmtNpr(groupRevenue)}</div>
           {!loading && clock.running && <div className="stat-sub">so far, today included</div>}
         </div>
@@ -459,7 +526,7 @@ export default function GroupDashboard() {
           {!loading && costSub && <div className="stat-sub">{costSub}</div>}
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="All outlets' labour ÷ all outlets' revenue. Each outlet's labour: on an outlet with Crest HR, its finalized payroll (pay earned + overtime + employer SSF), or until payroll is finalized the HR wage estimate through the last finished day, plus festival allowance, incentives and final settlements finalized for the month; on an outlet without Crest HR, what was typed on its Overheads Labor tab. On the month still running, a finalized run or a Labor tab is counted for the finished days only, and a festival allowance, incentive or final settlement paid in it leaves the figure without a colour, because it is not spread over the month. Shown only when every outlet has a labour figure, so an outlet without one cannot make the group look cheaper to staff than it is. Banded on the product's published 25–30% target, the same scale the Owner Dashboard and the Monthly Owner Report use." width={300}>Group Labour %</Tip></div>
+          <div className="stat-label"><Tip text="Labour of all outlets ÷ revenue of all outlets. Shown only when every outlet has a labour figure, so a missing one cannot make the group look cheaper to staff." width={300}>{`Group ${LABOUR_PCT_LABEL}`}</Tip></div>
           {(() => {
             const c = bandCell(groupLabour, lcBand, groupLabourWithheld)
             return <div className="stat-value" style={{ color: loading ? undefined : c.style.color }} title={loading ? undefined : c.title}>{loading ? <StatSkeleton /> : c.children}</div>
@@ -476,7 +543,7 @@ export default function GroupDashboard() {
           )}
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Guests seated at tables across included outlets, from paid POS bills closed within this BS month, Nepal time: each outlet's Covers Report count. Takeaway and delivery bills seat no guests, so they are not counted; a bill later credit-noted still counts its guests. Outlets without POS contribute zero." width={300}>Group Covers</Tip></div>
+          <div className="stat-label"><Tip text="Guests seated at tables in all included outlets this month, from paid till bills. Takeaway and delivery bills seat no guests." width={300}>Group Covers</Tip></div>
           {/* Zero covers is a COUNT, not a missing figure — an em-dash here says "we could not
               work this out" about a group whose outlets simply took no POS bills, on a page
               whose coverage banner above already explains any real gap (S734). */}
@@ -488,36 +555,27 @@ export default function GroupDashboard() {
 
       {/* Same gate as the KPI strip. Without it a failed read rendered ReportLoadError —
           "nothing here is a real figure" — directly above a table body reading "No outlets
-          in this group" (rows is [] on failure), two contradictory sentences (S683). */}
-      {!error && <div className="table-wrap">
+          in this group" (rows is [] on failure), two contradictory sentences (S683).
+          S857: `.phone-hide` below 600px, where the phone cards after the table take over. */}
+      {!error && <div className="table-wrap phone-hide">
         <table className="data-table">
           <thead>
             <tr>
               <th>Outlet</th>
-              <th style={{ textAlign: 'right' }}><Tip text="This outlet's Inventory sales for the month, before VAT. On the month still running it is everything so far, today included; the line under it compares it with last month's whole month." width={280}>Revenue</Tip></th>
+              <th style={{ textAlign: 'right' }}><Tip text="Inventory sales before VAT. The line under it compares with last month." width={280}>Revenue</Tip></th>
               <th style={{ textAlign: 'right' }}>Net Purchases</th>
               {/* Neutral while loading: `rows` still holds the previous month, whose outlets may stand differently. */}
               <th style={{ textAlign: 'right' }}><Tip text={columnTip} width={300}>{loading ? 'Food Cost / Spend %' : columnLabel}</Tip></th>
-              <th style={{ textAlign: 'right' }}><Tip text="This outlet's labour for the month. With Crest HR: its finalized payroll (pay earned + overtime + employer SSF), or until payroll is finalized the HR wage estimate (“estimate”), plus festival allowance, incentives and leavers' final settlements finalized for the month (hover the note for the amounts). Without Crest HR: what was typed on its Overheads Labor tab (“Labor tab”); “none entered” means nothing is there. “not loaded” means its labour could not be read. On the month still running, a run or a Labor tab is counted for the finished days only." width={300}>Labour</Tip></th>
-              <th style={{ textAlign: 'right' }}><Tip text="Labour ÷ revenue for this outlet alone, on the same days. No band while the outlet has no labour figure, while its pay is not fully set, or while a bonus or final pay paid this month sits over part of a month's sales.">Labour %</Tip></th>
+              <th style={{ textAlign: 'right' }}><Tip text="Wages for the month: finalized payroll, the HR estimate, or the Overheads Labor tab. The line under each figure says which." width={300}>Labour</Tip></th>
+              <th style={{ textAlign: 'right' }}><Tip text="Labour ÷ revenue for this outlet, on the same days. No colour while its labour figure is missing or not final.">{LABOUR_PCT_LABEL}</Tip></th>
               <th style={{ textAlign: 'right' }}>Covers</th>
             </tr>
           </thead>
           <tbody>
             {loading && <tr><td colSpan={7} style={{ color: 'var(--theme-text2)' }}>Loading…</td></tr>}
             {!loading && rows.length === 0 && <tr><td colSpan={7} style={{ color: 'var(--theme-text2)' }}>No outlets in this group.</td></tr>}
-            {!loading && rows.map(r => {
-              const fcRatio = ratioOf(r)
-              const labPct = rowLabourPct(r, clock)
-              const labWithheld = labourBandWithheld(r.labour, clock)
-              const lump = labourWithheld(r.labour, clock)
-              const change = revenueChange(r, clock, prevLabel)
-              const hover = r.labour ? labourHover(r.labour) : []
-              if (lump) hover.push('Paid in a month still running and not spread over it, so this row is not judged until the month ends')
-              const labourNote = r.labour?.note
-                ? [r.labour.note, daysText && r.labour.hasFigure ? daysText : null].filter(Boolean).join(' · ')
-                : null
-              const canGo = !isAdmin && canSwitchOutlet && r.client_id !== clientId
+            {views.map(v => {
+              const r = v.r
               // No opacity dimming on excluded rows. It read as de-emphasis but multiplies
               // straight through the text colour — text2 at 0.55 measured under 3:1 — and the
               // "No Suite Pro" badge plus a row of em-dashes already says the same thing
@@ -529,7 +587,7 @@ export default function GroupDashboard() {
                         the reader has to leave, find the sidebar switcher and re-pick by name.
                         S849 GROUP-14: every link waits while any switch is in flight. Crest
                         support reads names only: view-as is changed from Admin → Clients. */}
-                    {canGo ? (
+                    {v.canGo ? (
                       <button
                         className="btn-linklike"
                         onClick={() => handleGoToOutlet(r.client_id)}
@@ -538,39 +596,28 @@ export default function GroupDashboard() {
                         {switching === r.client_id ? 'Switching…' : r.client_name}
                       </button>
                     ) : r.client_name}
-                    {r.client_id === clientId && <span className="badge-yellow" style={{ marginLeft: 6 }}>Viewing</span>}
-                    {!r.is_included && <span className="badge-gray" style={{ marginLeft: 6 }}>No Suite Pro</span>}
-                    {r.is_included && r.has_period === false && <span className="badge-amber" style={{ marginLeft: 6 }}>No period</span>}
-                    {r.is_included && r.period_status === 'closed' && r.has_closing === false && (
-                      <Tip text={`This outlet closed ${BS_MONTHS[bsMonth - 1]} without a closing stock count, so its Food Cost % counts everything on the shelf as used and reads high. Enter the count in that outlet's Stock Count, then Resync Opening Stock in Periods.`} width={280}
-                        style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: 6 }}>
-                        <span className="badge-amber">No count</span>
-                      </Tip>
-                    )}
+                    {rowBadges(r, 6)}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     {fmtNpr(rowFigure(r, 'revenue'))}
-                    {change && (
-                      <div style={{ fontSize: 11, fontWeight: 400, whiteSpace: 'nowrap', color: change.good == null ? 'var(--theme-text3)' : change.good ? 'var(--theme-green-text)' : 'var(--theme-red-text)' }}>
-                        {change.text}
+                    {v.change && (
+                      <div style={{ fontSize: 11, fontWeight: 400, whiteSpace: 'nowrap', color: changeColor(v.change) }}>
+                        {v.change.text}
                       </div>
                     )}
                   </td>
                   <td style={{ textAlign: 'right' }}>{fmtNpr(rowFigure(r, 'net_purchases'))}</td>
-                  <td {...withMark(ratioCell(fcRatio, r.cogs), markOf(costMarks, r.client_id))} />
+                  <td {...v.costCell} />
                   <td style={{ textAlign: 'right' }}>
-                    {!r.is_included || r.has_period === false ? '—' : r.labour?.hasFigure ? fmtNpr(r.labour.amount) : '—'}
-                    {r.is_included && r.has_period !== false && labourNote && (
-                      <div style={{ fontSize: 11, fontWeight: 400, color: r.labour.hasFigure && !lump ? 'var(--theme-text2)' : 'var(--theme-amber-text)', whiteSpace: 'nowrap' }}>
-                        {/* S798 3c / S849: the short note inline, every sentence the row owes in the Tip. */}
-                        {hover.length > 0
-                          ? <Tip text={hover.map(t => `${t[0].toUpperCase()}${t.slice(1)}.`).join(' ')} width={280}>{labourNote}</Tip>
-                          : labourNote}
+                    {v.labourAmount}
+                    {v.labourNote && (
+                      <div style={{ fontSize: 11, fontWeight: 400, color: v.labourNoteColor, whiteSpace: 'nowrap' }}>
+                        {v.labourNoteBody}
                       </div>
                     )}
                   </td>
-                  <td {...withMark(bandCell(labPct, lcBand, labWithheld), markOf(labourMarks, r.client_id))} />
-                  <td style={{ textAlign: 'right' }}>{rowFigure(r, 'covers') == null ? '—' : rowFigure(r, 'covers').toLocaleString('en-IN')}</td>
+                  <td {...withMark(v.labourCell, v.labourMark)} />
+                  <td style={{ textAlign: 'right' }}>{coversText(r)}</td>
                 </tr>
               )
             })}
@@ -580,7 +627,7 @@ export default function GroupDashboard() {
           {!loading && included.length > 0 && (
             <tfoot>
               <tr style={{ fontWeight: 700 }}>
-                <td>Group total ({included.length} outlet{included.length === 1 ? '' : 's'})</td>
+                <td>{groupTotalLabel}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(groupRevenue)}</td>
                 <td style={{ textAlign: 'right' }}>{fmtNpr(groupPurchases)}</td>
                 <td {...ratioCell(groupRatio, groupCogs)} />
@@ -592,6 +639,72 @@ export default function GroupDashboard() {
           )}
         </table>
       </div>}
+
+      {/* S857, the Suite critique: the seven-column table had no phone layout and no fixed outlet
+          column, so on a phone the ratios sat past the edge. Below 600px this list shows instead
+          (`.phone-only`; the table is `.phone-hide`). It is drawn from the same `views`, so the two
+          cannot disagree: one card per outlet, its Revenue at the right of the first line, each ratio
+          with the ✓/△/▲ the table shows, the money one tap away, the group total last. It never
+          prints; the table does. */}
+      {!error && (
+        <ul className="phone-cards phone-cards--no-fab phone-only" aria-label={`Outlets, ${monthLabel}`}>
+          {loading && <li className="phone-card phone-card__meta">Loading…</li>}
+          {!loading && rows.length === 0 && <li className="phone-card phone-card__meta">No outlets in this group.</li>}
+          {views.map(v => {
+            const r = v.r
+            const badges = rowBadges(r, 0)
+            return (
+              <li key={r.client_id} className="phone-card">
+                <div className="phone-card__top">
+                  {v.canGo ? (
+                    <button
+                      type="button"
+                      className="phone-card__title btn-linklike"
+                      onClick={() => handleGoToOutlet(r.client_id)}
+                      disabled={!!switching}
+                    >
+                      {switching === r.client_id ? 'Switching…' : r.client_name}
+                    </button>
+                  ) : <span className="phone-card__title">{r.client_name}</span>}
+                  <span className="phone-card__figure">{fmtNpr(rowFigure(r, 'revenue'))}</span>
+                </div>
+                {badges.length > 0 && <div className="phone-card__meta" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{badges}</div>}
+                {v.change && <div className="phone-card__meta" style={{ color: changeColor(v.change) }}>{v.change.text}</div>}
+                {v.inMonth && (
+                  <>
+                    <div className="phone-card__meta">{v.fcRatio?.label || columnLabel}: {cardFigure(v.costFigure, v.costMark)}</div>
+                    <div className="phone-card__meta">{LABOUR_PCT_LABEL}: {cardFigure(v.labourCell, v.labourMark)}</div>
+                  </>
+                )}
+                {r.is_included && moneyLines({
+                  purchases: rowFigure(r, 'net_purchases'),
+                  cogs: cogsText(v.fcRatio, r.cogs) ? r.cogs : null,
+                  labour: v.labourAmount,
+                  labourNote: v.labourNote ? <span style={{ display: 'block', fontSize: 12, color: v.labourNoteColor }}>{v.labourNoteBody}</span> : null,
+                  covers: coversText(r),
+                })}
+              </li>
+            )
+          })}
+          {!loading && included.length > 0 && (
+            <li className="phone-card">
+              <div className="phone-card__top">
+                <span className="phone-card__title">{groupTotalLabel}</span>
+                <span className="phone-card__figure">{fmtNpr(groupRevenue)}</span>
+              </div>
+              <div className="phone-card__meta">{groupRatio.label}: {cardFigure(bandCell(groupFc, fcBandOf, groupCostWithheld))}</div>
+              <div className="phone-card__meta">{LABOUR_PCT_LABEL}: {cardFigure(bandCell(groupLabour, lcBand, groupLabourWithheld))}</div>
+              {moneyLines({
+                purchases: groupPurchases,
+                cogs: groupCogs,
+                labour: fmtNpr(groupLab.labour),
+                labourNote: null,
+                covers: groupCovers.toLocaleString('en-IN'),
+              })}
+            </li>
+          )}
+        </ul>
+      )}
 
       {/* S800: its own read, started with the month's other reads rather than after them, so
           it waits only on the page-level error (one failure card, not two). */}
@@ -617,7 +730,8 @@ export default function GroupDashboard() {
       <div className="page-header no-print">
         <div>
           <h1 className="page-title">Group Console</h1>
-          <p className="page-subtitle">Every outlet in the group, side by side for one BS month</p>
+          {/* S857: each owner page says its tense in one line; this one is every outlet, one month. */}
+          <p className="page-subtitle">Every outlet side by side for one month.</p>
         </div>
       </div>
 
