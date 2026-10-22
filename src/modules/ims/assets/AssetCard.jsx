@@ -2,7 +2,8 @@ import { nprInt } from '../../../shared/nepalMoney'
 import { useEffect, useState } from 'react'
 import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
-import FieldError, { fieldAria } from '../../../components/FieldError'
+import BsCalendarPicker from '../../../components/BsCalendarPicker'
+import FieldError from '../../../components/FieldError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { useAuth } from '../../../context/AuthContext'
@@ -79,7 +80,10 @@ export default function AssetCard({ asset, onClose, onChanged }) {
   const gapTotal = disposalGaps.reduce((s, g) => s + g.amount, 0)
 
   async function submitDisposal() {
-    if (loadError || loading) {
+    // S858: the button stays pressable while the history loads or after it failed (aria-disabled), so
+    // the press says which of the two it is instead of doing nothing.
+    if (loading) { setError('The depreciation history for this asset is still loading. Wait a moment, then press Confirm Disposal again.'); return }
+    if (loadError) {
       setError('The depreciation history for this asset could not be read, so its book value at disposal is unknown and nothing was disposed. Close this card and open it again.')
       return
     }
@@ -264,7 +268,10 @@ The asset is still on the register as active.`, detail })
             </div>
             <div className="form-field">
               <label htmlFor="assetc-f2">Disposal Date</label>
-              <input id="assetc-f2" type="date" className="form-input" value={disposalForm.disposal_date} onChange={e => { setDateErr(''); setDisposalForm(f => ({ ...f, disposal_date: e.target.value })) }} {...fieldAria('assetc-f2', dateErr)} />
+              {/* BS picker (S858): the stored AD string, as formatAd(bsToAd(...)) hands it back, so
+                  the before-acquisition check and the figures below compare the same strings. */}
+              <BsCalendarPicker id="assetc-f2" value={disposalForm.disposal_date} placeholder="Pick a BS date"
+                invalid={dateErr} onChange={v => { setDateErr(''); setDisposalForm(f => ({ ...f, disposal_date: v })) }} />
               <FieldError id="assetc-f2" message={dateErr} />
             </div>
             <div className="form-field">
@@ -307,7 +314,7 @@ The asset is still on the register as active.`, detail })
           <ActionError error={error} />
           <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 10 }}>
             <button className="btn btn-ghost" onClick={() => setDisposing(false)}>Cancel</button>
-            <button className="btn btn-primary" onClick={submitDisposal} disabled={saving || !figuresReal}>{saving ? 'Saving…' : 'Confirm Disposal'}</button>
+            <button className="btn btn-primary" onClick={submitDisposal} disabled={saving} aria-disabled={!figuresReal ? 'true' : undefined}>{saving ? 'Saving…' : 'Confirm Disposal'}</button>
           </div>
         </div>
       )}

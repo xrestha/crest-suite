@@ -6,6 +6,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { settleWithin } from '../../../utils/withTimeout'
@@ -315,7 +316,9 @@ export default function TaxPoolTab() {
     const { start: fyStartAd, end: fyEndAd } = getFiscalYearAdRange(fyStart)
     const fyFrom = formatAd(fyStartAd), fyTo = formatAd(fyEndAd)
     if (newExpense.expense_date < fyFrom || newExpense.expense_date > fyTo) {
-      setErr(`That date is outside FY ${fyLabel} (${fyFrom} to ${fyTo}), so it was not added. Pick a date inside the year, or switch the Fiscal Year above to the year the repair belongs to.`)
+      // S858: the year's ends are named in BS, the calendar the date was picked in; they were the
+      // raw AD strings the comparison uses.
+      setErr(`That date is outside FY ${fyLabel} (${formatAdAsBs(fyFrom)} to ${formatAdAsBs(fyTo)}), so it was not added. Pick a date inside the year, or switch the Fiscal Year above to the year the repair belongs to.`)
       return
     }
     // The list is about to change, so a preview on screen no longer matches it (COSTS-7): the one
@@ -436,6 +439,14 @@ export default function TaxPoolTab() {
   // earlier year whose posted schedule no longer matches its openings (ASSETS-9).
   async function post() {
     if (!lines || !built) return
+    // S858: Post stays pressable for a login without the rank (aria-disabled, the S857 Depreciation
+    // Runs pattern), so the press says why here instead of a disabled button saying nothing. The
+    // post RPC refuses such a login as well; this is the sentence, not the lock.
+    if (!canPost) {
+      setMsg(''); setRecheck(null)
+      setErr('Only a Manager or Owner login can post a tax pool schedule. Ask one of them to post it.')
+      return
+    }
     setMsg(''); setErr(null); setRecheck(null)
     // The inputs these lines were built from (COSTS-7). Checked again just before the write, since
     // the checks and confirms below leave time for a repair to be added or the year changed. The
@@ -613,8 +624,11 @@ ${text}`, detail })
           {/* Pressable while the repair list is not loaded, so the press can say why (COSTS-7). */}
           <button className="btn btn-primary" onClick={preview} disabled={loading} aria-disabled={!repairsLoaded || undefined}>{loading ? 'Computing…' : 'Preview'}</button>
           {lines && (
+            // S858: aria-disabled, not disabled, when the login cannot post: a disabled button takes
+            // no focus, so this Tip (the one place saying why) was out of reach and the press did
+            // nothing. `disabled` is only for a post in flight; post() says what is missing.
             <Tip text={canPost ? "Writes this year's pool schedule and locks it. To correct it, fix the register or repairs and post a second schedule for the same year; next year opens from the latest one." : 'Only a Manager or Owner login can post.'} width={300}>
-              <button className="btn btn-primary" onClick={post} disabled={!canPost || posting}>{posting ? 'Posting…' : 'Post'}</button>
+              <button className="btn btn-primary" onClick={post} disabled={posting} aria-disabled={!canPost ? 'true' : undefined}>{posting ? 'Posting…' : 'Post'}</button>
             </Tip>
           )}
           {lines && (
@@ -697,7 +711,13 @@ ${text}`, detail })
               {POOLS_AD.map(p => <option key={p} value={p}>{POOL_LABELS[p]}</option>)}
             </select>
           </div>
-          <input type="date" className="form-input form-input--auto" aria-label="Repair expense date" value={newExpense.expense_date} onChange={e => setNewExpense(f => ({ ...f, expense_date: e.target.value }))} />
+          {/* BS picker (S858): the stored AD string, as formatAd(bsToAd(...)) hands it back, so the
+              in-year check in addExpense compares the same strings it always did. The wrapper holds
+              the width a picked date needs, so the row does not jump when one is chosen. */}
+          <div style={{ minWidth: 170 }}>
+            <BsCalendarPicker ariaLabel="Repair expense date" value={newExpense.expense_date} placeholder="Pick a BS date"
+              onChange={v => setNewExpense(f => ({ ...f, expense_date: v }))} />
+          </div>
           <input type="number" className="form-input" placeholder="Amount" aria-label="Repair expense amount (NPR)" value={newExpense.amount} onChange={e => setNewExpense(f => ({ ...f, amount: e.target.value }))} style={{ width: 120 }} />
           <input className="form-input" placeholder="Description" aria-label="Repair expense description" value={newExpense.description} onChange={e => setNewExpense(f => ({ ...f, description: e.target.value }))} style={{ flex: 1, minWidth: 160 }} />
           <button className="btn btn-ghost" onClick={addExpense}>+ Add</button>

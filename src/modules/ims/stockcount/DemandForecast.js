@@ -858,12 +858,18 @@ function DemandForecastBody() {
                       <tr>
                         <td colSpan={colSpan} style={{ padding: '2px 12px 10px', borderTop: 'none' }}>
                           {/* Whole plates to prep. The raw average sits on hover — 0.8 was being read as a
-                              portion size, and nobody makes 0.8 of a toast (S694). */}
+                              portion size, and nobody makes 0.8 of a toast (S694). S858: each count is
+                              plain text with its average in a `title`; a Tip on every dish was a Tab stop
+                              each, about 180 of them on a 30-day forecast before the buying list. ONE Tip
+                              per day leads the line and says what the counts are, for the keyboard. */}
                           <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 11, color: 'var(--theme-text3)', alignItems: 'baseline' }}>
-                            {visiblePlates.map(p => (
-                              <Tip key={p.recipeId} text={avgTip(p.qty)} width={240}>
-                                <span>{nameOf(p.recipeId)}: <strong style={{ color: 'var(--theme-text2)' }}>{p.plates}</strong></span>
+                            {plates.length > 0 && (
+                              <Tip text={`Whole plates to prep, rounded up from the daily average${evidence ? ` (${evidence}, recent weeks weighted more)` : ''}. Hover a dish for its average.`} width={260}>
+                                <span style={{ fontStyle: 'italic' }}>Plates to prep:</span>
                               </Tip>
+                            )}
+                            {visiblePlates.map(p => (
+                              <span key={p.recipeId} title={avgTip(p.qty)}>{nameOf(p.recipeId)}: <strong style={{ color: 'var(--theme-text2)' }}>{p.plates}</strong></span>
                             ))}
                             {!showingAll && (hiddenPlates > 0 || occasional.length > 0) && (
                               <button type="button" className="btn-linklike" onClick={() => setExpandedIdx(idx)}>
@@ -878,13 +884,13 @@ function DemandForecastBody() {
                           </div>
                           {showingAll && occasional.length > 0 && (
                             <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 11, color: 'var(--theme-text3)', marginTop: 6, alignItems: 'baseline' }}>
-                              <Tip text={`Sold on fewer than one ${WEEKDAYS_FULL[weekday]} in two — under ${OCCASIONAL_THRESHOLD} a day on average. Worth having the ingredients for, not worth prepping a plate of.`} width={260}>
+                              {/* S858: the same shape as the plates line, one Tip for the list and a
+                                  `title` per dish rather than a Tab stop each. */}
+                              <Tip text={`Sold on fewer than one ${WEEKDAYS_FULL[weekday]} in two — under ${OCCASIONAL_THRESHOLD} a day on average. Worth having the ingredients for, not worth prepping a plate of. Hover a dish for the weeks behind its average.`} width={260}>
                                 <span style={{ fontStyle: 'italic' }}>Occasional:</span>
                               </Tip>
                               {occasional.map(o => (
-                                <Tip key={o.recipeId} text={avgTip(o.qty)} width={240}>
-                                  <span>{nameOf(o.recipeId)} <span style={{ opacity: 0.8 }}>({o.qty.toFixed(1)}/day)</span></span>
-                                </Tip>
+                                <span key={o.recipeId} title={avgTip(o.qty)}>{nameOf(o.recipeId)} <span style={{ opacity: 0.8 }}>({o.qty.toFixed(1)}/day)</span></span>
                               ))}
                             </div>
                           )}

@@ -3,6 +3,7 @@ import Modal from '../../../components/Modal'
 import Tip from '../../../components/Tip'
 import QtyInput from '../../../components/QtyInput'
 import SearchableSelect from '../../../components/SearchableSelect'
+import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import FieldError, { fieldAria } from '../../../components/FieldError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -246,7 +247,11 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
 
         <div className="form-field">
           <label htmlFor="assetf-f7">Acquisition Date</label>
-          <input id="assetf-f7" type="date" className="form-input" value={form.acquisition_date} onChange={e => set('acquisition_date', e.target.value)} {...fieldAria('assetf-f7', fieldErr.acquisition_date)} />
+          {/* BS picker (S858), as on Depreciation Runs since S857: the field stays the stored AD
+              string, converted by the picker through formatAd(bsToAd(...)), never toISOString. The
+              error reaches it as `invalid`, since its trigger is a button fieldAria cannot dress. */}
+          <BsCalendarPicker id="assetf-f7" value={form.acquisition_date} placeholder="Pick a BS date"
+            invalid={fieldErr.acquisition_date} onChange={v => set('acquisition_date', v)} />
           <FieldError id="assetf-f7" message={fieldErr.acquisition_date} />
         </div>
         <div className="form-field">
@@ -294,9 +299,11 @@ export default function AssetFormModal({ categories, asset, onClose, onSaved }) 
         </div>
         <div className="form-field">
           <label htmlFor="assetf-f16"><Tip text="The date that figure runs to — usually the last day of the fiscal year your books were closed for (end of Ashadh). Crest's depreciation runs charge from the day after it." width={280}>As of</Tip></label>
-          <input id="assetf-f16" type="date" className="form-input" value={form.opening_as_of} onChange={e => set('opening_as_of', e.target.value)} {...fieldAria('assetf-f16', fieldErr.opening_as_of)} />
+          {/* S858: the BS line that sat under the AD box is gone, because the picker now shows
+              the BS date itself. */}
+          <BsCalendarPicker id="assetf-f16" value={form.opening_as_of} placeholder="Pick a BS date"
+            invalid={fieldErr.opening_as_of} onChange={v => set('opening_as_of', v)} />
           <FieldError id="assetf-f16" message={fieldErr.opening_as_of} />
-          {form.opening_as_of && <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '4px 0 0' }}>{formatAdAsBs(form.opening_as_of)}</p>}
         </div>
         <div className="form-field" aria-hidden="true" />
 
