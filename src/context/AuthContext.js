@@ -354,10 +354,31 @@ export function AuthProvider({ children }) {
         // every query returns.
         const effectiveClientId = data.active_client_id || data.client_id
         const sameOutlet = !!prev && prevOutlet === effectiveClientId
+        // Legal re-acceptance. Deliberately shaped like the profile_outlet_access read below: it is
+        // skipped entirely unless some document actually demands re-acceptance, so while
+        // requiresReacceptance is false everywhere this costs the hot path nothing and never
+        // touches a table a given deployment may not have migrated yet.
+        //
+        // Owner only — staff are not the contracting party and are never gated, so fetching this
+        // for them would be a query whose answer is unused.
+        //
+        // It fails OPEN. On any error `rows` is null, the gate stays down, and the app keeps
+        // working; a missing table, an RLS refusal or a dropped connection must never lock every
+        // owner out of the product. Same stance as getAccessState.
+        // Doc-type strings, not documents: this scope only counts them and filters a column by
+        // them. The memo that decides the gate reads the documents themselves, because it needs
+        // each one's `version` to compare against the accepted row.
+        //
+        // It needs only this profile row, so it rides in the batch below rather than waiting for it
+        // (one round trip off every Owner's app open on a slow link).
+        const reacceptTypes = reacceptDocTypes()
+        const profileIsOwner = data.role === 'client'
+          && !data.pos_role && !data.ims_role && !data.hr_role && !data.hr_self_service
+        const wantsLegal = reacceptTypes.length > 0 && profileIsOwner
         // clients + feature_flags depend only on client_id, not on each other — run them
         // concurrently instead of waterfalling two more round trips after the profile fetch.
         // The outlet list joins them rather than adding a third sequential round trip (S460).
-        const [clientRes, flagsRes, siblingsRes] = await Promise.all([
+        const [clientRes, flagsRes, siblingsRes, legalRes] = await Promise.all([
           supabase
             .from('clients')
             .select('id, name, location, group_id, is_active, plan, trial_ends_at, subscription_ends_at, ims_ends_at, hr_ends_at, pos_ends_at, customization_ends_at, suite_ends_at, ims_enabled, ims_since, hr_enabled, pos_enabled, customization_enabled, suite_plan, is_trial, trial_approved_at, trial_start_date, trial_expires_at, trial_purge_at, subscribe_requested, pan_no, contact_phone')
@@ -378,6 +399,20 @@ export function AuthProvider({ children }) {
               .from('clients')
               .select(OUTLET_COLS)
               .order('name'),
+          wantsLegal
+            ? supabase
+              .from('legal_acceptances')
+              .select('doc_type, doc_version')
+              .eq('client_id', effectiveClientId)
+              // reacceptDocTypes(), never docsRequiringReacceptance() — this compares against the
+              // doc_type COLUMN, and the latter returns document objects. Passing those here
+              // filtered on the literal text "[object Object]", matched nothing, and returned
+              // `{ data: [], error: null }`: a successful read reporting that the client had
+              // accepted nothing, which held every Owner at the gate permanently and could not be
+              // cleared by accepting. Silent in both directions — no error to catch, and the
+              // fail-OPEN branch (`legalAccepted === null`) never reached (S674).
+              .in('doc_type', reacceptTypes)
+            : Promise.resolve(null),
         ])
         if (!mounted) return
         const { data: client, error: clientErr } = clientRes
@@ -415,37 +450,10 @@ export function AuthProvider({ children }) {
           }
         }
 
-        // Legal re-acceptance. Deliberately shaped like the profile_outlet_access read below: it is
-        // skipped entirely unless some document actually demands re-acceptance, so while
-        // requiresReacceptance is false everywhere (which it is for v1.0) this costs the hot path
-        // exactly nothing and never touches a table a given deployment may not have migrated yet.
-        //
-        // Owner only — staff are not the contracting party and are never gated, so fetching this
-        // for them would be a query whose answer is unused.
-        //
-        // It fails OPEN. On any error `rows` is null, the gate stays down, and the app keeps
-        // working; a missing table, an RLS refusal or a dropped connection must never lock every
-        // owner out of the product. Same stance as getAccessState.
-        // Doc-type strings, not documents: this scope only counts them and filters a column by
-        // them. The memo that decides the gate reads the documents themselves, because it needs
-        // each one's `version` to compare against the accepted row.
-        const reacceptTypes = reacceptDocTypes()
-        const profileIsOwner = data.role === 'client'
-          && !data.pos_role && !data.ims_role && !data.hr_role && !data.hr_self_service
-        if (mounted && reacceptTypes.length && profileIsOwner) {
-          const { data: rows, error: legalErr } = await supabase
-            .from('legal_acceptances')
-            .select('doc_type, doc_version')
-            .eq('client_id', effectiveClientId)
-            // reacceptDocTypes(), never docsRequiringReacceptance() — this compares against the
-            // doc_type COLUMN, and the latter returns document objects. Passing those here
-            // filtered on the literal text "[object Object]", matched nothing, and returned
-            // `{ data: [], error: null }`: a successful read reporting that the client had
-            // accepted nothing, which held every Owner at the gate permanently and could not be
-            // cleared by accepting. Silent in both directions — no error to catch, and the
-            // fail-OPEN branch (`legalAccepted === null`) never reached (S674).
-            .in('doc_type', reacceptTypes)
-          if (mounted) setLegalAccepted(legalErr ? null : (rows || []))
+        // The legal read went out with the batch above (it fails OPEN: an error is null, never []).
+        if (mounted && wantsLegal) {
+          const { data: rows, error: legalErr } = legalRes || {}
+          setLegalAccepted(legalErr ? null : (rows || []))
         } else if (mounted) {
           setLegalAccepted([])
         }

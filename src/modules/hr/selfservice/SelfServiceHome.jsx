@@ -293,11 +293,31 @@ export default function SelfServiceHome() {
   }, [weekDays])
 
   // ── Loaders ────────────────────────────────────────────────────────────────────────────────
+  // Which login these reads are for (S859). The first load used to wait for the profile, which
+  // AuthContext follows with the client, flags and outlets, so on a phone the employee's own reads
+  // left two round trips late. None of them needs it: each RPC answers for the signed-in login only,
+  // refuses a blocked one itself (hr_self_service_assert_active), and returns nothing to a login that
+  // is not a Staff app one. So they go out once there is a session, beside the profile read. When the
+  // profile says this is not a Staff app login (an Owner or support opening this route), nothing more
+  // is asked, anything still in flight is dropped when it lands, and Loading… stays up until the
+  // redirect above. A profile still held from another login counts as not landed yet.
+  const me = session?.user?.id || null
+  const profileIsMine = !!me && profile?.id === me
+  const loadFor = !me ? null
+    : profileIsMine ? (profile.hr_self_service ? me : null)
+      : (authLoading ? me : null)
+  const loadForRef = useRef(loadFor)
+  loadForRef.current = loadFor
+
+  // Each loader below starts only for that login, and sets nothing if it is no longer the one.
   const loadPayslips = useCallback(async () => {
+    const asked = loadForRef.current
+    if (!asked) return
     const [{ data, error }, paid] = await Promise.all([
       read(supabase.rpc('get_my_hr_payslips')),
       read(supabase.rpc('get_my_salary_payments')),
     ])
+    if (loadForRef.current !== asked) return
     setErrFor('payslips', error ? employeeErrorText(error) : '')
     if (!error) setPayslips(data || [])
     // The "Paid on …" line is extra, so its failure is swallowed: it must never blank the payslips,
@@ -307,10 +327,13 @@ export default function SelfServiceHome() {
   }, [])
 
   const loadLeave = useCallback(async () => {
+    const asked = loadForRef.current
+    if (!asked) return
     const [{ data: types, error: tErr }, { data: reqs, error: rErr }] = await Promise.all([
       read(supabase.rpc('get_my_leave_types')),
       read(supabase.rpc('get_my_leave_requests')),
     ])
+    if (loadForRef.current !== asked) return
     const error = tErr || rErr
     setErrFor('leave', error ? employeeErrorText(error) : '')
     if (error) return
@@ -320,10 +343,14 @@ export default function SelfServiceHome() {
   }, [leaveTypeId])
 
   // A resume on a new day reloads for the new weeks while the resume's own refetch may still be in
-  // flight for the old ones, so only the latest load may set the roster.
+  // flight for the old ones, so only the latest load may set the roster. The first load can now
+  // start before the profile lands (S859); the key is still claimed before the first await, and the
+  // profile landing for the same login starts no second load, so the guard is unchanged.
   const rosterReq = useLatestRequest()
   const rosterSeq = useRef(0)
   const loadRoster = useCallback(async () => {
+    const asked = loadForRef.current
+    if (!asked) return
     rosterSeq.current += 1
     const key = rosterReq.begin(rosterSeq.current)
     const results = await Promise.all(monthsNeeded.map(async ({ year, month }) => {
@@ -337,7 +364,7 @@ export default function SelfServiceHome() {
       // say "not published yet" over shifts that had loaded.
       return { year, month, rows: roster.data || [], days: published.data || [], error: roster.error || published.error }
     }))
-    if (!rosterReq.isCurrent(key)) return
+    if (!rosterReq.isCurrent(key) || loadForRef.current !== asked) return
     const failed = results.find(r => r.error)
     setErrFor('roster', failed ? employeeErrorText(failed.error) : '')
     if (failed) return
@@ -353,16 +380,22 @@ export default function SelfServiceHome() {
   }, [monthsNeeded, rosterReq])
 
   const loadSwapRequests = useCallback(async () => {
+    const asked = loadForRef.current
+    if (!asked) return
     const { data, error } = await read(supabase.rpc('get_my_swap_requests'))
+    if (loadForRef.current !== asked) return
     setErrFor('swaps', error ? employeeErrorText(error) : '')
     if (!error) setSwapRequests(data || [])
   }, [])
 
   const loadTada = useCallback(async () => {
+    const asked = loadForRef.current
+    if (!asked) return
     const [{ data, error }, vendors] = await Promise.all([
       read(supabase.rpc('get_my_tada_claims')),
       read(supabase.rpc('get_my_client_vendors')),
     ])
+    if (loadForRef.current !== asked) return
     setErrFor('tada', error ? employeeErrorText(error) : '')
     // The supplier list is a shortcut in the form, so its failure is one line there, never the
     // claims' error (S798, SELF-SERVICE-4). It used to leave the picker silently empty.
@@ -373,14 +406,15 @@ export default function SelfServiceHome() {
   }, [])
 
   // Home is built from the roster, the swap queue and the latest payslip, so those three load
-  // together on arrival rather than one tab at a time.
+  // together on arrival rather than one tab at a time. Keyed on the login, not the profile object:
+  // the profile landing for the login these reads already went out for must not send them again.
   const refetchForTab = useCallback(() => {
-    if (!profile?.hr_self_service) return
+    if (!loadFor) return
     if (tab === 'home') { loadRoster(); loadSwapRequests(); loadPayslips() }
     else if (tab === 'roster') { loadRoster(); loadSwapRequests() }
     else if (tab === 'requests') { loadLeave(); loadTada() }
     else if (tab === 'pay') loadPayslips()
-  }, [profile, tab, loadRoster, loadSwapRequests, loadPayslips, loadLeave, loadTada])
+  }, [loadFor, tab, loadRoster, loadSwapRequests, loadPayslips, loadLeave, loadTada])
 
   useEffect(() => { refetchForTab() }, [refetchForTab])
 
@@ -388,7 +422,7 @@ export default function SelfServiceHome() {
   // screen icon resumes the exact in-memory state from last time (a payroll run finalised while the
   // app sat suspended never appears) with none of the effects above re-firing.
   useEffect(() => {
-    if (!profile?.hr_self_service) return undefined
+    if (!loadFor) return undefined
     function onVisibility() { if (document.visibilityState === 'visible') refetchForTab() }
     function onPageShow(e) { if (e.persisted) refetchForTab() }
     document.addEventListener('visibilitychange', onVisibility)
@@ -397,7 +431,7 @@ export default function SelfServiceHome() {
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('pageshow', onPageShow)
     }
-  }, [profile, refetchForTab])
+  }, [loadFor, refetchForTab])
 
   // ── Swaps ──────────────────────────────────────────────────────────────────────────────────
   function openSwapRequest(day) {

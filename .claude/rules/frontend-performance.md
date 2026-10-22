@@ -97,6 +97,15 @@ A write that changes the list (close, reopen, rename, create, restore) calls
 `invalidatePeriodList(clientId)`. A page needing a column beyond `PERIOD_LIST_COLUMNS` keeps its
 own read for it. `MonthlySummary.js` is the worked example.
 
+**The app open is a waterfall too (S859).** Measured: about five serial levels before a signed-in
+Owner's first data. Three were not needed and are gone: `App.js`'s `BOOT_PAGES` starts the landing
+dashboard's chunk at once when a saved session exists (it used to wait for `ProtectedRoute`'s
+profile and outlet reads); `index.html` preconnects to the Supabase origin; and the Owner's
+`legal_acceptances` read rides in AuthContext's outlet batch, since it needs only the profile row.
+The same test applies inside a page: a read that needs only today's BS month (the Dashboard's
+forecast history) or only the session (Crest Staff's own RPCs) starts before the read it used to
+follow, and a late answer that no longer applies is dropped, never rendered.
+
 **Bulking a read means re-checking the 1000-row cap.** Collapsing N per-period queries into one
 `.in()` multiplies the row count — page it with `fetchAllRows` and give the sort a unique
 tiebreaker, or the fix trades a slow page for a silently truncated one.
@@ -363,7 +372,7 @@ Moved verbatim from the root `CLAUDE.md` (S769 context-reduction pass). The root
 
 Supabase sets PostgREST's `db-max-rows` to 1000. A `.select()` with no `.range()` that matches more rows than that returns the first 1000 with **no error and nothing in the data to say so** — every total summed from that array is then wrong, and wrong quietly, which is the dangerous part: it reads as a real figure until someone compares it against another source. Found live (S528) reporting 1000 movements / NPR 49,241 against a real 1753 / NPR 87,043.
 
-Use `fetchAllRows(makeQuery)` (`src/shared/fetchAllRows.js`) for any read that can realistically exceed 1000 rows — transaction tables rather than master data. Two rules: it takes a **function** returning a fresh builder (a supabase-js builder is a one-shot thenable and cannot be awaited twice), and that query must carry a **unique tiebreaker in its sort** (`.order('id')` after the display order), or paging a non-uniquely-ordered query repeats a row on one page and skips it on the next. A read that runs past `maxRows` returns an **error** (code `crest_row_cap`, worded by `errorText.js`), never the rows so far (S792); a caller with a legitimately bigger read raises `maxRows` (One Lakh's `ONE_LAKH_READ_MAX_ROWS`, the data export). `fetchAllRowsParallel` (same file, S853) is the opt-in for a read on a page's critical path: page 1 asks `count: 'exact'` and the rest go out together, so its `makeQuery(opts)` must pass `opts` to `.select(columns, opts)`. Only the Owner Dashboard's month `sales_entries` uses it.
+Use `fetchAllRows(makeQuery)` (`src/shared/fetchAllRows.js`) for any read that can realistically exceed 1000 rows — transaction tables rather than master data. Two rules: it takes a **function** returning a fresh builder (a supabase-js builder is a one-shot thenable and cannot be awaited twice), and that query must carry a **unique tiebreaker in its sort** (`.order('id')` after the display order), or paging a non-uniquely-ordered query repeats a row on one page and skips it on the next. A read that runs past `maxRows` returns an **error** (code `crest_row_cap`, worded by `errorText.js`), never the rows so far (S792); a caller with a legitimately bigger read raises `maxRows` (One Lakh's `ONE_LAKH_READ_MAX_ROWS`, the data export). `fetchAllRowsParallel` (same file, S853) is the opt-in for a read on a page's critical path: page 1 asks `count: 'exact'` and the rest go out together, so its `makeQuery(opts)` must pass `opts` to `.select(columns, opts)`. The Owner Dashboard, the Dashboard (month sales, the trend, the forecast history), Consolidated P&L with Monthly Summary (one pager per table on both, `summaryReads.test.js`) and Demand Forecast use it.
 
 **Decide by rows-per-what, not by table name, and count what the QUERY returns rather than what the function is named after.** A read narrowed in JS is bigger than it reads: `fetchYtdMap` looked scoped to one month while pulling the client's entire history. Per-employee-per-day and per-anything-per-month both cross 1000 inside one real client-year. And note the guard problem — truncation returns **no error**, so every `if (error)` check written against a failed read passes happily over a short one.
 

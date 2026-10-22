@@ -124,6 +124,45 @@ const Legal = lazy(() => import('./pages/Legal'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 const SubscriptionAgreement = lazy(() => import('./pages/SubscriptionAgreement'))
 
+// The page a signed-in app opens on, fetched at once (S859). Every page below ProtectedRoute mounts
+// only after the profile and outlet reads land, so on a cold open its code used to wait behind them:
+// two or three round trips on a slow link before the download even started. The dashboards are where
+// an app open lands (the manifest's start_url, `/`, and Login all go to /dashboard), so only they are
+// fetched early. Only with a saved session: a signed-out visitor is sent to /login, and on a thin
+// link the sign-in page should not share the pipe with a dashboard nobody can open yet. An import()
+// of the same file as a lazy page above is the same chunk, fetched once, so React.lazy then finds it
+// loaded or in flight. (Written out rather than shared with the lazy lines, which the prefetch tests
+// read in their `lazy(() => import(...))` form.)
+const BOOT_PAGES = {
+  '/dashboard': () => import('./pages/Dashboard'),
+  '/ims/dashboard': () => import('./pages/dashboard/ClientDashboard'),
+  '/owner-dashboard': () => import('./pages/dashboard/OwnerDashboard'),
+  '/hr/dashboard': () => import('./modules/hr/dashboard/HrDashboard'),
+  '/pos/dashboard': () => import('./modules/pos/dashboard/PosDashboard'),
+}
+
+function hasSavedSession() {
+  try {
+    return Object.keys(localStorage).some(k => k.startsWith('sb-') && k.endsWith('-auth-token'))
+  } catch (_) {
+    return false
+  }
+}
+
+function preloadBootPage() {
+  if (typeof window === 'undefined' || !hasSavedSession()) return
+  let path = window.location.pathname.replace(/\/+$/, '') || '/'
+  if (path === '/') {
+    try { if (localStorage.getItem('pos_device_client_id')) return } catch (_) { return }
+    path = '/dashboard'
+  }
+  const load = BOOT_PAGES[path]
+  // A failed early fetch is not this function's to report: React.lazy asks again on render, and that
+  // path goes through AppErrorBoundary and the chunk-reload guard.
+  if (load) load().catch(() => {})
+}
+preloadBootPage()
+
 function RootRedirect() {
   if (localStorage.getItem('pos_device_client_id')) return <Navigate to="/pos/login" replace />
   return <Navigate to="/dashboard" replace />

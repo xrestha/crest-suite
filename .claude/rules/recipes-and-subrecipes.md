@@ -193,6 +193,12 @@ the till (comp costs, slips, the Z-report, a closing bill's stock lines), throug
 and the other readers still fetch level by level; Stock Report, Reorder Report and the Dashboard took the
 book in S856 (PERF-5). A new multi-walk page should take the book.
 
+**A book's `items` are only the items some recipe uses (S859).** `loadDeltaExplosion(…, { book })`
+looks a choice's stock line up in that map, and an item no recipe uses has no yield there, which
+counts as 100%. Pass the book only when `bookCoversDeltas(book, lists)` (`orderLineIngredients.js`)
+says it holds every item and sub-recipe the deltas name; otherwise let it read. The Dashboard, the
+Owner Dashboard and Demand Forecast do; Stock Movements' Sub-Recipes tab does not yet (IMS_TODO PERF-6).
+
 **The server's post has a SQL copy of this walk (S830, Q30 a): `pos_bill_stock_lines`.** A change
 to `walkRecipeTree`, `deltaItems` or `billMovementRows` changes both, pinned by `serverPostTwin.test.js`
 and the migration's probe.

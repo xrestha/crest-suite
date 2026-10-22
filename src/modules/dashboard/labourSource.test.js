@@ -34,9 +34,12 @@ describe('Overheads adopts the shared labour rule', () => {
     expect(src).not.toMatch(/'hr_payroll_runs'/)
     expect(src).not.toMatch(/resolveLabour\(/)
   })
-  test('the shared loader pages the payslip read with a unique tiebreaker', () => {
+  // S859: the payslips ride on the finalized run's read (one run per month, one payslip per employee),
+  // ordered on their unique id, so the labour sum adds them in the order the paged read did.
+  test('the shared loader reads the payslips with the run, in payslip id order', () => {
     const loader = readSource('modules', 'dashboard', 'loadOutletLabour.js')
-    expect(loader).toMatch(/fetchAllRowsChunked\(runIds, chunk =>\s*from\('hr_payslips', PAYSLIP_LABOUR_COLUMNS\)\.in\('run_id', chunk\)\.order\('id'\)\)/)
+    expect(loader).toMatch(/from\('hr_payroll_runs', `id, hr_payslips\(\$\{PAYSLIP_LABOUR_COLUMNS\}\)`\)\s*\.eq\('period_id', period\.id\)\.eq\('status', 'finalized'\)\s*\.order\('id'\)\.order\('id', \{ referencedTable: 'hr_payslips' \}\)/)
+    expect(loader).not.toMatch(/from\('hr_payslips'/)
   })
 })
 

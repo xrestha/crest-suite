@@ -181,3 +181,38 @@ describe('ClientDashboard starts its slow reads early (PERF-5)', () => {
     expect(flat).toMatch(/fetchAllRowsParallel\(opts => supabase\.from\('sales_entries'\)\.select\('[^']*', opts\)\.eq\('period_id', period\.id\)\.order\('id'\)\)/)
   })
 })
+
+// S859: the slow-link pass over the page every Owner opens first.
+describe('ClientDashboard on a slow link (S859)', () => {
+  const flat = flatten('ClientDashboard.jsx')
+  const history = flat.slice(flat.indexOf('async function loadForecastHistory'), flat.indexOf('export default function ClientDashboard'))
+  const pos = flat.slice(flat.indexOf('async function loadPosStats'), flat.indexOf('async function loadKitchenPosStats'))
+
+  test('a Home of two or more modules does not read the Food Cost trend it does not draw', () => {
+    expect(flat).toMatch(/if \(!showModuleHeaders\) loadFcTrend\(periodRead\.then\(/)
+  })
+
+  test('the forecast history starts before the open-month read is awaited', () => {
+    const start = flat.indexOf('loadForecastHistory(scopedFrom, { bs_year: bsNow.year, bs_month: bsNow.month }')
+    expect(start).toBeGreaterThan(-1)
+    expect(flat.indexOf('await periodRead')).toBeGreaterThan(start)
+    expect(flat).toMatch(/const historyPromise = periodIsThisMonth \? earlyHistory : Promise\.resolve\(null\)/)
+  })
+
+  test.each(['sales_entries', 'purchase_entries'])("the history's %s read asks every page after the first at once", table => {
+    expect(history).toMatch(new RegExp(`fetchAllRowsParallel\\(opts => supabase\\.from\\('${table}'\\)\\.select\\('[^']*', opts\\)\\.in\\('period_id', ids\\)\\.order\\('id'\\)\\)`))
+  })
+
+  test("the POS card's bookings and tables go out before the month read is awaited", () => {
+    const month = pos.indexOf("await read(scopedFrom('monthly_periods')")
+    expect(month).toBeGreaterThan(-1)
+    expect(pos.indexOf("scopedFrom('pos_tables'")).toBeGreaterThan(-1)
+    expect(pos.indexOf("scopedFrom('pos_tables'")).toBeLessThan(month)
+    expect(pos.indexOf("scopedFrom('pos_reservations'")).toBeLessThan(month)
+  })
+
+  test('the choices read takes the recipe book only when it covers them', () => {
+    expect(flat).toMatch(/loadDeltaExplosion\(supabase, deltaLists, bookCoversDeltas\(deltaBook, deltaLists\) \? \{ book: deltaBook \} : \{\}\)/)
+  })
+})
+

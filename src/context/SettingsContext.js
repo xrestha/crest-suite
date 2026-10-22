@@ -135,6 +135,17 @@ export function SettingsProvider({ children }) {
     try {
       let query = supabase.from('settings').select('*')
       query = cid ? query.eq('client_id', cid) : query.is('client_id', null)
+      // A client session also needs the platform row, and that read uses nothing from its own, so
+      // both go out together (S859): the platform contact and prices land one round trip sooner. They
+      // are still awaited in turn, not through Promise.all, so the client's own row is applied the
+      // moment it lands and a slow platform read cannot hold back its branding or VAT flag.
+      // Promise.resolve sends it now (a builder sends only when awaited); the empty catch only marks
+      // a rejection handled while it waits, and the await below still throws it into the catch.
+      const platformRead = cid
+        ? Promise.resolve(supabase.from('settings')
+          .select('support_contact, contact_phone, contact_email, contact_website, plan_prices').is('client_id', null).maybeSingle())
+        : null
+      platformRead?.catch(() => {})
       const { data, error } = await query.maybeSingle()
       if (!current()) return
       setSettings(data ? { ...DEFAULT_SETTINGS, ...data } : DEFAULT_SETTINGS)
@@ -146,8 +157,7 @@ export function SettingsProvider({ children }) {
       // rule — a failed read is not an empty value). That now holds on BOTH paths: the no-client
       // path used to set both values to null from a failed read.
       if (cid) {
-        const { data: prow, error: perr } = await supabase.from('settings')
-          .select('support_contact, contact_phone, contact_email, contact_website, plan_prices').is('client_id', null).maybeSingle()
+        const { data: prow, error: perr } = await platformRead
         if (!current()) return
         if (!perr) {
           setPlatformSupport(platformSupportFromRow(prow))

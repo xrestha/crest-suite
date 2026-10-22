@@ -51,7 +51,7 @@ import { carryOverFrom, stillInPlay } from '../../modules/pos/reservations/reser
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients, getSuggestedPrice, loadRecipeBook } from '../../utils/recipeCost'
 import { buildStockRows } from '../../modules/ims/stockcount/stockReportCalc'
-import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
+import { loadDeltaExplosion, bookCoversDeltas } from '../../utils/orderLineIngredients'
 import { allocateBillDiscounts, returnCostValue } from '../../modules/ims/reports/supplierAttribution'
 import { valuePeriods, periodWastageValue, WASTAGE_VALUE_SELECT } from '../../modules/ims/reports/periodCost'
 import { FOOD_COST_LABEL, SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../../modules/ims/reports/foodCostBasis'
@@ -425,9 +425,11 @@ async function loadForecastHistory(scopedFrom, period, clientId) {
   const periods = (periodRows || []).filter(p => wanted.some(w => w.y === p.bs_year && w.m === p.bs_month))
   if (!periods.length) return { periods: [], sales: [], purchases: [], returns: [], holidays, error: null }
   const ids = periods.map(p => p.id)
+  // Two months of a busy till is many pages of sales; the pages after the first go out together
+  // (S859), as the month's own sales read does, rather than each waiting for the one before it.
   const results = await Promise.all([
-    fetchAllRows(() => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, bs_day, unit_price, discount, source').in('period_id', ids).order('id')),
-    fetchAllRows(() => supabase.from('purchase_entries').select('period_id, qty, rate, bs_day, discount_amount, purchase_group_id, vendor_id, invoice_ref, vat_inclusive, vat_is_cost').in('period_id', ids).order('id')),
+    fetchAllRowsParallel(opts => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, bs_day, unit_price, discount, source', opts).in('period_id', ids).order('id')),
+    fetchAllRowsParallel(opts => supabase.from('purchase_entries').select('period_id, qty, rate, bs_day, discount_amount, purchase_group_id, vendor_id, invoice_ref, vat_inclusive, vat_is_cost', opts).in('period_id', ids).order('id')),
     fetchAllRows(() => supabase.from('vendor_returns').select('period_id, qty, rate, bs_day, purchase_entries(vat_inclusive, vat_is_cost)').in('period_id', ids).order('id')),
   ])
   const error = firstError(results)
@@ -656,7 +658,20 @@ export default function ClientDashboard({ scope = 'home' }) {
     // point, which it derives from its own query batch rather than from this function's figures.
     // Before S558 it ran only after this whole function, so the chart always rendered last.
     // Not awaited — the same fire-and-forget shape it always had.
-    loadFcTrend(periodRead.then(r => r.data ?? null), myId)
+    // Only where the chart is drawn (S859): a Home of two or more modules shows no trend
+    // (imsChartsAndTables renders only when !showModuleHeaders, S800), and its twelve months of
+    // purchases, sales and counts were the heaviest download on the page an Owner opens first.
+    if (!showModuleHeaders) loadFcTrend(periodRead.then(r => r.data ?? null), myId)
+
+    // The 28 days before this month began, for the Daily Purchases vs Sales forecast and Target,
+    // started beside the open-month read rather than after it (S859): it needs only which month is
+    // running, and today's date says that. Every IMS tile waited for it, so it cost the whole page a
+    // round trip. Used only if the open month turns out to be this month (below); otherwise its
+    // answer is dropped. A hung history read is a failed one (S852): no Target is captured from it.
+    const bsNow = nepalBsToday()
+    const earlyHistory = settleWithin(
+      loadForecastHistory(scopedFrom, { bs_year: bsNow.year, bs_month: bsNow.month }, effectiveClientId),
+      WALK_TIMEOUT_MS, 'Past months')
 
     const { data: period, error: periodErr } = await periodRead
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
@@ -669,15 +684,11 @@ export default function ClientDashboard({ scope = 'home' }) {
     // costs are counted for those days. Fixed for this load, and kept in `stats` with its figures.
     const clock = mtdClock(period)
 
-    // The 28 days before this month began, for the Daily Purchases vs Sales forecast and Target.
-    // Only the month in progress forecasts anything, so only then is it read. Its own error slot:
-    // a failed history degrades one chart, it does not make the page's figures incomplete.
-    const bsNow = nepalBsToday()
+    // Only the month in progress forecasts anything, so the history started above is used only
+    // then. Its own error slot: a failed history degrades one chart, it does not make the page's
+    // figures incomplete.
     const periodIsThisMonth = !!period && period.bs_year === bsNow.year && period.bs_month === bsNow.month
-    // A hung history read is a failed one (S852): no Target is captured from it.
-    const historyPromise = periodIsThisMonth
-      ? settleWithin(loadForecastHistory(scopedFrom, period, effectiveClientId), WALK_TIMEOUT_MS, 'Past months')
-      : Promise.resolve(null)
+    const historyPromise = periodIsThisMonth ? earlyHistory : Promise.resolve(null)
 
     const dependentPromise = Promise.all([
       // `discount_amount` + the bill-key columns (`purchase_group_id`, and the vendor/invoice/day
@@ -800,7 +811,11 @@ export default function ClientDashboard({ scope = 'home' }) {
 
     // What customized plates used beyond their recipes (S758). Throws on a failed read, like the
     // recipe walk above, and is folded into hadRealError the same way — null = not computed.
-    const deltaExplosion = await withTimeout(loadDeltaExplosion(supabase, (salesData || []).map(s => s.ingredient_deltas)), WALK_TIMEOUT_MS, 'Option stock lines')
+    // From the recipe book already in hand when it holds every item and sub-recipe the choices name
+    // (S859): the yields and sub-recipe walk then cost no round trip. Otherwise it reads, as before.
+    const deltaLists = (salesData || []).map(s => s.ingredient_deltas)
+    const deltaBook = await bookPromise
+    const deltaExplosion = await withTimeout(loadDeltaExplosion(supabase, deltaLists, bookCoversDeltas(deltaBook, deltaLists) ? { book: deltaBook } : {}), WALK_TIMEOUT_MS, 'Option stock lines')
       .catch(err => { console.error('Dashboard: option stock-line walk failed', err); return null })
     if (loadIdRef.current !== myId) return // superseded during the option stock-line read
 
@@ -1282,6 +1297,29 @@ export default function ClientDashboard({ scope = 'home' }) {
   // window threw on. A null boundary is a failed read here too, never a query sent without one.
 
   async function loadPosStats(myId) {
+    // Tonight's bookings (S677): the same window the Orders floor uses — today's BS day plus six
+    // hours past midnight, so a 12:15 AM booking belongs to tonight's service, and since S818
+    // (RESERVATIONS-8) a booking from the evening before while its booked window is still open. "Still
+    // to come" is the covers not yet seated; a seated party is already inside Tables Occupied.
+    // Requests are public-page bookings waiting for a staff Accept, whatever day they are for.
+    //
+    // The bookings and the tables need nothing from the month or its bills, so they go out with the
+    // month read (S859). The card was four round trips in a row on a slow link; it is two.
+    const todayBs = nepalBs(new Date())
+    const dayStart = todayBs ? bsDayBoundaryIso(todayBs.year, todayBs.month, todayBs.day, false) : null
+    const dayEndBoundary = todayBs ? bsDayBoundaryIso(todayBs.year, todayBs.month, todayBs.day, true) : null
+    const bookingsPromise = dayStart && dayEndBoundary
+      ? Promise.all([
+        read(scopedFrom('pos_reservations', 'status, party_size, reserved_for, duration_minutes')
+          .in('status', ['booked', 'confirmed', 'arrived', 'seated'])
+          .gte('reserved_for', carryOverFrom(dayStart))
+          .lte('reserved_for', new Date(new Date(dayEndBoundary).getTime() + 6 * 3600000).toISOString()), 'Bookings'),
+        // S834: a request whose time has passed is not counted (reservationSeen.js, as the nav chip).
+        read(waitingRequests(scopedFrom('pos_reservations', 'id', { count: 'exact', head: true })), 'Booking requests'),
+      ])
+      : null
+    const tablesPromise = read(scopedFrom('pos_tables', 'status').neq('status', 'inactive'), 'Tables')
+
     // See loadStats' identical .single() comment above — PGRST116 (no open period) is expected,
     // not a failure. Every read here is time-limited (S852): a hung one fails its own tiles, which keep
     // their last good figures (keepLastGood) under the banner's Retry.
@@ -1336,31 +1374,16 @@ export default function ClientDashboard({ scope = 'home' }) {
     const dineInBills   = summary.dineInBills
     const avgCheck      = summary.avgBill ?? 0
 
-    // Tonight's bookings (S677): the same window the Orders floor uses — today's BS day plus six
-    // hours past midnight, so a 12:15 AM booking belongs to tonight's service, and since S818
-    // (RESERVATIONS-8) a booking from the evening before while its booked window is still open. "Still
-    // to come" is the covers not yet seated; a seated party is already inside Tables Occupied.
-    // Requests are public-page bookings waiting for a staff Accept, whatever day they are for.
-    const todayBs = nepalBs(new Date())
     let bookings = [], bookingsErr = null, requestsPending = 0, requestsErr = null
-    const dayStart = todayBs ? bsDayBoundaryIso(todayBs.year, todayBs.month, todayBs.day, false) : null
-    const dayEndBoundary = todayBs ? bsDayBoundaryIso(todayBs.year, todayBs.month, todayBs.day, true) : null
     if (todayBs && !(dayStart && dayEndBoundary)) bookingsErr = { message: `No calendar dates for BS ${todayBs.year}-${todayBs.month}-${todayBs.day}` }
-    if (dayStart && dayEndBoundary) {
-      const dayEnd = new Date(new Date(dayEndBoundary).getTime() + 6 * 3600000).toISOString()
-      const [b, r] = await Promise.all([
-        read(scopedFrom('pos_reservations', 'status, party_size, reserved_for, duration_minutes')
-          .in('status', ['booked', 'confirmed', 'arrived', 'seated'])
-          .gte('reserved_for', carryOverFrom(dayStart)).lte('reserved_for', dayEnd), 'Bookings'),
-        // S834: a request whose time has passed is not counted (reservationSeen.js, as the nav chip).
-        read(waitingRequests(scopedFrom('pos_reservations', 'id', { count: 'exact', head: true })), 'Booking requests'),
-      ])
+    if (bookingsPromise) {
+      const [b, r] = await bookingsPromise
       const dayStartMs = new Date(dayStart).getTime()
       bookings = (b.data || []).filter(x => stillInPlay(x, dayStartMs, Date.now())); bookingsErr = b.error
       requestsPending = r.count || 0; requestsErr = r.error
     }
 
-    const { data: tables, error: tablesErr } = await read(scopedFrom('pos_tables', 'status').neq('status', 'inactive'), 'Tables')
+    const { data: tables, error: tablesErr } = await tablesPromise
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
     const tablesOccupied = (tables || []).filter(t => t.status === 'occupied').length
     const tablesTotal    = (tables || []).length

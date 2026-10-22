@@ -81,6 +81,23 @@ export async function loadDeltaExplosion(supabase, deltaLists, { book } = {}) {
   return explosion
 }
 
+/**
+ * Whether `book` holds everything these deltas name, so loadDeltaExplosion can take it as it is
+ * (S859). A recipe book's `items` are only the items some recipe uses, and a choice's stock line may
+ * name an item no recipe does: the book has no yield for it, and a missing yield counts as 100%. A
+ * caller holding a book passes it only when this is true, and otherwise lets the explosion read.
+ */
+export function bookCoversDeltas(book, deltaLists) {
+  if (!book) return false
+  for (const list of deltaLists || []) {
+    for (const d of list || []) {
+      if (d.item_id) { if (!book.items.has(d.item_id)) return false }
+      else if (d.sub_recipe_id && !book.recipes.has(d.sub_recipe_id)) return false
+    }
+  }
+  return true
+}
+
 /** Raw items for one plate's stored deltas: [{ item_id, qty }] signed, aggregated. Pure. */
 export function deltaItems(deltas, explosion) {
   const agg = {}

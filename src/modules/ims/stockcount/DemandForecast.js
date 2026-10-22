@@ -5,7 +5,8 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { supabase } from '../../../supabaseClient'
 import { firstError } from '../../../shared/queryError'
-import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
+import { fetchAllRowsParallel } from '../../../shared/fetchAllRows'
+import { usePeriodList } from '../../../shared/hooks/usePeriodList'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { nepalBs, nepalBsLong, nepalCivilDate, nepalTime } from '../../../shared/nepalTime'
@@ -13,15 +14,14 @@ import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, bsToAd, getBsToday, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 import { runForecast } from '../../../utils/demandForecastData'
-import { splitDishList, totalQtyByRecipe, aggregateIngredientDemand, ingredientBuyList, scaleForecastDays, usualSupplierByItem, addDemand, averageChoicesPerPlate, periodsInLookback, LOOKBACK_DAYS, SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD } from '../../../utils/demandForecastMath'
+import { splitDishList, totalQtyByRecipe, aggregateIngredientDemand, ingredientBuyList, scaleForecastDays, addDemand, SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD } from '../../../utils/demandForecastMath'
 import { packsFor, packText } from './reorderPacks'
 import { useSettings } from '../../../context/SettingsContext'
 import { useWeatherStrip } from '../../dashboard/useWeatherStrip'
 import { rainFactorForMonth, rainPctValue, isRainyDay } from '../../dashboard/weatherEffect'
-import { buildStockRows } from './stockReportCalc'
 import { readPeriodTransfers } from '../transfers/transferFlows'
-import { explodeRecipeIngredients } from '../../../utils/recipeCost'
-import { loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
+import { loadRecipeBook } from '../../../utils/recipeCost'
+import { startBuyingListReads, loadBuyingList, countUndatedRows, SUPPLIER_LOOKBACK } from './demandForecastLoad'
 import { printWithTitle } from '../../../utils/printTitle'
 import { errorText, isNetworkError } from '../../../shared/errorText'
 import { withTimeout, settleWithin, isTimeout } from '../../../utils/withTimeout'
@@ -57,139 +57,6 @@ function newestRunOnly(rows) {
   const newest = rows.reduce((a, b) => (new Date(b.generated_at) > new Date(a.generated_at) ? b : a))
   const keep = runOf(newest)
   return rows.filter(r => runOf(r) === keep)
-}
-
-// What stands behind "In store": the one on-hand calculation (buildStockRows, S696), for the open
-// period or else the latest — never a local copy of opening + purchases − usage (S756, D21).
-// Throws on any failed read; the caller turns that into its own notice rather than an empty shelf.
-// Returns `{ onHandById: null, period: null }` when the client has no period at all.
-async function loadOnHand(scopedFrom, items) {
-  // Bounded (S857): this read had no limit, so a hung request held the buying list on "Working out
-  // ingredients…" for good. A timeout throws like any failed read, into the caller's In store notice.
-  const { data: periods, error: pErr } = await settleWithin(scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
-    .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }), 20000, 'Reading the stock months')
-  if (pErr) throw pErr
-  const period = (periods || []).find(p => p.status === 'open') || (periods || [])[0]
-  if (!period) return { onHandById: null, period: null, parById: null, periods: periods || [] }
-  const itemIds = items.map(i => i.id)
-  if (itemIds.length === 0) return { onHandById: {}, period, parById: {}, periods }
-  // Per-item tables narrowed to the forecast's ingredients (chunked: the id list is a URL, and
-  // each is one row per item per period or more). Sales stay whole-period and paged, because
-  // usage of these items can come from any dish sold, not only the forecast ones.
-  const byItems = (table, cols, scoped) => fetchAllRowsChunked(itemIds, ids =>
-    (scoped ? scopedFrom(table, cols) : supabase.from(table).select(cols))
-      .eq('period_id', period.id).in('item_id', ids).order('id'))
-  const results = await Promise.all([
-    byItems('opening_stock', 'item_id, qty'),
-    byItems('closing_stock', 'item_id, physical_qty'),
-    byItems('purchase_entries', 'item_id, qty'),
-    byItems('vendor_returns', 'item_id, qty', true),
-    byItems('wastages', 'item_id, qty'),
-    byItems('staff_meals', 'item_id, qty'),
-    // bs_day + source feed the POS-supersedes-manual rule inside buildStockRows; ingredient_deltas
-    // because a customized plate also consumes its options' stock lines (S758).
-    fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, bs_day, source, ingredient_deltas').eq('period_id', period.id).order('id')),
-    // Safety stock (S800): each item's par — one row per item per client, so chunked by item.
-    fetchAllRowsChunked(itemIds, ids => scopedFrom('par_levels', 'id, item_id, par_qty').in('item_id', ids).order('id')),
-    // Stock transfers between outlets (S849, PNL-8) move the shelf like a purchase and a return, the
-    // same as on Stock Report. A failed read is a failed shelf read, never "no transfers".
-    readPeriodTransfers(scopedFrom, period.id, { select: 'id, item_id, qty, direction' }),
-  ])
-  const failed = firstError(results)
-  if (failed) throw failed
-  const [{ data: opening }, { data: closing }, { data: purchases }, { data: returns }, { data: wastages }, { data: staffMeals }, { data: sales }, { data: pars }, { data: transfers }] = results
-  const soldIds = [...new Set((sales || []).map(s => s.recipe_id).filter(Boolean))]
-  // Both walks throw on a failed read, which the caller already turns into its own notice (S758).
-  const [breakdown, explosion] = await Promise.all([
-    soldIds.length > 0 ? explodeRecipeIngredients(supabase, soldIds) : {},
-    loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
-  ])
-  const rows = buildStockRows({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion, transfers })
-  return {
-    onHandById: Object.fromEntries(rows.map(r => [r.item.id, r.onHand])),
-    period,
-    periods,
-    countedIds: new Set(rows.filter(r => r.stockSource === 'closing').map(r => r.item.id)),
-    parById: Object.fromEntries((pars || []).map(p => [p.item_id, Number(p.par_qty) || 0])),
-  }
-}
-
-// Who each item is usually bought from (S800): the vendor on its latest purchase line over the last
-// SUPPLIER_LOOKBACK periods. purchase_entries is period-scoped, so it is read through the client's
-// own period ids. Throws on a failed read; the caller shows the list ungrouped and says why.
-const SUPPLIER_LOOKBACK = 6
-async function loadUsualSuppliers(scopedFrom, itemIds, periods) {
-  const ordinal = p => p.bs_year * 100 + p.bs_month
-  const recent = [...(periods || [])].sort((a, b) => ordinal(b) - ordinal(a)).slice(0, SUPPLIER_LOOKBACK)
-  if (recent.length === 0 || itemIds.length === 0) return { byItem: {}, names: {} }
-  const rankById = Object.fromEntries(recent.map(p => [p.id, ordinal(p)]))
-  const recentIds = recent.map(p => p.id)
-  const [linesRes, vendorsRes] = await Promise.all([
-    fetchAllRowsChunked(itemIds, ids => supabase.from('purchase_entries')
-      .select('id, item_id, vendor_id, period_id, bs_day, created_at')
-      .in('period_id', recentIds).in('item_id', ids).not('vendor_id', 'is', null).order('id')),
-    fetchAllRows(() => scopedFrom('vendors', 'id, name, is_active').order('id')),
-  ])
-  const failed = firstError([linesRes, vendorsRes])
-  if (failed) throw failed
-  return {
-    byItem: usualSupplierByItem(linesRes.data, rankById),
-    names: Object.fromEntries((vendorsRes.data || []).map(v => [v.id, v.name])),
-    active: new Set((vendorsRes.data || []).filter(v => v.is_active !== false).map(v => v.id)),
-  }
-}
-
-// The run's own 12-week window (S849): the Nepal date the shown run was made on, and 84 days back.
-// The forecast's history ended the day before the run, so the guests' choices and the Bulk-row
-// count below are read over the same days the forecast learned from, not over today's window.
-function runWindow(runAt) {
-  const to = runAt ? nepalCivilDate(runAt) : null
-  if (!to) return null
-  const from = new Date(to)
-  from.setDate(to.getDate() - LOOKBACK_DAYS)
-  return { from, to }
-}
-
-// The guests' usual choices on each forecast dish, per plate, as raw items (S849, FORECAST-3,
-// owner decision SU13 a). Learned from the till's posted sales over the run's own window
-// (averageChoicesPerPlate), then run through the ONE conversion stock uses (loadDeltaExplosion +
-// deltaItems), so the result has the recipe explosion's shape: { recipeId: [{ item_id, qty }] },
-// signed. A positive `.in` on `source` is deliberate: a NULL-source row is hand-entered and carries
-// no choices. Throws on any failed read; the caller shows its own notice and keeps the recipe half.
-async function loadUsualChoices(periodsP, recipeIds, runAt) {
-  const win = runWindow(runAt)
-  if (!win || recipeIds.length === 0) return {}
-  const { data: periods, error: pErr } = await periodsP
-  if (pErr) throw pErr
-  const windowPeriods = periodsInLookback(periods, win.from, win.to)
-  if (windowPeriods.length === 0) return {}
-  const periodIds = windowPeriods.map(p => p.id)
-  const { data: rows, error } = await fetchAllRowsChunked(recipeIds, ids => supabase.from('sales_entries')
-    .select('period_id, recipe_id, bs_day, qty_sold, source, ingredient_deltas')
-    .in('period_id', periodIds).in('recipe_id', ids).in('source', ['pos', 'pos_comp']).order('id'))
-  if (error) throw error
-  const avg = averageChoicesPerPlate(rows, { periodsById: Object.fromEntries(windowPeriods.map(p => [p.id, p])), ...win })
-  const lists = Object.values(avg)
-  if (lists.length === 0) return {}
-  const explosion = await loadDeltaExplosion(supabase, lists)
-  return Object.fromEntries(Object.entries(avg).map(([recipeId, lines]) => [recipeId, deltaItems(lines, explosion)]))
-}
-
-// How many Bulk monthly Sales Entries (bs_day 0) fall in the run's window (S849, FORECAST-10c). A
-// weekday with no samples on an outlet that enters sales as monthly totals is not "no sales" — the
-// sales are there, with no day on them. The run's own count is not stored, so this one head count
-// stands in for it, and only when some shown day has no samples.
-async function countUndatedRows(periodsP, runAt) {
-  const win = runWindow(runAt)
-  if (!win) return null
-  const { data: periods, error: pErr } = await periodsP
-  if (pErr) throw pErr
-  const ids = periodsInLookback(periods, win.from, win.to).map(p => p.id)
-  if (ids.length === 0) return 0
-  const { count, error } = await supabase.from('sales_entries').select('id', { count: 'exact', head: true })
-    .in('period_id', ids).eq('bs_day', 0).or('source.is.null,source.eq.manual')
-  if (error) throw error
-  return count || 0
 }
 
 // "18 Bhadra 2083, 9:14 AM": every time on this page, by Nepal's calendar and clock (S849, FORECAST-8).
@@ -233,6 +100,7 @@ function DemandForecastBody() {
   const navigate = useNavigate()
   const { scopedFrom } = useScopedDb()
   const horizonReq = useLatestRequest()
+  const periodList = usePeriodList()
   const [horizon, setHorizon] = useState(7)
   const [forecast, setForecast] = useState([])
   const [recipeNames, setRecipeNames] = useState({})
@@ -275,66 +143,23 @@ function DemandForecastBody() {
   // (the S693 Roster fix, applied here for the same reason).
   const hasPos = !!clientModules?.pos
 
-  const loadIngredients = useCallback(async (list, reqKey, { periodsP, runAt: madeAt } = {}) => {
+  // `reads` are the buying list's reads loadStored started beside the forecast (S859,
+  // demandForecastLoad.js): the walks run over the recipe book in memory, and nothing here sends a
+  // request that waits on another. The halves keep their own error slots, as before.
+  const loadIngredients = useCallback(async (list, reqKey, { reads, runAt: madeAt }) => {
     const totals = totalQtyByRecipe(list)
     const recipeIds = Object.keys(totals).filter(id => totals[id] > 0)
     if (recipeIds.length === 0) { setIngredients(EMPTY_ING); return }
     setIngredients(s => ({ ...s, loading: true, error: null }))
     try {
-      // Same walk the Reorder Report uses for theoretical usage: leaf items only, sub-recipes
-      // resolved through their yield, item yield_pct applied. Beside it, the guests' usual choices
-      // (Customization outlets only: elsewhere no sale carries any), which fail on their own.
-      const [exploded, choiceRes] = await Promise.all([
-        explodeRecipeIngredients(supabase, recipeIds),
-        customizationEnabled && periodsP
-          ? withTimeout(loadUsualChoices(periodsP, recipeIds, madeAt), 30000, 'Reading the guests\' usual choices')
-            .then(choicePerPlate => ({ choicePerPlate }), choiceError => ({ choiceError }))
-          : Promise.resolve({ choicePerPlate: {} }),
-      ])
-      const choicePerPlate = choiceRes.choicePerPlate || {}
-      const choiceError = choiceRes.choiceError || null
-      // Items reached only through a choice are loaded like any other: names, rates, in store, suppliers.
-      const itemIds = Object.keys(addDemand(aggregateIngredientDemand(totals, exploded), aggregateIngredientDemand(totals, choicePerPlate)))
-      let items = []
-      if (itemIds.length > 0) {
-        const { data, error } = await fetchAllRowsChunked(itemIds, ids =>
-          scopedFrom('items', 'id, name, uom, per_uom_rate, is_active, purchase_unit, conversion_factor, categories(name)').in('id', ids).order('id'))
-        if (error) throw error
-        items = data || []
-      }
+      const loaded = await loadBuyingList({ supabase, reads, totals, recipeIds, runAt: madeAt, customization: customizationEnabled })
       if (!horizonReq.isCurrent(reqKey)) return
-
-      // In store (S756, D21). Its own try: a failed stock read must not take forecast use with it,
-      // and must not read as an empty shelf either — ingredientBuyList carries it as unknown.
-      let stock = { onHandById: null, period: null, periods: [], countedIds: new Set(), parById: null }
-      let stockError = null
-      try {
-        stock = await loadOnHand(scopedFrom, items)
-      } catch (err) {
-        stockError = err
-      }
-      // Usual suppliers (S800), likewise on their own: without them the list is one ungrouped table.
-      let suppliers = null
-      let supplierError = null
-      try {
-        let periods = stock.periods
-        if (!periods?.length) {
-          // Bounded like the In-store read above (S857): an unanswered read left the buying list loading.
-          const { data, error } = await settleWithin(scopedFrom('monthly_periods', 'id, bs_year, bs_month'), 20000, 'Loading the months')
-          if (error) throw error
-          periods = data || []
-        }
-        suppliers = await loadUsualSuppliers(scopedFrom, items.map(i => i.id), periods)
-      } catch (err) {
-        supplierError = err
-      }
-      if (!horizonReq.isCurrent(reqKey)) return
-      setIngredients({ loading: false, error: null, exploded, choicePerPlate, choiceError, items, stock, stockError, suppliers, supplierError })
+      setIngredients({ loading: false, error: null, ...loaded })
     } catch (err) {
       if (!horizonReq.isCurrent(reqKey)) return
       setIngredients({ ...EMPTY_ING, error: err })
     }
-  }, [scopedFrom, horizonReq, customizationEnabled]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [horizonReq, customizationEnabled]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadStored = useCallback(async () => {
     if (!clientId) return
@@ -343,17 +168,29 @@ function DemandForecastBody() {
     setLoading(true)
     setLoadError(null)
     setExpandedIdx(null)
-    // The client's months, read once for the two follow-up reads over the run's window (the guests'
-    // choices and the Bulk-row count). Started now, beside the forecast, but never part of the
-    // forecast's own error: both follow-ups fail on their own.
-    const periodsP = settleWithin(scopedFrom('monthly_periods', 'id, bs_year, bs_month'), 20000, 'Loading the months')
+    // Everything the page reads starts here, beside the forecast (S859). It was 13 serial round trips
+    // on Fast 3G (14-24 s): the dish names after the forecast, the month list three times, and the
+    // buying list as a chain whose recipe walks cost one round trip per sub-recipe level.
+    //   - The client's months come from the shared list (S855, periodList.js), read once for the
+    //     in-store month, the suppliers, the guests' choices and the Bulk-row count. Never part of
+    //     the forecast's own error: each of those fails on its own.
+    //   - The recipe book (one request) feeds the dish names and both recipe walks, in memory. Read
+    //     on every load rather than once a visit, so a Recompute or a horizon switch sees the recipes
+    //     as they are now, as the per-level reads did; it costs no round trip, being beside the forecast.
+    //   - The buying list's other reads start too (startBuyingListReads); none waits on another.
+    const periodsP = settleWithin(periodList().fresh, 20000, 'Loading the months')
+    const bookP = settleWithin(loadRecipeBook(scopedFrom).then(book => ({ data: book, error: null }), error => ({ data: null, error })), 30000, 'Loading the recipes')
+    const reads = startBuyingListReads({ supabase, scopedFrom, periodsP, bookP, readTransfers: readPeriodTransfers })
+    // The dish names keep their own bound and their own error slot (S756), now as a wait on the book.
+    const namesP = settleWithin(bookP, 20000, 'Loading the dish names')
     // Bounded (S849, FORECAST-10a): a hung read becomes the read's own error, so the page shows
     // ReportLoadError instead of "Loading…" for ever.
     const results = await Promise.all([
       // Paged (S792 PLANNING-1): one row per day plus one per dish forecast that day, so a 30-day
       // run on a 40-dish menu is ~1,230 rows, and past 1,000 the later days lost their dishes and
       // "Ingredients to buy" under-read with no error. `id` is the unique tiebreak paging needs.
-      settleWithin(fetchAllRows(() => scopedFrom('demand_forecast_daily')
+      // The pages after the first are asked for together (S859).
+      settleWithin(fetchAllRowsParallel(opts => scopedFrom('demand_forecast_daily', '*', opts)
         .eq('horizon_days', horizon)
         .order('bs_year').order('bs_month').order('bs_day').order('id')), 20000, 'Loading the forecast'),
       // This horizon's own last run (FORECAST-8): a 30-day Recompute is not the 7-day forecast's
@@ -406,22 +243,21 @@ function DemandForecastBody() {
     setNamesError(null)
     const recipeIds = [...new Set(list.flatMap(d => Object.keys(d.forecastQtyByRecipe)))]
     if (recipeIds.length > 0) {
-      const { data: recs, error: recErr } = await settleWithin(
-        fetchAllRowsChunked(recipeIds, ids => scopedFrom('recipes', 'id, name').in('id', ids).order('id')), 20000, 'Loading the dish names')
+      const { data: book, error: recErr } = await namesP
       if (!horizonReq.isCurrent(reqKey)) return
       if (recErr) { setNamesError(recErr); setRecipeNames({}) }
-      else setRecipeNames(Object.fromEntries((recs || []).map(r => [r.id, r.name])))
+      else setRecipeNames(Object.fromEntries(recipeIds.filter(id => book.recipes.has(id)).map(id => [id, book.recipes.get(id).name])))
     }
     setLoading(false)
-    loadIngredients(list, reqKey, { periodsP, runAt: madeAt })
+    loadIngredients(list, reqKey, { reads, runAt: madeAt })
     // Only when some day shown has no samples: then whether the outlet enters monthly Bulk totals
     // is the difference between "no sales" and "no dated sales". Best-effort; a failure says nothing.
     if (list.some(d => d.sampleCount === 0)) {
-      countUndatedRows(periodsP, madeAt).then(
+      countUndatedRows(supabase, periodsP, madeAt).then(
         n => { if (horizonReq.isCurrent(reqKey)) setUndatedRows(n) },
         err => console.error('demand forecast: could not count the Bulk sales entries in the window:', err))
     }
-  }, [clientId, horizon, scopedFrom, horizonReq, loadIngredients])
+  }, [clientId, horizon, scopedFrom, horizonReq, loadIngredients, periodList])
 
   useEffect(() => { loadStored() }, [loadStored])
 

@@ -26,7 +26,7 @@ import { Navigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { supabase } from '../../supabaseClient'
-import { fetchAllRows } from '../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsParallel } from '../../shared/fetchAllRows'
 import { firstError } from '../../shared/queryError'
 import { npr } from '../../shared/nepalMoney'
 import {
@@ -154,23 +154,31 @@ export default function ConsolidatedPnl() {
     const from = (t, c) => scopedFrom(t, c)
     const clocks = new Map(list.map(p => [p.id, p.status === 'open' ? mtdClock(p) : null]))
 
+    // The depreciation memo is its own read (PNL-3): a failed memo never blocks the statement. It needs
+    // nothing from the batch, so it starts beside it (S859) rather than one round trip after it.
+    const memosPromise = Promise.all(list.map(p => withTimeout(loadDepreciationMemo(scopedFrom, p), LOAD_MS, 'Depreciation memo')
+      .catch(error => ({ error }))))
+
     let results
     try {
       results = await withTimeout(Promise.all([
         // Monthly Summary's exact reads, so revenue and COGS tie to that page: every item, hidden ones
-        // included (S792, D29), prep excluded, every per-item-per-period read paged on its id.
+        // included (S792, D29), prep excluded, every per-item-per-period read paged on its id. A fiscal
+        // year is twelve months of those rows, so each per-period read asks page 1 with the row count
+        // and every later page at once (fetchAllRowsParallel, S859): the same rows in the same order as
+        // one page after another, in two round trips whatever the year's size.
         fetchAllRows(() => scopedFrom('items', 'id, name, per_uom_rate, is_active').eq('is_sub_recipe', false).order('id')),
-        fetchAllRows(() => supabase.from('opening_stock').select('period_id, item_id, qty').in('period_id', ids).order('id')),
-        fetchAllRows(() => supabase.from('closing_stock').select('period_id, item_id, physical_qty').in('period_id', ids).order('id')),
-        fetchAllRows(() => supabase.from('purchase_entries')
-          .select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost')
+        fetchAllRowsParallel(opts => supabase.from('opening_stock').select('period_id, item_id, qty', opts).in('period_id', ids).order('id')),
+        fetchAllRowsParallel(opts => supabase.from('closing_stock').select('period_id, item_id, physical_qty', opts).in('period_id', ids).order('id')),
+        fetchAllRowsParallel(opts => supabase.from('purchase_entries')
+          .select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost', opts)
           .in('period_id', ids).order('id')),
-        fetchAllRows(() => scopedFrom('vendor_returns', 'period_id, item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').in('period_id', ids).order('id')),
-        fetchAllRows(() => supabase.from('wastages').select('period_id, item_id, qty').in('period_id', ids).order('id')),
-        fetchAllRows(() => supabase.from('staff_meals').select('period_id, item_id, qty').in('period_id', ids).order('id')),
+        fetchAllRowsParallel(opts => scopedFrom('vendor_returns', 'period_id, item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)', opts).in('period_id', ids).order('id')),
+        fetchAllRowsParallel(opts => supabase.from('wastages').select('period_id, item_id, qty', opts).in('period_id', ids).order('id')),
+        fetchAllRowsParallel(opts => supabase.from('staff_meals').select('period_id, item_id, qty', opts).in('period_id', ids).order('id')),
         // `source` selected and comps filtered in JS, never `.neq('source','pos_comp')` (S747).
-        fetchAllRows(() => supabase.from('sales_entries')
-          .select('period_id, recipe_id, qty_sold, unit_price, discount, source').in('period_id', ids)
+        fetchAllRowsParallel(opts => supabase.from('sales_entries')
+          .select('period_id, recipe_id, qty_sold, unit_price, discount, source', opts).in('period_id', ids)
           .order('id')),
         fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
         fetchAllRows(() => scopedFrom('overheads', 'id, period_id, bucket, amount').in('period_id', ids).order('id')),
@@ -207,9 +215,8 @@ export default function ConsolidatedPnl() {
       { data: labourLoads },
     ] = results
 
-    // The depreciation memo is its own read (PNL-3): a failed memo never blocks the statement.
-    const memos = await Promise.all(list.map(p => withTimeout(loadDepreciationMemo(scopedFrom, p), LOAD_MS, 'Depreciation memo')
-      .catch(error => ({ error }))))
+    // Started beside the batch above, and settled by now on any connection that brought the batch back.
+    const memos = await memosPromise
 
     const byPeriod = rows => {
       const m = new Map()

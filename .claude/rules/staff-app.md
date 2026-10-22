@@ -73,6 +73,10 @@ devices install that one.
   `loadRoster` is request-guarded so the older months' load cannot land last.
 - **`subscribeToPush` re-subscribes on a 42501 upsert** (S798): on a shared phone the browser's
   endpoint can still be another employee's row, which RLS will not let this login take over.
+- **The first load starts on the session, not the profile** (S859, `loadFor` in `SelfServiceHome`):
+  the RPCs answer for the signed-in login only, so they go out beside AuthContext's profile read
+  instead of two round trips after it. A load started for a login that turns out not to be a Staff
+  app one is dropped when it lands, and the route's own redirect still decides.
 - **Every RPC the app waits on is bounded** (S803): reads 20 s, sends 25 s, through `read`/`write`
   in `SelfServiceHome`, so a stalled call becomes that area's own error card with Retry. Reopening a
   sheet resets its busy flag; a second send is refused by the database if the first landed. Net pay

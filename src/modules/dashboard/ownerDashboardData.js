@@ -177,6 +177,8 @@ export function returnsAgainstEarlierBills(returns, periodId) {
 // ── Overdue Payables ─────────────────────────────────────────────────────────────────────────────
 
 const OVERDUE_BILL_COLUMNS = 'id, created_at, bs_day, qty, rate, invoice_ref, paid_at, vat_inclusive, discount_amount, purchase_group_id, vendor_id, monthly_periods!inner(client_id, bs_year, bs_month)'
+const PAYMENT_COLUMNS = 'id, purchase_entry_id, amount, paid_at, payment_mode, credit_link_id'
+const RETURN_COLUMNS = 'purchase_entry_id, qty, rate'
 export const OVERDUE_DAYS = 60
 
 /**
@@ -185,9 +187,12 @@ export const OVERDUE_DAYS = 60
  * invoice after the bill discount and returns, VAT included, less what has been paid. The tile counted
  * LINES at qty × rate before (S747): 24 lines for 2 bills, ex-VAT and before returns.
  *
- * 1. every unpaid Credit line of the client, across periods (paged); 2. every line of those bills by
- * `purchase_group_id` (chunked; a legacy line with no group is its own bill); 3. payments and returns
- * by line id (chunked + paged).
+ * Two round trips (S859; three before): 1. every unpaid Credit line of the client, across periods
+ * (paged); 2. together, every line of those bills by `purchase_group_id`, and the payments and returns
+ * against those bills' lines, found through the line's own group (`purchase_entries!inner`) so they need
+ * not wait for the line ids. A legacy line with no group is its own bill, and its payments and returns
+ * are read by its id. All chunked and paged. The maps are keyed by line and read only for the bills'
+ * lines, so they hold what the by-line-id reads held.
  *
  * @returns {Promise<{ overdueTotal: ?number, overdueCount: ?number, error: ?object }>}
  */
@@ -207,31 +212,41 @@ export async function loadOverdueCreditBills({ supabase, scopedFrom, clientId, t
   // A part-paid bill has some lines stamped paid: its figures need every line (calcBillTotals is not
   // linear in the bill discount, S723), so the bills are completed by group id.
   const groupIds = [...new Set(seed.map(e => e.purchase_group_id).filter(Boolean))]
-  const sibRes = await settleWithin(fetchAllRowsChunked(groupIds, gids => supabase.from('purchase_entries')
-    .select(OVERDUE_BILL_COLUMNS)
-    .eq('monthly_periods.client_id', clientId)
-    .eq('payment_method', 'Credit')
-    .in('purchase_group_id', gids)
-    .order('id')), timeoutMs, 'Credit bill lines')
-  if (sibRes.error) return fail(sibRes.error)
+  const looseIds = seed.filter(e => !e.purchase_group_id).map(e => e.id)
+  // One row per payment or return, ordered on its own id within each chunk, as the by-line-id reads
+  // were: a line's rows all sit in one chunk (one group, or one id), so each line's list keeps its order
+  // and its payments and returns add up in the same order.
+  const byGroup = (table, columns, label) => settleWithin(fetchAllRowsChunked(groupIds, gids => scopedFrom(table, `${columns}, purchase_entries!inner(purchase_group_id)`)
+    .in('purchase_entries.purchase_group_id', gids).order('id')), timeoutMs, label)
+  const byLine = (table, columns, label) => settleWithin(fetchAllRowsChunked(looseIds, ids => scopedFrom(table, columns)
+    .in('purchase_entry_id', ids).order('id')), timeoutMs, label)
+  const [sibRes, groupPmtRes, linePmtRes, groupRetRes, lineRetRes] = await Promise.all([
+    settleWithin(fetchAllRowsChunked(groupIds, gids => supabase.from('purchase_entries')
+      .select(OVERDUE_BILL_COLUMNS)
+      .eq('monthly_periods.client_id', clientId)
+      .eq('payment_method', 'Credit')
+      .in('purchase_group_id', gids)
+      .order('id')), timeoutMs, 'Credit bill lines'),
+    byGroup('payable_payments', PAYMENT_COLUMNS, 'Payable payments'),
+    byLine('payable_payments', PAYMENT_COLUMNS, 'Payable payments'),
+    byGroup('vendor_returns', RETURN_COLUMNS, 'Vendor returns'),
+    byLine('vendor_returns', RETURN_COLUMNS, 'Vendor returns'),
+  ])
+  // The bill lines' failure first, then the payments', then the returns', as the reads used to run.
+  const failed = [sibRes, groupPmtRes, linePmtRes, groupRetRes, lineRetRes].find(r => r.error)
+  if (failed) return fail(failed.error)
   const byId = new Map()
   for (const e of sibRes.data || []) byId.set(e.id, e)
   for (const e of seed) if (!byId.has(e.id)) byId.set(e.id, e)
   const lines = [...byId.values()]
-  const ids = lines.map(e => e.id)
 
-  const [pmtRes, retRes] = await Promise.all([
-    settleWithin(fetchAllRowsChunked(ids, chunk => scopedFrom('payable_payments', 'id, purchase_entry_id, amount, paid_at, payment_mode, credit_link_id')
-      .in('purchase_entry_id', chunk).order('id')), timeoutMs, 'Payable payments'),
-    settleWithin(fetchAllRowsChunked(ids, chunk => scopedFrom('vendor_returns', 'purchase_entry_id, qty, rate')
-      .in('purchase_entry_id', chunk).order('id')), timeoutMs, 'Vendor returns'),
-  ])
-  if (pmtRes.error) return fail(pmtRes.error)
-  if (retRes.error) return fail(retRes.error)
+  // The group embed is only the filter: each row goes into the map as the by-line-id read returned it.
   const pmtMap = {}
-  for (const p of pmtRes.data || []) (pmtMap[p.purchase_entry_id] = pmtMap[p.purchase_entry_id] || []).push(p)
+  for (const { purchase_entries: _group, ...p } of [...(groupPmtRes.data || []), ...(linePmtRes.data || [])]) {
+    (pmtMap[p.purchase_entry_id] = pmtMap[p.purchase_entry_id] || []).push(p)
+  }
   const returnedByEntry = {}
-  for (const r of retRes.data || []) {
+  for (const r of [...(groupRetRes.data || []), ...(lineRetRes.data || [])]) {
     returnedByEntry[r.purchase_entry_id] = (returnedByEntry[r.purchase_entry_id] || 0) + num(r.qty) * num(r.rate)
   }
   return { ...overdueFromLines(lines, pmtMap, returnedByEntry, today), error: null }

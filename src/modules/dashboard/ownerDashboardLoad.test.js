@@ -1,7 +1,12 @@
 // The Owner Dashboard's read ORDER (S853, OWNER-DASHBOARD-9): what starts in the same tick as the month
 // read, and that the month's sales pages after the first go out together. Round trips are the cost on a
 // slow link, and nothing else in the suite would notice one coming back.
+import fs from 'fs'
+import path from 'path'
 import { startFirstWave, startMonthBatch, RETURN_COLS, SALES_COLS } from './ownerDashboardLoad'
+import { loadOutletLabour } from './loadOutletLabour'
+import { loadOverdueCreditBills } from './ownerDashboardData'
+import { bsToAd } from '../../utils/bsCalendar'
 
 jest.mock('../../supabaseClient', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }))
 
@@ -147,5 +152,67 @@ describe('startMonthBatch', () => {
     const tables2 = [...supa2.calls, ...scoped2.calls].map(c => c.table)
     expect(tables2).toContain('overheads')
     for (const t of ['opening_stock', 'closing_stock', 'items', 'par_levels', 'staff_meals']) expect(tables2).not.toContain(t)
+  })
+})
+
+// S859: the two tiles that still paid a third round trip. Labour read the finalized run and only then its
+// payslips; Overdue Payables read the unpaid lines, then their bills' other lines, then the payments and
+// returns. Each is now one round trip after what it needs: the month for labour, the unpaid lines for
+// payables. A test holds every answer and checks what was already asked for.
+describe('labour and Overdue Payables, one round trip after their inputs (S859)', () => {
+  const KARTIK = { id: 'p7', bs_year: 2083, bs_month: 7 }
+
+  // `answerOf(call)` is the response; while `holding`, every request but those `passes(call)` lets
+  // through waits in `held` until released.
+  function holdingRecorder(answerOf, passes = () => false) {
+    const state = { holding: true, held: [] }
+    const rec = recorder(call => {
+      if (!state.holding || passes(call)) return answerOf(call)
+      return new Promise(resolve => state.held.push(() => resolve(answerOf(call))))
+    })
+    const release = () => { state.holding = false; state.held.splice(0).forEach(r => r()) }
+    return { ...rec, state, release }
+  }
+
+  test('labour: every read is asked for at once, the payslips inside the finalized run read', async () => {
+    const run = { id: 'run1', hr_payslips: [{ gross: '30000', absence_deduction: '0', ot_amount: '500', ssf_employer: '0' }] }
+    const rec = holdingRecorder(call => (call.table === 'hr_payroll_runs' ? { data: [run], error: null } : empty()))
+    // The staff reads come from startFirstWave, beside the month read.
+    const masters = Promise.resolve({ employees: [], components: [], error: null })
+    const done = loadOutletLabour(rec.from, { period: KARTIK, hrOn: true, masters })
+    await flush()
+    const asked = rec.calls.map(c => c.table)
+    expect(asked).toEqual(expect.arrayContaining(['hr_payroll_runs', 'hr_overtime_entries', 'hr_attendance', 'hr_final_settlements', 'hr_festival_allowances', 'hr_incentives']))
+    expect(asked).not.toContain('hr_payslips')
+    expect(rec.state.held).toHaveLength(asked.length)
+    rec.release()
+    const { labour } = await done
+    // Nothing was asked for after an answer came back.
+    expect(rec.calls.map(c => c.table)).toEqual(asked)
+    expect(labour).toMatchObject({ source: 'payroll', amount: 30500 })
+  })
+
+  test('Overdue Payables: once the unpaid lines land, the bill lines, payments and returns go out together', async () => {
+    const line = {
+      id: 'l1', created_at: '2026-06-10T00:00:00Z', bs_day: 1, qty: 1, rate: 10000, vat_inclusive: false, discount_amount: 0,
+      purchase_group_id: 'bill-1', vendor_id: 'v', invoice_ref: 'INV-9', paid_at: null, monthly_periods: { client_id: 'c', bs_year: 2083, bs_month: 3 },
+    }
+    const isSeed = call => call.table === 'purchase_entries' && !call.filters.some(f => f[0] === 'in')
+    const rec = holdingRecorder(call => (call.table === 'purchase_entries' ? { data: [line], error: null } : empty()), isSeed)
+    const today = new Date(bsToAd(2083, 3, 1).getTime() + 100 * 86400000)
+    const done = loadOverdueCreditBills({ supabase: rec, scopedFrom: rec.from, clientId: 'c', today })
+    await flush()
+    // The unpaid lines answered; the three reads that complete the bills are all in flight together.
+    expect(rec.calls.map(c => c.table).sort()).toEqual(['payable_payments', 'purchase_entries', 'purchase_entries', 'vendor_returns'])
+    expect(rec.state.held).toHaveLength(3)
+    rec.release()
+    expect(await done).toEqual({ overdueTotal: 10000, overdueCount: 1, error: null })
+    expect(rec.calls).toHaveLength(4)
+  })
+
+  test('the option stock lines take the recipe book from memory when it covers them (no read of their own)', () => {
+    const page = fs.readFileSync(path.join(__dirname, '..', '..', 'pages', 'dashboard', 'OwnerDashboard.jsx'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ').replace(/\s+/g, ' ')
+    expect(page).toMatch(/loadDeltaExplosion\(supabase, deltaLists, bookCoversDeltas\(book, deltaLists\) \? \{ book \} : \{\}\)/)
   })
 })

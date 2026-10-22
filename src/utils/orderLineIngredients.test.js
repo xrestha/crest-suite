@@ -1,4 +1,4 @@
-import { lineIngredientDeltas, deltaItems, usageOfSalesRow } from './orderLineIngredients'
+import { lineIngredientDeltas, deltaItems, usageOfSalesRow, bookCoversDeltas } from './orderLineIngredients'
 
 // The one place a customized plate's stock lines become raw items (S758). Pure halves only —
 // loadDeltaExplosion reads Supabase and is exercised by the pages that call it.
@@ -38,5 +38,16 @@ describe('orderLineIngredients', () => {
   it('a plain row is exactly its recipe', () => {
     expect(usageOfSalesRow({ recipe_id: 'momo', qty_sold: 1 }, { momo: [{ item_id: 'flour', qty: 100 }] }, null))
       .toEqual([{ item_id: 'flour', qty: 100 }])
+  })
+
+  // S859: a recipe book holds only the items some recipe uses. A choice naming any other item has no
+  // yield in it (a missing yield counts as 100%), so the book is handed over only when it covers all.
+  it('a recipe book covers the deltas only when it holds every item and sub-recipe they name', () => {
+    const book = { items: new Map([['onion', { yield_pct: 50 }]]), recipes: new Map([['gravy', { yield_qty: 4 }]]) }
+    expect(bookCoversDeltas(book, [[{ item_id: 'onion', qty: 10 }], null, [{ sub_recipe_id: 'gravy', qty: 1 }]])).toBe(true)
+    expect(bookCoversDeltas(book, [[{ item_id: 'onion', qty: 10 }, { item_id: 'cheese', qty: 30 }]])).toBe(false)
+    expect(bookCoversDeltas(book, [[{ sub_recipe_id: 'pickle', qty: 1 }]])).toBe(false)
+    expect(bookCoversDeltas(null, [[{ item_id: 'onion', qty: 10 }]])).toBe(false)
+    expect(bookCoversDeltas(book, [])).toBe(true)
   })
 })

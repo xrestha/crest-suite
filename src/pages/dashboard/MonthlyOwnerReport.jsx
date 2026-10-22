@@ -26,7 +26,7 @@ import { buildExecutiveSummary } from '../../modules/ownerReport/reportNarrative
 import { reportMadeText } from '../../modules/ownerReport/reportMadeLine'
 import { failedSectionKeys, sectionLabel, sectionList, newlyMissingSections, trendUnavailableText, priorFailedSections } from '../../modules/ownerReport/sectionNames'
 import { lastMonthFigures } from '../../modules/ownerReport/lastMonthFigures'
-import { loadProfileNames } from '../../shared/profileNames'
+import { loadProfileNames, fillMissingNames } from '../../shared/profileNames'
 import './MonthlyOwnerReport.css'
 
 const fmt = nprOrDash
@@ -226,6 +226,15 @@ function MonthlyOwnerReportBody() {
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
   const selectedRef = useRef(null)
   useEffect(() => { selectedRef.current = selectedPeriodId }, [selectedPeriodId])
+  // Started beside the month list (S859), since neither waits for it: every login's name but Crest's
+  // operators, which the "made by" line looks its maker up in, and, when the address names a month,
+  // that month's report, taken once loadReport has found the month in this outlet's list.
+  const namesRef = useRef(null)
+  const earlyReportRef = useRef(null)
+  // The "made by" read the report on screen is waiting for. The report no longer waits for it, so each
+  // new one (another month, a make, a regenerate) supersedes the last, and Export and Print wait for it.
+  const makerReq = useRef(0)
+  const [makerPending, setMakerPending] = useState(false)
   // Whatever picked the month (the first load, the picker, ‹ ›, the open-month card), the address
   // follows it, so a link copied at any moment names the month on screen.
   useEffect(() => {
@@ -236,6 +245,11 @@ function MonthlyOwnerReportBody() {
   useEffect(() => {
     if (!clientId) { setLoading(false); return }
     let cancelled = false
+    namesRef.current = loadProfileNames(supabase, clientId, undefined, { ms: READ_MS, label: 'Reading who made the report' })
+    // scopedFrom reads nothing of another outlet's, so a stale or foreign id in the address costs one
+    // empty read and is never shown: loadReport uses it only for a month of this outlet's list.
+    const askedId = askedPeriodRef.current
+    earlyReportRef.current = askedId ? { periodId: askedId, res: readReport(askedId) } : null
     ;(async () => {
       // `client_id` is read so the lazy generate can refuse a month that is not this outlet's (GAPS-2).
       const res = await settleWithin(scopedFrom('monthly_periods', 'id, client_id, bs_year, bs_month, status')
@@ -262,11 +276,40 @@ function MonthlyOwnerReportBody() {
   // blocks the report already on screen. Bounded by the page's own READ_MS (S857, the critique
   // found it unbounded at the call site): loadProfileNames settles a timeout or a rejection into
   // `error`, so a hung read only drops the name from the "made by" line.
+  // Since S859 the names come from the read started beside the month list; a maker it does not name
+  // (Crest support, a login since moved) is asked for by id, and so is every maker when that read
+  // failed, which was the one read made before.
   async function makerName(id) {
     if (!id) return ''
-    const { map: names, error: namesErr } = await loadProfileNames(supabase, clientId, [id], { ms: READ_MS, label: 'Reading who made the report' })
+    const opts = { ms: READ_MS, label: 'Reading who made the report' }
+    const all = namesRef.current ? await namesRef.current : null
+    const { map: names, error: namesErr } = !all || all.error
+      ? await loadProfileNames(supabase, clientId, [id], opts)
+      : await fillMissingNames(supabase, clientId, all.map, [id], opts)
     if (namesErr) { console.error('Owner Report: could not read who made it', namesErr); return '' }
     return names[id] || ''
+  }
+
+  // The report on screen gets its maker's name when that read lands; it never holds the report back
+  // (S859: the report stayed hidden one more round trip for it). Never the previous report's maker.
+  function showMaker(id) {
+    const token = ++makerReq.current
+    setGeneratorName('')
+    setMakerPending(true)
+    const apply = name => {
+      if (!mountedRef.current || makerReq.current !== token) return   // another report is on screen now
+      setGeneratorName(name)
+      setMakerPending(false)
+    }
+    void makerName(id).then(apply, error => { console.error('Owner Report: could not read who made it', error); apply('') })
+  }
+  function forgetMaker() {
+    makerReq.current += 1
+    setMakerPending(false)
+  }
+
+  function readReport(periodId, label = 'Loading the report') {
+    return settleWithin(scopedFrom('monthly_owner_reports', '*').eq('period_id', periodId).maybeSingle(), READ_MS, label)
   }
 
   // Make and save the report for a closed month, then read it back (the lazy generate, and the
@@ -299,10 +342,7 @@ function MonthlyOwnerReportBody() {
         return
       }
       setReport(freshRes.data)
-      setGeneratorName('')
-      const name = await makerName(freshRes.data.generated_by)
-      if (!mountedRef.current || !periodReq.isCurrent(key)) return
-      setGeneratorName(name)
+      showMaker(freshRes.data.generated_by)
     } catch (e) {
       if (!mountedRef.current || !periodReq.isCurrent(key)) return
       console.error('Report generation failed:', e)
@@ -333,10 +373,15 @@ function MonthlyOwnerReportBody() {
     setNeedsMaking(false)
     setPageError(null)
     setExportError(null)
+    forgetMaker()   // the previous month's maker never lands under this month's report
     if (!period) { setReport(null); setLoading(false); return }
     setLoading(true)
 
-    const existingRes = await settleWithin(scopedFrom('monthly_owner_reports', '*').eq('period_id', period.id).maybeSingle(), READ_MS, 'Loading the report')
+    // The month the address named was read beside the month list: that read is taken once, for that
+    // month. Every other load, and every later one, reads afresh.
+    const early = earlyReportRef.current
+    earlyReportRef.current = null
+    const existingRes = await (early && early.periodId === period.id ? early.res : readReport(period.id))
     if (!mountedRef.current || !periodReq.isCurrent(key)) return   // superseded by a newer period selection
     // A failed read here used to fall straight through to the lazy-generate path — treating
     // "could not read the snapshot" as "no snapshot exists" (S612). Refuse instead.
@@ -344,10 +389,7 @@ function MonthlyOwnerReportBody() {
     const existing = existingRes.data
     if (existing) {
       setReport(existing)
-      setGeneratorName('')   // never the previous month's maker under this month's report
-      const name = await makerName(existing.generated_by)
-      if (!mountedRef.current || !periodReq.isCurrent(key)) return   // superseded during the names read
-      setGeneratorName(name)
+      showMaker(existing.generated_by)
       setLoading(false)
       return
     }
@@ -425,9 +467,7 @@ function MonthlyOwnerReportBody() {
       // and this is the backstop.
       if (selectedRef.current === period.id) {
         setReport(freshRes.data)
-        setGeneratorName('')
-        const name = await makerName(freshRes.data.generated_by)
-        if (mountedRef.current && selectedRef.current === period.id) setGeneratorName(name)
+        showMaker(freshRes.data.generated_by)
       }
       if (mountedRef.current) setRegenNotice({ tone: 'ok', text: `Regenerated from today's data — ${label}.` })
     } catch (e) {
@@ -450,8 +490,9 @@ function MonthlyOwnerReportBody() {
   const snapshot = report?.snapshot
   const periodLabel = report ? `${BS_MONTHS[report.bs_month - 1]} ${report.bs_year}` : ''
   // Export and Print emit a FILE, so they wait for every read they print from (OWNER-REPORT-18):
-  // the letterhead's name, and no load in flight (S728's stale-workbook rule).
-  const exportsReady = !!report && biz.ready && !loading && !generating && !regenerating
+  // the letterhead's name, the "made by" name (S859: it lands after the report now), and no load in
+  // flight (S728's stale-workbook rule).
+  const exportsReady = !!report && biz.ready && !loading && !generating && !regenerating && !makerPending
 
   // Food Cost thresholds: the ones frozen with the report (schema 18, OWNER-REPORT-5), else today's
   // Settings for an older report.

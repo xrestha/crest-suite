@@ -81,8 +81,16 @@ describe.each(FILES)('%s pages its per-item-per-period reads', (name, file) => {
       // its neighbour's wrapper.
       const before = flat.slice(Math.max(0, at - 90), at)
       expect(`${name} ${table} @${at}: ${before.slice(-70)}`)
-        .toMatch(/fetchAllRows(Chunked)?\(/)
+        .toMatch(/fetchAllRows(Chunked|Parallel)?\(/)
     }
+  })
+
+  it('passes the parallel pager its select options on every read it pages', () => {
+    // fetchAllRowsParallel (S859) asks page 1 with { count: 'exact' } through makeQuery(opts); a
+    // builder that drops `opts` brings no count, and the read quietly falls back to one page at a time.
+    const calls = flat.match(/fetchAllRowsParallel\(\s*opts\s*=>[^;]*?\.order\(\s*'id'\s*\)\s*\)/g) || []
+    for (const call of calls) expect(`${name}: ${call}`).toMatch(/\.select\(\s*'[^']*',\s*opts\s*\)|scopedFrom\(\s*'\w+',\s*'[^']*',\s*opts\s*\)/)
+    expect((flat.match(/fetchAllRowsParallel\(/g) || []).length).toBe(calls.length)
   })
 
   it('gives every paged read a unique sort tiebreaker', () => {
@@ -95,6 +103,26 @@ describe.each(FILES)('%s pages its per-item-per-period reads', (name, file) => {
       // characters covers the longest of them (purchase_entries' column list).
       expect(flat.slice(at, at + 320)).toMatch(/\.order\(\s*'id'/)
     }
+  })
+})
+
+// 9. ONE PAGER FOR THE PAIR (S859). Consolidated P&L's reads must match Monthly Summary's, paging
+//    included, because both feed periodCost.js. When the P&L's fiscal-year reads moved to
+//    fetchAllRowsParallel, Monthly Summary's moved with them, so each table goes through the same pager
+//    on both pages (the answer is the same rows in the same order either way; this keeps it one shape).
+describe('Consolidated P&L and Monthly Summary page each table through the same pager', () => {
+  const byName = Object.fromEntries(FILES)
+  const pnl = flatten(byName['ConsolidatedPnl.jsx'])
+  const summary = flatten(byName['MonthlySummary.js'])
+  const pagerBefore = (flat, at) => {
+    const found = flat.slice(Math.max(0, at - 90), at).match(/fetchAllRows(?:Chunked|Parallel)?\(/g) || []
+    return found[found.length - 1] || null
+  }
+  const pagers = (flat, table) => [...new Set(readSites(flat, table).map(at => pagerBefore(flat, at)))]
+
+  it.each([...PER_ITEM_TABLES.filter(t => t !== 'ims_stock_transfer_lines'), 'sales_entries', 'recipes'])('%s', table => {
+    expect(pagers(pnl, table).length).toBeGreaterThan(0)
+    expect(`${table}: ${pagers(pnl, table).join(', ')}`).toBe(`${table}: ${pagers(summary, table).join(', ')}`)
   })
 })
 

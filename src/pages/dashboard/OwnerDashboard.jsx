@@ -24,7 +24,7 @@ import ChartCard from '../../components/ChartCard'
 import ActionError, { asActionError } from '../../components/ActionError'
 import SupportContactLine from '../../components/SupportContactLine'
 import { explodeRecipeIngredients, loadRecipeBook } from '../../utils/recipeCost'
-import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
+import { bookCoversDeltas, loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildStockRows, summarizeReorder } from '../../modules/ims/stockcount/stockReportCalc'
 import { periodWastageValue } from '../../modules/ims/reports/periodCost'
 import { SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../../modules/ims/reports/foodCostBasis'
@@ -242,12 +242,18 @@ export default function OwnerDashboard() {
     // The recipe walk reads the book in memory (`{ book }`, no extra round trips); a customized plate
     // also consumes its options' stock lines (S758). Either one missing means usage was not computed,
     // and without usage on-hand is opening + purchases: the count is withheld (S792, PLANNING-6).
+    // The options' lines read the book too (S859), but only when it holds every item and sub-recipe they
+    // name: the book has only the items some recipe uses, and a line naming another one would count at a
+    // 100% yield. Otherwise, and when the book could not be read (the walk reports that), they read
+    // their own yields and sub-recipes, as before.
     const recipeIds = (recipes.data || []).map(r => r.id)
+    const deltaLists = (sales.data || []).map(s => s.ingredient_deltas)
     const [walkRes, deltaRes] = await Promise.allSettled([
       recipeIds.length > 0
         ? Promise.resolve(bookPromise).then(book => explodeRecipeIngredients(supabase, recipeIds, book ? { book } : undefined))
         : Promise.resolve({}),
-      loadDeltaExplosion(supabase, (sales.data || []).map(s => s.ingredient_deltas)),
+      Promise.resolve(bookPromise).catch(() => null).then(book =>
+        loadDeltaExplosion(supabase, deltaLists, bookCoversDeltas(book, deltaLists) ? { book } : {})),
     ])
     if (!isCurrent('reorder', id)) return
     const walkFailed = [walkRes, deltaRes].find(r => r.status === 'rejected')

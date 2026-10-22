@@ -1,4 +1,4 @@
-const CACHE_NAME = 'crest-v473';
+const CACHE_NAME = 'crest-v474';
 
 // Two caches, because this origin serves two kinds of file (S855, PERF-4).
 //

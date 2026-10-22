@@ -237,7 +237,10 @@ figure states its basis in a comment.
 
 **The arithmetic lives in `demandForecastMath.js`, which imports no Supabase client;
 `demandForecastData.js` is the orchestration around it.** Put new forecast maths in the pure file
-— it has a test file, the orchestration file cannot. Three properties the tests pin: the day of
+— it has a test file, the orchestration file cannot. The buying list's reads live in
+`demandForecastLoad.js` (S859), which takes `supabase` and `scopedFrom` as arguments so Jest can load
+it: the recipe book, the shared month list, items and pars go out with the forecast, the month's
+stock reads and six months of supplier lines one level later, about 3 levels where it was 13. Three properties the tests pin: the day of
 the run is never a sample (a morning recompute would count a partial day as a whole one), a dish
 absent from a sample is a zero that day (not a missing sample), and covers/revenue average over
 POS-basis samples only (a manual day is "no signal", not zero). The run's `now` is the server's

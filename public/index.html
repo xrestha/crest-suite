@@ -18,6 +18,15 @@
     <!-- The Night ground, for the first paint only: applyTheme (ThemeContext.js) rewrites it to the
          chosen theme's ground once the app loads, so a Light user's phone bar is not left dark (S852). -->
     <meta name="theme-color" content="#191817" />
+    <!--
+      Open the database connection while main.js is still downloading. Every read goes to this one
+      origin, and on a 3G link its DNS + TCP + TLS handshake is about three round trips that the
+      first sign-in read used to pay on its own. `crossorigin` because supabase-js fetches in CORS
+      mode without credentials, which uses the anonymous connection pool. CRA fills the URL in at
+      build time from the same variable src/supabaseClient.js reads.
+    -->
+    <link rel="preconnect" href="%REACT_APP_SUPABASE_URL%" crossorigin />
+    <link rel="dns-prefetch" href="%REACT_APP_SUPABASE_URL%" />
     <meta name="description" content="Inventory, HR and POS for restaurants and hotels in Nepal" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />

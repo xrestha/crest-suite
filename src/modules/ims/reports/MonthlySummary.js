@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
-import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsParallel } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
@@ -89,21 +89,24 @@ export default function MonthlySummary() {
       // Hidden items are read too (S792, D29): a month keeps every purchase and count it had, so
       // hiding an item never rewrites a past month's COGS. periodValuationItems() below keeps the
       // hidden ones that had a row this period. Consolidated P&L makes the same read.
+      // The per-period reads ask page 1 with the row count and every later page at once
+      // (fetchAllRowsParallel, S859), as Consolidated P&L's do: the same rows in the same order, and a
+      // busy till's month of sales in two round trips instead of one per 1,000 rows.
       fetchAllRows(() => scopedFrom('items', '*, categories(id, name)').eq('is_sub_recipe', false).order('id')),
-      fetchAllRows(() => supabase.from('opening_stock').select('item_id, qty').eq('period_id', periodId).order('id')),
-      fetchAllRows(() => supabase.from('closing_stock').select('item_id, physical_qty').eq('period_id', periodId).order('id')),
-      fetchAllRows(() => supabase.from('purchase_entries')
-        .select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost')
+      fetchAllRowsParallel(opts => supabase.from('opening_stock').select('item_id, qty', opts).eq('period_id', periodId).order('id')),
+      fetchAllRowsParallel(opts => supabase.from('closing_stock').select('item_id, physical_qty', opts).eq('period_id', periodId).order('id')),
+      fetchAllRowsParallel(opts => supabase.from('purchase_entries')
+        .select('item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost', opts)
         .eq('period_id', periodId).order('id')),
-      fetchAllRows(() => scopedFrom('vendor_returns', 'item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)').eq('period_id', periodId).order('id')),
-      fetchAllRows(() => supabase.from('wastages').select('item_id, qty').eq('period_id', periodId).order('id')),
-      fetchAllRows(() => supabase.from('staff_meals').select('item_id, qty').eq('period_id', periodId).order('id')),
+      fetchAllRowsParallel(opts => scopedFrom('vendor_returns', 'item_id, qty, rate, purchase_entries(vat_inclusive, vat_is_cost)', opts).eq('period_id', periodId).order('id')),
+      fetchAllRowsParallel(opts => supabase.from('wastages').select('item_id, qty', opts).eq('period_id', periodId).order('id')),
+      fetchAllRowsParallel(opts => supabase.from('staff_meals').select('item_id, qty', opts).eq('period_id', periodId).order('id')),
       // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for. See
       // migration 20260706170000 for why sales_entries now carries that source separately.
       // Filtered in JS, not with a server-side .neq (S756): `source` is nullable, and
       // `NULL <> 'pos_comp'` is NULL, so the .neq silently dropped every legacy row — Revenue read
       // short and Food Cost % high, on the denominator of the page's headline ratio.
-      fetchAllRows(() => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source').eq('period_id', periodId).order('id')),
+      fetchAllRowsParallel(opts => supabase.from('sales_entries').select('recipe_id, qty_sold, unit_price, discount, source', opts).eq('period_id', periodId).order('id')),
       // Paged like every other read here (S849, PNL-15 — Consolidated P&L makes the same read): the
       // recipe book is the price list revenue is valued from, and past 1,000 recipes a bare read
       // dropped the rest silently, so their sales were valued at nothing.

@@ -56,18 +56,30 @@ describe('loadOutletLabour', () => {
     expect(parts.payroll).toBeNull()
   })
 
-  test('a finalized run → payroll from its payslips, chunked and paged', async () => {
+  // S859: the payslips ride on the run read, so a finalized month costs no second round trip.
+  test('a finalized run → payroll from the payslips embedded in its read, with no payslip read after it', async () => {
     const calls = []
     const tables = {
-      hr_employees: staff, hr_payroll_runs: [{ id: 'run1' }],
-      hr_payslips: [{ gross: '30000', absence_deduction: '0', ot_amount: '500', ssf_employer: '0' }],
+      hr_employees: staff,
+      hr_payroll_runs: [{ id: 'run1', hr_payslips: [{ gross: '30000', absence_deduction: '0', ot_amount: '500', ssf_employer: '0' }] }],
     }
     const { labour } = await loadOutletLabour(mockFrom(tables, { calls }), { period: KARTIK, hrOn: true })
     expect(labour).toMatchObject({ source: 'payroll', amount: 30500 })
-    const slips = calls.find(c => c.table === 'hr_payslips')
-    expect(slips.filters).toContainEqual(['in', 'run_id', ['run1']])
-    expect(slips.ordered).toContain('id')
-    expect(slips.ranged).toBe(true)
+    expect(calls.map(c => c.table)).not.toContain('hr_payslips')
+    const runs = calls.find(c => c.table === 'hr_payroll_runs')
+    expect(runs.columns).toBe('id, hr_payslips(gross, absence_deduction, ot_amount, ssf_employer)')
+    expect(runs.filters).toEqual(expect.arrayContaining([['eq', 'period_id', 'p7'], ['eq', 'status', 'finalized']]))
+    // The run, then its payslips, each on the unique id: the order the paged payslip read summed in.
+    expect(runs.ordered).toEqual(['id', 'id'])
+  })
+
+  test('a finalized run with no payslips is a payroll of 0, never "no run"; a failed other-pay read keeps no figure', async () => {
+    const empty = await loadOutletLabour(mockFrom({ hr_employees: staff, hr_payroll_runs: [{ id: 'run1', hr_payslips: [] }] }), { period: KARTIK, hrOn: true })
+    expect(empty.parts.payroll).toBe(0)
+    const tables = { hr_payroll_runs: [{ id: 'run1', hr_payslips: [{ gross: 1000, absence_deduction: 0, ot_amount: 0, ssf_employer: 0 }] }] }
+    const failed = await loadOutletLabour(mockFrom(tables, { fail: { hr_incentives: true } }), { period: KARTIK, hrOn: true })
+    expect(failed.parts.payroll).toBeNull()
+    expect(failed.parts.payrollReadFailed).toBe(true)
   })
 
   test('one failed read → failed, no figure, the error kept for the banner', async () => {
@@ -79,7 +91,7 @@ describe('loadOutletLabour', () => {
   })
 
   test('a failed estimate read beside a finalized run is not a failure', async () => {
-    const tables = { hr_payroll_runs: [{ id: 'run1' }], hr_payslips: [{ gross: 1000, absence_deduction: 0, ot_amount: 0, ssf_employer: 0 }] }
+    const tables = { hr_payroll_runs: [{ id: 'run1', hr_payslips: [{ gross: 1000, absence_deduction: 0, ot_amount: 0, ssf_employer: 0 }] }] }
     const { labour, error } = await loadOutletLabour(mockFrom(tables, { fail: { hr_attendance: true } }), { period: KARTIK, hrOn: true })
     expect(labour.source).toBe('payroll')
     expect(error).toBeNull()
@@ -146,7 +158,7 @@ describe('the staff reads, started early (masters)', () => {
     expect(handed.labour.source).toBe('failed')
     expect(handed.error).toEqual(inside.error)
     // Beside a finalized run the estimate is not needed, so its failure is not one.
-    const tables = { hr_payroll_runs: [{ id: 'run1' }], hr_payslips: [{ gross: 1000, absence_deduction: 0, ot_amount: 0, ssf_employer: 0 }] }
+    const tables = { hr_payroll_runs: [{ id: 'run1', hr_payslips: [{ gross: 1000, absence_deduction: 0, ot_amount: 0, ssf_employer: 0 }] }] }
     const run = await loadOutletLabour(mockFrom(tables), { period: KARTIK, hrOn: true, masters })
     expect(run.labour.source).toBe('payroll')
   })

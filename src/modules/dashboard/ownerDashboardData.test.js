@@ -194,23 +194,54 @@ describe('Overdue Payables — bills, valued as Outstanding Payables (OWNER-DASH
     expect(overdueFromLines(lines, {}, returned, today)).toEqual({ overdueTotal: 0, overdueCount: 0 })
     expect(overdueFromLines(lines, {}, {}, new Date(bsToAd(2083, 3, 20).getTime()))).toEqual({ overdueTotal: 0, overdueCount: 0 })
   })
-  test('the loader completes part-paid bills by group and reads payments and returns by line', async () => {
+  // A builder that records each `.in()` and answers `.range()` with `rowsOf(table, column, ids)`.
+  const recorder = rowsOf => {
     const seen = []
-    const builder = (table, rows) => {
+    const builder = (table, columns) => {
+      let filter = null
       const b = {
         select: () => b, eq: () => b, is: () => b, order: () => b,
-        in: (c, v) => { seen.push([table, c, v.length]); return b },
-        range: () => Promise.resolve({ data: rows, error: null }),
+        in: (c, v) => { filter = [c, v]; seen.push([table, c, v.length, columns || null]); return b },
+        range: () => Promise.resolve({ data: rowsOf(table, filter), error: null }),
       }
       return b
     }
-    const supabase = { from: t => builder(t, t === 'purchase_entries' ? lines : []) }
-    const scopedFrom = t => builder(t, [])
+    return { seen, supabase: { from: t => builder(t) }, scopedFrom: (t, c) => builder(t, c) }
+  }
+
+  // S859: the payments and returns are found by the bills' group, beside the bill lines, not after them.
+  test('the loader completes part-paid bills by group, and reads their payments and returns by group beside them', async () => {
+    const { seen, supabase, scopedFrom } = recorder(t => (t === 'purchase_entries' ? lines : []))
     const r = await loadOverdueCreditBills({ supabase, scopedFrom, clientId: 'c', today })
     expect(r).toEqual({ overdueTotal: 45200, overdueCount: 1, error: null })
-    expect(seen).toEqual(expect.arrayContaining([
-      ['purchase_entries', 'purchase_group_id', 1], ['payable_payments', 'purchase_entry_id', 4], ['vendor_returns', 'purchase_entry_id', 4],
+    expect(seen.map(x => x.slice(0, 3))).toEqual(expect.arrayContaining([
+      ['purchase_entries', 'purchase_group_id', 1],
+      ['payable_payments', 'purchase_entries.purchase_group_id', 1], ['vendor_returns', 'purchase_entries.purchase_group_id', 1],
     ]))
+    // Every line here has a group, so nothing is read by line id.
+    expect(seen.filter(x => x[1] === 'purchase_entry_id')).toEqual([])
+    expect(seen.find(x => x[0] === 'payable_payments')[3]).toMatch(/purchase_entries!inner\(purchase_group_id\)$/)
+  })
+
+  test('a legacy line with no group is read by its id; each payment lands on its own line, as the by-line read gave it', async () => {
+    const legacy = { ...lines[0], id: 'old', purchase_group_id: null, invoice_ref: 'INV-1' }
+    const pay = { id: 'pm1', purchase_entry_id: 'l1', amount: 11300, paid_at: '2026-07-01', payment_mode: 'Bank', credit_link_id: null }
+    const payOld = { id: 'pm2', purchase_entry_id: 'old', amount: 300, paid_at: '2026-07-01', payment_mode: 'Cash', credit_link_id: null }
+    const rows = (t, f) => {
+      if (t === 'purchase_entries') return f ? lines : [...lines, legacy]
+      if (t === 'payable_payments') return f[0] === 'purchase_entry_id' ? [payOld] : [{ ...pay, purchase_entries: { purchase_group_id: 'bill-1' } }]
+      if (t === 'vendor_returns') return f[0] === 'purchase_entry_id' ? [] : [{ purchase_entry_id: 'l4', qty: 1, rate: 10000, purchase_entries: { purchase_group_id: 'bill-1' } }]
+      return []
+    }
+    const { seen, supabase, scopedFrom } = recorder(rows)
+    const r = await loadOverdueCreditBills({ supabase, scopedFrom, clientId: 'c', today })
+    expect(seen.map(x => x.slice(0, 3))).toEqual(expect.arrayContaining([
+      ['payable_payments', 'purchase_entry_id', 1], ['vendor_returns', 'purchase_entry_id', 1],
+    ]))
+    // The figure the by-line-id maps give for the same rows.
+    const want = overdueFromLines([...lines, legacy], { l1: [pay], old: [payOld] }, { l4: 10000 }, today)
+    expect(r).toEqual({ ...want, error: null })
+    expect(r.overdueCount).toBe(2)
   })
   test('a failed read is a failure, never NPR 0', async () => {
     const b = { select: () => b, eq: () => b, is: () => b, order: () => b, range: () => Promise.resolve({ data: null, error: { message: 'down' } }) }

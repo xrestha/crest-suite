@@ -7,10 +7,11 @@
  * Every HR table read here carries the payslip RLS (`no_ims_staff`), so a fenced login must not call
  * `loadOutletLabour` with `fenced: false` — it would read `[]` with no error, a zero nobody computed.
  *
- * Every read is paged with a unique tiebreaker (OWNER-DASHBOARD-14: the approved-overtime read was not).
+ * Every read is paged with a unique tiebreaker (OWNER-DASHBOARD-14: the approved-overtime read was not),
+ * but the payroll run's, which is at most one row and carries its payslips embedded (S859).
  * A failed read returns its error; the rule turns it into `failed`, never into "no staff" or "no run".
  */
-import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
+import { fetchAllRows } from '../../shared/fetchAllRows'
 import { settleWithin } from '../../utils/withTimeout'
 import { bsToAd, formatAd, daysInBsMonth } from '../../utils/bsCalendar'
 import { loadMonthOtherLabour } from './loadOtherLabourPay'
@@ -101,21 +102,24 @@ export async function loadOutletLabour(from, { period, hrOn, fenced = false, thr
   }
 
   const [runsRes, otherRes, inputsRes] = await Promise.all([
-    settleWithin(from('hr_payroll_runs', 'id').eq('period_id', period.id).eq('status', 'finalized'), timeoutMs, 'Payroll runs'),
+    // The run arrives with its payslips (S859): they used to be a second read that waited for the run's
+    // id, one more round trip on every page that shows labour. One run per month (UNIQUE client_id,
+    // period_id), and one payslip per employee per run (UNIQUE run_id, employee_id), so the embed is the
+    // outlet's headcount: an embedded array is not cut at PostgREST's 1,000-row cap, and it is ordered
+    // on the payslip id, the order the paged read summed them in.
+    settleWithin(from('hr_payroll_runs', `id, hr_payslips(${PAYSLIP_LABOUR_COLUMNS})`)
+      .eq('period_id', period.id).eq('status', 'finalized')
+      .order('id').order('id', { referencedTable: 'hr_payslips' }), timeoutMs, 'Payroll runs'),
     // Festival, incentive and final-settlement pay finalized for the month (S798 3c): a failed read is a
     // failed payroll read — never a figure without it.
     settleWithin(loadMonthOtherLabour(from, period.bs_year, period.bs_month), timeoutMs, 'Other labour'),
     settleWithin(loadLabourEstimateInputs(from, period, { masters }), timeoutMs, 'Labour estimate'),
   ])
 
-  let payrollError = runsRes.error || otherRes.error || null
-  const runIds = (runsRes.data || []).map(r => r.id)
-  if (!payrollError && runIds.length > 0) {
-    // One row per employee per run: paged and chunked, with a unique tiebreaker.
-    const slipRes = await settleWithin(fetchAllRowsChunked(runIds, chunk =>
-      from('hr_payslips', PAYSLIP_LABOUR_COLUMNS).in('run_id', chunk).order('id')), timeoutMs, 'Payslips')
-    if (slipRes.error) payrollError = slipRes.error
-    else parts.payroll = payrollLabourTotal(slipRes.data || [])
+  const payrollError = runsRes.error || otherRes.error || null
+  const runs = runsRes.data || []
+  if (!payrollError && runs.length > 0) {
+    parts.payroll = payrollLabourTotal(runs.flatMap(r => r.hr_payslips || []))
   }
   parts.payrollReadFailed = !!payrollError
   parts.otherPay = otherRes.error ? null : (otherRes.other ?? null)
