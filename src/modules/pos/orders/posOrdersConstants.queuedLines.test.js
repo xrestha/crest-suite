@@ -63,3 +63,27 @@ describe('the upload sends the payload as built', () => {
     expect(storedLinesMatchPayload(rows, queued)).toBe(true)
   })
 })
+
+// S862 COMBOS-1: a combo dish's share rides on the queued copy beside the payload, for a swap made on
+// it, and never reaches the server: the server stamps the share itself.
+describe('a queued combo dish keeps the share it was priced from', () => {
+  const COKE_IN_COMBO = {
+    recipe_id: 'r-coke', name: 'Coke', category: 'Beverage', qty: 1, unit_price: 88.5, vat_rate: 0.13,
+    sent_to_kot: true, sent_qty: 1, notes: null, selection_key: '@aaaa/g-drink', option_ids: [],
+    combo_line_id: 'aaaa', combo_id: 'c-1', combo_group_id: 'g-drink', combo_name: 'Momo Combo',
+    combo_price: 350, combo_group_name: 'Pick a drink', combo_sort: 1, combo_share: 100,
+  }
+  const rows = queuedRows([COKE_IN_COMBO, MOMO_PLAIN].map(toItemPayload), [COKE_IN_COMBO, MOMO_PLAIN])
+
+  test('the cart line read back has it; a plain dish carries none', () => {
+    expect(rows[0].combo_share).toBe(100)
+    expect(rows[1].combo_share).toBeUndefined()
+    expect(cartLineFromStored(rows[0]).combo_share).toBe(100)
+  })
+
+  test('the upload leaves it out', () => {
+    const sent = replayRows(rows)
+    expect(sent[0].combo_share).toBeUndefined()
+    expect(sent).toEqual([COKE_IN_COMBO, MOMO_PLAIN].map(toItemPayload))
+  })
+})

@@ -1,7 +1,7 @@
 import { supabase } from '../supabaseClient'
 import { scopedFrom } from '../shared/scopedDb'
-import { buildBillHtml, buildCompSlipHtml } from '../modules/pos/orders/posOrderPrintHtml'
-import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK } from '../modules/pos/orders/posRecipeBook'
+import { buildBillHtml, buildCompSlipHtml, withChoices } from '../modules/pos/orders/posOrderPrintHtml'
+import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_BILL } from '../modules/pos/orders/posRecipeBook'
 import { withTimeout, settleWithin } from './withTimeout'
 import { readHscMap, staffNameFor, REPRINT_READ_MS } from '../modules/pos/orders/billReprintData'
 
@@ -75,11 +75,11 @@ export async function viewPosBill(clientId, row) {
   const outletName = client?.name || ''
   const tableName = order.table_name || 'Takeaway'
 
-  // With each line's choices' stock lines, which a Complimentary Slip is costed from (posLineCosts).
-  // `*` carries the combo columns (S839): the bill, its discount maths and both slips print a combo's
-  // dishes as one row by combo_line_id, so a narrowed select must keep combo_line_id, combo_name,
-  // combo_sort and selection_key.
-  const { data: allItems, error: itemsErr } = await within(scopedFrom('pos_order_items', clientId, `*, ${LINE_CHOICE_STOCK}`).eq('order_id', orderId), 'Reading the bill lines')
+  // With each line's choices' stock lines, which a Complimentary Slip is costed from (posLineCosts),
+  // and their names and prices, which the bill prints (S862 TILL-GUEST-5). `*` carries the combo
+  // columns (S839): the bill, its discount maths and both slips print a combo's dishes as one row by
+  // combo_line_id, so a narrowed select must keep combo_line_id, combo_name, combo_sort and selection_key.
+  const { data: allItems, error: itemsErr } = await within(scopedFrom('pos_order_items', clientId, `*, ${LINE_CHOICE_BILL}`).eq('order_id', orderId), 'Reading the bill lines')
   if (itemsErr) { writeLoadFailure(w); return }
   const items = allItems || []
 
@@ -151,8 +151,9 @@ export async function viewPosBill(clientId, row) {
       if (payErr) { writeLoadFailure(w); return }
       payments = (data || []).map(p => ({ method: p.payment_method, amount: p.amount }))
     }
+    // Each line's choices with their prices, as the original printed them (withChoices).
     html = buildBillHtml({
-      order, items: payableItems, copyLabel: 'VIEW ONLY', qrUrl: '', payments,
+      order, items: payableItems.map(withChoices), copyLabel: 'VIEW ONLY', qrUrl: '', payments,
       outletName, billingSettings, hscMap, tableName, cashierName: staffName,
     })
   }

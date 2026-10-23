@@ -20,19 +20,14 @@ import { nepalTime, nepalDateAd, nepalBsLong } from '../../../shared/nepalTime'
 import { npr2 } from '../../../shared/nepalMoney'
 // The bill's own choices row (S758) and item rows (S839: a combo is one row with its dishes under it),
 // so the note's lines read as they did on the bill.
-import { billOptionRow, billItemRowsHtml, BILL_TABLE_CSS, BILL_TABLE_HEAD } from '../orders/posOrderPrintHtml'
+// A line's choices as the bill printed them (S809 4c, CREDIT-NOTES-8): two "Chicken Momo" lines at
+// 400.00 and 550.00 were unexplained on the note. Both item reads (the issuing modal's and the Book's
+// reprint) carry the stored pos_order_item_options embed, which withChoices turns into `options`; it
+// lives beside billOptionRow since S862, as the bill's reprint reads the same way.
+import { billOptionRow, billItemRowsHtml, withChoices, BILL_TABLE_CSS, BILL_TABLE_HEAD } from '../orders/posOrderPrintHtml'
 import { printedQtyOf } from '../orders/comboBillRows'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
 export { COPY_LABEL }
-
-// A line's choices as the bill printed them (S809 4c, CREDIT-NOTES-8): two "Chicken Momo" lines at
-// 400.00 and 550.00 were unexplained on the note. `options` is a cart-shaped line; both item reads
-// (the issuing modal's and the Book's reprint) carry the stored pos_order_item_options embed instead.
-function withChoices(i) {
-  const opts = i.options ?? i.pos_order_item_options
-  if (!opts?.length) return i
-  return { ...i, options: [...opts].sort((a, b) => (Number(a.sort) || 0) - (Number(b.sort) || 0)) }
-}
 
 // Round Off from the note's own stored figures, as they print (S809 4c, CREDIT-NOTES-8). The note's
 // Net Credited is the bill's, rounded to the rupee, so on a VAT note Taxable 1,327.44 + VAT 172.57 =

@@ -95,6 +95,11 @@ export async function posDeltaCosting(supabase, clientId, deltaLists) {
 /** The embed a stored-line read adds so its comp is costed with its choices: the stock lines frozen on the line. */
 export const LINE_CHOICE_STOCK = 'pos_order_item_options(ingredient_deltas)'
 
+/** S862 TILL-GUEST-5: the same embed with what the bill prints of each choice, its name and price in
+ *  order, for a read that prints the bill again (a reprint, the Bill Register's view, a bill printed
+ *  after a lost close answer). posLineCosts still reads only ingredient_deltas from it. */
+export const LINE_CHOICE_BILL = 'pos_order_item_options(option_name, price_delta, sort, ingredient_deltas)'
+
 /**
  * A line's choices' stock lines per plate, as the server froze them (already scaled by the size).
  * Null when it has none — and for choices picked on this screen and never read back, which carry no

@@ -1020,3 +1020,29 @@ describe('customer payment receipt refusals (S843)', () => {
     expect(errorInfo(hinted.credit_receipt_bad, 'operator').detail).toMatch(/NPR 900/)
   })
 })
+
+// S862 SETUP-4 / PRICING-3: the S816 removal hints and the below-zero save used to fall to the
+// generic 23514 rule and the FALLBACK.
+describe('S862: removal hints and the below-zero choice save', () => {
+  const removal = { code: '23514', hint: 'group_kind_has_removals', message: 'pos_option_groups: a size group cannot hold a removal option' }
+  const inSize = { code: '23514', hint: 'option_removal_in_size', message: 'pos_options: a removal cannot be a size' }
+  const below = { code: 'P0001', hint: 'option_price_below_zero', message: 'option_price_below_zero: Test Bowl would cost less than nothing' }
+
+  it('names the No choice instead of the dates and amounts', () => {
+    for (const e of [removal, inSize]) {
+      expect(errorText(e, 'operator')).toMatch(/“No …” choice/)
+      expect(errorText(e, 'operator')).not.toMatch(/dates and amounts/)
+    }
+  })
+
+  it('a below-zero save is a sentence on either audience, never the fallback', () => {
+    expect(errorText(below, 'staff')).toMatch(/less than nothing/)
+    expect(errorText(below, 'staff')).toMatch(/Option Groups/)
+    expect(errorText(below, 'operator')).toMatch(/less than nothing/)
+    expect(errorText(below, 'staff')).not.toMatch(/isn.t one we recognise/)
+  })
+
+  it('option_count points at Change as well as Choices', () => {
+    expect(errorText({ hint: 'option_count', message: 'option_count: x' }, 'staff')).toMatch(/Change \(or Choices\)/)
+  })
+})

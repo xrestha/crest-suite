@@ -109,6 +109,28 @@ export function comboSharesOf(combo, recipeOf, vatReg) {
   return comboShares({ ...combo, groups: (combo?.groups || []).map(g => ({ ...g, items: g.share_items || g.items })) }, recipeOf, vatReg)
 }
 
+/**
+ * S862 COMBOS-1 (owner CU2 a): the share a dish swapped, or given other choices, inside a combo on the
+ * cart is priced from: the replaced dish's own (`combo_share`, as the guest pays it), which the server
+ * stamped when the combo was rung, so the combo keeps the price it was ordered at whatever the menu
+ * did since; today's split only for a dish rung before shares were kept (null), as the server does.
+ */
+export function swapShareOf(old, combo, groupId, recipeOf, vatReg) {
+  if (old?.combo_share != null && Number.isFinite(Number(old.combo_share))) return Number(old.combo_share)
+  return comboSharesOf(combo, recipeOf, vatReg)[groupId]
+}
+
+/**
+ * The combo as the swap window should price it: at the price it was sold at (the dish's stamped
+ * `combo_price`) when the dish carries its share, since the swap keeps that price (swapShareOf); the
+ * combo as it is now otherwise.
+ */
+export function comboAsSold(combo, old) {
+  const sold = Number(old?.combo_price)
+  if (!combo || old?.combo_share == null || !(sold > 0)) return combo
+  return { ...combo, guest_price: sold }
+}
+
 /** The dish a pick starts on: the one the owner marked default, else the first. */
 export const defaultDishOf = group => (group?.items || []).find(i => i.is_default) || group?.items?.[0] || null
 
@@ -146,6 +168,8 @@ export function comboDishLine({ combo, group, item, recipe, vatReg, share, qty =
     ...(ids.length ? { base_unit_price: base, options_delta: delta, option_summary: desc?.summary || '', options: desc?.options || [] } : {}),
     combo_line_id: lower(lineId), combo_id: combo.id, combo_name: combo.name, combo_price: num(combo.guest_price),
     combo_group_id: group.id, combo_group_name: group.name, combo_sort: num(group.sort),
+    // S862 COMBOS-1: the share it was priced from, which a swap inside this combo carries on.
+    combo_share: share == null ? null : num(share),
   }
   line.selection_key = selectionKeyOf(ids) + comboSuffixOf(line)
   return line

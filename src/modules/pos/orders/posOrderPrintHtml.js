@@ -43,6 +43,17 @@ export function billOptionRow(i, { indent = 0 } = {}) {
   return `<tr><td></td><td colspan="4" style="font-size:10px;padding-top:0${indent ? `;padding-left:${indent}px` : ''}">${text}</td></tr>`
 }
 
+// A STORED line with its choices as billOptionRow prints them: the pos_order_item_options embed
+// (LINE_CHOICE_BILL, or the credit note reads' own) becomes `options` in the bill's order, so a copy
+// lists "Large +40" as the original did, not the bare summary (S809 4c for the note; S862 TILL-GUEST-5
+// for a reprint, the Bill Register's view and a bill printed after a lost close). A cart-shaped line
+// keeps its own `options`, sorted the same way.
+export function withChoices(i) {
+  const opts = i.options ?? i.pos_order_item_options
+  if (!opts?.length) return i
+  return { ...i, options: [...opts].sort((a, b) => (Number(a.sort) || 0) - (Number(b.sort) || 0)) }
+}
+
 // Combos (S839, docs/pos-combos.md): how far a combo's dishes, and their choices, sit in under it.
 const COMBO_DISH_INDENT = 10
 const COMBO_CHOICE_INDENT = 18

@@ -17,7 +17,7 @@ import { memberStatus, isMembershipReason, creditLimitWarning, normalizeCardNo, 
 import { creditPartyKey } from '../customers/creditLedger'
 import { FLOOR_STATUSES, isDue, tableIdsOf, stampFor, windowOf, bookingToSeatOnTap, carryOverFrom, stillInPlay } from '../reservations/reservationStatus'
 import { normalizeReservationSettings, DEFAULT_RESERVATION_SETTINGS } from '../reservations/reservationSettings'
-import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK } from './posRecipeBook'
+import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK, LINE_CHOICE_BILL } from './posRecipeBook'
 import { readHscMap, staffNameFor } from './billReprintData'
 import { noteImsMiss, pruneImsMisses, outletHasIms, countPhrase } from './posImsWaiting'
 import { buildDynamicQr } from '../../../utils/emvQr'
@@ -42,20 +42,20 @@ import MenuGrid, { filterMenu } from './MenuGrid'
 import {
   COMBO_TAB, COMBO_TAB_LABEL, loadComboCatalog, comboAddsInOneTap, defaultComboPicks, buildComboLines, comboDishLine,
   comboIdOf, comboGroupOf, groupComboBlocks, cartRows, addComboLinesToCart, setComboQtyIn, comboUnitsPulled,
-  swapComboDish, picksOfCombo, collapseCombosForMove, expandComboPicks, guestLineOf, guestRequestText, comboSharesOf,
+  swapComboDish, picksOfCombo, collapseCombosForMove, expandComboPicks, guestLineOf, guestRequestText, swapShareOf, comboAsSold,
 } from './comboCart'
 import { computeOrderAmounts, discountableSubtotal, isComboItem } from '../../../utils/posBillingMath'
 import { openBillTotal } from '../dashboard/posDashboardMath'
 import { loadOptionCatalog } from '../../customization/customizationData'
 import { groupsForDish, describeSelection, defaultSelection, selectionProblems } from '../../../shared/optionPricing'
-import { lineChoiceTrouble, choiceRefusalText, savedLineGoneNote } from './choiceRefusal'
+import { lineChoiceTrouble, choiceRefusalText, savedLineGoneNote, sentDishWayOut, customizationSwitchedText } from './choiceRefusal'
 import {
   cachePosMenu, getCachedPosMenu, cachePosTables, getCachedPosTables,
   cachePosSettings, getCachedPosSettings, cachePosOrderForTable, getCachedPosOrderForTable,
   clearCachedPosOrderForTable, enqueuePosOrder, getPosOrderQueue, getQueuedPosOrder, dequeuePosOrder,
   settlePosOrderUpload, markQueuedSendsLogged, queuedSendKey, enqueuePosTickets,
 } from '../../../utils/offlineQueue'
-import { buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml, buildShareSlipsHtml } from './posOrderPrintHtml'
+import { buildBillHtml, buildTenderSlipHtml, buildCompSlipHtml, buildShareSlipsHtml, withChoices } from './posOrderPrintHtml'
 import { kotBotDoc, voidSlipDoc, moveSlipDoc } from '../printing/ticketDoc'
 import { useStationPrinting } from '../printing/useStationPrinting'
 import StationPrintAlerts from '../printing/StationPrintAlerts'
@@ -107,7 +107,7 @@ import {
   isComboLine, comboFieldsOf, comboSuffixOf,
   PAYMENT_METHODS, VOID_REASONS, COMP_REASONS, DEFAULT_DISCOUNT_REASONS, KOT_PULL_REASONS, COPY_LABEL,
   btnSm, billInput, PREVIEW_DEBOUNCE_MS, printedStaffName,
-  keptLinesToRestore, mergeRecoveredLines, menuReadMode,
+  keptLinesToRestore, mergeRecoveredLines, menuReadMode, placeCustomLine, customChangeOf,
 } from './posOrdersConstants'
 
 // The pre-20260818150000 delete-then-insert fallback for save_pos_order_items is GONE (S754). Since
@@ -148,6 +148,9 @@ const stripCodeWord = (msg, word) => String(msg || '').replace(new RegExp(`^(pos
 const CLOSE_STEP_MS = 20000
 const bounded = (call, label, ms = CLOSE_STEP_MS) =>
   withTimeout(call, ms, label).catch(error => ({ data: null, error }))
+
+// Added to a refusal once the menu it made the till read again has landed (S809 4h).
+const MENU_RELOADED_TEXT = 'The menu has been reloaded.'
 
 // S841: opening a table, and reading the menu, wait this long for the server (owner decision
 // 2026-10-15), then take no answer as the internet being down, by S809 3f's rule: the table opens
@@ -197,7 +200,7 @@ const coarsePointer = () => { try { return window.matchMedia('(pointer: coarse)'
 // ~1,500 lines of interlocked state in this file (tenders, splits, comps, discount caps, loyalty,
 // the print pipeline), and a second copy of any of it is exactly the failure CLAUDE.md warns about.
 export default function PosOrders({ billingStation = false } = {}) {
-  const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, clientModules, clientModulesKnown, hasFeature, customizationEnabled, outlets } = useAuth()
+  const { clientId, profile, hasPosAccess, isAdmin, isOwner, imsEnabled, clientModules, clientModulesKnown, hasFeature, customizationEnabled, outlets, refreshProfile } = useAuth()
   // Who the floor's Inventory-posting banner is for (S776): since S809 3j it posts the open month itself
   // (Post to Inventory); a closed month stays the Owner's, in Periods. hasPosAccess resolves admin and
   // Owner to manager already.
@@ -360,10 +363,15 @@ export default function PosOrders({ billingStation = false } = {}) {
   // runs from a loadFloor closure that can be as old as the mount.
   const menuReadCustomRef = useRef(null)
   const loadMenuRef = useRef(null)
+  // S862 TILL-GUEST-1: the Customization switch as the latest render has it, so a menu read started
+  // under the other setting, landing after the switch moved, is dropped rather than written.
+  const customizationNowRef = useRef(customizationEnabled)
+  customizationNowRef.current = customizationEnabled
   // Crest Customization (S758): the option groups, options and dish attachments, read with the menu
   // and cached with it for offline. Empty for a client without the module.
   const [optionCatalog, setOptionCatalog] = useState({ groups: [], options: [], attachments: [] })
-  // { recipe, dishGroups, replaceIdx?, initialIds? } while the choice window is open.
+  // { recipe, dishGroups, replaceKey?, initialIds? } while the choice window is open; replaceKey is the
+  // line key of the cart line Change opened on (S862 TILL-GUEST-3: by key, as the cart can move meanwhile).
   const [optionPicker, setOptionPicker] = useState(null)
   // Combos (S839): { combo } while a combo's picks are being chosen, or { combo, swap: { lineId,
   // groupId }, initialPicks } while one dish of a combo on the cart is being swapped.
@@ -754,6 +762,9 @@ export default function PosOrders({ billingStation = false } = {}) {
   // S833: the cart as it stood when the save in flight was pressed (cartKeyMap), so ← can tell what that
   // save already carries — it lands and prints whether or not the waiter stays — from what changed after.
   const sendingCartRef = useRef(null)
+  // S862 TILL-GUEST-3: the line keys the save in flight sends to a station (none for a hold), so a
+  // Change answered meanwhile on one of them adds a dish of its own instead of replacing the one sent.
+  const sendingKeysRef = useRef(null)
   // S809 ORDER-FLOW-3, -4 (3e): saves of an order whose answer has not come back, by order id, oldest
   // first (sendAttempt.js). Each save is marked just before it goes out and the mark is dropped once its
   // answer is known, so a stale refusal, a reopened order and the 15 s poll below can tell this till's
@@ -1583,6 +1594,34 @@ export default function PosOrders({ billingStation = false } = {}) {
     if ((optionCatalog?.buildYourOwn || []).includes(recipeId)) return true
     return selectionProblems(dg, defaultSelection(dg)).length > 0
   }
+
+  // S862 TILL-GUEST-1: Customization switched on or off for this outlet while this till is open (or,
+  // since S862, lapsed 7 days past its paid-up date) reaches the till at its next login read: a screen
+  // wake, a PIN sign-in, or a refusal below (handleSaveRefusal). A menu read under the other setting is
+  // then read again at once, since its choices and combos are the old setting's. `customSwitchCheck`
+  // is such a refusal, set once the login has been read again: { shown, wasOn }, its message and the
+  // switch the till had when the save was refused.
+  const [customSwitchCheck, setCustomSwitchCheck] = useState(null)
+  useEffect(() => {
+    const check = customSwitchCheck
+    if (check) setCustomSwitchCheck(null)
+    // Stale: the menu on screen, or the read on its way (a first read too, which readMenu drops when it
+    // lands), is the other setting's.
+    const cur = menuInFlightRef.current
+    const stale = (menuReadAtRef.current > 0 && menuReadCustomRef.current !== customizationEnabled)
+      || (!!cur && cur.custom !== customizationEnabled)
+    if (!check && !stale) return
+    // The login came back with the same switch: the refusal was the menu, as for any other.
+    if (check && check.wasOn === customizationEnabled) { reloadMenuThenSay(check.shown, MENU_RELOADED_TEXT); return }
+    const said = check ? customizationSwitchedText(customizationEnabled) : null
+    const say = () => { if (said) setMsg(m => (m === check.shown ? `${check.shown} ${said}` : m)) }
+    // A read under this switch already on its way (a full one, or the replacement a dropped read
+    // started) answers for this one too: one read per switch.
+    const mine = cur && cur.custom === customizationEnabled ? cur : null
+    if (!stale && !mine) { say(); return } // the menu was already read again on the switch
+    const read = mine && (mine.mode === 'full' || !stale) ? mine.promise : loadMenu({ force: true })
+    void read.then(ok => { if (ok) say() }, e => console.error('menu re-read after a Customization switch failed:', e))
+  }, [customizationEnabled, customSwitchCheck]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // A reload or a closed tab ends this screen without a word (S809.4): ← asks before it drops unsaved
   // lines, and Cancel before it drops recorded payments, but the browser asked nothing. While either is
@@ -2651,7 +2690,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const readAt = menuReadCustomRef.current === customizationEnabled ? menuReadAtRef.current : 0
     const mode = menuReadMode({ hasMenu, savedToReplace: refreshSaved, readAt, now: Date.now(), force, background })
     if (mode === 'none') return false
-    const entry = { promise: readMenu(mode, refreshSaved), mode, hadMenu: hasMenu }
+    const entry = { promise: readMenu(mode, refreshSaved), mode, hadMenu: hasMenu, custom: customizationEnabled }
     menuInFlightRef.current = entry
     try { return await entry.promise } finally { if (menuInFlightRef.current === entry) menuInFlightRef.current = null }
   }
@@ -2708,6 +2747,18 @@ export default function PosOrders({ billingStation = false } = {}) {
       bounded(scopedFrom('recipes', 'id').eq('is_egg', true).eq('is_active', true).eq('pos_enabled', true),
         'Loading egg marks', OPEN_READ_MS),
     ])
+    // S862 TILL-GUEST-1: read under a Customization switch that has moved since: its choices and
+    // combos are the old setting's, so it is dropped, and never without a read under the new switch
+    // on its way: the effect on the switch may have started one; if not, it starts here, through the
+    // latest loadMenu (set in the same render as the switch), or a first read would stay loading.
+    if (customizationNowRef.current !== customizationEnabled) {
+      const next = menuInFlightRef.current
+      if (!(next && next.custom === customizationNowRef.current)) {
+        void Promise.resolve(loadMenuRef.current?.({ force: true }))
+          .catch(e => console.error('menu re-read after a Customization switch failed:', e))
+      }
+      return false
+    }
     // S847: a quiet read that failed, or heard nothing, keeps the menu on screen (or none, for the
     // floor's early read) and says nothing. It never marks the internet down: a background read on a
     // slow link is not the waiter's table failing to open. The next order screen asks again.
@@ -2788,8 +2839,12 @@ export default function PosOrders({ billingStation = false } = {}) {
   function refuseAndReloadMenu(text) {
     const shown = `error:${text}`
     setMsg(shown)
+    reloadMenuThenSay(shown, MENU_RELOADED_TEXT)
+  }
+  // The re-read itself: `more` is added to `shown` once it lands, if nothing has replaced the message.
+  function reloadMenuThenSay(shown, more) {
     void loadMenu({ force: true }).then(
-      ok => { if (ok) setMsg(m => (m === shown ? `${shown} The menu has been reloaded.` : m)) },
+      ok => { if (ok) setMsg(m => (m === shown ? `${shown} ${more}` : m)) },
       e => console.error('menu reload after a refusal failed:', e),
     )
   }
@@ -3629,10 +3684,11 @@ export default function PosOrders({ billingStation = false } = {}) {
   }
 
   // A dish with its choices, from the choice window or a one-tap default. The same choices tapped
-  // again add to the same line; different choices are a new line. `replaceIdx` is the Change button
-  // on an unsent line: that line is replaced (or folded into an identical one already on the order).
+  // again add to the same line; different choices are a new line. `replaceKey` is the Change button
+  // on an unsent line, by the key the line had when Change opened (S862 TILL-GUEST-3): that line is
+  // replaced (or folded into an identical one already on the order, placeCustomLine).
   // `qty` is the choice window's stepper — how many to add, or the replaced line's new quantity.
-  function addCustomLine(recipe, optionIds, replaceIdx = null, qty = null) {
+  function addCustomLine(recipe, optionIds, replaceKey = null, qty = null) {
     const vat = vatReg ? vatOf(recipe) : 0
     const dishGroups = dishGroupsByRecipe[recipe.id] || []
     const attachByGroup = Object.fromEntries(dishGroups.map(d => [d.group.id, d.attachment]))
@@ -3643,30 +3699,40 @@ export default function PosOrders({ billingStation = false } = {}) {
       selection_key, option_ids: [...optionIds].map(String).sort(),
       base_unit_price: base, options_delta: desc.delta, option_summary: desc.summary, options: desc.options,
     } : {}
-    const key = lineKeyOf({ recipe_id: recipe.id, selection_key })
     // Remembered per recipe so the choice window can offer "Same as last" on the next tap.
     if (selection_key) lastPicksRef.current[recipe.id] = [...optionIds].map(String)
-    const wanted = qty == null ? null : Math.max(1, Number(qty) || 1)
-    setOrderItems(prev => {
-      const replaced = replaceIdx != null ? prev[replaceIdx] : null
-      const rest = replaced ? prev.filter((_, n) => n !== replaceIdx) : prev
-      const addQty = replaced ? (wanted ?? replaced.qty) : (wanted ?? 1)
-      const idx = rest.findIndex(i => lineKeyOf(i) === key)
-      if (idx >= 0) {
-        return rest.map((item, n) => n === idx
-          ? { ...item, qty: item.qty + addQty, sent_to_kot: false, sent_qty: item.sent_to_kot ? item.qty : (item.sent_qty || 0) }
-          : item)
+    const line = {
+      recipe_id: recipe.id, name: recipe.name, category: recipe.category || 'Other',
+      unit_price: base + desc.delta, vat_rate: vat, sent_to_kot: false, sent_qty: 0, ...custom,
+    }
+    // S862 TILL-GUEST-3: the line Change opened on, as the cart holds it now. One the kitchen or bar
+    // has had since (sent units, or carried by the send in flight) is never edited in place: the new
+    // choices go on as their own dish, with its note, and the waiter is told.
+    let opts = { replaceKey, qty }
+    let said = ''
+    if (replaceKey != null) {
+      const { kind, line: before } = customChangeOf(orderItems, replaceKey, lineKeyOf(line), sendingKeysRef.current)
+      if (kind === 'gone') {
+        setMsg('error:That dish changed on the order while you were choosing, so nothing was changed. Check the order, then tap Change again.')
+        return
       }
-      const line = {
-        recipe_id: recipe.id, name: recipe.name, category: recipe.category || 'Other',
-        qty: addQty, unit_price: base + desc.delta, vat_rate: vat,
-        sent_to_kot: false, sent_qty: 0, notes: replaced?.notes || '', ...custom,
+      const station = botCategories.has(before.category || 'Other') ? 'bar' : 'kitchen'
+      // The same choices on a dish already sent: adding would only add plates, so nothing changes.
+      if (kind === 'unchanged') {
+        setMsg(`error:${before.name} went to the ${station} while you were choosing, with the same choices, so nothing was changed. Use + or − on it to change how many.`)
+        return
       }
-      if (replaced) { const out = [...rest]; out.splice(Math.min(replaceIdx, out.length), 0, line); return out }
-      return [...rest, line]
-    })
-    setMsg('')
-    if (replaceIdx == null) computeSuggestions(recipe)
+      if (kind === 'own') {
+        opts = { replaceKey: null, qty, note: before.notes || '' }
+        said = `error:${before.name} went to the ${station} while you were choosing. The new one is added as its own dish; take the first off if it is not wanted.`
+      }
+    }
+    // S862 TILL-GUEST-6: two notes on one line are both kept, and the waiter is told to check them.
+    const { joined } = placeCustomLine(orderItems, line, opts)
+    if (!said && joined) said = `ok:The two ${recipe.name}${desc.summary ? ` · ${desc.summary}` : ''} lines were joined; check the note.`
+    setOrderItems(prev => placeCustomLine(prev, line, opts).items)
+    setMsg(said)
+    if (replaceKey == null) computeSuggestions(recipe)
   }
 
   /* ── combos (S839, docs/pos-combos.md) ── */
@@ -3717,7 +3783,8 @@ export default function PosOrders({ billingStation = false } = {}) {
       setMsg(`error:${item.combo_name || 'This combo'} no longer has that pick, so ${item.name} cannot be changed. Remove the combo to change it.`)
       return
     }
-    setComboPicker({ combo, swap: { lineId, groupId }, initialPicks: picksOfCombo(orderItems, lineId) })
+    // S862 COMBOS-1: the window prices the combo as it was sold, as the swap will (comboAsSold).
+    setComboPicker({ combo: comboAsSold(combo, item), swap: { lineId, groupId }, initialPicks: picksOfCombo(orderItems, lineId) })
   }
 
   // The swap's answer: the new dish takes the old one's place in the same combo and pick. A dish the
@@ -3729,12 +3796,17 @@ export default function PosOrders({ billingStation = false } = {}) {
     const recipe = item && comboRecipeOf(item.recipe_id)
     const old = orderItems.find(i => comboIdOf(i) === swap.lineId && comboGroupOf(i) === String(swap.groupId).toLowerCase())
     if (!recipe || !old) return
-    const share = comboSharesOf(combo, comboRecipeOf, vatReg)[group.id]
+    // S862 COMBOS-1 (owner CU2 a): priced from the replaced dish's own share, as the server prices it, so
+    // the combo keeps the price it was ordered at and a Pay straight after is not stopped by menuDrift.
+    const share = swapShareOf(old, combo, group.id, comboRecipeOf, vatReg)
     const newLine = comboDishLine({
       combo, group, item, recipe, vatReg, share, qty: old.qty, lineId: swap.lineId, optionIds: pick.option_ids, describe: describeDishChoices,
     })
     if (lineKeyOf(newLine) === lineKeyOf(old)) return
-    const kitchenQty = Math.min(kitchenQtyOf(old), Number(old.qty) || 0)
+    // S862 TILL-GUEST-3: a dish the send in flight carries reaches the kitchen whatever happens, so
+    // swapping it is a pull like any sent dish's, with its reason.
+    const inFlight = sendingKeysRef.current?.has(lineKeyOf(old)) ? Number(old.qty) || 0 : 0
+    const kitchenQty = Math.max(inFlight, Math.min(kitchenQtyOf(old), Number(old.qty) || 0))
     if (kitchenQty > 0) {
       setPullPrompt({ swap: { lineId: swap.lineId, groupId: swap.groupId, newLine }, name: old.name, pulled: kitchenQty })
       setPullReason('')
@@ -4324,20 +4396,43 @@ export default function PosOrders({ billingStation = false } = {}) {
       // re-ruled, a price changed, the module switched off), so the menu and its options are re-read.
       // S809 3o (CUSTOMIZATION-2): the sentence names the dish the server named, and once the menu is
       // back the cart marks the line to fix, with a Change that works even when no choice is left.
-      const named = choiceRefusalText(err)
-      refuseAndReloadMenu(named || `Not saved — ${errorText(err, 'staff')}`)
+      const lines = snapshot || orderItems
+      // S862 TILL-GUEST-2 (owner CU5 a): a named dish already made (sent, not on the saved order) has
+      // no Change, so the sentence gives its way out instead.
+      const sentWayOut = dish => {
+        const line = lines.find(i => i.name === dish && (i.sent_to_kot || (i.sent_qty || 0) > 0)
+          && !savedItemsRef.current.has(lineKeyOf(i)))
+        if (!line) return null
+        const t = lineChoiceTrouble(line, dishGroupsByRecipe[line.recipe_id], optionMaps.optionsById, { sent: true, dish })
+        const way = t ? t.text : sentDishWayOut(dish)
+        return isComboLine(line) ? comboWayOut(way, line) : way
+      }
+      const text = choiceRefusalText(err, { sentWayOut }) || `Not saved — ${errorText(err, 'staff')}`
+      // S862 TILL-GUEST-1: Customization switched on or off for the outlet (or lapsed) after this till
+      // read its login. Options refused as off, or a count refused on an order where no dish has
+      // choices on this till, is that: the login is read again, and the effect on the switch re-reads
+      // the menu and says so. Never loadMenu straight after the read: this closure has the old switch.
+      const maySwitch = err?.hint === HINT.optionsOff
+        || (err?.hint === HINT.optionCount && !lines.some(i => dishGroupsByRecipe[i.recipe_id]))
+      if (maySwitch && refreshProfile) {
+        const shown = `error:${text}`
+        setMsg(shown)
+        const wasOn = customizationEnabled
+        void withTimeout(Promise.resolve(refreshProfile()), SEND_READ_MS, 'Reading the login again').then(
+          () => setCustomSwitchCheck({ shown, wasOn }),
+          e => { console.error('login re-read after a choices refusal failed:', e); reloadMenuThenSay(shown, MENU_RELOADED_TEXT) },
+        )
+        return { ok: false, handled: true, error: err }
+      }
+      refuseAndReloadMenu(text)
       return { ok: false, handled: true, error: err }
     }
-    if (err?.hint === HINT.comboDishOff || err?.hint === HINT.comboOff) {
+    if (err?.hint === HINT.comboDishOff || err?.hint === HINT.comboOff || err?.hint === HINT.comboIncomplete) {
       // S839: a combo or one of its dishes is off the menu since the till read it. Nothing was saved; the
-      // menu and its combos are re-read, as for a dish off the menu.
+      // menu and its combos are re-read, as for a dish off the menu. S862 COMBOS-4: a combo missing a
+      // dish is most often one whose picks the owner changed since this till read the menu, so it is
+      // re-read too, and a combo removed and added again then comes from the menu as it is now.
       refuseAndReloadMenu(`Not saved — ${errorText(err, 'staff')}`)
-      return { ok: false, handled: true, error: err }
-    }
-    if (err?.hint === HINT.comboIncomplete) {
-      // S839: a combo missing a dish, or its dishes at different quantities. Pressing again changes
-      // nothing, so the sentence says what to fix instead of "try again".
-      setMsg(`error:Not saved — ${errorText(err, 'staff')}`)
       return { ok: false, handled: true, error: err }
     }
     if (err?.hint === HINT.offMenu) {
@@ -4596,10 +4691,12 @@ export default function PosOrders({ billingStation = false } = {}) {
     const botItems = unsentItems.filter(i =>  botCategories.has(i.category || 'Other'))
     savingRef.current = true
     sendingCartRef.current = cartKeyMap(orderItems)
+    const sendKeys = new Set(unsentItems.map(lineKeyOf))
+    sendingKeysRef.current = sendKeys
     setSaving(true); setMsg('')
     const screen = watchScreen()
     try {
-      const saved = await performSave({ sendKeys: new Set(unsentItems.map(lineKeyOf)), queue: true })
+      const saved = await performSave({ sendKeys, queue: true })
       // No answer (S809 ORDER-FLOW-3, -5) is kept on this till and prints (3f, Q16); `unknown` is left only
       // when this till could not keep it either (its local store failed): not known whether it landed, so
       // nothing prints yet — the till finds out (the poll, or the next press reads the order first).
@@ -4626,6 +4723,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       // ORDER-FLOW-5: whatever happened, this till can send and take payment again.
       savingRef.current = false
       sendingCartRef.current = null
+      sendingKeysRef.current = null
       setSaving(false)
     }
   }
@@ -4642,6 +4740,7 @@ export default function PosOrders({ billingStation = false } = {}) {
 
     const wasNew = !orderId
     const fires = wasNew && !hold
+    sendingKeysRef.current = fires ? new Set(orderItems.map(lineKeyOf)) : null
     const press = hold ? 'Save, do not send yet (beside Send)' : wasNew ? 'Send Order' : 'Update Order'
     try {
       // A NEW order auto-sends every line on its first save, so its lines are marked sent in that same
@@ -4686,6 +4785,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       // ORDER-FLOW-5: whatever happened, this till can send and take payment again.
       savingRef.current = false
       sendingCartRef.current = null
+      sendingKeysRef.current = null
       setSaving(false)
     }
   }
@@ -5426,8 +5526,9 @@ export default function PosOrders({ billingStation = false } = {}) {
   // is null when its read failed — never the cart in its place.
   async function readStoredBill(row) {
     const [itemsRes, legsRes] = await Promise.all([
-      // With each line's choices' stock lines, which a Complimentary Slip is costed from.
-      bounded(scopedFrom('pos_order_items', `*, ${LINE_CHOICE_STOCK}`).eq('order_id', row.id), 'Reading the bill'),
+      // With each line's choices' stock lines, which a Complimentary Slip is costed from, and their
+      // names and prices, which the bill prints (S862 TILL-GUEST-5).
+      bounded(scopedFrom('pos_order_items', `*, ${LINE_CHOICE_BILL}`).eq('order_id', row.id), 'Reading the bill'),
       row.payment_method === 'Split'
         ? bounded(scopedFrom('pos_order_payments', 'payment_method, amount').eq('order_id', row.id), 'Reading the payments')
         : Promise.resolve({ data: [], error: null }),
@@ -5837,7 +5938,9 @@ export default function PosOrders({ billingStation = false } = {}) {
         delivery_partner: closeType === 'paid' && payMethod === 'Credit' ? (deliveryPartner || null) : null,
         close_reason:     closeType === 'paid' ? null : closeReason,
         discount_amount:  closeType === 'paid' ? discountAmt : null,
-        discount_reason:  closeType === 'paid' ? (discountReason || null) : null,
+        // S862 COMBOS-8: a reason only with a discount, so a combos-only bill with a member card on
+        // it is not stored as a member discount of NPR 0.
+        discount_reason:  closeType === 'paid' && discountAmt > 0 ? (discountReason || null) : null,
         buyer_name:       buyerName.trim() || null,
         buyer_address:    buyerAddress.trim() || null,
         buyer_pan:        buyerPan.trim() || null,
@@ -6049,7 +6152,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // A settled close prints the bill as STORED (S809), and nothing at all when its lines could not
     // be read back — never the cart in their place. In the background it does not print (see above).
     const canPrint = !background && !(stored && !stored.items)
-    if (canPrint && closeType === 'paid') printed.push(await printBill(updated, stored ? stored.items.filter(i => !i.comped) : payableOrderItems))
+    if (canPrint && closeType === 'paid') printed.push(await printBill(updated, stored ? stored.items.filter(i => !i.comped).map(withChoices) : payableOrderItems))
     // A Complimentary Slip prints the bill's STORED lines: a dish's choices' stock lines, which its food
     // cost includes, are the server's snapshot and never the cart's. Read back here on an ordinary close;
     // a failed read prints nothing rather than a slip costed without them.
@@ -6440,7 +6543,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // two with a customer standing at the counter.
     const [{ data: order, error: orderErr }, { data: items, error: itemsErr }] = await Promise.all([
       bounded(scopedFrom('pos_orders').eq('id', orderRow.id).single(), 'Reading the bill'),
-      bounded(scopedFrom('pos_order_items', `*, ${LINE_CHOICE_STOCK}`).eq('order_id', orderRow.id), 'Reading the bill lines'),
+      bounded(scopedFrom('pos_order_items', `*, ${LINE_CHOICE_BILL}`).eq('order_id', orderRow.id), 'Reading the bill lines'),
     ])
     // `if (!order) return` alone let a failed ITEMS read straight through: items came back null,
     // `|| []` turned it into an empty array, and the reprint went out as a Tax Invoice carrying
@@ -6467,7 +6570,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const reprint = { hscMap: hsc.map, staffName: staff.name }
     const printed = writeoff
       ? await printCompSlip(order, lines, reprint)
-      : await printBill(order, lines, reprint)
+      : await printBill(order, lines.map(withChoices), reprint) // S862 TILL-GUEST-5: choices with their prices
     // false = blocked window; null = printBill already raised a notice about its own failed read.
     if (printed === false) noticePopupBlocked()
     setRecentBills(prev => prev.map(o => o.id === orderRow.id ? { ...o, print_count: (o.print_count || 0) + 1 } : o))
@@ -6820,10 +6923,19 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
     return dishGroupsByRecipe[item.recipe_id] ? 'Change' : null
   }
   // S809 3o for a combo's dish: choices the next save would refuse, on a dish not yet on the saved order.
+  // S862 TILL-GUEST-2: a sent one too, with the way out for a dish already made (a combo goes whole).
   const comboDishTrouble = item => {
-    if (item.sent_to_kot || (item.sent_qty || 0) > 0 || !menuLoaded || savedItemsRef.current.has(lineKeyOf(item))) return null
-    const t = lineChoiceTrouble(item, dishGroupsByRecipe[item.recipe_id], optionMaps.optionsById)
-    return t ? t.text.replace(/Tap (Change|Choices)/, `Tap ${comboSwapLabel(item) || 'Swap'}`) : null
+    if (!menuLoaded || savedItemsRef.current.has(lineKeyOf(item))) return null
+    const sent = !!item.sent_to_kot || (item.sent_qty || 0) > 0
+    const t = lineChoiceTrouble(item, dishGroupsByRecipe[item.recipe_id], optionMaps.optionsById, { sent })
+    if (!t) return null
+    if (sent) return comboWayOut(t.text, item)
+    return t.text.replace(/Tap (Change|Choices)/, `Tap ${comboSwapLabel(item) || 'Swap'}`)
+  }
+  // A dish already made inside a combo is not taken off alone (combo_incomplete): it is swapped, or the combo goes.
+  const comboWayOut = (text, item) => {
+    const way = comboSwapLabel(item) === 'Swap' ? 'swap it, or take the combo off' : 'take the combo off'
+    return text.replace(/(t)ake the dish off/i, (_, c) => (c === 'T' ? way[0].toUpperCase() + way.slice(1) : way))
   }
 
   // Recent Bills' number search (S754). A day's bills — cheap to filter per keystroke.
@@ -7369,7 +7481,8 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                 return (
                   <ComboCartBlock key={`combo:${block.id}`} block={block}
                     lineTotalOf={cartLineTotal} renderMarks={cartLineMarks} renderNote={cartNoteEditor}
-                    swapLabelOf={comboSwapLabel} troubleOf={comboDishTrouble}
+                    // S862 TILL-GUEST-3: no Swap while a save is on its way; it may be sending that dish.
+                    swapLabelOf={saving ? () => null : comboSwapLabel} troubleOf={comboDishTrouble}
                     onQty={setComboQty} onRemove={id => setComboQty(id, 0)} onSwap={openComboSwap} />
                 )
               }
@@ -7416,9 +7529,11 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     // S809 3o (CUSTOMIZATION-2): a line the next save will check (its key is not on the
                     // saved order) whose choices the menu no longer offers, or no longer fit, is marked,
                     // and keeps its Change even when the dish has no choice left to offer.
+                    // S862 TILL-GUEST-2 (owner CU5 a): a SENT one too (a dish this till printed offline,
+                    // put back as sent): no Change, and the mark says how to bill it as made or take it off.
                     const saved = savedItemsRef.current.has(lineKeyOf(item))
-                    const trouble = unsent && menuLoaded && !saved
-                      ? lineChoiceTrouble(item, lineGroups, optionMaps.optionsById) : null
+                    const trouble = menuLoaded && !saved
+                      ? lineChoiceTrouble(item, lineGroups, optionMaps.optionsById, { sent: !unsent }) : null
                     // S809 4h (owner, Q3 b): a SAVED line not yet sent keeps its exemption, so a
                     // choice hidden since is a grey note that blocks nothing, not a red mark.
                     const goneNote = unsent && menuLoaded && saved
@@ -7436,12 +7551,14 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                               type="button"
                               className="btn btn-ghost btn-sm till-hit--row"
                               aria-label={`Change choices for ${item.name}`}
+                              // S862 TILL-GUEST-3: not while a save is on its way; it may be sending this dish.
+                              disabled={saving}
                               onClick={() => {
                                 const recipe = menu.find(m => m.id === item.recipe_id)
                                 if (!recipe) { setMsg('error:This dish is not on the till menu any more.'); return }
                                 const initialIds = item.option_ids
                                   || (item.selection_key ? lineOptionIds(item) : defaultSelection(lineGroups))
-                                setOptionPicker({ recipe, dishGroups: lineGroups || [], replaceIdx: idx, initialIds, lineOptions: item.options || null })
+                                setOptionPicker({ recipe, dishGroups: lineGroups || [], replaceKey: lineKeyOf(item), initialIds, lineOptions: item.options || null })
                               }}
                             >{lineOptionIds(item).length ? 'Change' : 'Choices'}</button>
                           </Tip>
@@ -8026,7 +8143,11 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                           ) : memberNow.kind === 'active' ? (
                             <>
                               <span className="badge badge-gray" style={{ whiteSpace: 'nowrap' }}>★ {memberNow.typeName} member</span>
-                              {isMembershipReason(discountReason) ? (
+                              {/* S862 COMBOS-8: a bill of combos only takes no bill discount, so the
+                                  card says so rather than that its discount is filled in below. */}
+                              {comboOnlyBill ? (
+                                <span style={{ color: 'var(--theme-text2)' }}>— combos take no bill discount.</span>
+                              ) : isMembershipReason(discountReason) ? (
                                 <>
                                   <span style={{ color: 'var(--theme-text2)' }}>{pctText(memberNow.pct)}% member discount filled in below.</span>
                                   {!tendersLocked && <button type="button" className="btn btn-ghost btn-sm till-hit--row" onClick={removeMemberDiscount}>Take it off</button>}
@@ -8394,13 +8515,13 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           catalog={optionMaps}
           vatRate={vatReg ? vatOf(optionPicker.recipe) : 0}
           initialIds={optionPicker.initialIds}
-          initialQty={optionPicker.replaceIdx != null ? orderItems[optionPicker.replaceIdx]?.qty : undefined}
+          initialQty={optionPicker.replaceKey != null ? orderItems.find(i => lineKeyOf(i) === optionPicker.replaceKey)?.qty : undefined}
           lastIds={lastPicksRef.current[optionPicker.recipe.id] || null}
           lineOptions={optionPicker.lineOptions || null}
-          confirmLabel={optionPicker.replaceIdx != null ? 'Update dish' : 'Add to order'}
+          confirmLabel={optionPicker.replaceKey != null ? 'Update dish' : 'Add to order'}
           onClose={() => setOptionPicker(null)}
           onConfirm={(ids, qty) => {
-            addCustomLine(optionPicker.recipe, ids, optionPicker.replaceIdx ?? null, qty)
+            addCustomLine(optionPicker.recipe, ids, optionPicker.replaceKey ?? null, qty)
             setOptionPicker(null)
           }}
         />
@@ -8926,7 +9047,8 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                     ) : c.reason === 'table_taken' ? (
                       <><strong>{c.table_name}</strong> was opened on another device while you were offline — </>
                     ) : c.reason === 'off_menu' ? (
-                      <><strong>{c.table_name}</strong>: a dish in your offline order is no longer on the till menu — </>
+                      // S862 TILL-GUEST-2: a hidden choice on a dish lands here too, not only a dish gone.
+                      <><strong>{c.table_name}</strong>: a dish in your offline order, or one of its choices, is no longer offered — </>
                     ) : c.reason === 'refused' ? (
                       <><strong>{c.table_name}</strong>: the server would not take your offline changes{c.refusal ? ` (${c.refusal})` : ''} — </>
                     ) : (
@@ -8938,7 +9060,7 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
                   {conflictPrintedNote(c)}
                 </span>
                 {/* S754: recover the lines rather than only throw them away. */}
-                <Tip text="Puts these items back as unsent lines: onto the order this table (or takeaway) has open now — only what that order does not already carry — or onto a new order if it has none. This notice goes away once that order is saved.">
+                <Tip text="Puts these items back onto the order this table (or takeaway) has open now — only what that order does not already carry — or onto a new order if it has none. Back onto the same order, dishes this till already printed come back as already sent, so they do not print again; onto any other order they come back unsent, named in the message. This notice goes away once that order is saved.">
                   <button className="btn btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, flexShrink: 0 }}
                     disabled={!isOnline}
                     onClick={() => startOrderFromConflict(c)}>Start new order with these</button>

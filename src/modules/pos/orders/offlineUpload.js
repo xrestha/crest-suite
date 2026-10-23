@@ -50,17 +50,21 @@ export const queuedHasLines = q => Array.isArray(q?.items) && !q?.tickets_for
 /** A save's payload as the queue keeps it: each customized row also carries the choices the cart showed
  *  (`option_summary`, `option_snapshot`), so an order reopened from the queue shows them and its tickets
  *  name them (cartLineFromStored reads them back). `cart` is the cart the payload was built from, line
- *  for line. */
+ *  for line. S862 COMBOS-1: a combo dish keeps the share it was priced from (`combo_share`), so a swap
+ *  on the queued copy prices as the server will; the server never reads it (replayRows drops it). */
 export function queuedRows(payload, cart) {
   return (payload || []).map((row, n) => {
     const line = cart?.[n]
-    if (!row.options?.length || !line) return row
-    return { ...row, option_summary: line.option_summary || null, option_snapshot: line.options || null }
+    if (!line) return row
+    let out = row
+    if (row.options?.length) out = { ...out, option_summary: line.option_summary || null, option_snapshot: line.options || null }
+    if (row.combo && line.combo_share != null) out = { ...out, combo_share: line.combo_share }
+    return out
   })
 }
 
 /** The rows an upload sends: the payload exactly as the till built it, without the display copy. */
-export const replayRows = items => (items || []).map(({ option_summary: _s, option_snapshot: _o, ...row }) => row)
+export const replayRows = items => (items || []).map(({ option_summary: _s, option_snapshot: _o, combo_share: _c, ...row }) => row)
 
 /** The order a queued entry belongs to: a ticket-only entry is keyed apart from its order. */
 export const queuedOrderId = q => q?.tickets_for || q?.order_id || null

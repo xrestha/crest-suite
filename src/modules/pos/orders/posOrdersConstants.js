@@ -85,6 +85,9 @@ export const OPEN_ORDER_SELECT =
   'selection_key, base_unit_price, options_delta, option_summary, ' +
   // Combos (S839): the dish's combo, as the server stamped it.
   'combo_line_id, combo_id, combo_name, combo_price, combo_group_id, combo_group_name, combo_sort, ' +
+  // S862 COMBOS-1 (owner CU2 a): the pick's share as the guest pays it, stamped by the server, which a
+  // dish swapped or re-chosen inside this combo is priced from.
+  'combo_share, ' +
   'pos_order_item_options(option_id, group_id, group_name, group_kind, option_name, kitchen_name, is_removal, price_delta, included, ingredient_deltas, sort))'
 
 // A stored line as the cart holds it. sent_qty is the stored count, falling back to the whole qty for
@@ -185,6 +188,63 @@ export function ticketForLine(tickets, line) {
 // Order-independent on purpose — the same options ticked in a different order are the same line.
 export const selectionKeyOf = optionIds =>
   (optionIds || []).filter(Boolean).map(String).sort().join('+')
+
+/**
+ * S862 TILL-GUEST-3: what an answered Change does to the line it opened on, found by that line's key:
+ * 'gone' (no longer on the cart: nothing changes), 'replace' (still unsent: replaced in place), 'own'
+ * (the kitchen or bar has it now, or the send in flight carries it: the new choices go on as a dish of
+ * their own), or 'unchanged' (it went out and the choices are the same: adding would only add plates,
+ * so nothing changes and + or − is the way to change how many).
+ * @returns {{ kind: 'gone'|'replace'|'own'|'unchanged', line: object|null }}
+ */
+export function customChangeOf(cart, replaceKey, newKey, sendingKeys = null) {
+  const line = (cart || []).find(i => lineKeyOf(i) === replaceKey) || null
+  if (!line) return { kind: 'gone', line }
+  const out = !!line.sent_to_kot || (Number(line.sent_qty) || 0) > 0 || !!sendingKeys?.has(replaceKey)
+  if (!out) return { kind: 'replace', line }
+  return { kind: newKey === replaceKey ? 'unchanged' : 'own', line }
+}
+
+/**
+ * A dish with its choices onto the cart (PosOrders' addCustomLine; S862 TILL-GUEST-3, -6). `line` is
+ * the new line, quantity aside. `replaceKey` is the key of the line Change opened on (null for an add),
+ * found by that key and not by its place, since the cart can move while the window is open. `qty` is
+ * the window's stepper. `note` is a note to carry onto an ADDED line (null for none).
+ *
+ * The same choices as another line add to that line, which holds one note: where the two notes differ
+ * (a replaced line's note, or a carried one), both are kept on it, each with its count ("×1: less
+ * sugar"), so no instruction is dropped or spread to plates it was not for. `joined` says so.
+ * @returns {{ items: object[], joined: boolean }}
+ */
+export function placeCustomLine(prev, line, { replaceKey = null, qty = null, note = null } = {}) {
+  const at = replaceKey != null ? prev.findIndex(i => lineKeyOf(i) === replaceKey) : -1
+  const replaced = at >= 0 ? prev[at] : null
+  const rest = replaced ? prev.filter((_, n) => n !== at) : prev
+  const wanted = qty == null ? null : Math.max(1, Number(qty) || 1)
+  const addQty = replaced ? (wanted ?? replaced.qty) : (wanted ?? 1)
+  const carried = replaced ? (replaced.notes || '') : (note || '')
+  const key = lineKeyOf(line)
+  const idx = rest.findIndex(i => lineKeyOf(i) === key)
+  if (idx >= 0) {
+    const item = rest[idx]
+    const kitchen = item.sent_to_kot ? item.qty : (item.sent_qty || 0)
+    const merged = { ...item, qty: item.qty + addQty, sent_to_kot: false, sent_qty: kitchen }
+    const nt = (item.notes || '').trim(), nr = carried.trim()
+    const joined = (!!replaced || note != null) && nt !== nr
+    if (joined) {
+      merged.notes = [nt && `×${item.qty}: ${nt}`, nr && `×${addQty}: ${nr}`].filter(Boolean).join(', ')
+      // As updateItemNote: the station keeps the note it was sent with, so its plates get a change line.
+      if (kitchen > 0) {
+        merged.note_at_send = item.note_at_send ?? item.notes ?? ''
+        merged.note_changed = merged.notes.trim() !== String(merged.note_at_send).trim()
+      }
+    }
+    return { items: rest.map((x, n) => (n === idx ? merged : x)), joined }
+  }
+  const placed = { ...line, qty: addQty, notes: carried }
+  if (replaced) { const out = [...rest]; out.splice(Math.min(at, out.length), 0, placed); return { items: out, joined: false } }
+  return { items: [...rest, placed], joined: false }
+}
 
 // Lines this device had that `serverLines` does not — by recipe and by quantity difference — as
 // UNSENT lines of just the difference. What a stale save (another tablet saved first) or a stale
@@ -322,7 +382,12 @@ export const comboFieldsOf = i => ({
   combo_line_id: comboLineIdOf(i), combo_id: i.combo_id ?? i.combo?.combo_id ?? null, combo_group_id: comboGroupIdOf(i),
   combo_name: i.combo_name ?? i.combo?.name ?? null, combo_group_name: i.combo_group_name ?? i.combo?.group_name ?? null,
   combo_sort: i.combo_sort ?? i.combo?.sort ?? null, combo_price: i.combo_price ?? i.combo?.price ?? null,
+  // S862 COMBOS-1: the share the dish was priced from (null for a combo rung before shares were kept).
+  combo_share: i.combo_share ?? null,
 })
+
+// Two combo shares agree: both unknown, or the same figure.
+const sameShare = (a, b) => (a == null && b == null) || (a != null && b != null && Math.abs(Number(a) - Number(b)) < 0.0001)
 
 const SAME_NUMBER = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.0001
 
@@ -372,7 +437,9 @@ export function withServerLineFields(localLines, serverItems) {
     const category = s.category || 'Other'
     if (SAME_NUMBER(s.unit_price, i.unit_price) && SAME_NUMBER(s.vat_rate, i.vat_rate)
         && (s.name || '') === (i.name || '') && category === (i.category || 'Other')
-        && (!s.selection_key || (s.option_summary || '') === (i.option_summary || ''))) return i
+        && (!s.selection_key || (s.option_summary || '') === (i.option_summary || ''))
+        // S862 COMBOS-1: a combo dish takes the server's share, or none, so a swap prices as it does.
+        && (!s.combo_line_id || sameShare(s.combo_share, i.combo_share))) return i
     changed = true
     return {
       ...i, unit_price: Number(s.unit_price) || 0, vat_rate: Number(s.vat_rate) || 0, name: s.name, category,

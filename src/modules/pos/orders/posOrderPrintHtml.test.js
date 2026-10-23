@@ -1,6 +1,7 @@
 // S809 CHECKOUT-13: a PAN bill's own figures add up to its Net Amount (Round Off prints on every
 // bill), and a Credit bill says what is owed instead of printing a Tender as if the guest had paid.
-import { buildBillHtml, billOptionRow, buildVoidSlipHtml, buildMoveSlipHtml, buildShareSlipsHtml, buildCompSlipHtml } from './posOrderPrintHtml'
+import { buildBillHtml, billOptionRow, withChoices, buildVoidSlipHtml, buildMoveSlipHtml, buildShareSlipsHtml, buildCompSlipHtml } from './posOrderPrintHtml'
+import { LINE_CHOICE_BILL } from './posRecipeBook'
 import { equalShares } from './shareSplit'
 import { escapeHtml } from '../../../utils/escapeHtml'
 import { npr2 } from '../../../shared/nepalMoney'
@@ -90,6 +91,43 @@ describe('billOptionRow', () => {
 
   test('is empty for a line with no choices', () => {
     expect(billOptionRow({ options: [] })).toBe('')
+  })
+})
+
+// S862 TILL-GUEST-5: a reprint, the Bill Register's view and a bill printed after a lost close answer
+// list a dish's choices with their prices, as the original did (BLOOM invoices 2642 and 2644).
+describe('a stored line prints its choices as the original did', () => {
+  const stored = {
+    recipe_id: 'r-bowl', name: 'Test Bowl', qty: 1, unit_price: 266.38, vat_rate: 0.13,
+    option_summary: 'Large · Test Base · Test Topping',
+    pos_order_item_options: [
+      { option_name: 'Test Topping', price_delta: 0, sort: 3000, ingredient_deltas: [] },
+      { option_name: 'Large', price_delta: 66.38, sort: 2, ingredient_deltas: [] },
+      { option_name: 'Test Base', price_delta: 0, sort: 1000, ingredient_deltas: [] },
+    ],
+  }
+  test('the read embeds what the bill prints, beside the stock lines a comp is costed from', () => {
+    expect(LINE_CHOICE_BILL).toMatch(/^pos_order_item_options\(/)
+    for (const col of ['option_name', 'price_delta', 'sort', 'ingredient_deltas']) expect(LINE_CHOICE_BILL).toContain(col)
+  })
+  test('withChoices turns the embed into the choices in the order they print', () => {
+    const line = withChoices(stored)
+    expect(line.options.map(o => o.option_name)).toEqual(['Large', 'Test Base', 'Test Topping'])
+    expect(line.pos_order_item_options).toBe(stored.pos_order_item_options) // the costing still reads it
+    expect(billOptionRow(line)).toContain('Large +66, Test Base, Test Topping')
+    // Without it the copy fell back to the bare summary.
+    expect(billOptionRow(stored)).toContain('Large · Test Base · Test Topping')
+  })
+  test('a line with no choices, or a cart line with its own, is left as it is', () => {
+    const plain = { recipe_id: 'r1', name: 'Tea', qty: 1, unit_price: 50 }
+    expect(withChoices(plain)).toBe(plain)
+    expect(withChoices({ ...plain, pos_order_item_options: [] }).options).toBeUndefined()
+    const cart = { ...plain, options: [{ option_name: 'Large', price_delta: 40, sort: 2 }] }
+    expect(withChoices(cart).options).toEqual(cart.options)
+  })
+  test('the printed bill lists them', () => {
+    const html = bill({ items: [withChoices(stored)], vatReg: true })
+    expect(html).toContain('Large +66, Test Base, Test Topping')
   })
 })
 

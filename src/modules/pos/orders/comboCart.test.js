@@ -2,6 +2,7 @@ import {
   nestCombos, comboAddsInOneTap, defaultComboPicks, buildComboLines, comboIdOf, comboGroupOf, groupComboBlocks,
   cartRows, addComboLinesToCart, setComboQtyIn, comboUnitsPulled, swapComboDish, picksOfCombo,
   collapseCombosForMove, expandComboPicks, guestLineOf, guestRequestText, isMissingTable, comboSignature, comboSharesOf,
+  swapShareOf, comboAsSold, comboDishLine,
 } from './comboCart'
 import { lineKeyOf, toItemPayload, lineOptionIds } from './posOrdersConstants'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
@@ -236,5 +237,40 @@ describe('a bill discount never touches a combo (the till\'s figure is computeOr
     const out = computeOrderAmounts({ discount_amount: 20 }, items, true)
     const comboVat = items.slice(1).reduce((s, i) => s + i.qty * i.unit_price * i.vat_rate, 0)
     expect(out.vatAmt).toBeCloseTo(comboVat + (200 - 20) * 0.13, 6)
+  })
+})
+
+// S862 COMBOS-1 (owner CU2 a): a dish swapped, or given other choices, inside a combo already on the bill
+// is priced from the replaced dish's own share, so the combo keeps the price it was ordered at.
+describe('a swap keeps the price the combo was ordered at', () => {
+  test('every combo dish carries the share it was priced from', () => {
+    const shares = comboSharesOf(momoCombo, recipeOf, true)
+    const lines = comboOf('aaaa')
+    expect(lines.map(l => l.combo_share)).toEqual([shares['g-momo'], shares['g-drink']])
+  })
+
+  test('the replaced dish\'s stored share prices the new one, its extra on top', () => {
+    const old = { ...comboOf('aaaa')[0], combo_share: 210, combo_price: 350 }
+    const share = swapShareOf(old, momoCombo, 'g-momo', recipeOf, true)
+    expect(share).toBe(210)
+    const group = momoCombo.groups.find(g => g.id === 'g-momo')
+    const item = group.items.find(i => i.recipe_id === 'r-momo-c')
+    const line = comboDishLine({ combo: momoCombo, group, item, recipe: recipeOf('r-momo-c'), vatReg: true, share, lineId: 'aaaa' })
+    // (210 + Chicken's 50) / 1.13, to the paisa, as the server prices it.
+    expect(line.unit_price).toBe(Math.round((260 / 1.13) * 100) / 100)
+    expect(line.combo_share).toBe(210)
+  })
+
+  test('a dish rung before shares were kept is priced from today\'s split, as the server does', () => {
+    const old = { ...comboOf('aaaa')[0], combo_share: null }
+    expect(swapShareOf(old, momoCombo, 'g-momo', recipeOf, true)).toBe(comboSharesOf(momoCombo, recipeOf, true)['g-momo'])
+  })
+
+  test('the swap window shows the combo at the price it was sold at, only when the dish kept its share', () => {
+    const priced = comboAsSold(momoCombo, { combo_share: 210, combo_price: 400 })
+    expect(priced.guest_price).toBe(400)
+    expect(priced.groups).toBe(momoCombo.groups)
+    expect(comboAsSold(momoCombo, { combo_share: null, combo_price: 400 })).toBe(momoCombo)
+    expect(comboAsSold(momoCombo, { combo_share: 210, combo_price: null })).toBe(momoCombo)
   })
 })
