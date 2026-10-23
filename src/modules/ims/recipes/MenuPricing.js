@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState, useCallback } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -16,9 +16,9 @@ import { calcSubRecipeCostPerUnit } from './recipeCostCalc'
 import { nextProductCode, productCodePrefix } from '../../../shared/productCode'
 import Modal from '../../../components/Modal'
 import AttachGroupsModal from '../../customization/AttachGroupsModal'
-import { loadOptionCatalog } from '../../customization/customizationData'
-import { dishesBelowZero, belowZeroText, groupsForDish } from '../../../shared/optionPricing'
-import { npr } from '../../../shared/nepalMoney'
+import { loadOptionCatalog, CUSTOMIZATION_READ_MS } from '../../customization/customizationData'
+import { sizeEffect, belowZeroText, belowZeroLine, CHOICES_UNCHECKED, CHOICES_CHECKING } from '../../../shared/optionPricing'
+import { settleWithin } from '../../../utils/withTimeout'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { useBuildCostRanges } from '../../customization/useBuildCostRanges'
 import BuildCostDetail, { costRangeText, fcRangeNode } from '../../customization/BuildCostDetail'
@@ -47,18 +47,10 @@ function vatLabel(vat) {
 const NO_COST_TITLE = 'No food cost yet — add ingredients to this recipe in Recipe Costing.'
 const NO_COST_TITLE_POS = 'No cost price yet — add one with Edit on this row.'
 
-// S835: said under a price being typed when the option catalog could not be read, so the below-zero
-// check did not run. The price still saves (owner decision).
-const CHOICES_UNCHECKED = 'Choices not checked — couldn’t read them'
-
-// "With “Half” and “Less rice” it would cost −NPR 20" — the size line's own words for a price that
-// would let the dish be ordered below zero (S835).
-function belowZeroLine(found) {
-  const { picks, incl } = found[0]
-  const q = (picks || []).map(n => `“${n}”`)
-  const names = q.length > 1 ? `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}` : q[0]
-  return `${names ? `With ${names} it` : 'It'} would cost −${npr(Math.abs(Math.round(incl)))}`
-}
+// S835: CHOICES_UNCHECKED is said under a price being typed when the option catalog could not be
+// read, so the below-zero check did not run, and (S862 SETUP-9) CHOICES_CHECKING while it has not
+// answered yet. The price still saves (owner decision). belowZeroLine and both sentences live in
+// optionPricing.js since S862, so Recipe Costing says the same.
 
 const EMPTY_FORM = { name: '', category: '', price: '', vatRate: 0.13, costPrice: '' }
 
@@ -105,9 +97,14 @@ export default function MenuPricing() {
   // by name if one slips through.
   const [optionCatalog, setOptionCatalog] = useState(null) // { groups, options, attachments }
   const [choicesReadFailed, setChoicesReadFailed] = useState(false)
+  // S862 SETUP-9: the read is bounded, so a hang becomes the failed-read state below, and only the
+  // latest read answers: a timed-out first read must not mark a later good one as failed.
+  const choicesReq = useRef(0)
   const loadChoiceNames = useCallback(async () => {
     if (!customizationOn || !effectiveClientId) return
-    const cat = await loadOptionCatalog(scopedFrom)
+    const req = ++choicesReq.current
+    const cat = await settleWithin(loadOptionCatalog(scopedFrom), CUSTOMIZATION_READ_MS, 'Loading the choices')
+    if (req !== choicesReq.current) return
     if (cat.error) {
       console.error('Menu Pricing: the option catalog could not be read, so new prices are saved without the below-zero check', cat.error)
       setChoicesReadFailed(true)
@@ -126,19 +123,15 @@ export default function MenuPricing() {
   }, [customizationOn, effectiveClientId, scopedFrom])
   useEffect(() => { loadChoiceNames() }, [loadChoiceNames])
   // What a new price does to the dish's sizes: "Half NPR 180 · Full NPR 280", and whether the dish
-  // could then be ordered below zero with its choices. `stored` is storedFromMenuPrice's answer for
-  // the typed price. `unchecked` is a failed catalog read: nothing here can be said, and the row says so.
-  const sizeEffect = (recipe, stored) => {
-    const unchecked = customizationOn && choicesReadFailed
-    if (!stored || !optionCatalog || !recipe?.id) return { sizesText: '', below: [], unchecked }
-    const incl = ex => ex * (1 + (Number(stored.vat_rate) || 0))
-    const fmt = v => (v < 0 ? `−${npr(Math.abs(v))}` : npr(v))
-    const sizesText = groupsForDish(recipe.id, optionCatalog).filter(d => d.group.kind === 'size').flatMap(d => d.options)
-      .map(o => `${o.name} ${fmt(incl(stored.selling_price + (Number(o.price_delta) || 0)))}`).join(' · ')
-    const below = dishesBelowZero(
-      [{ id: recipe.id, name: recipe.name, selling_price: stored.selling_price, inclPrice: incl(stored.selling_price) }], optionCatalog)
-    return { sizesText, below, unchecked }
-  }
+  // could then be ordered below zero with its choices (sizeEffect, optionPricing.js). `stored` is
+  // storedFromMenuPrice's answer for the typed price. `unchecked` is a failed catalog read: nothing
+  // here can be said, and the row says so. `checking` (S862 SETUP-9) is a read not answered yet,
+  // which is neither failed nor loaded: it was read as "no choices", with nothing said.
+  const priceEffect = (recipe, stored) => ({
+    ...sizeEffect(recipe, stored, optionCatalog),
+    unchecked: customizationOn && choicesReadFailed,
+    checking: customizationOn && !optionCatalog && !choicesReadFailed,
+  })
   const belowZeroRefusal = (name, below) =>
     `“${name}” — not saved. ${belowZeroText(below)}, and the till refuses a dish priced below zero. Raise the price, or change its choices in Option Groups first.`
   // A failed catalog read is not "no choices" (S835): the link says only Choices until a read lands.
@@ -424,7 +417,7 @@ export default function MenuPricing() {
       setPageError(`“${recipe.name}” — the new price was not saved. ${VAT_MODE_UNKNOWN_TEXT}`)
       return
     }
-    const { below } = sizeEffect(recipe, stored)
+    const { below } = priceEffect(recipe, stored)
     if (below.length) {
       setErrors(e => ({ ...e, [recipe.id]: 'Its choices would go below zero' }))
       setPageError(belowZeroRefusal(recipe.name, below))
@@ -469,7 +462,7 @@ export default function MenuPricing() {
     const stored = storedFromMenuPrice(priceNum, addForm.vatRate, vatMode)
     if (!stored) { setAddError(`Nothing was saved. ${VAT_MODE_UNKNOWN_TEXT}`); return }
     if (editingId) {
-      const { below } = sizeEffect({ id: editingId, name: addForm.name.trim() }, stored)
+      const { below } = priceEffect({ id: editingId, name: addForm.name.trim() }, stored)
       if (below.length) { setAddError(belowZeroRefusal(addForm.name.trim(), below)); return }
     }
     const costPriceNum = parseFloat(addForm.costPrice)
@@ -622,7 +615,7 @@ export default function MenuPricing() {
       : addForm.price && parseFloat(addForm.price) > 0 && addForm.vatRate > 0
         ? <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>Ex-VAT: NPR {(parseFloat(addForm.price) / (1 + addForm.vatRate)).toFixed(2)}</div>
         : null
-  const addEffect = editingId ? sizeEffect({ id: editingId }, storedFromMenuPrice(addForm.price, addForm.vatRate, vatMode)) : null
+  const addEffect = editingId ? priceEffect({ id: editingId }, storedFromMenuPrice(addForm.price, addForm.vatRate, vatMode)) : null
   const addPriceNote = (
     <>
       {addPriceBasis}
@@ -634,6 +627,9 @@ export default function MenuPricing() {
       )}
       {addEffect?.unchecked && (
         <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>{CHOICES_UNCHECKED}</div>
+      )}
+      {addEffect?.checking && (
+        <div role="status" style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>{CHOICES_CHECKING}</div>
       )}
     </>
   )
@@ -1274,13 +1270,14 @@ export default function MenuPricing() {
                           names WHICH dish as well (S576's template-label rule). */}
                       <FieldError id={`menuprice-${r.id}`} message={errors[r.id]} />
                       {changed && draftNum > 0 && (() => {
-                        const { sizesText, below, unchecked } = sizeEffect(r, storedFromMenuPrice(draftNum, r.storedVat, vatMode))
+                        const { sizesText, below, unchecked, checking } = priceEffect(r, storedFromMenuPrice(draftNum, r.storedVat, vatMode))
                         const line = { fontSize: 11, color: 'var(--theme-text2)', marginTop: 4, maxWidth: 220, marginLeft: 'auto' }
                         return (
                           <>
                             {sizesText && <div style={line}>Sizes become {sizesText}</div>}
                             {below.length > 0 && <div style={{ ...line, color: 'var(--theme-red-text)' }}>{belowZeroLine(below)}</div>}
                             {unchecked && <div style={{ ...line, color: 'var(--theme-text3)' }}>{CHOICES_UNCHECKED}</div>}
+                            {checking && <div role="status" style={{ ...line, color: 'var(--theme-text3)' }}>{CHOICES_CHECKING}</div>}
                           </>
                         )
                       })()}

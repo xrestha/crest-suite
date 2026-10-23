@@ -36,6 +36,7 @@ import { chipKeys } from '../../../shared/rovingFocus'
 import RowDisclosure from '../../../components/RowDisclosure'
 import { FilterChips } from '../../../components/Tabs'
 import { useBuildCostRanges } from '../../customization/useBuildCostRanges'
+import { sizeEffect, belowZeroText, belowZeroLine, CHOICES_UNCHECKED, CHOICES_CHECKING } from '../../../shared/optionPricing'
 import BuildCostDetail, { costRangeText, fcRangeNode } from '../../customization/BuildCostDetail'
 import { isCostedByBuild, BYO_STATUS, BYO_TIP } from './buildYourOwnRating'
 import { vatModeOf, guestVatRate, storedFromMenuPrice, panPriceMismatches, PAN_LABEL, VAT_MODE_UNKNOWN_TEXT } from './menuPriceVat'
@@ -987,6 +988,12 @@ export default function Recipes() {
         }
       }
 
+      // S862 SETUP-2 (D16): a new price that lets the dish be ordered below zero with its choices
+      // (priceEffect, below the derived values) is refused before anything is written.
+      if ('selling_price' in payload && priceEffect?.below.length) {
+        throw new SaveRefusal(`Nothing was saved. ${belowZeroText(priceEffect.below)}, and the till refuses a dish priced below zero. Raise the price, or change its choices in Option Groups first.`)
+      }
+
       // A 23505 on this table is the per-client recipe_code unique index — the only unique
       // constraint a menu item's payload can violate. Name it so the operator fixes the code,
       // rather than surfacing a raw Postgres constraint string.
@@ -1508,6 +1515,24 @@ Check the recipe list before saving again — if it timed out after the recipe w
   const byoCost = useBuildCostRanges({ enabled: !!customizationEnabled, recipes, fixedCostOf: byoFixedCost })
   const [expandedByo, setExpandedByo] = useState(() => new Set())
   const [byoNotice, setByoNotice] = useState('')
+
+  // S862 SETUP-2 (D16): a dish's new price says what its sizes become and is refused on Save when it
+  // lets the dish be ordered below zero with its choices, as on Menu Pricing (the same sizeEffect),
+  // rather than by the till mid-service. A size is stored as a difference from its dish, so it moves
+  // with the price. The catalog is the one useBuildCostRanges already reads. Not read (failed) is
+  // said and the price still saves (S835 owner decision); not answered yet is said too (SETUP-9).
+  const storedPrice = parseFloat(selectedRecipe?.selling_price) || 0
+  const priceTouched = !!selectedRecipe && !isSubRecipeForm && !priceLocked && !!customizationEnabled
+    && livePrice > 0 && livePrice !== storedPrice
+  const priceEffect = useMemo(() => {
+    if (!priceTouched) return null
+    const dish = { id: selectedRecipe.id, name: recipeForm.name.trim() || selectedRecipe.name }
+    return {
+      ...sizeEffect(dish, { selling_price: livePrice, vat_rate: formVat }, byoCost.catalog),
+      unchecked: byoCost.catalogFailed,
+      checking: byoCost.catalogLoading,
+    }
+  }, [priceTouched, selectedRecipe, recipeForm.name, livePrice, formVat, byoCost.catalog, byoCost.catalogFailed, byoCost.catalogLoading])
 
   const { filtered, regularRecipes, subRecipeList, tabs, byoOutOfBand } = useMemo(() => {
     const q = search.toLowerCase()
@@ -2125,6 +2150,19 @@ Check the recipe list before saving again — if it timed out after the recipe w
                         <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 4 }}>
                           {liveVat > 0 ? 'Ex-VAT stored' : 'Stored'}: NPR {parseFloat(recipeForm.selling_price).toFixed(2)}
                         </div>
+                      )}
+                      {/* S862 SETUP-2: what the sizes become at the new price, as on Menu Pricing. */}
+                      {priceEffect?.sizesText && (
+                        <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 4 }}>Sizes become {priceEffect.sizesText}</div>
+                      )}
+                      {priceEffect?.below.length > 0 && (
+                        <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>{belowZeroLine(priceEffect.below)}, and the till refuses that.</div>
+                      )}
+                      {priceEffect?.unchecked && (
+                        <div style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>{CHOICES_UNCHECKED}</div>
+                      )}
+                      {priceEffect?.checking && (
+                        <div role="status" style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 4 }}>{CHOICES_CHECKING}</div>
                       )}
                       {vatMode == null && !priceLocked && (
                         <div id="recipe-price-basis" role="note" style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>

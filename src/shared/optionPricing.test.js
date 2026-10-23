@@ -2,6 +2,7 @@ import {
   exFromIncl, inclFromEx, effectiveRule, ruleText, countAllowed, optionsPriceDelta, signedPrice,
   describeSelection, groupsForDish, defaultSelection, selectionProblems, lowestDishPrice,
   sizeFactor, scaledDelta, scaledQty, cheapestValidSelection, dishesBelowZero, belowZeroText, groupShortfalls,
+  belowZeroLine, sizeEffect,
 } from './optionPricing'
 
 describe('VAT conversion', () => {
@@ -71,6 +72,48 @@ describe('optionsPriceDelta', () => {
     const chosen = [{ id: 'no-onion', group_id: 'toppings', sort: 0, price_delta: 0, is_removal: true, name: 'No onion' },
       t('cheese', 1, 50), t('egg', 2, 40)]
     expect(optionsPriceDelta(chosen, groups)).toBe(0)
+  })
+})
+
+describe('the name order is the server’s, whatever the browser language (S862 PRICING-1)', () => {
+  const toppings = { tops: { included_count: 1 } }
+  // A browser set to Nepali or Hindi: localeCompare puts Devanagari before Latin there.
+  const devanagariFirst = function (other) {
+    const dev = s => /[ऀ-ॿ]/.test(s)
+    const a = String(this), b = String(other)
+    if (dev(a) !== dev(b)) return dev(a) ? -1 : 1
+    return a < b ? -1 : a > b ? 1 : 0
+  }
+
+  it('frees the Latin name beside a Devanagari one at the same place, as ICU en-US does on the server', () => {
+    const cheese = { id: 'z-cheese', group_id: 'tops', name: 'Cheese', price_delta: 40, sort: 2 }
+    const egg = { id: 'a-egg', group_id: 'tops', name: 'अण्डा', price_delta: 50, sort: 2 }
+    const spy = jest.spyOn(String.prototype, 'localeCompare').mockImplementation(devanagariFirst)
+    try {
+      // The server frees Cheese and charges the egg: 50. The old sort, in this browser, charged 40.
+      expect(optionsPriceDelta([egg, cheese], toppings)).toBe(50)
+      const sel = describeSelection(['a-egg', 'z-cheese'], {
+        optionsById: { 'a-egg': egg, 'z-cheese': cheese }, groupsById: { tops: { name: 'Toppings', included_count: 1 } },
+      })
+      expect(sel.delta).toBe(50)
+      expect(sel.summary).toBe('Cheese (incl.) · अण्डा')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('breaks a tie ICU cannot see by the stored characters, as Postgres breaks it by bytes', () => {
+    // "Café crumble" typed with é and pasted as e + a combining accent compare equal in every
+    // locale; Postgres orders the e + accent one first (bytes 65 cc 81 before c3 a9) and frees it.
+    const composed = { id: 'a', group_id: 'tops', name: 'Café crumble', price_delta: 50, sort: 0 }
+    const decomposed = { id: 'b', group_id: 'tops', name: 'Café crumble', price_delta: 40, sort: 0 }
+    expect(optionsPriceDelta([composed, decomposed], toppings)).toBe(50)
+    // A name carrying an invisible zero-width space sorts after the plain one, as its bytes do.
+    const plain = { id: 'b', group_id: 'tops', name: 'Cheese', price_delta: 30, sort: 0 }
+    const zwsp = { id: 'a', group_id: 'tops', name: 'Che​ese', price_delta: 20, sort: 0 }
+    expect(optionsPriceDelta([zwsp, plain], toppings)).toBe(20)
+    // Only then the id: two identical names free the lower id.
+    expect(optionsPriceDelta([{ ...plain, id: 'b' }, { ...plain, id: 'a', price_delta: 10 }], toppings)).toBe(30)
   })
 })
 
@@ -483,6 +526,28 @@ describe('dishesBelowZero (S809 4h, CUSTOMIZATION-6; whole dish S835)', () => {
     expect(dishesBelowZero([{ id: 'new', name: 'New dish', selling_price: 0 }], { groups: [sizes], options: [half], attachments: on('new', 'size') })).toEqual([])
   })
 
+  it('names a dish a choice takes a fraction of a paisa below zero, as the till compares (S862 PRICING-2)', () => {
+    // Menu Pricing stores a NPR 80 dish on a VAT outlet as 80 ÷ 1.13 = 70.7965, and a size typed as
+    // costing 0 is stored as −70.80. To the paisa that is −0; the till compares the exact −0.0035.
+    const kids4 = { ...kids, selling_price: 70.7965, inclPrice: 80 }
+    const tiny = O('Tiny', 'size', -70.80)
+    const cat = { groups: [sizes], options: [full, tiny], attachments: on('kids', 'size') }
+    const found = dishesBelowZero([kids4], cat)
+    expect(found.map(x => [x.dish.id, x.picks])).toEqual([['kids', ['Tiny']]])
+    expect(belowZeroText(found)).toBe('Kids Momo would cost a few paisa less than nothing with “Tiny”')
+    expect(belowZeroLine(found)).toBe('With “Tiny” it would cost a few paisa less than nothing')
+    // A paisa dearer lands at +0.0065 and passes.
+    const dearer = { ...cat, options: [full, O('Tiny', 'size', -70.79)] }
+    expect(dishesBelowZero([kids4], dearer)).toEqual([])
+    // `before` compares exactly too: from the dearer size, this change is the one that goes under…
+    expect(dishesBelowZero([kids4], cat, { before: dearer }).map(x => x.dish.id)).toEqual(['kids'])
+    // …and a rename of a size already a fraction under is not this change's doing.
+    expect(dishesBelowZero([kids4], { ...cat, options: [full, { ...tiny, name: 'Tiny plate' }] }, { before: cat })).toEqual([])
+    // The guest "From" never reads −0.
+    expect(Object.is(lowestDishPrice(70.7965, groupsForDish('kids', cat)), 0)).toBe(true)
+    expect(Object.is(lowestDishPrice(70.80, groupsForDish('kids', cat)), 0)).toBe(true)
+  })
+
   it('finds two cheaper choices that only go below zero together, which a per-option check passed', () => {
     // Kids Momo 70.80: Half −50 alone is 20.80, "Less filling" −30 alone is 40.80, both −9.20.
     const less = G('less', 'choice', 0, 1)
@@ -553,6 +618,39 @@ describe('dishesBelowZero (S809 4h, CUSTOMIZATION-6; whole dish S835)', () => {
     expect(belowZeroText(found)).toBe('Kids Momo would cost −NPR 20 with “Half”')
     expect(belowZeroText([...found, ...found, ...found])).toBe('Kids Momo would cost −NPR 20 with “Half”, Kids Momo would cost −NPR 20 with “Half” and 1 more')
     expect(belowZeroText([{ dish: kids, incl: -9.2, picks: ['Half', 'Less', 'No sauce'] }])).toBe('Kids Momo would cost −NPR 9 with “Half”, “Less” and “No sauce”')
+    expect(belowZeroLine(found)).toBe('With “Half” it would cost −NPR 20')
+    expect(belowZeroLine([{ dish: kids, incl: -9.2, picks: [] }])).toBe('It would cost −NPR 9')
+  })
+})
+
+describe('sizeEffect: what a new dish price does to its sizes (S809 4h, D16; shared since S862 SETUP-2)', () => {
+  const sizes = { id: 'size', name: 'Size', kind: 'size', min_select: 1, max_select: 1, included_count: 0, size_scaling: 'none', sort: 0, is_active: true }
+  const opt = (id, price_delta, sort) => ({ id, group_id: 'size', name: id, price_delta, sort, is_active: true })
+  const cat = { groups: [sizes], options: [opt('Full', 0, 0), opt('Half', -88.50, 1)], attachments: [{ recipe_id: 'kids', group_id: 'size', sort: 0 }] }
+  const dish = { id: 'kids', name: 'Kids Momo' }
+
+  it('says what each size costs a guest at the new price, and names a price that goes below zero', () => {
+    // 70.80 before VAT: Full NPR 80, Half (70.80 − 88.50) × 1.13 = −NPR 20.
+    const low = sizeEffect(dish, { selling_price: 70.80, vat_rate: 0.13 }, cat)
+    expect(low.sizesText).toBe('Full NPR 80 · Half −NPR 20')
+    expect(belowZeroText(low.below)).toBe('Kids Momo would cost −NPR 20 with “Half”')
+    // 300 before VAT on a PAN-bill outlet (no VAT): Full NPR 300, Half NPR 212, nothing below zero.
+    expect(sizeEffect(dish, { selling_price: 300, vat_rate: 0 }, cat)).toEqual({ sizesText: 'Full NPR 300 · Half NPR 212', below: [] })
+  })
+
+  it('says nothing with no catalog yet, no price or no dish', () => {
+    const none = { sizesText: '', below: [] }
+    expect(sizeEffect(dish, { selling_price: 70.80, vat_rate: 0.13 }, null)).toEqual(none)
+    expect(sizeEffect(dish, null, cat)).toEqual(none)
+    expect(sizeEffect({ id: null }, { selling_price: 70.80, vat_rate: 0.13 }, cat)).toEqual(none)
+    expect(sizeEffect({ id: 'other', name: 'Other' }, { selling_price: 70.80, vat_rate: 0.13 }, cat)).toEqual(none)
+  })
+
+  it('reads a size a fraction under zero as NPR 0 and words the refusal', () => {
+    const tiny = { ...cat, options: [opt('Full', 0, 0), opt('Tiny', -70.80, 1)] }
+    const eff = sizeEffect(dish, { selling_price: 70.7965, vat_rate: 0.13 }, tiny)
+    expect(eff.sizesText).toBe('Full NPR 80 · Tiny NPR 0')
+    expect(belowZeroLine(eff.below)).toBe('With “Tiny” it would cost a few paisa less than nothing')
   })
 })
 
@@ -604,5 +702,15 @@ describe('the S816 probe fixture (shared with the 4h migration)', () => {
   it('refuses three real toppings, and finds the Half below zero', () => {
     expect(selectionProblems(dg, ['reg', 'egg', 'cheese', 'bacon']).map(p => p.group.id)).toEqual(['gt'])
     expect(dishesBelowZero([dish], { groups, options, attachments }).map(x => [x.picks, x.price])).toEqual([[['Half'], -17.70]])
+  })
+})
+
+// S862 review: an amount a few paisa under zero is never printed as "NPR −0".
+describe('belowZeroAmount', () => {
+  const { belowZeroAmount } = require('./optionPricing')
+  it('prints whole rupees, and words under half a rupee', () => {
+    expect(belowZeroAmount(-20.4)).toBe('NPR −20')
+    expect(belowZeroAmount(-0.0033)).toBe('a few paisa below NPR 0')
+    expect(belowZeroAmount(-0.0033)).not.toMatch(/−0/)
   })
 })

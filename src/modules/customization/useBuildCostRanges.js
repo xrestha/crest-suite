@@ -5,7 +5,8 @@ import { fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { groupsForDish, defaultSelection } from '../../shared/optionPricing'
 import { buildCostRange, typicalSelections } from '../../shared/buildCost'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
-import { loadOptionCatalog } from './customizationData'
+import { withTimeout, settleWithin } from '../../utils/withTimeout'
+import { loadOptionCatalog, CUSTOMIZATION_READ_MS } from './customizationData'
 
 // Crest Customization (S760): the cost range of every build-your-own dish on a costing page.
 // Recipe Costing and Menu Pricing (IMS branch) both render it, so the loading lives here once.
@@ -23,18 +24,25 @@ import { loadOptionCatalog } from './customizationData'
 // a range computed without the choices' stock, which would be the near-zero food cost this exists to
 // replace. The order-line read is different: the typical build falls back to the dish's defaults and
 // SAYS so, because a POS-fenced IMS account reads that table as empty rather than as a failure.
+//
+// S862 SETUP-9: every read has a time limit (CUSTOMIZATION_READ_MS), so a hang becomes the error
+// state rather than "…" for the whole visit; a late order-line read falls back to the defaults.
+// S862 SETUP-2: the option catalog is returned too (`catalog`, with `catalogLoading` and
+// `catalogFailed`), so Recipe Costing's price box checks the dish's sizes from this read rather
+// than a second one. It is kept when a later read fails: the price check needs only the catalog.
 
 export const TYPICAL_WINDOW_DAYS = 30
 export const TYPICAL_MIN_PLATES = 10
 
-const EMPTY = { loading: false, error: null, catalog: null, explosion: null, rates: {}, typical: {} }
+const EMPTY = { loading: false, error: null, catalog: null, explosion: null, rates: {}, typical: {}, catalogFailed: false }
 
 /**
  * @param {object} args
  * @param {boolean} args.enabled                         Customization is live for this client
  * @param {object[]} args.recipes                        the page's dish rows ({ id, selling_price, category })
  * @param {(r: object) => number} args.fixedCostOf       the dish's own ingredient cost per plate
- * @returns {{ byRecipe: Record<string, object>, buildYourOwn: Set<string>, loading: boolean, error: string|null }}
+ * @returns {{ byRecipe: Record<string, object>, buildYourOwn: Set<string>, loading: boolean, error: string|null,
+ *            catalog: object|null, catalogLoading: boolean, catalogFailed: boolean }}
  */
 export function useBuildCostRanges({ enabled, recipes, fixedCostOf }) {
   const { scopedFrom, clientId } = useScopedDb()
@@ -43,30 +51,37 @@ export function useBuildCostRanges({ enabled, recipes, fixedCostOf }) {
   useEffect(() => {
     if (!enabled || !clientId) { setState(EMPTY); return }
     let cancelled = false
-    setState(s => ({ ...s, loading: true, error: null }))
+    // A re-run is a new client (scopedFrom follows it): nothing read for the last one is kept, or a
+    // catalog that lands first would be costed against the last client's rates.
+    setState({ ...EMPTY, loading: true })
     ;(async () => {
+      let catalog = null
       try {
-        const catalog = await loadOptionCatalog(scopedFrom, { withIngredients: true })
-        if (catalog.error) throw new Error(catalog.error)
+        const read = await settleWithin(loadOptionCatalog(scopedFrom, { withIngredients: true }), CUSTOMIZATION_READ_MS, 'Loading the choices')
+        if (read.error) throw read.error instanceof Error ? read.error : new Error(read.error)
+        catalog = read
         if (!catalog.buildYourOwn.length) {
           if (!cancelled) setState({ ...EMPTY, catalog })
           return
         }
+        if (!cancelled) setState(s => ({ ...s, catalog }))
         const deltas = catalog.ingredients.map(i => ({ item_id: i.item_id, sub_recipe_id: i.sub_recipe_id, qty: i.qty_per_portion }))
-        const explosion = await loadDeltaExplosion(supabase, [deltas])
+        const explosion = await withTimeout(loadDeltaExplosion(supabase, [deltas]), CUSTOMIZATION_READ_MS, 'Reading the stock lines of the choices')
 
         const itemIds = new Set(catalog.ingredients.map(i => i.item_id).filter(Boolean))
         Object.values(explosion.subPerUnit).forEach(list => list.forEach(x => itemIds.add(x.item_id)))
         const since = new Date(Date.now() - TYPICAL_WINDOW_DAYS * 86400000).toISOString()
         const [rateRes, lines] = await Promise.all([
-          fetchAllRowsChunked([...itemIds], ids => scopedFrom('items', 'id, per_uom_rate').in('id', ids).order('id')),
+          settleWithin(fetchAllRowsChunked([...itemIds], ids => scopedFrom('items', 'id, per_uom_rate').in('id', ids).order('id')),
+            CUSTOMIZATION_READ_MS, 'Reading item rates'),
           // Only builds a guest paid for (S792, RECIPES-10): the line's bill closed 'paid' — the house
           // definition get_cooccurrence and the POS reports use — windowed by when the BILL closed.
           // This read every line by its own created_at, so a voided bill, a table still open and a
           // bill written off all taught "the most-picked build". A comped line on a paid bill still
           // counts: the plate was built and served.
-          fetchAllRowsChunked(catalog.buildYourOwn, ids => scopedFrom('pos_order_items', 'id, recipe_id, selection_key, qty, pos_orders!inner(close_type, closed_at)')
+          settleWithin(fetchAllRowsChunked(catalog.buildYourOwn, ids => scopedFrom('pos_order_items', 'id, recipe_id, selection_key, qty, pos_orders!inner(close_type, closed_at)')
             .in('recipe_id', ids).eq('pos_orders.close_type', 'paid').gte('pos_orders.closed_at', since).order('id')),
+            CUSTOMIZATION_READ_MS, 'Reading recent orders'),
         ])
         if (rateRes.error) throw new Error(rateRes.error.message || 'item rates could not be read')
         const rates = Object.fromEntries((rateRes.data || []).map(r => [r.id, Number(r.per_uom_rate) || 0]))
@@ -75,9 +90,9 @@ export function useBuildCostRanges({ enabled, recipes, fixedCostOf }) {
         const sizeIds = new Set(catalog.options.filter(o => groupKind[o.group_id] === 'size').map(o => o.id))
         if (lines.error) console.error('build-your-own typical builds: order lines unreadable, using defaults', lines.error)
         const typical = lines.error ? {} : typicalSelections(lines.data, sizeIds, TYPICAL_MIN_PLATES)
-        if (!cancelled) setState({ loading: false, error: null, catalog, explosion, rates, typical })
+        if (!cancelled) setState({ ...EMPTY, catalog, explosion, rates, typical })
       } catch (err) {
-        if (!cancelled) setState({ ...EMPTY, error: err?.message || String(err) })
+        if (!cancelled) setState({ ...EMPTY, error: err?.message || String(err), catalog, catalogFailed: !catalog })
       }
     })()
     return () => { cancelled = true }
@@ -123,5 +138,11 @@ export function useBuildCostRanges({ enabled, recipes, fixedCostOf }) {
     return out
   }, [state, buildYourOwn, recipes, fixedCostOf])
 
-  return { byRecipe, buildYourOwn, loading: state.loading, error: state.error }
+  return {
+    byRecipe, buildYourOwn, loading: state.loading, error: state.error,
+    catalog: state.catalog,
+    // Neither answered nor failed yet (the first render, before the effect has started, included).
+    catalogLoading: !!enabled && !!clientId && !state.catalog && !state.catalogFailed,
+    catalogFailed: state.catalogFailed,
+  }
 }

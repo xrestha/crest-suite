@@ -117,6 +117,19 @@ export function countAllowed(count, { min, max }, real = count) {
 /** The picks a group's maximum counts: every pick but a "No …" removal (S809 4h, Q20 a). */
 const realPicks = opts => opts.filter(o => !o.is_removal)
 
+// S862 PRICING-1: one name order for every sort here, the server's. Both SQL pricers number picks
+// ORDER BY sort, name, id under the database collation (ICU en-US); a bare localeCompare followed
+// the browser's language, so a Nepali or Hindi phone freed a Devanagari name the bill charged.
+// Where ICU calls two names equal (é typed once, e + accent pasted once) Postgres breaks the tie by
+// bytes before it reaches the id, so the code units break it here; then the id, as a uuid sorts.
+const NAMES = new Intl.Collator('en-US')
+const plainOrder = (a, b) => (a < b ? -1 : a > b ? 1 : 0)
+const nameOrder = (a, b) => {
+  const x = String(a ?? ''), y = String(b ?? '')
+  return NAMES.compare(x, y) || plainOrder(x, y)
+}
+const idOrder = (a, b) => plainOrder(String(a), String(b))
+
 /**
  * The ex-VAT price change a selection adds to one plate. Within each group the first
  * `included_count` chosen options — in the group's display order (sort, then name) — are free.
@@ -135,15 +148,15 @@ export function optionsPriceDelta(chosen, groupsById) {
   let total = 0
   for (const [groupId, opts] of byGroup) {
     const included = groupsById?.[groupId]?.included_count || 0
-    const ordered = realPicks(opts).sort((a, b) =>
-      (a.sort ?? 0) - (b.sort ?? 0) || String(a.name || '').localeCompare(String(b.name || '')) || String(a.id).localeCompare(String(b.id)))
+    const ordered = realPicks(opts).sort(byDisplayOrder)
     for (let i = included; i < ordered.length; i++) total += scaledDelta(ordered[i], groupsById?.[groupId], factor)
   }
   return round2(total)
 }
 
-const byDisplayOrder = (a, b) =>
-  (a.sort ?? 0) - (b.sort ?? 0) || String(a.name || '').localeCompare(String(b.name || '')) || String(a.id).localeCompare(String(b.id))
+function byDisplayOrder(a, b) {
+  return (a.sort ?? 0) - (b.sort ?? 0) || nameOrder(a.name || '', b.name || '') || idOrder(a.id, b.id)
+}
 
 /**
  * A selection as a cart line carries it before the server has priced it — the same shape
@@ -180,7 +193,7 @@ export function describeSelection(optionIds, { optionsById, groupsById, attachBy
     })
   }
   rows.sort((a, b) => a.groupSort - b.groupSort || a.gSort - b.gSort || a.oSort - b.oSort
-    || String(a.option_name).localeCompare(String(b.option_name)))
+    || nameOrder(a.option_name, b.option_name))
   const options = rows.map(({ groupSort, gSort, oSort, ...r }) => ({ ...r, sort: groupSort * 1000 + oSort }))
   return {
     portion_factor: factor,
@@ -208,7 +221,7 @@ export function groupsForDish(recipeId, { groups, options, attachments }) {
     .map(a => ({ attachment: a, group: groupById.get(a.group_id) }))
     .filter(x => x.group?.is_active && optsByGroup.has(x.group.id))
     .sort((a, b) => (a.attachment.sort ?? 0) - (b.attachment.sort ?? 0) || (a.group.sort ?? 0) - (b.group.sort ?? 0)
-      || String(a.group.name).localeCompare(String(b.group.name)))
+      || nameOrder(a.group.name, b.group.name))
     .map(({ attachment, group }) => ({
       group, attachment,
       rule: effectiveRule(group, attachment),
@@ -268,6 +281,10 @@ function lowestReachable(recipeId, sellingPrice, catalog) {
   })
   return {
     price: round2(sellingPrice + sel.delta),
+    // S862 PRICING-2 (CU3 b): the figure the till compares with 0, exact in ten-thousandths of a
+    // rupee (a dish price has at most 4 places, a choice 2). `price` rounds a VAT dish stored as
+    // 265.4867 with a −265.49 size to −0, which passed here and was refused on the bill.
+    exact: Math.round(sellingPrice * 1e4) + Math.round(sel.delta * 1e4),
     // A size that scales the picks after it is named too: a Large that doubles a −40 is half the reason.
     picks: sel.options.filter(o => o.price_delta < 0 || o.is_removal || (o.group_kind === 'size' && sel.portion_factor !== 1))
       .map(o => o.option_name),
@@ -282,7 +299,8 @@ function lowestReachable(recipeId, sellingPrice, catalog) {
  * editor and were refused at the till. This works out the whole dish's lowest price through
  * cheapestValidSelection — every offered group, its minimum and its maximum, the first free picks
  * in display order, a "No …" removal answering a minimum for free, and the size scaling the picks
- * after it — the server's arithmetic, ex-VAT on both sides. A dish with no price yet is skipped: it
+ * after it — the server's arithmetic, ex-VAT on both sides, compared with 0 to the ten-thousandth as
+ * the till compares it (S862): a dish brought to exactly NPR 0.00 passes. A dish with no price yet is skipped: it
  * cannot be sold until Menu Pricing prices it, which checks then.
  *
  * `before` is the catalog as it stands now. When given, a dish is named only when the change LOWERS
@@ -301,10 +319,10 @@ export function dishesBelowZero(dishes, catalog, { before } = {}) {
     const sp = Number(dish?.selling_price) || 0
     if (sp <= 0) continue
     const low = lowestReachable(dish.id, sp, catalog)
-    if (!low || low.price >= 0) continue
+    if (!low || low.exact >= 0) continue
     if (before) {
       const was = lowestReachable(dish.id, sp, before)
-      if (was && was.price <= low.price) continue
+      if (was && was.exact <= low.exact) continue
     }
     out.push({ dish, price: low.price, picks: low.picks, incl: dish.inclPrice > 0 ? low.price * (dish.inclPrice / sp) : low.price })
   }
@@ -316,13 +334,65 @@ const quotedList = names => {
   return q.length > 1 ? `${q.slice(0, -1).join(', ')} and ${q[q.length - 1]}` : (q[0] || '')
 }
 
+// "would cost −NPR 20", or, for a dish under NPR 0 by less than half a rupee (S862 PRICING-2), words
+// instead of "−NPR 0": the till still refuses it.
+const wouldCost = incl => {
+  const rupees = Math.abs(Math.round(Number(incl) || 0))
+  return rupees ? `would cost −NPR ${nprInt(rupees)}` : 'would cost a few paisa less than nothing'
+}
+
+/** "NPR −20" for a dish price below zero, or words for one under NPR 0 by less than half a rupee, never
+ *  "NPR −0" (S862 review: the attach dialogs and the size cell formatted it themselves). */
+export function belowZeroAmount(incl) {
+  const rupees = Math.abs(Math.round(Number(incl) || 0))
+  return rupees ? `NPR −${nprInt(rupees)}` : 'a few paisa below NPR 0'
+}
+
 /** "Kids Momo would cost −NPR 20 with “Half” and “No sauce”" for the first two found, then "and 3 more". */
 export function belowZeroText(found) {
   const xs = found || []
   const parts = xs.slice(0, 2).map(({ dish, picks, incl }) =>
-    `${dish.name} would cost −NPR ${nprInt(Math.abs(Math.round(incl)))}${picks?.length ? ` with ${quotedList(picks)}` : ''}`)
+    `${dish.name} ${wouldCost(incl)}${picks?.length ? ` with ${quotedList(picks)}` : ''}`)
   if (xs.length > 2) parts.push(`${xs.length - 2} more`)
   return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : (parts[0] || '')
+}
+
+/** "With “Half” and “Less rice” it would cost −NPR 20": the price box's own words for the first dish
+ *  dishesBelowZero found (S835, Menu Pricing; shared with Recipe Costing since S862). */
+export function belowZeroLine(found) {
+  const { picks, incl } = (found || [])[0] || {}
+  const names = quotedList(picks || [])
+  return `${names ? `With ${names} it` : 'It'} ${wouldCost(incl)}`
+}
+
+// S835 / S862 SETUP-9: said under a price being typed when the option catalog could not be read, or
+// has not answered yet, so the below-zero check did not run. The price still saves (owner decision).
+export const CHOICES_UNCHECKED = 'Choices not checked — couldn’t read them'
+export const CHOICES_CHECKING = 'Checking choices…'
+
+/**
+ * S809 4h (D16), moved here from Menu Pricing in S862 (SETUP-2) so Recipe Costing says the same:
+ * what a new dish price does to the dish's sizes — "Half NPR 180 · Full NPR 280" — and whether the
+ * dish could then be ordered below zero with its choices (dishesBelowZero over the whole dish). A
+ * size is stored as a difference from its dish, so it moves with the dish price.
+ * @param {{ id, name }} dish
+ * @param {{ selling_price: number, vat_rate: number }|null} stored  the price as it would be stored
+ *        (storedFromMenuPrice), with the VAT rate the guest pays on it (0 on a PAN-bill outlet)
+ * @param {{ groups, options, attachments }|null} catalog  null while it has not been read
+ * @returns {{ sizesText: string, below: Array<{ dish, price, incl, picks }> }}
+ */
+export function sizeEffect(dish, stored, catalog) {
+  if (!stored || !catalog || !dish?.id) return { sizesText: '', below: [] }
+  const sp = Number(stored.selling_price) || 0
+  const incl = ex => ex * (1 + (Number(stored.vat_rate) || 0))
+  const fmt = v => {
+    const rupees = Math.round(Math.abs(v))
+    return v < 0 && rupees > 0 ? `−NPR ${nprInt(rupees)}` : `NPR ${nprInt(v < 0 ? 0 : v)}`
+  }
+  const sizesText = groupsForDish(dish.id, catalog).filter(d => d.group.kind === 'size').flatMap(d => d.options)
+    .map(o => `${o.name} ${fmt(incl(sp + (Number(o.price_delta) || 0)))}`).join(' · ')
+  const below = dishesBelowZero([{ id: dish.id, name: dish.name, selling_price: sp, inclPrice: incl(sp) }], catalog)
+  return { sizesText, below }
 }
 
 /**
@@ -498,7 +568,8 @@ export function cheapestValidSelection(dishGroups, { fixed = {} } = {}) {
  * still cost more once a required topping is priced at it.
  */
 export function lowestDishPrice(basePrice, dishGroups) {
-  return round2((Number(basePrice) || 0) + cheapestValidSelection(dishGroups).delta)
+  // `|| 0`: a dish a choice brings to nothing reads "From NPR 0", never "From NPR -0" (S862 PRICING-2).
+  return round2((Number(basePrice) || 0) + cheapestValidSelection(dishGroups).delta) || 0
 }
 
 /** "+NPR 50", "−NPR 100", "" for zero — what a guest reads beside an option. */
