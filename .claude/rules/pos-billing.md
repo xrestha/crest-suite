@@ -1135,8 +1135,10 @@ printed has Print in the Book. **A change to the close guard's link rule, or to
 
 **A note says whether its food was served (S809 2e, Q10 a).** `pos_credit_notes.restock`, locked once
 issued. A "not served" note posts its reversal as `pos_credit_restock` (counted, negatively, by
-`selectDepletingSales`) plus positive `stock_movements` `pos_credit_restock` rows that negate the
-bill's own `pos_sale` depletion (one per bill and item, a unique index), in the note's month. It waits
+`selectDepletingSales`) plus signed `stock_movements` `pos_credit_restock` rows that negate the
+bill's own `pos_sale` movements (one per bill and item, a unique index), in the note's month: an item
+the bill took off comes back on, and an item a choice ADDED to the bill comes back off (S862
+REPORTS-STOCK-4, `HAVING abs(sum) > 1e-9`; until then only the first half was written). It waits
 (`bill_waiting`) until the bill's own sale is in Inventory. `ims_sales_entries_guard` refuses a
 `pos_credit` row for a restock note (`credit_note_restock_mismatch`, an older page) and a malformed
 restock row (`pos_credit_restock_invalid`), the Owner included. Since S828 5d it also refuses a row

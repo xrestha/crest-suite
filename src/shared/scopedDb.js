@@ -62,7 +62,8 @@ export const CLIENT_SCOPED_TABLES = [
   // The per-line options snapshot on an order (stage 4) — written only by save_pos_order_items.
   'pos_order_item_options',
   // Combos (S839, docs/pos-combos.md): a combo, its picks and the dishes in each pick. Read here by any
-  // login of the outlet; written only through save_pos_combo / delete_pos_combo.
+  // login of the outlet; written through save_pos_combo / delete_pos_combo, except Combos.jsx's Hide
+  // and QR-menu switches, which update pos_combos directly (guard_pos_combo_edit checks the rank).
   'pos_combos', 'pos_combo_groups', 'pos_combo_items',
   // Customer credit part payments (S843, 20261015120000): a numbered receipt per payment and its split
   // over bills. Both client_id NOT NULL; client sessions only read them (record_credit_receipt /

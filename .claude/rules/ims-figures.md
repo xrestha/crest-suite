@@ -1228,7 +1228,16 @@ applied once, at order time. **Usage of a sales row is recipe × qty_sold + delt
 - **A choice's lines are not clamped on their own, but they follow their dish (S835).** "No onion" on a
   dish whose recipe has no onion still takes onion off; a negative total is a data-entry problem to
   show, not to hide. In a month where a dish's net sold is 0 or less, its choices add nothing either,
-  as the base recipe does (`stockReportCalc.js`, Theoretical Variance).
+  as the base recipe does. Every reader that turns choices into usage follows it: `stockReportCalc.js`
+  (Stock Report and Reorder), Theoretical Variance, Supplier Contribution, the Sub-Recipes tab
+  (`subRecipeUsage.js`) and, since S862 (REPORTS-STOCK-2), Stock Ageing and FIFO
+  (`stockAgeingCalc.js` `sumConsumptionByPeriod`, each selection gated on its DISH's net and added
+  signed).
+- **An item reached only by a choice is linked (S862, REPORTS-STOCK-3).** `linkedItemIdsOf` takes the
+  items the client's current choice stock lines reach (`loadChoiceLinkedItemIds`, sub-recipe lines
+  exploded), read beside the recipe walk by Variance, Theoretical Variance, Home's Top Variance,
+  Shrinkage (page and Owner Report trend) and the Owner Report's variance, failing as the walk does.
+  An item in no recipe and no choice line is "no recipe or choice linked", out of the totals.
 - **Stock Movements' Sub-Recipes tab counts choices too (S838, `subRecipeUsage.js`).** A choice's
   `{sub_recipe_id}` line is walked like a recipe line (reached straight from the plate), its
   `{item_id}` lines feed the reconciliation, and credit-note put-backs are rows with a minus under

@@ -69,9 +69,9 @@ the "slice" is not small — a build-your-own dish's numbers need item rates, pu
 recipes and counts, i.e. most of Starter plus Growth. A slim edition would also need a new gate in
 every route guard, the sidebar and the command palette, and would break the tier rule that a feature
 must be able to produce a number on its own tier's data. Customization stays a flat add-on on POS,
-priced in Settings → Plan Pricing. **Its build-your-own cost range needs IMS at Growth**, because
-Recipe Costing is a Growth feature; a client below that keeps the till and guest behaviour without
-the range.
+priced in Settings → Plan Pricing. **On Recipe Costing its build-your-own cost range needs IMS at
+Growth**, because Recipe Costing is a Growth feature; Menu Pricing, a Starter page, shows the range on
+any IMS plan (S862 ADD-5). A client with neither keeps the till and guest behaviour without the range.
 
 **Suite has ONE tier** (S548): `suite_plan` is `NULL | 'pro'`. It was `starter|growth|pro`, but both call sites were `minTier="growth"` — so Suite Starter unlocked nothing at all and Suite Pro added nothing over Suite Growth on its own axis. It is also an **add-on priced per outlet on top of a client's modules**, not a bundle containing them: turning it on implies only that IMS is enabled (`requireModules`' floor) and says nothing about HR, POS, or which IMS tier the client is on. `requireModules` (array, default `['ims','hr']` — Owner Dashboard's original behavior) varies per feature, and since S849 lives in `SUITE_PAGES` (`SuiteGate.js`): every other Suite page (Monthly Owner Report, Consolidated P&L, Group Console, Demand Forecast, Fixed Assets) passes `['ims']`. Don't assume every caller needs Owner Dashboard's set. A page asks `useSuiteAccess(SUITE_PAGES.x)` before any read, the same `suiteAccess()` the gate renders from (S849 ACCESS-9), because a JSX child runs before its gate.
 
@@ -260,7 +260,11 @@ changes what a page DOES, support follows the viewed client's `clientModules`: `
 - **`ModuleMissingCard`** (`src/components/ModuleMissingCard.jsx`) is what both `ModuleGate` (module
   off) and `SuiteGate` (required module missing) render, in place, inside the shell: it names the
   module, says the data is untouched, gives the OWNER the `SupportContactLine` buttons and tells a
-  staff login who can act. Only the station-team branch still redirects (`STATION_TEAM_HOME`), to the KDS.
+  staff login who can act. Only the station-team branch still redirects (`STATION_TEAM_HOME`), to the KDS,
+  and since S862 it runs BEFORE the module check, so a kitchen login is never told to ask for a module
+  on a page it can never open. Until S862 (ADD-7) `ModuleGate` still bounced silently to the dashboard;
+  `moduleGateOutcome()` is its pure, tested decision. The card takes `anyOf` ("needs Crest IMS or Crest
+  POS", `/menu-pricing`) and says a lapsed Customization has passed its paid-up date.
 - **`PremiumGate` names the feature** through `FEATURE_LABELS` in `src/shared/featureCatalog.js`, a
   data-only file so the admin modal stays out of the main bundle. `featureCatalog.test.js` fails on
   any routed or navigated `featureKey` with no label. Help's Module Guide files IMS pages by the same

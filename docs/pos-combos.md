@@ -36,8 +36,9 @@ ex-VAT; the conversion happens per dish, below.
 A dish in a combo must be active and not a Sub-Recipe. It need NOT be On POS or priced on its own (a
 side sold only in combos).
 
-**Writes go through two RPCs**, never the tables (the trigger `guard_pos_combo_edit` refuses a direct
-write below the rank, and the RPC keeps a combo whole):
+**Writes go through two RPCs**, which keep a combo whole. The page's Hide and QR-menu switches update
+`pos_combos` directly; `guard_pos_combo_edit` checks the rank (and Customization, and a foreign dish) on
+every write, through the RPCs or not (S862 COMBOS-9):
 - `save_pos_combo(p_combo jsonb) returns uuid` — INVOKER. `p_combo` = `{ id?, client_id, name, guest_price,
   description?, is_active?, on_guest_menu?, sort?, groups: [{ id?, name, sort?, items: [{ recipe_id,
   extra_price?, is_default?, sort? }] }] }`. Upserts the combo, its picks (by id; a pick without an id
@@ -54,10 +55,13 @@ Reads: the three tables through `scopedFrom` (any login of the outlet; the till 
 ### The price split — `pos_combo_shares(p_combo_id uuid)` and its JS twin `comboShares()`
 
 Each pick's **share** of `guest_price` is in proportion to its CHEAPEST dish's standalone guest price
-(`selling_price × (1 + vat_rate)` on a VAT outlet, `vat_rate` NULL = 0.13; `selling_price` on a PAN
-outlet; an unpriced dish weighs 0). If every pick weighs 0, the picks share equally. Shares are rounded
-to 2 decimals and the LAST pick (by `sort`, then `id`) takes the remainder, so the shares always add up
-to `guest_price` exactly. Because the share depends on the cheapest dish, not on the dish picked, a
+to the paisa (`round(selling_price × (1 + vat_rate), 2)` on a VAT outlet, `vat_rate` NULL = 0.13;
+`round(selling_price, 2)` on a PAN outlet; an unpriced dish weighs 0). If every pick weighs 0, the picks
+share equally. Each share is `round(guest_price × w ÷ total, 2)`, multiplied BEFORE it divides, and the
+HEAVIEST pick (by weight, then `sort`, then `id`) takes the remainder, so the shares always add up to
+`guest_price` exactly and a pick that weighs 0 is exactly 0 (S862 COMBOS-2: the last pick took it, and
+could come out at −0.01). `comboShares()` works in whole paisa, rounding half up, so the till and the
+server land a half-paisa tie the same way (S862 COMBOS-3). Because the share depends on the cheapest dish, not on the dish picked, a
 swap within a pick never moves the other dishes' prices (Odoo's rule).
 
 A combo dish's line is priced:
@@ -96,20 +100,24 @@ or its `selection_key` contains `@` (`isComboLine`).
 The till sends each combo dish as an ordinary row plus `combo: { line_id, combo_id, group_id }` (the
 row's `options` are that dish's own choices). The server:
 - builds the selection key above, and takes `combo_name`, `combo_price`, `combo_group_name` and
-  `combo_sort` itself, never from the tablet;
+  `combo_sort` itself, never from the tablet, and stamps `combo_share`, the pick's share as the guest
+  pays it, on every new combo dish (S862);
 - for every combo on the payload (one `combo_line_id`): one row per pick, every pick present, all at the
   same quantity — else `combo_incomplete`. A combo already on the order is checked against the picks it
   was saved with; a new one against the combo's picks today;
 - a NEW combo dish must be one of its pick's dishes today, the combo active, Customization live —
   else `combo_dish_not_offered` / `combo_unavailable`;
-- prices a new combo dish from today's split (above); an existing line keeps its price, as every line
-  does;
-- **swapping** a dish = the payload replaces that pick's row with another dish of the pick (same
-  `combo_line_id` and `group_id`): the old dish's sent units are recorded as pulled, the new dish is
-  priced from today's split and goes on the next ticket. Dropping a dish with no replacement is
-  `combo_incomplete`: remove all its dishes to remove the combo;
-- the dishes of a combo always share one quantity: two of the same combo with the same picks are one
-  combo at qty 2.
+- prices a new combo from today's split (above); an existing line keeps its price, as every line does;
+- **swapping** a dish, or changing its choices, = the payload replaces that pick's row with another row
+  of the pick (same `combo_line_id` and `group_id`): the old dish's sent units are recorded as pulled,
+  and the new dish goes on the next ticket priced from the REPLACED row's `combo_share` plus its own
+  extra charge, with the combo's name and price as sold, so the combo keeps the price it was ordered at
+  (S862 COMBOS-1, owner decision CU2 (a)). Only a combo rung before S862, whose rows carry no share,
+  takes today's split. The till prices the swap from the same stored share. Dropping a dish with no
+  replacement is `combo_incomplete`: remove all its dishes to remove the combo;
+- the dishes of a combo always share one quantity. A second identical combo added to the cart folds
+  into the first (qty 2) only while none of the first has been sent; after a Send it is a combo of its
+  own, printed as its own row.
 
 ### Discounts never touch a combo
 

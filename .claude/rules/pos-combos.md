@@ -21,7 +21,8 @@ there.
   combo dish by its tag or its key. A CHECK on `pos_order_items` keeps the tag and the key in step.
 - **The split is one rule in two places**: `pos_combo_shares` (SQL, authoritative) and `comboShares`
   (`comboPricing.js`, display only). A pick's share follows its cheapest dish's guest price, inactive
-  dishes included, the last pick takes the rounding. Change both together; the till only ever shows
+  dishes included, to the paisa; each share multiplies before it divides and the HEAVIEST pick takes
+  the rounding, in whole paisa on the JS side (S862). Change both together; the till only ever shows
   the server's prices once a save answers.
 - **Total Qty counts a combo once, on the bill, the credit note and the Complimentary Slip**
   (`printedQtyOf` in `comboBillRows.js`, S856, owner decision): what the guest ordered, never its dishes.
@@ -33,7 +34,11 @@ there.
   (`combo_incomplete`: a dish is swapped within its pick or the whole combo goes). The server enforces
   all three; the till offers the combo as one row.
 - **A function that copies `pos_order_items` rows by column list** (`pos_move_lines`,
-  `apply_pos_item_comps`) must carry the seven combo columns, and `guard_pos_item_price` lists them.
+  `apply_pos_item_comps`) must carry the eight combo columns (`combo_share` since S862), and
+  `guard_pos_item_price` lists them.
+- **`combo_share` is what a combo on a bill keeps (S862, owner CU2 (a))**: the server stamps the
+  pick's share on every new combo dish, and a Swap or a Change inside a combo already on the order is
+  priced from the replaced row's share, never today's split. NULL means rung before S862.
 - **The till floor** was raised once the combo release was deployed: an older till would read the `@`
   key as an option id.
 - **HQ's push carries combos with the choices (S840)**: `master_id` on `pos_combos` / `pos_combo_groups`,

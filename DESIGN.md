@@ -1079,8 +1079,9 @@ cards in the option-group dialog; `.gm-option` on the guest menu, the same state
 radio, since there is no corner left to tell them apart). The rule the class exists for: **a checked
 chip must not change size.** The checked state
 is a 1px accent border plus a 1px inset ring, never a 2px border, so a grid of chips does not
-reflow by 2px on every tap. Every chip carries the product's focus pair, and a group is ONE Tab
-stop with arrow keys between its members (`src/shared/rovingFocus.js`). A pick that is free under a
+reflow by 2px on every tap. Every chip carries the product's focus pair. A single-pick group is ONE
+Tab stop with arrow keys between its members (`src/shared/rovingFocus.js`); in a group where several
+can be picked each chip is its own Tab stop, as the WAI-ARIA checkbox pattern gives it (S862 ADD-5). A pick that is free under a
 first-N deal reads **Included** with its list price struck through — a price a guest will not pay
 is never printed as if they will. The Add button under a group that is still short stays pressable
 (`.btn[aria-disabled="true"]`, opacity 0.6): the press names the group, scrolls to it and focuses
