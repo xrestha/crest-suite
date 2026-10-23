@@ -6,9 +6,11 @@ import QtyInput from '../../components/QtyInput'
 import FieldError, { fieldAria } from '../../components/FieldError'
 import ActionError from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
+import { useConfirm } from '../../shared/hooks/useConfirm'
 import { settleWithin, isTimeout } from '../../utils/withTimeout'
 import { OPTION_COLS, DIET_LABEL, parseAllergens, CUSTOMIZATION_WRITE_MS, writeFailure } from './customizationData'
-import { exFromIncl, inclFromEx, signedPrice, dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
+import { signedPrice, dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
+import { fullPriceBase, priceSeed, priceEntry, optionLossText } from './optionChecks'
 import { VAT_MODE_UNKNOWN_TEXT } from '../ims/recipes/menuPriceVat'
 import { npr } from '../../shared/nepalMoney'
 
@@ -18,7 +20,8 @@ import { npr } from '../../shared/nepalMoney'
 // A SIZE option is entered as the full price of that size when every dish the group is attached to
 // has the same price — the owner's own menu reads "Half 150, Full 250" — and as a difference from
 // the dish price otherwise, with each attached dish's result shown underneath, because one stored
-// difference cannot be two different full prices.
+// difference cannot be two different full prices. S862 SETUP-1: "the same price" is to the paisa,
+// and a save leaves the stored price alone unless the price box (or "No …") was changed.
 //
 // INGREDIENTS (IMS only). Each line ADDS to or TAKES OFF the plate, per ONE plate, in the item's
 // own unit. Stored signed. An option with no lines changes nothing in stock, and the list on the
@@ -43,20 +46,21 @@ export default function OptionModal({
   itemChoices, onClose, onSaved, initialError = null,
 }) {
   const { scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
+  const { ask, confirmEl } = useConfirm()
   const isSize = group.kind === 'size'
 
-  // One distinct incl-VAT dish price across every dish this group is on → full-price entry.
-  const dishPrices = useMemo(() => Array.from(new Set(attachedDishes.map(d => Math.round(d.inclPrice)))), [attachedDishes])
-  const fullPriceMode = isSize && dishPrices.length === 1
-  const basePrice = fullPriceMode ? dishPrices[0] : null
+  // One distinct incl-VAT dish price (to the paisa) across every dish this group is on → full-price
+  // entry, measured from that exact price. Only the labels round it to the rupee (S862 SETUP-1).
+  const sharedPrice = useMemo(() => fullPriceBase(attachedDishes), [attachedDishes])
+  const fullPriceMode = isSize && sharedPrice != null
+  const basePrice = fullPriceMode ? sharedPrice : null
 
-  const storedDeltaIncl = option ? inclFromEx(option.price_delta, vat) : 0
+  // What the price box and "No …" opened with: a save sends price_delta only when one moved.
+  const [seed] = useState(() => ({ price: priceSeed({ option, base: basePrice, vat }), is_removal: !!option?.is_removal }))
   const [form, setForm] = useState(() => ({
     name: option?.name || '',
     kitchen_name: option?.kitchen_name || '',
-    price: option
-      ? String(Math.round(fullPriceMode ? basePrice + storedDeltaIncl : storedDeltaIncl))
-      : (fullPriceMode ? String(basePrice) : ''),
+    price: seed.price,
     is_removal: !!option?.is_removal,
     is_default: !!option?.is_default,
     diet: option?.diet || '',
@@ -81,12 +85,17 @@ export default function OptionModal({
   const [actionError, setActionError] = useState(initialError)
   const set = patch => setForm(f => ({ ...f, ...patch }))
 
-  const priceNum = form.price === '' ? 0 : Number(form.price)
-  const deltaIncl = fullPriceMode ? priceNum - basePrice : priceNum
+  const { deltaIncl, priceDelta, savedDelta } = priceEntry({
+    option, seed: seed.price, price: form.price, isRemoval: form.is_removal, wasRemoval: seed.is_removal, base: basePrice, vat,
+  })
   // S809 4h (CUSTOMIZATION-6): a result below zero reads as one, never as NPR 0. Both server
   // pricers add the difference as it is, and since 4h refuse a line that ends below zero.
   const resultText = v => (v < 0 ? `−${npr(Math.abs(v))}` : npr(v))
   const choiceByRef = useMemo(() => new Map(itemChoices.map(c => [c.value, c])), [itemChoices])
+  // S862 SETUP-7: only shown items and sub-recipes are offered; a hidden one stays on the line that
+  // already holds it, labelled, because that line still takes it off stock on every sale.
+  const offeredChoices = useMemo(() => itemChoices.filter(c => !c.hidden), [itemChoices])
+  const dishNameById = useMemo(() => new Map(attachedDishes.map(d => [d.id, d.name])), [attachedDishes])
   // What "More details" holds, said on the closed button so a folded section is not a hidden one.
   const detailSummary = [
     form.diet ? DIET_LABEL[form.diet] : null,
@@ -99,7 +108,9 @@ export default function OptionModal({
   function validate() {
     const e = {}
     if (!form.name.trim()) e.name = 'Give the option a name, e.g. “Extra cheese”.'
-    if (!form.is_removal && form.price !== '' && !Number.isFinite(Number(form.price))) e.price = 'Enter a number.'
+    // S862 SETUP-5: an emptied full-price box read as "this size costs nothing".
+    if (fullPriceMode && String(form.price).trim() === '') e.price = 'Type what this size costs.'
+    else if (!form.is_removal && form.price !== '' && !Number.isFinite(Number(form.price))) e.price = 'Enter a number.'
     if (fullPriceMode && form.price !== '' && Number(form.price) < 0) e.price = 'A price cannot be below zero.'
     if (isSize && form.portion !== '' && !(Number(form.portion) > 0 && Number(form.portion) <= 10)) {
       e.portion = 'Enter a portion above 0 and up to 10 — 1 is a regular plate, 1.5 is half as much again.'
@@ -139,7 +150,7 @@ export default function OptionModal({
       id: option?.id || NEW_OPTION_ID,
       group_id: group.id,
       name: form.name.trim() || 'this option',
-      price_delta: form.is_removal ? 0 : exFromIncl(deltaIncl, vat),
+      price_delta: savedDelta,
       is_removal: isSize ? false : form.is_removal,
       is_active: form.is_active,
       sort: option ? option.sort : nextSortOf(group),
@@ -149,16 +160,35 @@ export default function OptionModal({
     return { ...catalog, options: [...options, edited] }
   }
 
-  async function save() {
-    // Every save writes price_delta from the form through `vat` — a rename included — so none while
-    // the VAT basis is unknown (S809 2h).
+  function save() {
+    // A typed price is converted through `vat`, so nothing is saved while the VAT basis is unknown
+    // (S809 2h). Since S862 (SETUP-1) an untouched price box sends no price_delta at all, so a
+    // rename or a stock-line edit keeps the stored price exactly.
     if (saving || vatUnknown || !validate()) return
+    // S862 SETUP-3: unticking Shown here is the page's Hide, so it asks the same question first.
+    const loss = option && option.is_active !== false && !form.is_active
+      ? optionLossText({ ...option, group_id: group.id, is_active: true }, catalog, id => dishNameById.get(id) || 'a dish')
+      : null
+    if (loss) {
+      ask({
+        title: `Hide “${option.name}”?`,
+        confirmLabel: 'Save and hide it',
+        busyLabel: 'Saving…',
+        body: <p style={{ margin: 0 }}>{loss}</p>,
+        run: commit,
+      })
+      return
+    }
+    return commit()
+  }
+
+  async function commit() {
     setSaving(true)
     setActionError(null)
     const row = {
       name: form.name.trim(),
       kitchen_name: form.kitchen_name.trim() || null,
-      price_delta: form.is_removal ? 0 : exFromIncl(deltaIncl, vat),
+      ...(priceDelta === undefined ? {} : { price_delta: priceDelta }),
       is_removal: isSize ? false : form.is_removal,
       is_default: form.is_default,
       diet: form.is_removal ? null : (form.diet || null),
@@ -193,19 +223,24 @@ export default function OptionModal({
       const failure = await saveIngredients(saved.id)
       if (failure) {
         setSaving(false)
-        const a = writeFailure(failure)
         // The option row DID land; only the ingredient list is uncertain. Say which state it is in.
         // A timed-out line may still land, and saving again would add it twice, so that case says
-        // to reload first (S852).
-        const message = isTimeout(failure)
-          ? {
-            text: `“${saved.name}” was saved, but the server took too long to answer about its ingredient list. Close this and reload the page to check that list before you save again.`,
-            detail: a.detail,
-          }
-          : {
-            text: `“${saved.name}” was saved, but its ingredient list was not fully updated — check it and save again. ${a.text}`,
-            detail: a.detail,
-          }
+        // to reload first (S852), and so does a line changed on another device (S862 SETUP-10).
+        let message
+        if (failure === STALE_LINES) {
+          message = `“${saved.name}” was saved, but some of its ingredient lines had changed on another device, so the list may not be as shown here. Close this and reload the page to check that list before you save again.`
+        } else {
+          const a = writeFailure(failure)
+          message = isTimeout(failure)
+            ? {
+              text: `“${saved.name}” was saved, but the server took too long to answer about its ingredient list. Close this and reload the page to check that list before you save again.`,
+              detail: a.detail,
+            }
+            : {
+              text: `“${saved.name}” was saved, but its ingredient list was not fully updated — check it and save again. ${a.text}`,
+              detail: a.detail,
+            }
+        }
         setActionError(message)
         onSaved(saved, { keepOpen: true, error: message })
         return
@@ -231,17 +266,21 @@ export default function OptionModal({
       const { error } = await within(scopedInsert('pos_option_ingredients', inserts), 'Saving the ingredient list')
       if (error) return error
     }
+    // S862 SETUP-10: each update and the delete return their rows, so a line deleted on another
+    // device meanwhile is reported rather than its change said to be saved.
     const updates = await within(Promise.all(lines.filter(l => l.id).map(l =>
-      scopedUpdate('pos_option_ingredients', toRow(l)).eq('id', l.id))), 'Saving the ingredient list')
+      scopedUpdate('pos_option_ingredients', toRow(l)).eq('id', l.id).select('id'))), 'Saving the ingredient list')
     if (updates.error) return updates.error
     const upErr = updates.find(r => r.error)
     if (upErr) return upErr.error
+    let stale = updates.some(r => !r.data?.length)
     const removed = [...existingIds].filter(id => !keptIds.has(id))
     if (removed.length) {
-      const { error } = await within(scopedDelete('pos_option_ingredients').in('id', removed), 'Saving the ingredient list')
+      const { data, error } = await within(scopedDelete('pos_option_ingredients').in('id', removed).select('id'), 'Saving the ingredient list')
       if (error) return error
+      if ((data?.length || 0) < removed.length) stale = true
     }
-    return null
+    return stale ? STALE_LINES : null
   }
 
   const priceLabel = fullPriceMode
@@ -291,7 +330,7 @@ export default function OptionModal({
                 {priceLabel}
               </Tip>
             </label>
-            <input id="opt-price" type="number" step="any" value={form.price} placeholder={fullPriceMode ? String(basePrice) : '0'}
+            <input id="opt-price" type="number" step="any" value={form.price} placeholder={fullPriceMode ? String(Math.round(basePrice)) : '0'}
               onChange={e => set({ price: e.target.value })} {...fieldAria('opt-price', errors.price)} style={{ maxWidth: 220 }} />
             <FieldError id="opt-price" message={errors.price} />
             <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
@@ -316,7 +355,7 @@ export default function OptionModal({
               </p>
             )}
             {vat > 0 && (
-              <Tip width={300} text={`Saved as ${npr(exFromIncl(deltaIncl, vat))} before VAT, so the guest pays this on a 13% dish. A dish sold without VAT charges the before-VAT amount instead.`}>
+              <Tip width={300} text={`Saved as ${npr(savedDelta)} before VAT, so the guest pays this on a 13% dish. A dish sold without VAT charges the before-VAT amount instead.`}>
                 <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--theme-text3)' }}>
                   Includes VAT · how a no-VAT dish charges it
                 </p>
@@ -428,7 +467,7 @@ export default function OptionModal({
                       </select>
                       {/* Item first, then the amount in ITS unit — the unit was blank until an item was chosen. */}
                       <div style={{ flex: '1 1 200px', minWidth: 180 }}>
-                        <SearchableSelect id={`opt-line-${l.key}`} value={l.ref} options={itemChoices}
+                        <SearchableSelect id={`opt-line-${l.key}`} value={l.ref} options={choice?.hidden ? [...offeredChoices, choice] : offeredChoices}
                           placeholder="— Choose a stock item or sub-recipe —"
                           onChange={v => setLines(ls => ls.map(x => x.key === l.key ? { ...x, ref: v } : x))}
                           invalid={errors[`line${i}`] || ''} />
@@ -458,6 +497,7 @@ export default function OptionModal({
         )}
 
         <ActionError error={actionError} />
+        {confirmEl}
         {vatUnknown && (
           <p role="note" id="opt-vat-unknown" style={{ margin: 0, fontSize: 12, color: 'var(--theme-amber-text)' }}>
             △ Nothing can be saved here yet. {VAT_MODE_UNKNOWN_TEXT}
@@ -477,6 +517,9 @@ export default function OptionModal({
 
 // Stands in for a new option's id in the below-zero check, before the database gives it one.
 const NEW_OPTION_ID = '__new_option__'
+
+// saveIngredients' answer when every write answered but a line it updated or deleted was gone.
+const STALE_LINES = { stale: true }
 
 // New options go to the end of their group. `group.options` is attached by the page.
 function nextSortOf(group) {

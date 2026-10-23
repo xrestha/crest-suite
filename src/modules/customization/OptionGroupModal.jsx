@@ -4,10 +4,12 @@ import Tip from '../../components/Tip'
 import FieldError, { fieldAria } from '../../components/FieldError'
 import ActionError from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
+import { useConfirm } from '../../shared/hooks/useConfirm'
 import { settleWithin } from '../../utils/withTimeout'
 import { GROUP_COLS, SIZE_SCALING_HELP, CUSTOMIZATION_WRITE_MS, writeFailure } from './customizationData'
 import { ruleText, SIZE_SCALING_LABEL } from '../../shared/optionPricing'
 import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
+import { groupEditEffects, groupEditRefusal, shortfallText } from './optionChecks'
 
 // Create or edit one option group — written for a restaurant owner, not a form designer (S758).
 //
@@ -28,6 +30,13 @@ import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 // more stock and a higher price. A size group is always "nothing" (the database holds that too).
 // The column is written only when it differs from what is saved, so an ordinary edit still saves on
 // a database the S760 migration has not reached.
+//
+// S862 SETUP-3: the dialog runs the checks the page's Hide and Show again run. `catalog` is the
+// page's { groups, options, attachments } and `attachedDishes` the dishes this group is on, so a
+// save that would let one of them be ordered below zero is refused (ticking Shown on a hidden group
+// was the unchecked way back), and one that leaves a dish with more to pick than the group offers
+// asks first. SETUP-4: a group holding a "No …" choice cannot become a Size (the database refuses
+// it as group_kind_has_removals), so that is said when Size is picked, from `group.options`.
 
 // The three kinds differ in what they DO, and the hint says that rather than repeating the pick
 // rule twice: a size prices the dish (as a difference that follows the dish's own price, S809 4h),
@@ -48,8 +57,9 @@ const maxLabel = n => (n == null ? 'any number' : n === 1 ? 'only 1' : `up to ${
 // silently snapping it to the nearest one on open.
 const withCurrent = (list, v) => (v == null || list.includes(v) ? list : [...list, v].sort((a, b) => a - b))
 
-export default function OptionGroupModal({ group, attachedCount = 0, nextSort, onClose, onSaved }) {
+export default function OptionGroupModal({ group, attachedCount = 0, nextSort, catalog = null, attachedDishes = [], onClose, onSaved }) {
   const { scopedInsert, scopedUpdate } = useScopedDb()
+  const { ask, confirmEl } = useConfirm()
   const [name, setName] = useState(group?.name || '')
   const [kind, setKind] = useState(group?.kind || 'addon')
   const [min, setMin] = useState(group ? (group.min_select ?? 0) : 0)
@@ -67,6 +77,7 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, o
   const effMin = isSize ? 1 : min
   const effMax = isSize ? 1 : max
   const effIncluded = kind === 'addon' ? Math.min(included, effMax ?? included) : 0
+  const removalBlocksSize = isSize && !!group && group.kind !== 'size' && (group.options || []).some(o => o.is_removal)
 
   function pickKind(k) {
     if (k === kind) return
@@ -89,10 +100,36 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, o
     if (v != null && included > v) setIncluded(v)
   }
 
-  async function save() {
+  function save() {
     if (saving) return
     if (!name.trim()) { setNameError('Give the group a name — guests see it, e.g. “Extras” or “Choose your size”.'); return }
     setNameError('')
+    if (removalBlocksSize) return
+    setActionError(null)
+    const nextScaling = isSize ? 'none' : scaling
+    if (group) {
+      const next = { kind, min_select: effMin, max_select: effMax, included_count: effIncluded, is_active: active, size_scaling: nextScaling }
+      const { belowZero, short } = groupEditEffects(group, next, catalog, attachedDishes)
+      if (belowZero.length) {
+        setActionError(groupEditRefusal(group.name, belowZero, { showing: group.is_active === false && active }))
+        return
+      }
+      if (short.length) {
+        const nameOf = id => attachedDishes.find(d => d.id === id)?.name || 'a dish'
+        ask({
+          title: `Save “${name.trim()}”?`,
+          confirmLabel: 'Save anyway',
+          busyLabel: 'Saving…',
+          body: <p style={{ margin: 0 }}>{shortfallText(name.trim(), short, nameOf)}</p>,
+          run: () => write(nextScaling),
+        })
+        return
+      }
+    }
+    return write(nextScaling)
+  }
+
+  async function write(nextScaling) {
     setSaving(true)
     setActionError(null)
     const row = {
@@ -104,7 +141,6 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, o
       included_count: effIncluded,
       is_active: active,
     }
-    const nextScaling = isSize ? 'none' : scaling
     if (nextScaling !== (group?.size_scaling || 'none')) row.size_scaling = nextScaling
     const { data, error } = await settleWithin(group
       ? scopedUpdate('pos_option_groups', row).eq('id', group.id).select(GROUP_COLS)
@@ -154,7 +190,12 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, o
               )
             })}
           </div>
-          {kindChangedLive && (
+          {removalBlocksSize && (
+            <p role="alert" className="field-error" style={{ margin: '8px 0 0' }}>
+              This group has a “No …” choice, and a size cannot be one. Delete the “No …” choice first, or keep the group as Add-ons or Choice.
+            </p>
+          )}
+          {kindChangedLive && !removalBlocksSize && (
             <p role="alert" style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-amber-text)' }}>
               This group is on {attachedCount} dish{attachedCount === 1 ? '' : 'es'}. Changing its kind resets the pick rule to “{summary}” for all of them the moment you save, including any rule a dish had of its own; bills already rung are not affected.
             </p>
@@ -242,9 +283,11 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, o
 
         <ActionError error={actionError} />
       </div>
+      {confirmEl}
       <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
         <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={save} disabled={saving} aria-busy={saving || undefined}>
+        <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={save} disabled={saving}
+          aria-disabled={removalBlocksSize || undefined} aria-busy={saving || undefined}>
           {saving ? 'Saving…' : group ? 'Save group' : 'Create group'}
         </button>
       </div>

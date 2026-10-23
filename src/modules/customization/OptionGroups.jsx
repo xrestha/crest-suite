@@ -16,8 +16,9 @@ import { withTimeout, settleWithin } from '../../utils/withTimeout'
 import {
   loadOptionCatalog, KIND_LABEL, DIET_LABEL, CUSTOMIZATION_READ_MS, CUSTOMIZATION_WRITE_MS, PAGE_CHECK, writeFailure,
 } from './customizationData'
-import { STANDARD_VAT, inclFromEx, ruleText, signedPrice, groupShortfalls, dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
+import { STANDARD_VAT, inclFromEx, ruleText, signedPrice, groupShortfalls, dishesBelowZero, belowZeroAmount } from '../../shared/optionPricing'
 import { andList } from '../../shared/offeredPicks'
+import { fullPriceBase, optionLossText as lossTextOf, stillHiddenText, stillShownText, notDeletedText, hideBelowZero } from './optionChecks'
 import { vatModeOf, VAT_MODE_UNKNOWN_TEXT } from '../ims/recipes/menuPriceVat'
 import OptionGroupModal from './OptionGroupModal'
 import OptionModal from './OptionModal'
@@ -106,13 +107,15 @@ export default function OptionGroups() {
     try {
       results = await withTimeout(Promise.all([
         loadOptionCatalog(scopedFrom, { withIngredients: imsOn }),
-        // Every active recipe. A NULL category is a dish (S714's .or form), and a sub-recipe is only
-        // offered as an option ingredient, never as something to customize.
-        fetchAllRows(() => scopedFrom('recipes', 'id, name, category, selling_price, vat_rate, pos_enabled, yield_uom')
-          .not('is_active', 'is', false).order('name').order('id')),
+        // Every recipe. A NULL category is a dish (S714's .or form), and a sub-recipe is only
+        // offered as an option ingredient, never as something to customize. S862 SETUP-7: hidden
+        // recipes and items are read too, and filtered below (dishes stay active-only), so a stock
+        // line on a hidden item or sub-recipe shows what it takes off stock instead of a blank box.
+        fetchAllRows(() => scopedFrom('recipes', 'id, name, category, selling_price, vat_rate, pos_enabled, yield_uom, is_active')
+          .order('name').order('id')),
         imsOn
-          ? fetchAllRows(() => scopedFrom('items', 'id, name, uom').eq('is_sub_recipe', false)
-            .not('is_active', 'is', false).order('name').order('id'))
+          ? fetchAllRows(() => scopedFrom('items', 'id, name, uom, is_active').eq('is_sub_recipe', false)
+            .order('name').order('id'))
           : Promise.resolve({ data: [], error: null }),
       ]), CUSTOMIZATION_READ_MS, 'Loading option groups')
     } catch (err) {
@@ -128,15 +131,22 @@ export default function OptionGroups() {
     if (failed) { setLoadError(failed); setLoading(false); return }
     const [{ data: recipes }, { data: items }] = rest
     const all = recipes || []
+    const shown = r => r.is_active !== false
     setCatalog(cat)
-    setDishes(all.filter(r => r.category !== 'Sub-Recipe').map(r => ({
+    setDishes(all.filter(r => r.category !== 'Sub-Recipe' && shown(r)).map(r => ({
       ...r,
       inclPrice: (Number(r.selling_price) || 0) * (1 + (vatReg ? vatOf(r) : 0)),
     })))
+    // `hidden` ones are offered only on a line that already holds them (OptionModal).
     setItemChoices([
-      ...(items || []).map(i => ({ value: `item:${i.id}`, label: `${i.name} (${i.uom})`, unit: i.uom })),
+      ...(items || []).map(i => ({
+        value: `item:${i.id}`, label: `${i.name} (${i.uom})${shown(i) ? '' : ' — hidden in Item Master'}`, unit: i.uom, hidden: !shown(i),
+      })),
       ...all.filter(r => r.category === 'Sub-Recipe').map(r => ({
-        value: `sub:${r.id}`, label: `Sub-recipe: ${r.name}${r.yield_uom ? ` (${r.yield_uom})` : ''}`, unit: r.yield_uom || '',
+        value: `sub:${r.id}`,
+        label: `Sub-recipe: ${r.name}${r.yield_uom ? ` (${r.yield_uom})` : ''}${shown(r) ? '' : ' — hidden in Recipe Costing'}`,
+        unit: r.yield_uom || '',
+        hidden: !shown(r),
       })),
     ])
     setLoading(false)
@@ -229,17 +239,24 @@ export default function OptionGroups() {
   // came straight back with it and the till refused the dish by name mid-service.
   function showAgainRefusal(name, groupId, after) {
     const found = dishesBelowZero(dishesForGroup(groupId), after, { before: catalog })
+    return found.length ? stillHiddenText(name, found) : null
+  }
+  // S862 SETUP-3: hiding is checked the same way. A hidden group or choice can be the paid pick a
+  // cheaper size was leaning on, so hiding it can let the dish be ordered below zero too.
+  // A delete takes it away exactly as Hide does, so it is refused the same way, before the ask.
+  function hideRefusal(name, groupId, target, { deleting = false } = {}) {
+    const found = hideBelowZero(dishesForGroup(groupId), catalog, target)
     if (!found.length) return null
-    return `“${name}” is still hidden. ${belowZeroText(found)}, and the till refuses a dish priced below zero. Change the prices with Edit first, or take the group off ${found.length === 1 ? 'that dish' : 'those dishes'}.`
+    return deleting ? notDeletedText(name, found) : stillShownText(name, found)
   }
 
   // ── Groups ──
   async function toggleGroupActive(g) {
     setPageError(null)
-    if (!g.is_active) {
-      const refusal = showAgainRefusal(g.name, g.id, { ...catalog, groups: catalog.groups.map(x => (x.id === g.id ? { ...x, is_active: true } : x)) })
-      if (refusal) { setPageError(refusal); return }
-    }
+    const refusal = g.is_active
+      ? hideRefusal(g.name, g.id, { groupId: g.id })
+      : showAgainRefusal(g.name, g.id, { ...catalog, groups: catalog.groups.map(x => (x.id === g.id ? { ...x, is_active: true } : x)) })
+    if (refusal) { setPageError(refusal); return }
     const { data, error } = await bounded(scopedUpdate('pos_option_groups', { is_active: !g.is_active }).eq('id', g.id).select('id'), 'Saving the group')
     if (error) { setPageError(pageFailure(error)); return }
     if (!data?.length) { setPageError('That group no longer exists — reload the page.'); return }
@@ -248,6 +265,9 @@ export default function OptionGroups() {
   }
 
   function deleteGroup(g) {
+    setPageError(null)
+    const refusal = g.is_active ? hideRefusal(g.name, g.id, { groupId: g.id }, { deleting: true }) : null
+    if (refusal) { setPageError(refusal); return }
     const n = attachCountByGroup[g.id] || 0
     ask({
       title: `Delete “${g.name}”?`,
@@ -277,26 +297,8 @@ export default function OptionGroups() {
 
   // ── Options ──
   // S809 4h (CUSTOMIZATION-8): what taking an offered option away does to the dishes its group is
-  // on, said before it happens. Too few left for a dish's minimum takes the dish off the till and
-  // the QR menu (the server refuses it); none left drops the group, and the dish sells without it.
-  // Only what THIS change causes is named: a dish already short is flagged on the group's card.
-  function optionLossText(o) {
-    const group = catalog.groups.find(g => g.id === o.group_id)
-    if (!o.is_active || !group?.is_active) return null
-    const after = catalog.options.map(x => (x.id === o.id ? { ...x, is_active: false } : x))
-    const before = new Set(groupShortfalls(group, catalog.options, catalog.attachments).map(x => x.recipe_id))
-    const short = groupShortfalls(group, after, catalog.attachments).filter(x => !before.has(x.recipe_id))
-    const nameOf = id => dishById.get(id)?.name || 'a dish'
-    const left = after.filter(x => x.group_id === group.id && x.is_active).length
-    if (short.length) {
-      return `${andList(short.map(x => `${nameOf(x.recipe_id)} must pick ${x.need}`))} from “${group.name}”, which would have ${left} left to pick. ${short.length === 1 ? 'It' : 'They'} can’t be ordered on the till or the QR menu until you show an option again or lower the rule.`
-    }
-    const on = catalog.attachments.filter(a => a.group_id === group.id)
-    if (left === 0 && on.length) {
-      return `Nothing would be left to pick in “${group.name}”, so ${andList(on.map(a => nameOf(a.recipe_id)))} would be ordered without it.`
-    }
-    return null
-  }
+  // on, said before it happens (optionChecks.js since S862, so the option editor asks it too).
+  const optionLossText = o => lossTextOf(o, catalog, id => dishById.get(id)?.name || 'a dish')
 
   async function setOptionActive(o, active) {
     setPageError(null)
@@ -307,11 +309,11 @@ export default function OptionGroups() {
   }
 
   function toggleOptionActive(o) {
-    if (!o.is_active) {
-      setPageError(null)
-      const refusal = showAgainRefusal(o.name, o.group_id, { ...catalog, options: catalog.options.map(x => (x.id === o.id ? { ...x, is_active: true } : x)) })
-      if (refusal) { setPageError(refusal); return }
-    }
+    setPageError(null)
+    const refusal = o.is_active
+      ? hideRefusal(o.name, o.group_id, { optionId: o.id })
+      : showAgainRefusal(o.name, o.group_id, { ...catalog, options: catalog.options.map(x => (x.id === o.id ? { ...x, is_active: true } : x)) })
+    if (refusal) { setPageError(refusal); return }
     const loss = optionLossText(o)
     if (!loss) { setOptionActive(o, !o.is_active); return }
     ask({
@@ -324,6 +326,9 @@ export default function OptionGroups() {
   }
 
   function deleteOption(o) {
+    setPageError(null)
+    const refusal = o.is_active ? hideRefusal(o.name, o.group_id, { optionId: o.id }, { deleting: true }) : null
+    if (refusal) { setPageError(refusal); return }
     ask({
       title: `Delete “${o.name}”?`,
       danger: true,
@@ -349,11 +354,12 @@ export default function OptionGroups() {
     if (o.is_removal) return <span style={{ color: 'var(--theme-text3)' }}>Free</span>
     const deltaIncl = inclFromEx(o.price_delta, entryVat)
     if (g.kind === 'size') {
-      const prices = Array.from(new Set(dishesForGroup(g.id).map(d => Math.round(d.inclPrice))))
+      // S862 SETUP-1: the same full-price test as the option editor, to the paisa.
+      const base = fullPriceBase(dishesForGroup(g.id))
       // S809 4h (CUSTOMIZATION-6): below zero reads as below zero, never as NPR 0.
-      if (prices.length === 1) {
-        const v = prices[0] + deltaIncl
-        return v < 0 ? <span style={{ color: 'var(--theme-red-text)' }}>−{npr(Math.abs(v))}</span> : npr(v)
+      if (base != null) {
+        const v = base + deltaIncl
+        return v < 0 ? <span style={{ color: 'var(--theme-red-text)' }}>{belowZeroAmount(v)}</span> : npr(v)
       }
     }
     return signedPrice(deltaIncl) || <span style={{ color: 'var(--theme-text3)' }}>No charge</span>
@@ -661,6 +667,8 @@ export default function OptionGroups() {
         <OptionGroupModal
           group={groupModal.group}
           attachedCount={groupModal.group ? (attachCountByGroup[groupModal.group.id] || 0) : 0}
+          catalog={catalog}
+          attachedDishes={groupModal.group ? dishesForGroup(groupModal.group.id) : []}
           nextSort={Math.max(-1, ...catalog.groups.map(g => g.sort || 0)) + 1}
           onClose={() => setGroupModal(null)}
           onSaved={saved => {
@@ -673,7 +681,10 @@ export default function OptionGroups() {
 
       {openGroup && (
         <OptionModal
-          key={openOption?.id || 'new'}
+          // S862 SETUP-6: keyed on the VAT rate the figures use, so a basis that resolves after the
+          // editor opened (unknown, read as VAT, then PAN) re-seeds the price box instead of leaving
+          // the figure worked out on the old rate. Unknown to VAT changes no figure, so no remount.
+          key={`${openOption?.id || 'new'}:${entryVat}`}
           group={openGroup}
           option={openOption}
           ingredients={openOption?.ingredients || []}
@@ -702,7 +713,12 @@ export default function OptionGroups() {
 
       {attachFor && (
         <AttachGroupsModal recipe={attachFor} onClose={() => setAttachFor(null)}
-          onSaved={n => { load({ quiet: true }); flash(n ? `${attachFor.name} now offers ${n} group${n === 1 ? '' : 's'}.` : `${attachFor.name} now orders with no choices.`) }} />
+          onSaved={(n, r) => {
+            load({ quiet: true })
+            // A save that stopped part-way keeps the dialog open with its own message (S862 SETUP-10).
+            if (r?.partial) return
+            flash(n ? `${attachFor.name} now offers ${n} group${n === 1 ? '' : 's'}.` : `${attachFor.name} now orders with no choices.`)
+          }} />
       )}
 
       {templateOpen && (
@@ -710,6 +726,8 @@ export default function OptionGroups() {
           dishes={dishes}
           buildYourOwn={catalog.buildYourOwn || []}
           groupNames={catalog.groups.map(g => g.name)}
+          groups={catalog.groups}
+          attachments={catalog.attachments}
           onClose={() => setTemplateOpen(false)}
           onSaved={({ dish }) => {
             setTemplateOpen(false)

@@ -94,7 +94,7 @@ describe('subRecipeInUseText — moving it out of the Sub-Recipe category', () =
       .toBe('"House Granola" is an ingredient in Parfait, so it can\'t stop being a Sub-Recipe — those recipes would keep consuming it while it disappeared from their ingredient pickers. Remove it from them first, or use Hide if you just want it off the menu.')
   })
 
-  it('choices only: names the consequence and does not offer Hide (it hides the line too)', () => {
+  it('choices only: names the consequence and does not offer Hide', () => {
     const text = subRecipeInUseText({ ...base, ...live, choiceNames: ['Toppings › Granola'] })
     expect(text).toBe('"House Granola" is a stock line on these choices: Toppings › Granola, so it can\'t stop being a Sub-Recipe — those choices would keep taking it off stock while it disappeared from Option Groups. Remove it from those choices in Option Groups first.')
     expect(text).not.toMatch(/Hide/)

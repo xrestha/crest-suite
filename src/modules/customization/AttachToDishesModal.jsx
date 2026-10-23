@@ -5,8 +5,9 @@ import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { settleWithin } from '../../utils/withTimeout'
 import { runChunkedByIds } from '../../shared/fetchAllRows'
 import { CUSTOMIZATION_WRITE_MS, writeFailure, detachFailure } from './customizationData'
-import { npr, nprInt } from '../../shared/nepalMoney'
-import { dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
+import { npr } from '../../shared/nepalMoney'
+import { dishesBelowZero, belowZeroText, belowZeroAmount } from '../../shared/optionPricing'
+import { otherSizesText } from './optionChecks'
 
 // Attach ONE group to many dishes — the bulk half of attaching (S759).
 //
@@ -83,6 +84,11 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
     }
   }, [dishes, picked, initial, catalog, group.id])
   const refused = belowZero.length + droppedBelow.length > 0
+  // S862 SETUP-8: a ticked dish that already carries another Size group would ask for two sizes.
+  const twoSizes = useMemo(
+    () => otherSizesText(group, dishes.filter(d => picked.has(d.id)), catalog.attachments, catalog.groups),
+    [group, dishes, picked, catalog],
+  )
 
   const toggle = id => setPicked(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
   const setMany = (ids, on) => setPicked(p => { const n = new Set(p); ids.forEach(id => (on ? n.add(id) : n.delete(id))); return n })
@@ -106,15 +112,17 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
     if (removeIds.length) {
       // In chunks (S852): `.in('id', …)` travels in the URL, and unticking a group from a whole menu
       // made one URL of every id. A chunk that answered is off; the one that failed, and any after
-      // it, are named as still offering the group.
+      // it, are named as still offering the group. S862 SETUP-10: off means the rows the delete
+      // returned, so a chunk RLS matched to nothing (the outlet moved on another device) is named
+      // too, rather than reported as taken off.
       const detached = new Set()
       const { error } = await runChunkedByIds(removeIds, async ids => {
-        const r = await settleWithin(scopedDelete('pos_recipe_option_groups').in('id', ids),
+        const r = await settleWithin(scopedDelete('pos_recipe_option_groups').in('id', ids).select('id'),
           CUSTOMIZATION_WRITE_MS, 'Saving the dishes')
-        if (!r.error) ids.forEach(id => detached.add(id))
+        if (!r.error) (r.data || []).forEach(row => detached.add(row.id))
         return r
       })
-      if (error) {
+      if (error || removeRows.some(a => !detached.has(a.id))) {
         setSaving(false)
         const nameOf = a => dishById.get(a.recipe_id)?.name || 'a dish'
         setActionError(detachFailure({
@@ -200,6 +208,11 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
           △ Already on: {reachList(alreadyBelow)} with these choices — fix {alreadyBelow.length === 1 ? 'its' : 'their'} prices.
         </p>
       )}
+      {twoSizes && (
+        <p role="status" style={{ margin: '12px 0 0', fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          △ {twoSizes}
+        </p>
+      )}
       <ActionError error={actionError} />
       <div style={{ display: 'flex', gap: 10, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--theme-border)', flexShrink: 0 }}>
         <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
@@ -214,7 +227,7 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
 
 // "Veg Momo can reach NPR −20", "… and Kids Momo can reach NPR −5", then "and 3 more".
 function reachList(found) {
-  const parts = found.slice(0, 3).map(({ dish, incl }) => `${dish.name} can reach NPR −${nprInt(Math.abs(Math.round(incl)))}`)
+  const parts = found.slice(0, 3).map(({ dish, incl }) => `${dish.name} can reach ${belowZeroAmount(incl)}`)
   if (found.length > 3) parts.push(`${found.length - 3} more`)
   return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0]
 }

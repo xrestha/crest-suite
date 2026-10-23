@@ -7,6 +7,7 @@ import FieldError, { fieldAria } from '../../components/FieldError'
 import ActionError from '../../components/ActionError'
 import { settleWithin } from '../../utils/withTimeout'
 import { CUSTOMIZATION_WRITE_MS, writeFailure } from './customizationData'
+import { sizeGroupsOn, templateSizeClashText } from './optionChecks'
 
 // Crest Customization (S760) — the build-your-own template.
 //
@@ -20,8 +21,12 @@ import { CUSTOMIZATION_WRITE_MS, writeFailure } from './customizationData'
 // Group names are unique per client, so the groups are named after the dish ("Acai Bowl · Base") —
 // two build-your-own dishes rarely share a base, and a pizza's base list should not be an acai
 // bowl's.
+//
+// S862 SETUP-8: the RPC refuses only a name clash, so a second run under a shorter name gave the
+// dish two Sizes and two Bases (the till asked for both and multiplied both portions). A dish that
+// already offers a Size group is refused here, naming it; `groups` and `attachments` are the page's.
 
-export default function BuildYourOwnTemplateModal({ dishes, buildYourOwn = [], groupNames = [], onClose, onSaved }) {
+export default function BuildYourOwnTemplateModal({ dishes, buildYourOwn = [], groupNames = [], groups = [], attachments = [], onClose, onSaved }) {
   const candidates = useMemo(
     () => dishes.filter(d => d.category !== 'Sub-Recipe').map(d => ({
       value: d.id,
@@ -36,6 +41,7 @@ export default function BuildYourOwnTemplateModal({ dishes, buildYourOwn = [], g
   const [actionError, setActionError] = useState(null)
 
   const dish = dishes.find(d => d.id === dishId) || null
+  const sizeClash = dish ? templateSizeClashText(dish.name, sizeGroupsOn(dish.id, attachments, groups).map(g => g.name)) : null
   const shownPrefix = (prefix.trim() || dish?.name || 'Dish').slice(0, 60)
   const names = ['Size', 'Base', 'Sauces', 'Toppings'].map(s => `${shownPrefix} · ${s}`)
   const taken = useMemo(() => {
@@ -47,6 +53,7 @@ export default function BuildYourOwnTemplateModal({ dishes, buildYourOwn = [], g
     if (saving) return
     const e = {}
     if (!dishId) e.dish = 'Choose the dish guests build — e.g. Acai Bowl.'
+    else if (sizeClash) e.dish = sizeClash
     if (taken.length) e.prefix = `A group called “${taken[0]}” already exists. Type a different name for the groups.`
     setErrors(e)
     if (Object.keys(e).length) return
@@ -76,13 +83,13 @@ export default function BuildYourOwnTemplateModal({ dishes, buildYourOwn = [], g
         <div className="form-field" style={{ margin: 0 }}>
           <label htmlFor="byo-dish">Dish</label>
           <SearchableSelect id="byo-dish" value={dishId} onChange={v => setDishId(v)} options={candidates}
-            placeholder="Choose a dish…" invalid={errors.dish} />
-          <FieldError id="byo-dish" message={errors.dish} />
+            placeholder="Choose a dish…" invalid={errors.dish || sizeClash || ''} />
+          <FieldError id="byo-dish" message={errors.dish || sizeClash} />
         </div>
 
         <div className="form-field" style={{ margin: 0 }}>
           <label htmlFor="byo-prefix">
-            <Tip width={300} text="Group names must be different from each other, so each group is named after the dish. Change it if you want shorter names on the Groups page. Guests see the name too, so keep it readable.">Name the groups after</Tip>
+            <Tip width={300} text="Group names must be different from each other, so each group is named after the dish. Change it now if you want shorter names on the Groups page; to rename a group later, use Edit group, because running the template again adds new groups rather than renaming these. Guests see the name too, so keep it readable.">Name the groups after</Tip>
           </label>
           <input id="byo-prefix" value={prefix} onChange={ev => setPrefix(ev.target.value)} maxLength={60}
             placeholder={dish?.name || 'The dish name'} {...fieldAria('byo-prefix', errors.prefix)} />
@@ -101,7 +108,7 @@ export default function BuildYourOwnTemplateModal({ dishes, buildYourOwn = [], g
       <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
         <button type="button" className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
         <button type="button" className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }}
-          onClick={create} disabled={saving} aria-busy={saving || undefined}>
+          onClick={create} disabled={saving} aria-disabled={!!sizeClash || undefined} aria-busy={saving || undefined}>
           {saving ? 'Creating…' : 'Create the four groups'}
         </button>
       </div>

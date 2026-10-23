@@ -33,12 +33,20 @@ const dishNames = names => andList(names.length > DISH_NAMES_SHOWN
  * both, never a blanket failure. `off` and `still` are dish names; `error` is the failed chunk.
  * A timed-out chunk may still land, so those dishes "may still" offer it. `retry` is said after a
  * timeout: every write here is keyed, so saving again is safe.
+ * S862 SETUP-10: `error` null means every chunk answered but fewer rows came off than were sent —
+ * a window whose outlet moved on another device, or a row changed there — so it says to reload.
  */
 export function detachFailure({ groupName, added, off, still, error, retry }) {
-  const { text, detail } = writeFailure(error)
+  const { text, detail } = error ? writeFailure(error) : { text: '', detail: null }
   const lead = added ? `The dishes you ticked now offer “${groupName}”. ` : ''
   const done = off.length ? `It is off ${dishNames(off)}, but ` : ''
   const one = still.length === 1
+  if (!error) {
+    return {
+      text: `${lead}${done}${dishNames(still)} may still offer it: ${one ? 'that dish' : 'those dishes'} may have changed on another device. Reload the page to check before you save again.`,
+      detail,
+    }
+  }
   const rest = isTimeout(error)
     ? `${done ? 'the' : 'The'} server took too long to answer about ${dishNames(still)}, so ${one ? 'that dish' : 'those dishes'} may still offer it. ${retry}`
     : `${dishNames(still)} still ${one ? 'offers' : 'offer'} it. ${text}`

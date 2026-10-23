@@ -70,6 +70,16 @@ describe('detachFailure', () => {
     expect(text).toBe('It is off Momo, but the server took too long to answer about Thukpa and Pizza, so those dishes may still offer it. Saving again is safe.')
   })
 
+  // S862 SETUP-10: every chunk answered, but fewer rows came off than were sent.
+  it('says to reload when a delete touched fewer rows than it sent', () => {
+    const { text, detail } = detachFailure({
+      groupName: 'Size', added: true, off: ['Momo'], still: ['Thukpa'], error: null, retry,
+    })
+    expect(text).toBe('The dishes you ticked now offer “Size”. It is off Momo, but Thukpa may still offer it: that dish may have changed on another device. Reload the page to check before you save again.')
+    expect(detail).toBeNull()
+    expect(text).not.toMatch(/'/)
+  })
+
   it('shortens a long list rather than printing a whole menu', () => {
     const still = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
     const { text } = detachFailure({ groupName: 'Size', added: false, off: [], still, error: refused, retry })

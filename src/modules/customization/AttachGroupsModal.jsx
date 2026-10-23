@@ -6,8 +6,9 @@ import ReportLoadError from '../../components/ReportLoadError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { settleWithin, isTimeout } from '../../utils/withTimeout'
 import { loadOptionCatalog, KIND_LABEL, CUSTOMIZATION_READ_MS, CUSTOMIZATION_WRITE_MS, writeFailure } from './customizationData'
-import { effectiveRule, ruleText, dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
-import { nprInt } from '../../shared/nepalMoney'
+import { effectiveRule, ruleText, dishesBelowZero, belowZeroText, belowZeroAmount } from '../../shared/optionPricing'
+import { andList } from '../../shared/offeredPicks'
+import { twoSizesText } from './optionChecks'
 
 // Which option groups one dish offers. Opened from two places that must behave identically — the
 // Dishes tab of Option Groups and the "Customize" button on Menu Pricing — so it loads its own data
@@ -78,6 +79,8 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
     [groups, draft],
   )
   const chosen = visibleGroups.filter(g => draft[g.id]?.on)
+  // S862 SETUP-8: two Size groups on one dish ask for two sizes and multiply both portions.
+  const twoSizes = twoSizesText(recipe.name, chosen.filter(g => g.kind === 'size').map(g => g.name))
 
   // S809 4h (CUSTOMIZATION-6, D17): a setup that takes this dish below zero is refused here, before
   // the till refuses it mid-service. Option Groups passes the dish with `inclPrice`, Menu Pricing
@@ -114,6 +117,15 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
     const rule = effectiveRule(g, { min_override: min, max_override: max })
     if (rule.max != null && rule.min > rule.max) return 'Minimum cannot be above maximum for this dish.'
     return null
+  }
+
+  // S862 SETUP-3: a minimum above what the group offers takes the dish off the till and the QR
+  // menu (option_count), so it is said here rather than found after the save. A group with nothing
+  // to pick is skipped by the server, and a hidden one is not offered, so neither is named.
+  function shortNote(g, rule) {
+    const offered = (optionsByGroup[g.id] || []).length
+    if (g.is_active === false || offered === 0 || !(rule.min > offered)) return null
+    return `${recipe.name} must pick ${rule.min} from “${g.name}”, which offers only ${offered} option${offered === 1 ? '' : 's'}, so it cannot be ordered on the till or the QR menu until the group has more options or the minimum is lowered.`
   }
 
   // The order the picker and the guest sheet show the groups in. Chosen groups are listed by
@@ -167,9 +179,10 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
         return
       }
     }
-    const removedIds = existing.filter(a => !draft[a.group_id]?.on).map(a => a.id)
+    const removed = existing.filter(a => !draft[a.group_id]?.on)
+    const removedIds = removed.map(a => a.id)
     if (removedIds.length) {
-      const { error } = await settleWithin(scopedDelete('pos_recipe_option_groups').in('id', removedIds),
+      const { data, error } = await settleWithin(scopedDelete('pos_recipe_option_groups').in('id', removedIds).select('id'),
         CUSTOMIZATION_WRITE_MS, 'Saving the choices')
       if (error) {
         setSaving(false)
@@ -177,7 +190,18 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
         setActionError(isTimeout(error)
           ? { text: `The groups you ticked were saved, but the server took too long to answer about the ones you unticked, so they may still be on ${recipe.name}. ${RETRY_IS_SAFE}`, detail: a.detail }
           : { text: `The groups you ticked were saved, but the ones you unticked are still on ${recipe.name}. ${a.text}`, detail: a.detail })
-        onSaved?.(rows.length)
+        onSaved?.(rows.length, { partial: true })
+        return
+      }
+      // S862 SETUP-10: a delete RLS matched to nothing (the outlet moved on another device) answers
+      // with no error, so the rows it returned are what came off.
+      const gone = new Set((data || []).map(r => r.id))
+      const left = removed.filter(a => !gone.has(a.id))
+      if (left.length) {
+        setSaving(false)
+        const nameOf = a => `“${groups.find(g => g.id === a.group_id)?.name || 'a group'}”`
+        setActionError(`${rows.length ? 'The groups you ticked were saved, but ' : ''}${andList(left.map(nameOf))} may still be on ${recipe.name}: it may have changed on another device. Reload the page to check before you save again.`)
+        onSaved?.(rows.length, { partial: true })
         return
       }
     }
@@ -265,6 +289,9 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
                         </div>
                       )}
                       {err && <span className="field-error" role="alert" style={{ flexBasis: '100%' }}>{err}</span>}
+                      {!err && shortNote(g, rule) && (
+                        <span role="status" style={{ flexBasis: '100%', fontSize: 12, color: 'var(--theme-amber-text)' }}>△ {shortNote(g, rule)}</span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -278,9 +305,12 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
           {belowZeroText(belowZero)}, and the till refuses a dish priced below zero. Change what is ticked here, or change the prices in Option Groups first.
         </p>
       )}
+      {twoSizes && (
+        <p role="status" style={{ margin: '12px 0 0', fontSize: 13, color: 'var(--theme-amber-text)' }}>△ {twoSizes}</p>
+      )}
       {alreadyBelow.length > 0 && (
         <p role="status" style={{ margin: '12px 0 0', fontSize: 13, color: 'var(--theme-amber-text)' }}>
-          △ {recipe.name} can already reach NPR −{nprInt(Math.abs(Math.round(alreadyBelow[0].incl)))} with these choices, and the till refuses it at that price — fix its prices in Option Groups.
+          △ {recipe.name} can already reach {belowZeroAmount(alreadyBelow[0].incl)} with these choices, and the till refuses it at that price — fix its prices in Option Groups.
         </p>
       )}
       <ActionError error={actionError} />

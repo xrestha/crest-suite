@@ -7,8 +7,10 @@
 // 40 g of House Granola"). Recipe Costing's pre-checks only ever read the first, so the second
 // reached the reader as the 23503 fallback: "still used by other records … use Hide instead" —
 // and Hide does nothing for a choice. Moving it out of the category was worse: Option Groups only
-// offers Sub-Recipe recipes as stock lines, so the choice kept taking it off stock through a line
-// nobody could see any more.
+// lists Sub-Recipe recipes as stock lines, so the choice kept taking it off stock through a line
+// nobody could see any more. Hiding it is not that: since S862 (SETUP-7) Option Groups keeps a
+// hidden sub-recipe visible on the choice line that holds it, labelled, and offers only shown ones
+// to add.
 //
 // Who can clear a choice's line matters to the sentence, because the database decides it
 // (guard_pos_option_edit): only the Owner, a POS or IMS manager, or Crest support, and only while
@@ -88,8 +90,11 @@ export function subRecipeInUseText({ action, name, recipeNames = [], choiceNames
   const choices = choiceNames.join(', ')
 
   if (action === 'recategorise') {
-    // Recipes alone keep the S714 sentence word for word, Hide included. Hide is not offered once a
-    // choice holds it: Option Groups lists only active sub-recipes, so hiding it hides the line too.
+    // Recipes alone keep the S714 sentence word for word, Hide included. Once a choice holds it the
+    // sentence offers no Hide. Until S862 that was because hiding it hid the line too; Option Groups
+    // now keeps a hidden one visible and labelled, so that reason is gone; leaving Hide out is still
+    // true, only less helpful. "Disappeared from Option Groups" is about leaving the category, which
+    // still drops it from the stock-line list.
     if (!hasChoices) {
       return `"${name}" is an ingredient in ${recipes}, so it can't stop being a Sub-Recipe — those recipes would keep consuming it while it disappeared from their ingredient pickers. Remove it from them first, or use Hide if you just want it off the menu.`
     }
