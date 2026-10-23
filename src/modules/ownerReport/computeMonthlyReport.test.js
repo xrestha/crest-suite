@@ -598,5 +598,10 @@ describe('Inventory Turnover is COGS over the stock of the same items (S849, OWN
 })
 
 test('the schema version moved for S855', () => {
-  expect(CURRENT_SCHEMA_VERSION).toBe(19)
+  expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(19)
+})
+
+// S862 REPORTS-STOCK-1: Comped Bills' food cost includes the choices (computeMonthlyReport.pos.test.js).
+test('the schema version moved for S862', () => {
+  expect(CURRENT_SCHEMA_VERSION).toBe(20)
 })

@@ -1,3 +1,5 @@
+import fs from 'fs'
+import path from 'path'
 import { buildCustomizationReport, withOptionCosts, allDeltaSets, mostAddedOf, sliceByOrders, weeklyDishShares, TREND_MIN_PLATES, buildComboReport } from './customizationReportCalc'
 import { bsMonthRangeIso, shiftBsMonth } from '../pos/reports/reportRange'
 
@@ -40,6 +42,45 @@ describe('buildCustomizationReport', () => {
     expect(r.sizeAdjustments).toBe(-200)      // Half −100 × 2
     expect(r.sizeAdjustments).toBeLessThanOrEqual(0)
     expect(r.extrasEarned + r.sizeAdjustments).toBe(r.extraCharged)
+  })
+
+  // S862 REPORTS-STOCK-6 (owner decision CU6 a): Extras earned keeps every positive charge, a larger
+  // size's included; the negative half splits by KIND, a size into Size adjustments and any other
+  // choice priced below the dish into its own figure.
+  test('a larger size counts in Extras earned; a cheaper non-size choice is its own figure', () => {
+    const BOWL = 'r-bowl'
+    const ls = [
+      { id: 'b1', recipe_id: BOWL, name: 'Bowl', qty: 3, comped: false, selection_key: 'o-large+o-tofu' },
+      { id: 'b2', recipe_id: BOWL, name: 'Bowl', qty: 2, comped: false, selection_key: 'o-half' },
+      { id: 'b3', recipe_id: BOWL, name: 'Bowl', qty: 1, comped: true, selection_key: 'o-tofu' },
+    ]
+    const ss = [
+      { order_item_id: 'b1', option_id: 'o-large', group_name: 'Size', group_kind: 'size', option_name: 'Large', is_removal: false, price_delta: 40, list_price_delta: 40 },
+      { order_item_id: 'b1', option_id: 'o-tofu', group_name: 'Protein', group_kind: 'choice', option_name: 'Tofu instead of chicken', is_removal: false, price_delta: -30, list_price_delta: -30 },
+      { order_item_id: 'b2', option_id: 'o-half', group_name: 'Size', group_kind: 'size', option_name: 'Half', is_removal: false, price_delta: -100, list_price_delta: -100 },
+      { order_item_id: 'b3', option_id: 'o-tofu', group_name: 'Protein', group_kind: 'choice', option_name: 'Tofu instead of chicken', is_removal: false, price_delta: -30, list_price_delta: -30 },
+    ]
+    const rb = buildCustomizationReport({ lines: ls, snapshots: ss, attachedRecipeIds: new Set([BOWL]) })
+    expect(rb.extrasEarned).toBe(120)          // Large +40 × 3: a size above the dish is an extra
+    expect(rb.sizeAdjustments).toBe(-200)      // Half −100 × 2, sizes only
+    expect(rb.cheaperChoices).toBe(-90)        // Tofu −30 × 3 paid plates; the comped plate adds nothing
+    expect(rb.extrasEarned + rb.sizeAdjustments + rb.cheaperChoices).toBe(rb.extraCharged)
+    expect(rb.options.find(o => o.option_id === 'o-tofu').group_kind).toBe('choice')
+  })
+
+  test('a negative charge whose kind is not known is not called a size', () => {
+    const rb = buildCustomizationReport({
+      lines: [lines[0]],
+      snapshots: [{ order_item_id: 'l1', option_id: 'o-gone', group_name: 'Old', option_name: 'Old discount', is_removal: false, price_delta: -20 }],
+      attachedRecipeIds: new Set([MOMO]),
+    })
+    expect(rb.sizeAdjustments).toBe(0)
+    expect(rb.cheaperChoices).toBe(-40)
+  })
+
+  test('a month with no cheaper choice reports 0 for it', () => {
+    expect(r.cheaperChoices).toBe(0)
+    expect(r.extrasEarned + r.sizeAdjustments + r.cheaperChoices).toBe(r.extraCharged)
   })
 
   test('each option carries its group kind and list price from the catalog', () => {
@@ -364,5 +405,30 @@ describe('a combo dish is not a customized plate by its key alone', () => {
     expect(r.dishes.map(d => d.recipe_id)).toEqual([MOMO])
     expect(r.customizablePlates).toBe(1)
     expect(r.customizedPlates).toBe(1)
+  })
+})
+
+// A source check, the salesReads.test.js pattern: what these pin has no symptom until a read hangs
+// or a cheaper non-size choice is sold.
+describe('the Customization Report page', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'CustomizationReport.jsx'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ').replace(/\s+/g, ' ')
+
+  // S862 REPORTS-STOCK-5: both read waves are bounded over the chosen range AND the one before it,
+  // the option catalog included, and a hung costing fails only the Margin tab.
+  test('every read wave is bounded, the catalog included', () => {
+    expect(src).toMatch(/const readMs = rangeReadMs\(prevFromIso, toIso\)/)
+    expect(src.match(/await settleAll\(\[/g)).toHaveLength(2)
+    expect(src).toMatch(/loadOptionCatalog\(scopedFrom\), \], readMs, LOAD_LABEL\)/)
+    expect(src).not.toMatch(/await Promise\.all\(\[/)
+  })
+  test('the costing is bounded in its own try, so a hang reaches costError only', () => {
+    expect(src).toMatch(/try \{ const \{ explosion, rateOf \} = await withTimeout\(posDeltaCosting\(supabase, clientId, deltaSets\), readMs, /)
+    expect(src).toMatch(/setCostError\(e\)/)
+  })
+  // S862 REPORTS-STOCK-6: only a size below the dish is greyed as part of the dish cost.
+  test('a choice below the dish is greyed as a size only when it is a size', () => {
+    expect(src).toMatch(/const sizeBelow = o\.group_kind === 'size' && o\.listPriceDelta != null && o\.listPriceDelta < 0/)
+    expect(src).toMatch(/report\.cheaperChoices < 0 &&/)
   })
 })

@@ -2,7 +2,8 @@ import fs from 'fs'
 import path from 'path'
 import {
   linkedItemIdsOf, bandPctOf, varianceRowBand, hasVarianceActivity, isUncountedGap, judgedRows,
-  isClosingCount, closingCountMap,
+  isClosingCount, closingCountMap, choiceLinesAsDeltas, choiceLinkedItemIds, loadChoiceLinkedItemIds,
+  VARIANCE_FLAG_TEXT,
 } from './variancePopulation'
 import { varianceBand } from '../../../shared/imsFormulas'
 
@@ -121,6 +122,57 @@ describe('linkedItemIdsOf', () => {
   test('empty inputs give an empty set', () => {
     expect(linkedItemIdsOf(null, null, null).size).toBe(0)
   })
+
+  // S862 REPORTS-STOCK-3: Oat Milk is on a choice and in no recipe. In a counted month nobody picked
+  // it, it is still judged, not greyed as "no recipe linked" with its loss out of the totals.
+  test('an item only a choice uses is linked in a month nobody picked that choice', () => {
+    const breakdown = { latte: [{ item_id: 'milk', qty: 200 }] }
+    const depleting = [{ recipe_id: 'latte', qty_sold: 5, ingredient_deltas: null }]
+    expect(linkedItemIdsOf(breakdown, depleting, null).has('oat_milk')).toBe(false)
+    expect(linkedItemIdsOf(breakdown, depleting, null, new Set(['oat_milk'])).has('oat_milk')).toBe(true)
+  })
+})
+
+describe('the client\'s choice stock lines (S862 REPORTS-STOCK-3)', () => {
+  const rows = [
+    { item_id: 'oat_milk', sub_recipe_id: null, qty_per_portion: 150 },
+    { item_id: 'milk', sub_recipe_id: null, qty_per_portion: -150 },   // a take-off still links
+    { item_id: null, sub_recipe_id: 'sauce', qty_per_portion: 0.5 },
+  ]
+  const explosion = { itemYield: {}, subPerUnit: { sauce: [{ item_id: 'chilli', qty: 0.2 }, { item_id: 'garlic', qty: 0.05 }] } }
+
+  test('lines become stored deltas, an item line or a sub-recipe line', () => {
+    expect(choiceLinesAsDeltas(rows)).toEqual([
+      { item_id: 'oat_milk', qty: 150 }, { item_id: 'milk', qty: -150 }, { sub_recipe_id: 'sauce', qty: 0.5 },
+    ])
+  })
+
+  test('a sub-recipe line reaches its raw items through the one conversion', () => {
+    expect([...choiceLinkedItemIds(rows, explosion)].sort()).toEqual(['chilli', 'garlic', 'milk', 'oat_milk'])
+  })
+
+  const builder = result => {
+    const b = { order: jest.fn(() => b), range: jest.fn(() => b), then: (ok, bad) => Promise.resolve(result).then(ok, bad) }
+    return b
+  }
+
+  test('one scoped, paged read of pos_option_ingredients; item lines need no further read', async () => {
+    const from = jest.fn(() => builder({ data: rows.slice(0, 2), error: null }))
+    const supabase = { from: jest.fn() }
+    const ids = await loadChoiceLinkedItemIds(supabase, from)
+    expect(from).toHaveBeenCalledWith('pos_option_ingredients', 'item_id, sub_recipe_id, qty_per_portion')
+    expect([...ids].sort()).toEqual(['milk', 'oat_milk'])
+    expect(supabase.from).not.toHaveBeenCalled()
+  })
+
+  test('a failed read THROWS, so the page fails as it does for the recipe walk', async () => {
+    const from = jest.fn(() => builder({ data: null, error: { message: 'permission denied' } }))
+    await expect(loadChoiceLinkedItemIds({ from: jest.fn() }, from)).rejects.toThrow('permission denied')
+  })
+
+  test('the state is named for both links', () => {
+    expect(VARIANCE_FLAG_TEXT.no_recipe).toBe('no recipe or choice linked')
+  })
 })
 
 // Lead note on D36 (S792): a closing_stock row whose physical_qty is NULL is NOT a count. The pages
@@ -162,6 +214,32 @@ describe('the three pages share the population (S792)', () => {
   // a dish whose month net sold is 0 or less adds no extras to theoretical usage either.
   test('Theoretical vs Actual adds choice extras only for a dish that sold', () => {
     expect(read('TheoreticalVariance.js')).toMatch(/depleting\.forEach\(e => \{\s*if \(!e\.ingredient_deltas\) return\s*if \(\(salesMap\[e\.recipe_id\] \|\| 0\) <= 0\) return/)
+  })
+
+  // S862 REPORTS-STOCK-3: every page that judges the population reads the client's choice lines beside
+  // the recipe walk and passes them on; the two pure builders take them from their caller.
+  test.each(['Variance.js', 'TheoreticalVariance.js'])('%s reads the choice lines and links them', f => {
+    expect(read(f)).toMatch(/loadChoiceLinkedItemIds\(supabase, scopedFrom/)
+    expect(read(f)).toMatch(/linkedItemIdsOf\([^\n]*, choiceItemIds\)/)
+  })
+  test('the Owner Report variance section reads them too, and the pure builders pass them on', () => {
+    const readFrom = (dir, f) => fs.readFileSync(path.join(__dirname, dir, f), 'utf8')
+    expect(readFrom('../../../modules/ownerReport', 'computeInventoryVariance.js')).toMatch(/loadChoiceLinkedItemIds\(supabase, \(t, c\) => scopedFrom\(t, clientId, c\)\)/)
+    expect(read('shrinkageCalc.js')).toMatch(/linkedItemIdsOf\([^\n]*, choiceItemIds\)/)
+    expect(readFrom('../../../pages/dashboard', 'homeTopVariance.js')).toMatch(/linkedItemIdsOf\(breakdown, depleting, explosion, choiceItemIds\)/)
+  })
+  test('the pages feeding the pure builders read the choice lines beside their recipe walk', () => {
+    const readFrom = (dir, f) => fs.readFileSync(path.join(__dirname, dir, f), 'utf8')
+    const shrink = read('ShrinkageReport.js')
+    expect(shrink).toMatch(/loadChoiceLinkedItemIds\(supabase, scopedFrom\)/)
+    expect(shrink).toMatch(/explosion, transfers, choiceItemIds,/)
+    const trend = readFrom('../../../modules/ownerReport', 'computeInventoryShrinkageTrend.js')
+    expect(trend).toMatch(/loadChoiceLinkedItemIds\(supabase, \(t, c\) => scopedFrom\(t, clientId, c\)\)/)
+    expect(trend).toMatch(/settings, transfers, choiceItemIds \}\)/)
+    const dash = readFrom('../../../pages/dashboard', 'ClientDashboard.jsx')
+    expect(dash).toMatch(/withTimeout\(loadChoiceLinkedItemIds\(supabase, scopedFrom\), WALK_TIMEOUT_MS/)
+    expect(dash).toMatch(/variance: shelfFailed \|\| choiceItemIds === null/)
+    expect(dash).toMatch(/transfers: transfersData,\s*choiceItemIds,/)
   })
 
   test('Shrinkage no longer skips a month before looking at its count when nothing sold', () => {

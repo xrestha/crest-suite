@@ -10,7 +10,7 @@ import { COGS_FORMULA, computeUsed, varianceBand, varianceFlagPct } from '../../
 import { selectDepletingSales } from '../sales/salesDepletion'
 import { loadDeltaExplosion, deltaItems } from '../../../utils/orderLineIngredients'
 import {
-  linkedItemIdsOf, varianceRowBand, hasVarianceActivity, isUncountedGap, judgedRows, closingCountMap, VARIANCE_FLAG_TEXT as FLAG_TEXT,
+  linkedItemIdsOf, loadChoiceLinkedItemIds, varianceRowBand, hasVarianceActivity, isUncountedGap, judgedRows, closingCountMap, VARIANCE_FLAG_TEXT as FLAG_TEXT,
 } from './variancePopulation'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
@@ -239,9 +239,14 @@ export default function TheoreticalVariance() {
     // sub-recipes, which go through the ONE shared walk inside loadDeltaExplosion, not the local
     // expandIngredients below. It throws on a failed read, and a missing explosion would read a
     // Half plate as a whole one — so it fails the load like any other read here.
-    let explosion
+    // The client's choice stock lines fail it the same way (S862 REPORTS-STOCK-3): missed, an item only
+    // a choice uses would read "no recipe linked" in a month nobody picked it.
+    let explosion, choiceItemIds
     try {
-      explosion = await loadDeltaExplosion(supabase, depleting.map(e => e.ingredient_deltas))
+      ;[explosion, choiceItemIds] = await Promise.all([
+        loadDeltaExplosion(supabase, depleting.map(e => e.ingredient_deltas)),
+        loadChoiceLinkedItemIds(supabase, scopedFrom),
+      ])
     } catch (err) {
       if (!periodReq.isCurrent(periodId)) return
       setLoadError(err); setRows([]); return
@@ -299,7 +304,7 @@ export default function TheoreticalVariance() {
     // NPR 11,200" here, for one month. Now every active item is a row (drawn when it has activity),
     // an item in no recipe gets D17's grey "no recipe linked" state, and the verdict, the flagged
     // count and the totals come from ./variancePopulation.js, which Variance.js reads too.
-    const linkedItemIds = linkedItemIdsOf(breakdown, depleting, explosion)
+    const linkedItemIds = linkedItemIdsOf(breakdown, depleting, explosion, choiceItemIds)
     const computed = itemList.map(item => {
       const openQty         = openMap[item.id] || 0
       const purchQty        = (purchMap[item.id] || 0) - (retMap[item.id] || 0) + (transferNet[item.id] || 0)   // net of returns and stock transfers (S849)
@@ -384,7 +389,7 @@ export default function TheoreticalVariance() {
         ? `${uncountedCount} item(s) have no closing count and are marked "not counted" — they are excluded from the period totals`
         : null,
       noRecipeCount > 0
-        ? `${noRecipeCount} item(s) are in no recipe and are marked "no recipe linked" — excluded from the over-tolerance count and the totals`
+        ? `${noRecipeCount} item(s) are in no recipe and no choice and are marked "no recipe or choice linked" — excluded from the over-tolerance count and the totals`
         : null,
       'A Variance % of "" means nothing using the item sold this period; its use is still judged, as on the Variance Report',
     ].filter(Boolean)
@@ -534,7 +539,7 @@ export default function TheoreticalVariance() {
             { label: 'Items Over Tolerance',
               value: hasClosing ? overCount : '—',
               sub:   !hasClosing ? 'Needs closing count'
-                     : [`${underCount} under tolerance`, noRecipeCount > 0 ? `${noRecipeCount} with no recipe` : null].filter(Boolean).join(' · '),
+                     : [`${underCount} under tolerance`, noRecipeCount > 0 ? `${noRecipeCount} with no recipe or choice` : null].filter(Boolean).join(' · '),
               color: !hasClosing ? 'var(--theme-text2)' : overCount > 0 ? 'var(--theme-red-text)' : 'var(--theme-green-text)' },
           // `.stat-card`/`.stat-label`/`.stat-value`/`.stat-sub` — the product's own tile. The
           // hand-rolled copy sat at fontSize 22 (off the 24px figure step) with letterSpacing
@@ -643,8 +648,8 @@ export default function TheoreticalVariance() {
                           </Tip>
                         )}
                         {hasCount && b.flag === 'no_recipe' && (
-                          <Tip text="This item is not an ingredient in any recipe (gas, foil, napkins…), so there is no theoretical usage to compare against. What was used is shown; it is left out of the over-tolerance count and the totals — as on the Variance Report." width={300}>
-                            <span className="badge badge-gray" style={{ marginLeft: 6, display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>no recipe linked</span>
+                          <Tip text="This item is not an ingredient in any recipe and no choice uses it (gas, foil, napkins…), so there is no theoretical usage to compare against. What was used is shown; it is left out of the over-tolerance count and the totals — as on the Variance Report." width={300}>
+                            <span className="badge badge-gray" style={{ marginLeft: 6, display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>no recipe or choice linked</span>
                           </Tip>
                         )}
                       </td>

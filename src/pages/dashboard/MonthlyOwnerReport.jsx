@@ -1422,7 +1422,7 @@ function MonthlyOwnerReportBody() {
                           △ Not judged:
                           {v.uncountedCount > 0 && <> {num(v.uncountedCount)} item{v.uncountedCount === 1 ? '' : 's'} with stock had no closing count</>}
                           {v.uncountedCount > 0 && v.noRecipeCount > 0 && ';'}
-                          {v.noRecipeCount > 0 && <> {num(v.noRecipeCount)} {v.noRecipeCount === 1 ? 'is' : 'are'} in no recipe (gas, foil, napkins…), so nothing sold explains {v.noRecipeCount === 1 ? 'it' : 'them'}</>}.
+                          {v.noRecipeCount > 0 && <> {num(v.noRecipeCount)} {v.noRecipeCount === 1 ? 'is' : 'are'} in no recipe or choice (gas, foil, napkins…), so nothing sold explains {v.noRecipeCount === 1 ? 'it' : 'them'}</>}.
                           {' '}Neither is in the flagged count or the total below.
                         </p>
                       )}

@@ -73,6 +73,7 @@ import { KOT_CHANGE_ITEMS } from '../../modules/pos/kitchenNotes'
 import { summariseBills, returnsOf } from '../../modules/pos/dashboard/posDashboardMath'
 import { HOME_POS_READS, HOME_KITCHEN_READS, anyReadFailed, keepLastGood, readUnavailable } from './homePosStats'
 import { buildTopVariance, topVarianceRows, isTopVarianceView } from './homeTopVariance'
+import { loadChoiceLinkedItemIds } from '../../modules/ims/variance/variancePopulation'
 import { waitingRequests } from '../../shared/reservationSeen'
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
 const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
@@ -644,6 +645,14 @@ export default function ClientDashboard({ scope = 'home' }) {
     // nesting level per round trip. A failed or hung read is null, the same as a failed walk.
     const bookPromise = withTimeout(loadRecipeBook(scopedFrom), WALK_TIMEOUT_MS, 'Recipe book')
       .catch(err => { console.error('Dashboard: recipe book failed', err); return null })
+    // S862 REPORTS-STOCK-3: every item the client's choice stock lines reach, for Top Variance's
+    // population, so an item only a choice uses (Oat Milk) is judged in a month nobody picked it, as on
+    // the Variance page. Needs nothing else, so it starts here. A failed or hung read is null and
+    // fails the card the way a failed recipe walk does.
+    const choiceLinksPromise = canVariance
+      ? withTimeout(loadChoiceLinkedItemIds(supabase, scopedFrom), WALK_TIMEOUT_MS, 'Choice stock lines')
+          .catch(err => { console.error('Dashboard: choice stock-line read failed', err); return null })
+      : Promise.resolve(undefined)
 
     // .single() reports error.code 'PGRST116' when the result set isn't exactly one row — for
     // this query that just means "no open period right now," a normal, common state, not a
@@ -793,7 +802,7 @@ export default function ClientDashboard({ scope = 'home' }) {
           .catch(err => { console.error('Dashboard: recipe walk failed', err); return null })
       : Promise.resolve({})
 
-    const [dependentResults, rawBreakdown, forecastHistory, labourResult, commission] = await Promise.all([dependentPromise, ingredientBreakdownPromise, historyPromise, labourPromise, commissionPromise])
+    const [dependentResults, rawBreakdown, forecastHistory, labourResult, commission, choiceItemIds] = await Promise.all([dependentPromise, ingredientBreakdownPromise, historyPromise, labourPromise, commissionPromise, choiceLinksPromise])
     if (loadIdRef.current !== myId) return // superseded again after these more awaits
     const ingredientBreakdown = rawBreakdown || {}
 
@@ -822,7 +831,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     const labourFailed = labourResult?.labour?.source === 'failed'
     const hadRealError = periodFailed
       || independentResults.some(r => r.error) || dependentResults.some(r => r.error)
-      || rawBreakdown === null || deltaExplosion === null || labourFailed || commission.status === 'failed'
+      || rawBreakdown === null || deltaExplosion === null || choiceItemIds === null || labourFailed || commission.status === 'failed'
     setLoadErrors(prev => ({ ...prev, ims: hadRealError ? 'Inventory data failed to load — figures below may be incomplete or stale.' : '' }))
     // A load with any failed read is shown but never cached (S849, OWNER-DASHBOARD-2): a cached
     // partial load would outlive the failure as a confident figure on the next visit.
@@ -854,7 +863,7 @@ export default function ClientDashboard({ scope = 'home' }) {
       // Daily Purchases vs Sales: the day's purchases net of returns, and its sales at their prices.
       trend: periodFailed || indFailed(4) || [0, 1, 2].some(depFailed),
       stock: shelfFailed || indFailed(6),
-      variance: shelfFailed,
+      variance: shelfFailed || choiceItemIds === null,
     }
 
     // purchaseTotal = purchases NET of bill discounts − returns. `discount_amount` is a BILL-level
@@ -968,6 +977,7 @@ export default function ClientDashboard({ scope = 'home' }) {
       put(setTopVariance, 'topVarianceView', buildTopVariance({
         items, opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData,
         sales: salesData, breakdown: ingredientBreakdown, explosion: deltaExplosion, transfers: transfersData,
+        choiceItemIds,
       }))
     } else {
       put(setTopVariance, 'topVarianceView', null)

@@ -37,6 +37,7 @@ import { varianceThresholds } from '../../shared/imsFormulas'
 import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildShrinkageObservations, bandShrinkageItem } from '../ims/variance/shrinkageCalc'
+import { loadChoiceLinkedItemIds } from '../ims/variance/variancePopulation'
 import { readPeriodTransfers } from '../ims/transfers/transferFlows'
 
 const WINDOW_SIZE = 6
@@ -46,12 +47,12 @@ const WINDOW_SIZE = 6
  * database. `window` is the closed periods analysed, newest first; `sales` rows must carry
  * `period_id, recipe_id, qty_sold, bs_day, source, ingredient_deltas`.
  */
-export function buildShrinkageTrendSection({ window, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion = null, settings = null, transfers = null }) {
+export function buildShrinkageTrendSection({ window, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion = null, settings = null, transfers = null, choiceItemIds = null }) {
   const periodIds = (window || []).map(p => p.id)
   // Stock transfers between outlets move each month's net purchases (S849, PNL-8, schema 18), as on
   // the Shrinkage Report: stock sent to a branch is never read as shrinkage here.
   const { rows: observed, uncountedItems, uncountedItemPeriods } = buildShrinkageObservations({
-    periodIds, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion, transfers,
+    periodIds, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion, transfers, choiceItemIds,
   })
   // The frozen row names its item by id and name (resolved at generation, S435), not the item row.
   const rows = observed.map(({ item, rate, observations, uncountedPeriods }) =>
@@ -120,11 +121,14 @@ export async function computeInventoryShrinkageTrend(clientId, period) {
 
   const recipeIds = (recipes || []).map(r => r.id)
   // Both walks throw on a failed read, so a failure names this section as failed rather than
-  // freezing zero theoretical usage — which reads as every item shrinking.
-  const [breakdown, explosion] = await Promise.all([
+  // freezing zero theoretical usage — which reads as every item shrinking. So does the client's
+  // choice-line read (S862 REPORTS-STOCK-3, schema 20): missed, an item only a choice uses would
+  // drop out of the trend in a window nobody picked it.
+  const [breakdown, explosion, choiceItemIds] = await Promise.all([
     recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds) : {},
     loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
+    loadChoiceLinkedItemIds(supabase, (t, c) => scopedFrom(t, clientId, c)),
   ])
 
-  return buildShrinkageTrendSection({ window, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion, settings, transfers })
+  return buildShrinkageTrendSection({ window, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion, settings, transfers, choiceItemIds })
 }

@@ -22,6 +22,7 @@ import {
 } from '../../shared/menuEngineering'
 import { recipeCostOf } from '../../shared/imsFormulas'
 import { isCostedByBuild, BYO_REASON } from '../ims/recipes/buildYourOwnRating'
+import { customizationState } from '../../utils/subscription'
 
 // RECIPES-1 (S792, settled by precedent): a build-your-own dish is "Not rated — costed by build".
 // Its recipe holds only the fixed part (the bowl and the spoon); the plate is the guest's choices,
@@ -39,8 +40,9 @@ export async function computeMenuEngineeringSection(clientId, period) {
     // flags, not the viewer's: the live page's `customizationEnabled` is also true for any admin,
     // and a frozen report must not depend on who generated it. `clients` stays on raw supabase.from
     // (CLAUDE.md), and `.single()` so a failed or empty read fails the section rather than
-    // defaulting to "off" and freezing bowls as Stars.
-    supabase.from('clients').select('pos_enabled, customization_enabled').eq('id', clientId).single(),
+    // defaulting to "off" and freezing bowls as Stars. With its end date since S862 (CU1): the
+    // till stops offering choices 7 days after it, so the dish sells plain and is rated like any other.
+    supabase.from('clients').select('pos_enabled, customization_enabled, customization_ends_at').eq('id', clientId).single(),
     // Both NULL-safe (S714). Both columns are nullable and a server-side .neq drops NULL rows,
     // so an uncategorised dish was absent from the matrix — and this section is FROZEN into the
     // monthly snapshot, so it was absent permanently, with no way to tell from the artifact.
@@ -58,8 +60,9 @@ export async function computeMenuEngineeringSection(clientId, period) {
   // matrix of all-Dogs into the immutable snapshot (S612).
   throwFirstError(results)
   const [{ data: client }, { data: recipes }, { data: sales }] = results
-  // AuthContext's rule for the client's own module flag: Customization is sold on top of POS.
-  const customizationEnabled = !!client?.pos_enabled && !!client?.customization_enabled
+  // AuthContext's rule for the client's own module flag (customizationState, S862): sold on top of
+  // POS, and live until 7 days past its end date.
+  const customizationEnabled = customizationState(client).live
 
   const recipeIds = (recipes || []).map(r => r.id)
   const costMap = recipeIds.length > 0 ? await computeRecipeCosts(supabase, recipeIds) : {}

@@ -149,6 +149,37 @@ describe('the reads behind it', () => {
   })
 })
 
+// S862 REPORTS-STOCK-1, schema v20: a comped dish is costed WITH its choices, as every POS comp
+// screen has been since S838 (posLineCosts), on the CLIENT's flags, never the viewer's.
+describe('Comped Bills food cost includes the choices (v20)', () => {
+  const flat = fs.readFileSync(path.join(__dirname, 'computeMonthlyReport.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+    .replace(/\s+/g, ' ')
+  const pos = flat.slice(flat.indexOf('async function computePosSection'), flat.indexOf('export function computeCombinedMetrics'))
+
+  test('with Inventory, the line read embeds the choices\' stock lines frozen on each line', () => {
+    expect(pos).toMatch(/scopedFrom\('pos_order_items', clientId, `[^`]*\$\{inventory \? `, \$\{LINE_CHOICE_STOCK\}` : ''\}`\)/)
+  })
+  test('each comp is costed per plate by posLineCosts, never the plain recipe cost', () => {
+    expect(pos).toMatch(/await posLineCosts\(supabase, clientId, compedItems, \{/)
+    expect(pos).toMatch(/compedFoodCost \+= i\.qty \* costOf\(i\)/)
+    expect(pos).not.toMatch(/computeRecipeCosts/)
+  })
+  test('Inventory is the client\'s module flag and build-your-own follows the client\'s live Customization', () => {
+    expect(flat).toMatch(/computePosSection\(clientId, period, \{ inventory: !!modulesIncluded\.ims \}\)/)
+    expect(pos).toMatch(/supabase\.from\('clients'\)\.select\('pos_enabled, customization_enabled, customization_ends_at'\)\.eq\('id', clientId\)\.single\(\)/)
+    expect(pos).toMatch(/customizationState\(clientRes\.data\)\.live/)
+    expect(pos).toMatch(/buildYourOwn: inventory && customizationLive \? buildYourOwnAmong\(/)
+    // The clients read rides in the first batch, so a failed read fails the section.
+    expect(pos.indexOf("supabase.from('clients')")).toBeLessThan(pos.indexOf('throwFirstError(posResults)'))
+  })
+  test('the figure is marked, and the schema version moved with its meaning', () => {
+    expect(pos).toMatch(/compedBillsTotal: \{[^}]*costBasis: 'with_choices'/)
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(20)
+  })
+})
+
 // S839 (docs/pos-combos.md): a bill discount never touches a combo's dishes. The line read takes
 // `selection_key` (a combo dish's carries '@'), never the newer `combo_line_id`, which a database the
 // combo migration has not reached would refuse and freeze the POS section as failed.
@@ -177,7 +208,7 @@ describe('a bill discount never touches a combo', () => {
   test('the line read carries selection_key and does not name combo_line_id', () => {
     const src = fs.readFileSync(path.join(__dirname, 'computeMonthlyReport.js'), 'utf8')
     const pos = src.slice(src.indexOf('async function computePosSection'), src.indexOf('export function computeCombinedMetrics'))
-    expect(pos).toMatch(/scopedFrom\('pos_order_items', clientId, '[^']*\bselection_key\b[^']*'\)\.in\('order_id', ids\)\.order\('id'\)/)
+    expect(pos).toMatch(/scopedFrom\('pos_order_items', clientId, `[^`]*\bselection_key\b[^)]*\)\.in\('order_id', ids\)\.order\('id'\)/)
     expect(pos).not.toMatch(/combo_line_id/)
   })
 })

@@ -10,12 +10,14 @@
 // the same rule per period.
 //
 // Variance.js is the reference; its population and its verdict moved here unchanged so the other
-// pages can share them rather than copy them. Pure — no Supabase, no React.
+// pages can share them rather than copy them. Pure — no Supabase client, no React; the one reader
+// here (`loadChoiceLinkedItemIds`) is handed its query builder and client by the caller.
 //
 // Every row function takes Variance.js's row shape:
 //   measured         the month has a closing count AND this item has one (S719; a 0 is a count,
 //                    a NULL physical_qty is not — closingCountMap below)
-//   noRecipe         the item is in no recipe at any depth and no option line (D17)
+//   noRecipe         the item is in no recipe at any depth and no choice stock line (D17; S862
+//                    REPORTS-STOCK-3: the client's choice lines, sold this month or not)
 //   theoreticalUsed  sales × recipe (+ option deltas), through the depletion rule
 //   actualUsed       computeUsed(): opening + net purchases − wastage − staff meals − closing
 //   variancePct      (actual − theoretical) ÷ theoretical × 100, or null when theoretical ≤ 0
@@ -25,7 +27,9 @@
 //                    `hasVarianceActivity` and `isUncountedGap` see stock that only arrived by
 //                    transfer, and a sender stops expecting stock that is on the way elsewhere)
 import { varianceBand } from '../../../shared/imsFormulas'
-import { deltaItems } from '../../../utils/orderLineIngredients'
+import { deltaItems, loadDeltaExplosion, bookCoversDeltas } from '../../../utils/orderLineIngredients'
+import { fetchAllRows } from '../../../shared/fetchAllRows'
+import { throwFirstError } from '../../../shared/queryError'
 
 /**
  * Is this closing_stock row a COUNT? A `physical_qty` of 0 is ("we looked, there was none" — S695);
@@ -49,24 +53,66 @@ export function closingCountMap(rows) {
 }
 
 /** The Flag column's words, shared by the pages' exports. */
-export const VARIANCE_FLAG_TEXT = { over: 'over', under: 'under', ok: 'ok', unmeasured: 'not measurable', no_recipe: 'no recipe linked' }
+export const VARIANCE_FLAG_TEXT = { over: 'over', under: 'under', ok: 'ok', unmeasured: 'not measurable', no_recipe: 'no recipe or choice linked' }
 
 /**
- * Every item that a recipe (at any depth) or a sold option line consumes. D17's "no recipe linked"
+ * Every item that a recipe (at any depth) or a choice stock line consumes. D17's "no recipe linked"
  * test is this set, NOT "theoretical usage was 0 this month" — a recipe ingredient whose dishes did
  * not sell is still judged. `breakdown` is `{ recipeId: [{ item_id, qty }] }` over the client's
  * WHOLE recipe book (explodeRecipeIngredients' shape); `depletingRows` are sales rows that have
  * already been through the depletion rule, whose `ingredient_deltas` name items reached only
- * through an option (extra cheese on a dish whose recipe has none — S758).
+ * through an option (extra cheese on a dish whose recipe has none — S758), including a choice since
+ * deleted. `choiceItemIds` (S862 REPORTS-STOCK-3, `loadChoiceLinkedItemIds`) is every item the
+ * client's choice lines reach today: an item only a choice uses (Oat Milk) is judged like a recipe
+ * ingredient in a month nobody picked it, rather than greyed as "no recipe linked".
  */
-export function linkedItemIdsOf(breakdown, depletingRows, explosion) {
+export function linkedItemIdsOf(breakdown, depletingRows, explosion, choiceItemIds = null) {
   const ids = new Set()
   Object.values(breakdown || {}).forEach(ings => (ings || []).forEach(({ item_id }) => ids.add(item_id)))
   ;(depletingRows || []).forEach(s => {
     if (!s.ingredient_deltas) return
     deltaItems(s.ingredient_deltas, explosion).forEach(({ item_id }) => ids.add(item_id))
   })
+  for (const id of choiceItemIds || []) ids.add(id)
   return ids
+}
+
+/** `pos_option_ingredients` rows → the stored-delta shape deltaItems reads. Pure. */
+export function choiceLinesAsDeltas(rows) {
+  const out = []
+  for (const r of rows || []) {
+    const qty = Number(r?.qty_per_portion) || 0
+    if (!qty) continue
+    if (r.item_id) out.push({ item_id: r.item_id, qty })
+    else if (r.sub_recipe_id) out.push({ sub_recipe_id: r.sub_recipe_id, qty })
+  }
+  return out
+}
+
+/** The raw items these choice lines reach: an item line itself, a sub-recipe line through `explosion`. Pure. */
+export function choiceLinkedItemIds(rows, explosion) {
+  return new Set(deltaItems(choiceLinesAsDeltas(rows), explosion).map(({ item_id }) => item_id))
+}
+
+/**
+ * Every item the client's choice stock lines reach today (S862 REPORTS-STOCK-3), for
+ * `linkedItemIdsOf`. One scoped, paged read of `pos_option_ingredients`; a sub-recipe line goes
+ * through the one conversion (loadDeltaExplosion), from `book` when it holds that sub-recipe. Read
+ * it beside the recipe walk: it THROWS on a failed read like the walk, because a missed line would
+ * grey a choice's item as "no recipe linked" and leave its loss out of every total.
+ * @param {object} supabase
+ * @param {Function} from  (table, columns) → a client-scoped builder
+ * @param {object} [opts]  `book`: a recipe book (recipeCost.loadRecipeBook) the caller already holds
+ * @returns {Promise<Set<string>>}
+ */
+export async function loadChoiceLinkedItemIds(supabase, from, { book } = {}) {
+  const res = await fetchAllRows(() => from('pos_option_ingredients', 'item_id, sub_recipe_id, qty_per_portion').order('id'))
+  throwFirstError([res])
+  const rows = res.data || []
+  // Only the sub-recipe lines need reading; an item line names its item. No sub-recipe line, no read.
+  const subLines = choiceLinesAsDeltas(rows).filter(d => d.sub_recipe_id)
+  const explosion = await loadDeltaExplosion(supabase, [subLines], { book: bookCoversDeltas(book, [subLines]) ? book : undefined })
+  return choiceLinkedItemIds(rows, explosion)
 }
 
 /**

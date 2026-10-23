@@ -81,8 +81,9 @@ function byPeriodItem(rows, field) {
  *   NUMBER, so two months at once let a till sale on the 5th of one silence a manual sale on the 5th
  *   of another (S718). buildUsageMap drops credit notes and superseded manual rows, then adds each
  *   surviving customized plate's option lines (S758).
- * - The items judged are the Variance Report's (D17/D36): every item a recipe at any depth, or a
- *   sold option line, consumes. An item in no recipe is never judged (gas, foil, napkins).
+ * - The items judged are the Variance Report's (D17/D36): every item a recipe at any depth, a sold
+ *   option line, or one of the client's choice lines (`choiceItemIds`, loadChoiceLinkedItemIds,
+ *   S862 REPORTS-STOCK-3) consumes. An item in no recipe or choice is never judged (gas, foil, napkins).
  * - A month is observed when the item was COUNTED (a NULL physical_qty is not a count, a 0 is —
  *   S695) and either its dishes sold or its stock moved with nothing sold (D36). A month with
  *   expected use or stock on hand but no count is skipped and counted, never read as the whole shelf
@@ -93,7 +94,7 @@ function byPeriodItem(rows, field) {
  *   stock ('in') adds like a purchase, sent stock ('out') comes off like a return. Stock sent to a
  *   branch is therefore never read as shrinkage at the sender, nor stock received as a surplus.
  */
-export function buildShrinkageObservations({ periodIds, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion = null, transfers = null }) {
+export function buildShrinkageObservations({ periodIds, items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion = null, transfers = null, choiceItemIds = null }) {
   const ids = periodIds || []
   const openMap = byPeriodItem(opening, 'qty')
   const wasteMap = byPeriodItem(wastages, 'qty')
@@ -122,7 +123,7 @@ export function buildShrinkageObservations({ periodIds, items, opening, closing,
   const theorMap = {}
   ids.forEach(pid => { theorMap[pid] = buildUsageMap(salesByPeriod[pid] || [], breakdown || {}, explosion) })
 
-  const linked = linkedItemIdsOf(breakdown || {}, selectDepletingSalesAcrossPeriods(sales || []), explosion)
+  const linked = linkedItemIdsOf(breakdown || {}, selectDepletingSalesAcrossPeriods(sales || []), explosion, choiceItemIds)
 
   let uncountedItems = 0
   let uncountedItemPeriods = 0

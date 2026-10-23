@@ -14,6 +14,8 @@ import ReportPage from '../../components/ReportPage'
 import Tip from '../../components/Tip'
 import BsCalendarPicker from '../../components/BsCalendarPicker'
 import RangePresets from '../pos/reports/RangePresets'
+import { settleAll, rangeReadMs } from '../pos/reports/reportTimeout'
+import { withTimeout } from '../../utils/withTimeout'
 import { nepalDayStartTs, nepalDayEndTs, bsSlash, bsMonthRangeIso } from '../pos/reports/reportRange'
 import { deltaItems } from '../../utils/orderLineIngredients'
 import { posDeltaCosting } from '../pos/orders/posRecipeBook'
@@ -181,8 +183,13 @@ export default function CustomizationReport() {
     if (!clientId) return
     const key = rangeReq.begin(`${clientId}:${fromIso}:${toIso}`)
     setLoading(true); setLoadError(null); setCostError(null)
+    // S862 REPORTS-STOCK-5: every read is bounded, as on Sales Report (S842). A hung read answers
+    // `{ error }` and fails the page through ReportLoadError like a refused one, with Retry. The limit
+    // covers the chosen range AND the one before it, which the bill read spans.
+    const readMs = rangeReadMs(prevFromIso, toIso)
+    const LOAD_LABEL = 'Loading the Customization Report'
     try {
-      const [ordersRes, attachRes, catalog] = await Promise.all([
+      const [ordersRes, attachRes, catalog] = await settleAll([
         // Paged: a month of bills passes 1000 at any real volume, and every share on this page
         // divides by a count taken from it.
         // S800: the chosen range AND the equal range before it, in one read, so the tiles can say
@@ -196,9 +203,10 @@ export default function CustomizationReport() {
         // price (a free-by-design choice is not a loss). A failed catalog read is a failed report
         // read — without it the tiles and the Margin tab would state things they cannot know.
         // S809 3o (REPORTS-12): each bill's own snapshot decides both now; the catalog only fills a
-        // snapshot row that carries no kind or list price.
+        // snapshot row that carries no kind or list price. Bounded, it answers `{ error }` on a
+        // timeout, the shape a refused catalog read has.
         loadOptionCatalog(scopedFrom),
-      ])
+      ], readMs, LOAD_LABEL)
       const err1 = firstError([ordersRes, attachRes]) || catalog.error
       if (err1) throw err1
       const kindByGroup = Object.fromEntries(catalog.groups.map(g => [g.id, g.kind]))
@@ -212,12 +220,12 @@ export default function CustomizationReport() {
           ? fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_items', LINE_COLS).in('order_id', ids).order('id'))
           : r
       }
-      const [linesRes, snapRes] = await Promise.all([
+      const [linesRes, snapRes] = await settleAll([
         readLines(),
         fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_item_options',
           'id, order_item_id, option_id, group_name, group_kind, option_name, is_removal, price_delta, list_price_delta, included, ingredient_deltas')
           .in('order_id', ids).order('id')),
-      ])
+      ], readMs, LOAD_LABEL)
       const err2 = firstError([linesRes, snapRes])
       if (err2) throw err2
       const attachedRecipeIds = new Set((attachRes.data || []).map(a => a.recipe_id))
@@ -260,7 +268,8 @@ export default function CustomizationReport() {
       const deltaSets = allDeltaSets(report.options)
       if (imsOn && deltaSets.length > 0) {
         try {
-          const { explosion, rateOf } = await posDeltaCosting(supabase, clientId, deltaSets)
+          // Bounded in its own try (S862 REPORTS-STOCK-5): a hung costing fails the Margin tab only.
+          const { explosion, rateOf } = await withTimeout(posDeltaCosting(supabase, clientId, deltaSets), readMs, 'Costing the choices')
           const toItems = d => deltaItems(d, explosion)
           const itemIds = [...new Set(deltaSets.flatMap(d => toItems(d).map(x => x.item_id)))]
           const rateByItem = Object.fromEntries(itemIds.map(id => [id, rateOf(id)]))
@@ -368,7 +377,9 @@ export default function CustomizationReport() {
     // S809 3o (REPORTS-12): free only when every plate was BILLED at a list price of 0. A choice
     // charged all month and made free since keeps its loss in red.
     const free = o.freeByDesign || (o.listPriceDelta == null && o.chargedPerPick === 0)
-    const sizeBelow = o.listPriceDelta != null && o.listPriceDelta < 0
+    // S862 REPORTS-STOCK-6: only a SIZE below the dish is part of the dish cost by design. Any other
+    // choice priced below the dish keeps its margin verdict, red and ▼ when it loses money.
+    const sizeBelow = o.group_kind === 'size' && o.listPriceDelta != null && o.listPriceDelta < 0
     if (free || sizeBelow) {
       // Not an upsell that lost money: a choice priced at 0 by design (or a size priced below the
       // dish) costs what it costs inside the dish's own food cost. No red, no ▼.
@@ -443,7 +454,7 @@ export default function CustomizationReport() {
               format={pct} opts={{ floor: 0.02 }} />
           </div>
           <div className="stat-card">
-            <div className="stat-label"><Tip text="What paid add-ons added to bills, ex-VAT and before bill discounts. Comped plates add nothing.">Extras earned</Tip></div>
+            <div className="stat-label"><Tip text="What paid add-ons and larger sizes added to bills: every choice priced above the dish, ex-VAT and before bill discounts. Comped plates add nothing.">Extras earned</Tip></div>
             <div className="stat-value">{npr(Math.round(report.extrasEarned))}</div>
             <VsBefore now={report.extrasEarned} then={data.prevReport?.extrasEarned} label={`the ${rangeDays} days before`}
               format={v => npr(Math.round(v))} opts={{ floor: 100 }} />
@@ -464,6 +475,13 @@ export default function CustomizationReport() {
             {report.removals[0] && <div className="stat-sub">{nprInt(report.removals[0].picks)} plates</div>}
           </div>
         </div>
+        {/* S862 REPORTS-STOCK-6 (owner decision CU6 a): a choice that is not a size, priced below the
+            dish, is its own figure, never a size adjustment. Shown only when there is one. */}
+        {report.cheaperChoices < 0 && (
+          <p className="page-footnote">
+            <strong>Cheaper choices {negative(report.cheaperChoices)}</strong>: choices other than a size, priced below the dish, took this off bills (ex-VAT, before bill discounts). It is counted in neither Extras earned nor Size adjustments.
+          </p>
+        )}
         {data.weekly && data.weekly.dishes.length > 0 && (
           <div className="dash-row" style={{ marginTop: 16 }}>
             <ChartCard

@@ -14,7 +14,9 @@ import { useRecipeBook } from '../../../shared/hooks/useRecipeBook'
 import { selectDepletingSales } from '../sales/salesDepletion'
 import { buildUsageMap } from '../stockcount/stockReportCalc'
 import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
-import { linkedItemIdsOf, varianceRowBand, hasVarianceActivity, isUncountedGap, closingCountMap } from './variancePopulation'
+import {
+  linkedItemIdsOf, loadChoiceLinkedItemIds, varianceRowBand, hasVarianceActivity, isUncountedGap, closingCountMap, VARIANCE_FLAG_TEXT as FLAG_TEXT,
+} from './variancePopulation'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -45,8 +47,6 @@ function dispPurch(baseQty, item) {
 // nothing but the stock fell" included — lives in ./variancePopulation.js since S792 (FIGURES-4 /
 // D36), unchanged, so Theoretical vs Actual and Shrinkage judge the same items the same way
 // rather than keeping copies of it.
-
-const FLAG_TEXT = { over: 'over', under: 'under', ok: 'ok', unmeasured: 'not measurable', no_recipe: 'no recipe linked' }
 
 export default function Variance() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -183,12 +183,16 @@ export default function Variance() {
     // usage came out as zero, and every item read as over-consumed by its whole actual usage.
     let breakdown = {}
     let explosion = null
+    let choiceItemIds = null
     try {
       // The option-delta explosion (S758) fails the same way the recipe walk does: a missing one
-      // would read a customized plate as its plain recipe, so it shares this catch.
-      ;[breakdown, explosion] = await Promise.all([
+      // would read a customized plate as its plain recipe, so it shares this catch. So do the
+      // client's choice stock lines (S862 REPORTS-STOCK-3): missed, an item only a choice uses
+      // would read "no recipe linked" in a month nobody picked it, its loss left out of the totals.
+      ;[breakdown, explosion, choiceItemIds] = await Promise.all([
         recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds, { book }) : {},
         loadDeltaExplosion(supabase, (sales || []).map(r => r.ingredient_deltas)),
+        loadChoiceLinkedItemIds(supabase, scopedFrom, { book }),
       ])
     } catch (err) {
       // The isCurrent guard belongs on the failure path too: without it a superseded load's
@@ -202,8 +206,9 @@ export default function Variance() {
     // is still judged, because stock vanishing with nothing sold is exactly what this page is for.
     // An item reached only through an option (extra cheese on a dish whose recipe has none) is
     // still something sales explain, so it is judged rather than parked as "no recipe linked"
-    // (S758). One definition, shared with Theoretical vs Actual and Shrinkage (S792, D36).
-    const linkedItemIds = linkedItemIdsOf(breakdown, selectDepletingSales(sales || []), explosion)
+    // (S758), and so is one only a choice uses in a month nobody picked it (S862). One definition,
+    // shared with Theoretical vs Actual and Shrinkage (S792, D36).
+    const linkedItemIds = linkedItemIdsOf(breakdown, selectDepletingSales(sales || []), explosion, choiceItemIds)
 
     const openMap = {}; (opening || []).forEach(r => { openMap[r.item_id] = parseFloat(r.qty) || 0 })
     // Counts only (S792): a row whose physical_qty is NULL is not a count, and reading it as 0 made
@@ -323,8 +328,8 @@ export default function Variance() {
     if (band.flag === 'under') return <span className="badge badge-amber">Under</span>
     if (band.flag === 'no_recipe') {
       return (
-        <Tip text="This item is not an ingredient in any recipe (gas, foil, napkins…), so there is no theoretical usage to compare against. What was used is shown; it is left out of the flagged count and the total variance value." width={280}>
-          <span className="badge badge-gray" style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>No recipe linked</span>
+        <Tip text="This item is not an ingredient in any recipe and no choice uses it (gas, foil, napkins…), so there is no theoretical usage to compare against. What was used is shown; it is left out of the flagged count and the total variance value." width={280}>
+          <span className="badge badge-gray" style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>No recipe or choice linked</span>
         </Tip>
       )
     }
@@ -351,7 +356,7 @@ export default function Variance() {
         ? `${summary.uncounted} item(s) have no closing count and are marked "not measurable" — they are excluded from the period totals`
         : null,
       noRecipeCount > 0
-        ? `${noRecipeCount} item(s) are in no recipe and are marked "no recipe linked" — excluded from the flagged count and the total variance value`
+        ? `${noRecipeCount} item(s) are in no recipe and no choice and are marked "no recipe or choice linked" — excluded from the flagged count and the total variance value`
         : null,
     ].filter(Boolean)
     const rows = filtered.map(r => ({
@@ -439,12 +444,12 @@ export default function Variance() {
             <div className="stat-value">{filtered.length}</div>
             <div className="stat-sub">
               {[summary.uncounted > 0 ? `${summary.uncounted} not measurable` : 'all measurable',
-                noRecipeCount > 0 ? `${noRecipeCount} with no recipe` : null].filter(Boolean).join(' · ')}
+                noRecipeCount > 0 ? `${noRecipeCount} with no recipe or choice` : null].filter(Boolean).join(' · ')}
             </div>
           </div>
           <div className="stat-card">
             <div className="stat-label">
-              <Tip text={`Counted items whose usage differs from theoretical by more than ${flagPct}% AND by more than NPR ${VARIANCE_MATERIALITY_NPR.toLocaleString('en-IN')} — the same test that colours the rows. Items linked to no recipe are not counted. Change the percentage in Settings → Thresholds.`} width={260}>Flagged Items</Tip>
+              <Tip text={`Counted items whose usage differs from theoretical by more than ${flagPct}% AND by more than NPR ${VARIANCE_MATERIALITY_NPR.toLocaleString('en-IN')} — the same test that colours the rows. Items linked to no recipe or choice are not counted. Change the percentage in Settings → Thresholds.`} width={260}>Flagged Items</Tip>
             </div>
             {/* A tile is read from further away than a table cell, and these two were the only
                 severity on the page carried by hue alone. ✓ / ▲ are distinguished by shape. */}
@@ -455,7 +460,7 @@ export default function Variance() {
           </div>
           <div className="stat-card">
             <div className="stat-label">
-              <Tip text="Sum of (variance qty × item rate) across counted items that appear in a recipe. This is the NPR value of stock you can't account for. Items linked to no recipe (gas, foil, napkins) have nothing to compare against and are left out." width={260}>Total Variance Value</Tip>
+              <Tip text="Sum of (variance qty × item rate) across counted items that appear in a recipe or a choice. This is the NPR value of stock you can't account for. Items linked to no recipe or choice (gas, foil, napkins) have nothing to compare against and are left out." width={260}>Total Variance Value</Tip>
             </div>
             {/* `.gold` was inert here — an inline `color` beats the class, so the tile had carried
                 a dead class since it was written. Dropped rather than left to read as intent.
@@ -518,7 +523,7 @@ export default function Variance() {
             <option value="over">Over variance only</option>
             <option value="under">Under variance only</option>
             <option value="ok">OK only</option>
-            <option value="no_recipe">No recipe linked</option>
+            <option value="no_recipe">No recipe or choice linked</option>
           </select>
         </div>
         <span style={{ fontSize: 13, color: 'var(--theme-text2)', marginLeft: 'auto' }}>{filtered.length} items</span>

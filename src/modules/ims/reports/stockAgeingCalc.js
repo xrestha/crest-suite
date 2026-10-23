@@ -257,7 +257,7 @@ export function sumConsumptionByPeriod({ sales, breakdown, wastages, staffMeals,
     soldByPeriodRecipe[key] = (soldByPeriodRecipe[key] || 0) + (parseFloat(s.qty_sold) || 0)
     if (s.ingredient_deltas) {
       const dKey = `${key}|${JSON.stringify(s.ingredient_deltas)}`
-      const e = deltaSoldByKey[dKey] || (deltaSoldByKey[dKey] = { pid: s.period_id || '_', deltas: s.ingredient_deltas, sold: 0 })
+      const e = deltaSoldByKey[dKey] || (deltaSoldByKey[dKey] = { pid: s.period_id || '_', dishKey: key, deltas: s.ingredient_deltas, sold: 0 })
       e.sold += parseFloat(s.qty_sold) || 0
     }
   }
@@ -267,9 +267,11 @@ export function sumConsumptionByPeriod({ sales, breakdown, wastages, staffMeals,
     const [pid, recipeId] = key.split('|')
     for (const { item_id, qty } of (breakdown || {})[recipeId] || []) bump(pid, item_id, sold * (parseFloat(qty) || 0))
   }
-  // Same net-negative rule for the options, per dish + selection.
-  for (const { pid, deltas, sold } of Object.values(deltaSoldByKey)) {
-    if (!(sold > 0)) continue
+  // Choices follow their dish (S835; S862 REPORTS-STOCK-2): a selection counts while its DISH nets
+  // above 0 in the period, and it counts signed, as buildUsageMap does. Gated on the selection's own
+  // net, a "not served" note from an earlier month dropped a selection the Stock Report put back.
+  for (const { pid, dishKey, deltas, sold } of Object.values(deltaSoldByKey)) {
+    if (!(soldByPeriodRecipe[dishKey] > 0) || !sold) continue
     for (const { item_id, qty } of deltaItems(deltas, explosion)) bump(pid, item_id, sold * qty)
   }
   for (const [pid, byItem] of Object.entries(salesUse)) {

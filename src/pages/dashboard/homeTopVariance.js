@@ -22,8 +22,9 @@ import {
   closingCountMap, linkedItemIdsOf, judgedRows, isUncountedGap, varianceRowBand,
 } from '../../modules/ims/variance/variancePopulation'
 
-/** The cached shape's version: a pre-S852 cache held a bare array of rows built the old way. */
-export const TOP_VARIANCE_VERSION = 2
+/** The cached shape's version: a pre-S852 cache held a bare array of rows built the old way; 3 (S862)
+ *  links an item to the client's choice stock lines, so a view cached before it is not reused. */
+export const TOP_VARIANCE_VERSION = 3
 
 // Enough that the client's own tolerance, applied at render, still finds the five it shows: a row
 // can be large in rupees and still inside tolerance. Kept small because the view is cached.
@@ -46,12 +47,14 @@ function sumByItem(rows, field) {
  *   breakdown   `{ recipeId: [{ item_id, qty }] }` over the whole recipe book
  *   explosion   loadDeltaExplosion's result, for option stock lines (S758)
  *   transfers   readPeriodTransfers' rows (S849)
+ *   choiceItemIds  loadChoiceLinkedItemIds' set (S862 REPORTS-STOCK-3): an item only a choice uses is
+ *               judged in a month nobody picked it, as on the Variance page
  *
  * Returns `{ v, countedItems, uncounted, candidates }`. `countedItems` is how many items have a
  * closing count; 0 means nothing can be judged yet ("Needs a stock count"). `uncounted` is how many
  * items with stock have none (`isUncountedGap`), named under the table rather than judged.
  */
-export function buildTopVariance({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion = null, transfers = null }) {
+export function buildTopVariance({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion = null, transfers = null, choiceItemIds = null }) {
   const openMap = sumByItem(opening, 'qty')
   const closeMap = closingCountMap(closing)
   // Local, never state: does the month have any count at all.
@@ -64,7 +67,7 @@ export function buildTopVariance({ items, opening, closing, purchases, returns, 
 
   const depleting = selectDepletingSales(sales || [])
   const theoreticalMap = buildUsageMap(depleting, breakdown, explosion)
-  const linked = linkedItemIdsOf(breakdown, depleting, explosion)
+  const linked = linkedItemIdsOf(breakdown, depleting, explosion, choiceItemIds)
 
   const rows = (items || []).map(item => {
     const openQty = openMap[item.id] || 0

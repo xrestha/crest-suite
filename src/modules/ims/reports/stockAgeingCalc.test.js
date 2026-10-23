@@ -5,6 +5,7 @@ import {
   batchRateOf, transferBatchesOf,
 } from './stockAgeingCalc'
 import { daysInBsMonth } from '../../../utils/bsCalendar'
+import { buildUsageMap } from '../stockcount/stockReportCalc'
 
 const AS_OF = new Date('2026-08-19T12:00:00')
 const daysAgo = n => new Date(AS_OF.getTime() - n * 24 * 60 * 60 * 1000)
@@ -349,6 +350,50 @@ describe('sumConsumptionByPeriod', () => {
       returnsByPeriodItem: { p2: { oil: 2 } },
     })
     expect(out).toEqual({ p1: { rice: 1, oil: 1.5 }, p2: { rice: 4, oil: 2 } })
+  })
+})
+
+// S862 REPORTS-STOCK-2: a choice follows its DISH's net for the month (S835), signed, as the Stock
+// Report's buildUsageMap does. Only a "not served" note crossing a month edge tells the two rules apart.
+describe('sumConsumptionByPeriod: choices follow their dish across a month edge', () => {
+  const breakdown = { latte: [{ item_id: 'espresso', qty: 18 }, { item_id: 'milk', qty: 200 }] }
+  const shot = [{ item_id: 'espresso', qty: 9 }]
+  const kartikUse = sales => {
+    const out = sumConsumptionByPeriod({ sales, breakdown })
+    return out.kartik || {}
+  }
+  const stockReportUse = sales => buildUsageMap(sales, breakdown)
+
+  test('a later note for an Extra Shot latte puts the shot back while the dish still nets above 0', () => {
+    const sales = [
+      { period_id: 'kartik', recipe_id: 'latte', qty_sold: 3, source: 'pos', bs_day: 4 },
+      // Ashwin's latte with an Extra Shot, credited "not served" in Kartik.
+      { period_id: 'kartik', recipe_id: 'latte', qty_sold: -1, source: 'pos_credit_restock', bs_day: 9, ingredient_deltas: shot },
+    ]
+    // The dish nets 2: 36 g of espresso from the recipe, less the 9 g shot put back.
+    expect(kartikUse(sales)).toEqual({ espresso: 27, milk: 400 })
+    expect(kartikUse(sales)).toEqual(stockReportUse(sales))
+  })
+
+  test('a later note for a plain latte nets the dish to 0, so this month\'s Extra Shot takes nothing either', () => {
+    const sales = [
+      { period_id: 'kartik', recipe_id: 'latte', qty_sold: 1, source: 'pos', bs_day: 4, ingredient_deltas: shot },
+      // Ashwin's plain latte, credited "not served" in Kartik.
+      { period_id: 'kartik', recipe_id: 'latte', qty_sold: -1, source: 'pos_credit_restock', bs_day: 9 },
+    ]
+    expect(kartikUse(sales)).toEqual({})
+    expect(stockReportUse(sales)).toEqual({})
+  })
+
+  test('inside one month a selection and its own note still cancel', () => {
+    const out = sumConsumptionByPeriod({
+      sales: [
+        { period_id: 'kartik', recipe_id: 'latte', qty_sold: 2, ingredient_deltas: shot },
+        { period_id: 'kartik', recipe_id: 'latte', qty_sold: -1, ingredient_deltas: shot },
+      ],
+      breakdown,
+    })
+    expect(out).toEqual({ kartik: { espresso: 18 + 9, milk: 200 } })
   })
 })
 

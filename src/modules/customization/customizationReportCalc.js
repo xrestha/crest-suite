@@ -12,7 +12,12 @@
 //                    made but not paid for, so they count as picks and add nothing charged.
 //                    Split by sign into `extrasEarned` (the positive picks — add-ons) and
 //                    `sizeAdjustments` (the negative ones — a Half priced below the dish), because a
-//                    net figure hid a size discount inside the add-on income (S759).
+//                    net figure hid a size discount inside the add-on income (S759). S862
+//                    REPORTS-STOCK-6 (owner decision CU6 a): `extrasEarned` keeps every positive
+//                    charge, a larger size's included; the negative half splits by the plate's
+//                    group kind, a size into `sizeAdjustments` and any other choice priced below
+//                    the dish ("Tofu instead of chicken −30") into `cheaperChoices`, never into the
+//                    size tile.
 //   group kind       AS BILLED (S809 3o, REPORTS-12): the snapshot's `group_kind`, the kind most of
 //                    the choice's plates were billed under. Today's catalog (`kindByOptionId`) only
 //                    fills in a snapshot row that has none; with neither it is 'unknown'. Until S809
@@ -74,6 +79,7 @@ export function buildCustomizationReport({ lines, snapshots, attachedRecipeIds, 
   let customizedPlates = 0
   let extrasEarned = 0
   let sizeAdjustments = 0
+  let cheaperChoices = 0
 
   const attached = attachedRecipeIds || new Set()
   const soldCustomized = new Set((lines || []).filter(hasChoices).map(l => l.recipe_id))
@@ -126,7 +132,10 @@ export function buildCustomizationReport({ lines, snapshots, attachedRecipeIds, 
       }
       options.set(key, o)
       if (charged > 0) extrasEarned += charged
-      else sizeAdjustments += charged
+      else if (charged < 0) {
+        if (kind === 'size') sizeAdjustments += charged
+        else cheaperChoices += charged
+      }
       if (p.is_removal) {
         const rk = `${l.recipe_id}|${key}`
         const r = removalsByDish.get(rk) || { dish: l.name, option_name: p.option_name, picks: 0, dishPlates: 0, recipe_id: l.recipe_id }
@@ -155,9 +164,10 @@ export function buildCustomizationReport({ lines, snapshots, attachedRecipeIds, 
     customizablePlates,
     customizedPlates,
     customizedShare: customizablePlates > 0 ? customizedPlates / customizablePlates : null,
-    extraCharged: extrasEarned + sizeAdjustments,
+    extraCharged: extrasEarned + sizeAdjustments + cheaperChoices,
     extrasEarned,
     sizeAdjustments,
+    cheaperChoices,
     options: optionRows,
     removals: optionRows.filter(o => o.is_removal),
     removalsByDish: [...removalsByDish.values()].sort((a, b) => b.picks - a.picks),

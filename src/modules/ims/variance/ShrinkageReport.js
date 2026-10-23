@@ -8,6 +8,7 @@ import { supabase } from '../../../supabaseClient'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../../utils/orderLineIngredients'
 import { buildShrinkageObservations, bandShrinkageItem } from './shrinkageCalc'
+import { loadChoiceLinkedItemIds } from './variancePopulation'
 import { readPeriodTransfers } from '../transfers/transferFlows'
 import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
@@ -186,12 +187,16 @@ export default function ShrinkageReport() {
     // usage came out as zero, and every item read as fully shrunk.
     let ingredientBreakdown = {}
     let explosion = null
+    let choiceItemIds = null
     try {
       // The option-delta explosion (S758) shares this catch: a missing one would read a customized
-      // plate as its plain recipe, which is a wrong theoretical just like a failed recipe walk.
-      ;[ingredientBreakdown, explosion] = await Promise.all([
+      // plate as its plain recipe, which is a wrong theoretical just like a failed recipe walk. So do
+      // the client's choice stock lines (S862 REPORTS-STOCK-3): missed, an item only a choice uses
+      // would drop out of the report in a window nobody picked it.
+      ;[ingredientBreakdown, explosion, choiceItemIds] = await Promise.all([
         shrinkRecipeIds.length > 0 ? explodeRecipeIngredients(supabase, shrinkRecipeIds) : {},
         loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
+        loadChoiceLinkedItemIds(supabase, scopedFrom),
       ])
     } catch (err) {
       // The isCurrent guard belongs on the failure path too: without it a superseded load's
@@ -208,7 +213,7 @@ export default function ShrinkageReport() {
     // so neither is shrinkage.
     const { rows: observed, uncountedItems, uncountedItemPeriods } = buildShrinkageObservations({
       periodIds, items, opening, closing, purchases, returns, wastages, staffMeals, sales,
-      breakdown: ingredientBreakdown, explosion, transfers,
+      breakdown: ingredientBreakdown, explosion, transfers, choiceItemIds,
     })
     const rows = observed.map(r => ({ ...r, category: r.item.categories?.name || 'Uncategorised' }))
 

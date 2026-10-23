@@ -37,7 +37,7 @@ import { readPeriodTransfers } from '../ims/transfers/transferFlows'
 import { selectDepletingSales } from '../ims/sales/salesDepletion'
 import { buildUsageMap, transferNetQtyMap } from '../ims/stockcount/stockReportCalc'
 import {
-  closingCountMap, linkedItemIdsOf, varianceRowBand, judgedRows, isUncountedGap, hasVarianceActivity,
+  closingCountMap, linkedItemIdsOf, loadChoiceLinkedItemIds, varianceRowBand, judgedRows, isUncountedGap, hasVarianceActivity,
 } from '../ims/variance/variancePopulation'
 
 const num = v => parseFloat(v) || 0
@@ -52,9 +52,10 @@ function sumByItem(rows, field) {
  * Pure: the section from already-read rows, exported so the arithmetic is tested without a
  * database. `sales` rows must carry `recipe_id, qty_sold, bs_day, source, ingredient_deltas` — the
  * depletion rule cannot run without `bs_day` and `source`. `settings` supplies
- * `variance_flag_pct`; anything missing falls back to varianceBand's defaults.
+ * `variance_flag_pct`; anything missing falls back to varianceBand's defaults. `choiceItemIds` is
+ * loadChoiceLinkedItemIds' set (S862 REPORTS-STOCK-3).
  */
-export function buildVarianceSection({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion = null, settings = null, transfers = null }) {
+export function buildVarianceSection({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion = null, settings = null, transfers = null, choiceItemIds = null }) {
   const openMap = sumByItem(opening, 'qty')
   const closeMap = closingCountMap(closing)
   // Local, never state: the month has any count at all. Without one nothing is measured.
@@ -73,9 +74,10 @@ export function buildVarianceSection({ items, opening, closing, purchases, retur
   const depleting = selectDepletingSales(sales || [])
   const theoreticalMap = buildUsageMap(depleting, breakdown, explosion)
 
-  // Every item any recipe consumes at any depth, plus anything a sold plate's options reach (S758):
-  // D17's "no recipe linked" is this set, NOT "theoretical use was 0 this month".
-  const linked = linkedItemIdsOf(breakdown, depleting, explosion)
+  // Every item any recipe consumes at any depth, plus anything a sold plate's options reach (S758)
+  // and anything the client's choice lines reach, sold this month or not (S862, schema 20): D17's
+  // "no recipe linked" is this set, NOT "theoretical use was 0 this month".
+  const linked = linkedItemIdsOf(breakdown, depleting, explosion, choiceItemIds)
 
   const rows = (items || []).map(item => {
     const openQty = openMap[item.id] || 0
@@ -167,11 +169,14 @@ export async function computeInventoryVariance(clientId, period) {
 
   const recipeIds = (recipes || []).map(r => r.id)
   // Both walks throw on a failed read (S695/S758), so a failure names this section as failed rather
-  // than freezing zero theoretical usage, which reads as every item over-consumed.
-  const [breakdown, explosion] = await Promise.all([
+  // than freezing zero theoretical usage, which reads as every item over-consumed. So does the
+  // choice-line read (S862 REPORTS-STOCK-3), which would otherwise freeze a choice's item as
+  // "no recipe linked", its loss out of the totals.
+  const [breakdown, explosion, choiceItemIds] = await Promise.all([
     recipeIds.length > 0 ? explodeRecipeIngredients(supabase, recipeIds) : {},
     loadDeltaExplosion(supabase, (sales || []).map(s => s.ingredient_deltas)),
+    loadChoiceLinkedItemIds(supabase, (t, c) => scopedFrom(t, clientId, c)),
   ])
 
-  return buildVarianceSection({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion, settings, transfers })
+  return buildVarianceSection({ items, opening, closing, purchases, returns, wastages, staffMeals, sales, breakdown, explosion, settings, transfers, choiceItemIds })
 }

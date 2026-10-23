@@ -82,7 +82,9 @@ describe('computeMenuEngineeringSection source', () => {
     .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ').replace(/\s+/g, ' ')
 
   test("reads the CLIENT's module flags with .single(), and the recipe's BYO mark", () => {
-    expect(src).toMatch(/from\('clients'\)\.select\('pos_enabled, customization_enabled'\)\.eq\('id', clientId\)\.single\(\)/)
+    expect(src).toMatch(/from\('clients'\)\.select\('pos_enabled, customization_enabled, customization_ends_at'\)\.eq\('id', clientId\)\.single\(\)/)
+    // S862: the client's live state, end date included, never the two bare flags.
+    expect(src).toMatch(/const customizationEnabled = customizationState\(client\)\.live/)
     expect(src).toMatch(/is_build_your_own/)
     expect(src).toMatch(/isCostedByBuild\(r, customizationEnabled\)/)
   })

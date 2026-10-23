@@ -8,7 +8,7 @@ import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { throwFirstError } from '../../shared/queryError'
 import { bsToAd, daysInBsMonth, formatAd, bsDayBoundaryIso } from '../../utils/bsCalendar'
 import { tallyAttendance } from '../hr/payroll/payrollCompute'
-import { explodeRecipeIngredients, computeRecipeCosts } from '../../utils/recipeCost'
+import { explodeRecipeIngredients } from '../../utils/recipeCost'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
 import { buildStockRows, summarizeReorder } from '../ims/stockcount/stockReportCalc'
 import { allocateBillDiscounts, returnCostValue } from '../ims/reports/supplierAttribution'
@@ -18,6 +18,8 @@ import { UNCOUNTED_NAME_LIMIT } from '../../shared/uncountedItems'
 import { fcThresholds } from '../../shared/imsFormulas'
 import { zeroAmounts, addAmounts, billAmounts, buildSalesEntries, buildGroupedRows, buildPaymentRows, forgoneMenuValue } from '../pos/reports/salesReportMath'
 import { coversTotals } from '../pos/reports/coversMath'
+import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK } from '../pos/orders/posRecipeBook'
+import { customizationState } from '../../utils/subscription'
 import { computeMenuEngineeringSection } from './computeMenuEngineeringSection'
 import { computeLaborAnalyticsSection } from './computeLaborAnalyticsSection'
 import { computeVendorPurchasingSection } from './computeVendorPurchasingSection'
@@ -555,7 +557,9 @@ export function posSalesFigures({ orders, creditNotes, orderById = {}, itemsByOr
   }
 }
 
-async function computePosSection(clientId, period) {
+// `inventory` is the CLIENT's Crest IMS flag (`modulesIncluded.ims`), never the viewer's: it decides
+// whether a comped dish is costed with its choices (posLineCosts), as the till's comp figures are.
+async function computePosSection(clientId, period, { inventory = false } = {}) {
   const monthDays = daysInBsMonth(period.bs_year, period.bs_month)
   const fromTs = bsDayBoundaryIso(period.bs_year, period.bs_month, 1, false)
   const toTs = bsDayBoundaryIso(period.bs_year, period.bs_month, monthDays, true)
@@ -563,6 +567,11 @@ async function computePosSection(clientId, period) {
 
   const posResults = await Promise.all([
     supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
+    // S862 REPORTS-STOCK-1: is Crest Customization live for this client, the gate on costing a
+    // build-your-own dish by its build. The CLIENT's flags and end date (customizationState), not the
+    // viewer's; `clients` stays on raw supabase.from, and `.single()` so a failed read fails the
+    // section rather than defaulting to "off" (computeMenuEngineeringSection.js reads it the same way).
+    inventory ? supabase.from('clients').select('pos_enabled, customization_enabled, customization_ends_at').eq('id', clientId).single() : null,
     // Paged: a busy month passes 1,000 paid bills, and a bare select stopped there with no error,
     // freezing a short POS section into the snapshot.
     fetchAllRows(() => scopedFrom('pos_orders', clientId, POS_ORDER_COLUMNS)
@@ -572,7 +581,8 @@ async function computePosSection(clientId, period) {
       .gte('created_at', fromTs).lte('created_at', toTs).order('id')),
   ])
   throwFirstError(posResults)
-  const [{ data: settings }, { data: orderData }, { data: noteData }] = posResults
+  const [{ data: settings }, clientRes, { data: orderData }, { data: noteData }] = posResults
+  const customizationLive = !!clientRes && customizationState(clientRes.data).live
   const vatReg = settings?.is_vat_registered ?? true
   const orders = orderData || []
   const creditNotes = noteData || []
@@ -595,8 +605,10 @@ async function computePosSection(clientId, period) {
     // Chunked as well: every paid bill's id goes in the URL, and a month of a few hundred bills
     // was a 400 Bad Request that froze the POS section as failed.
     // selection_key marks a combo's dish ('@'), which takes none of the bill discount (S839, isComboItem).
+    // With Inventory, the choices' stock lines frozen on each line (S862 REPORTS-STOCK-1), so a comp
+    // is costed with its choices.
     fetchAllRowsChunked(allOrders.map(o => o.id),
-      ids => scopedFrom('pos_order_items', clientId, 'order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no, selection_key').in('order_id', ids).order('id')),
+      ids => scopedFrom('pos_order_items', clientId, `order_id, recipe_id, name, category, qty, unit_price, vat_rate, comped, comp_no, selection_key${inventory ? `, ${LINE_CHOICE_STOCK}` : ''}`).in('order_id', ids).order('id')),
     // The legs of every Split bill, the read Sales Report's Payment Summary and the Z-report make.
     fetchAllRowsChunked(splitIds,
       ids => scopedFrom('pos_order_payments', clientId, 'order_id, payment_method, amount').in('order_id', ids).order('id')),
@@ -618,12 +630,20 @@ async function computePosSection(clientId, period) {
 
   let compedCount = 0, compedFoodCost = 0, compedPotentialValue = 0
   if (compedItems.length > 0) {
-    const recipeIds = [...new Set(compedItems.map(i => i.recipe_id).filter(Boolean))]
-    const costMap = recipeIds.length > 0 ? await computeRecipeCosts(supabase, recipeIds) : {}
+    // S862 REPORTS-STOCK-1 (since schema 20): each comped dish at its plate cost WITH its choices, the
+    // figure every POS comp screen shows since S838 (posLineCosts): the recipe plus the stored line's
+    // choice stock lines with Inventory, and a build-your-own dish at its fixed part plus its choices
+    // while Customization is live, never its typed Cost Price. It THROWS on a failed read, which
+    // runSection names, so a comp is never frozen at a partial cost.
+    const recipeIds = compedItems.map(i => i.recipe_id)
+    const { costOf } = await posLineCosts(supabase, clientId, compedItems, {
+      inventory,
+      buildYourOwn: inventory && customizationLive ? buildYourOwnAmong((t, c) => scopedFrom(t, clientId, c), recipeIds) : [],
+    })
     const compGroups = new Set()
     compedItems.forEach(i => {
       compGroups.add(`${i.order_id}:${i.comp_no}`)
-      compedFoodCost += i.qty * (costMap[i.recipe_id] || 0)
+      compedFoodCost += i.qty * costOf(i)
       // Menu price before VAT since schema 16 (S814 4d, owner decision D1): the Sales Exceptions
       // basis, and the voids beside it were already ex-VAT.
       compedPotentialValue += forgoneMenuValue([i])
@@ -645,8 +665,10 @@ async function computePosSection(clientId, period) {
   return {
     ...figures,
     // `basis: 'ex_vat'` (schema 16) marks a potential value before VAT; an older report's has none
-    // and was frozen with VAT, which the page and the workbook say.
-    compedBillsTotal: { count: compedCount, foodCost: compedFoodCost, potentialValue: compedPotentialValue, basis: 'ex_vat' },
+    // and was frozen with VAT, which the page and the workbook say. `costBasis: 'with_choices'`
+    // (schema 20) marks a food cost that includes the dishes' choices; an older one is the plain
+    // recipe cost. No screen shows `foodCost` today.
+    compedBillsTotal: { count: compedCount, foodCost: compedFoodCost, potentialValue: compedPotentialValue, basis: 'ex_vat', costBasis: 'with_choices' },
     voidsWriteoffsTotal: { count: voidOrderIds.length, amount: voidsAmount },
   }
 }
@@ -1081,7 +1103,19 @@ async function computeTrendSection(clientId, period, currentPartial) {
 //   a row, and `vendorPurchasing.unassigned` carries the no-supplier bills' figures. Unpaid Credit
 //   (`billAging`) is unchanged and stays what is owed, VAT included, so it can be larger than
 //   Credit. No Trend marker: Trend does not compare suppliers.
-export const CURRENT_SCHEMA_VERSION = 19
+// 20 (S862, REPORTS-STOCK-1): Comped Bills' food cost is each comped dish WITH its choices, through
+//   the POS comp screens' own helper (posLineCosts): with Inventory in the report, the recipe plus
+//   the stock lines frozen on the line (a Large latte's extra espresso and milk), and a build-your-own
+//   dish at its fixed part plus its choices while Customization is live, where v19 took the plain
+//   recipe cost (a bowl at its typed Cost Price, usually 0). `pos.compedBillsTotal.costBasis:
+//   'with_choices'` marks it. No page, print, workbook or Trend reads `foodCost` today.
+//   Riding along (REPORTS-STOCK-3): Inventory Variance and Shrinkage Trend link an item to the
+//   client's choice stock lines as well as its recipes (variancePopulation.loadChoiceLinkedItemIds),
+//   so an item only a choice uses (Oat Milk) is judged in a counted month nobody picked it, where
+//   v19 counted it in `noRecipeCount` (and left it out of Shrinkage Trend) with its loss out of the
+//   totals. And Menu Engineering rates a build-your-own dish by its build only while Customization
+//   is live (customizationState, its end date and grace week included), not on the two bare flags.
+export const CURRENT_SCHEMA_VERSION = 20
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean
@@ -1126,7 +1160,7 @@ export async function computeMonthlyReport({ clientId, period, modulesIncluded }
       hrLabour = r.labourInput
       return r.section
     }, sectionErrors) : null,
-    modulesIncluded.pos ? runSection('pos', () => computePosSection(clientId, period), sectionErrors) : null,
+    modulesIncluded.pos ? runSection('pos', () => computePosSection(clientId, period, { inventory: !!modulesIncluded.ims }), sectionErrors) : null,
     commissionIncluded ? runSection('deliveryCommission', () => computeDeliveryCommissionSection(clientId, period), sectionErrors) : null,
   ])
   const labour = resolveReportLabour({ hrIncluded: !!modulesIncluded.hr, hrLabour: hr ? hrLabour : null, ims })
