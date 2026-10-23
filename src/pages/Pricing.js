@@ -331,7 +331,7 @@ export default function Pricing() {
         {[
           { key: 'hr',  name: 'Crest HR',  tagline: 'Nepal-compliant payroll, attendance, and staff management.', pricing: pricing.hr },
           { key: 'pos', name: 'Crest POS', tagline: 'Tables, orders, billing, and shift reconciliation.',             pricing: pricing.pos },
-          { key: 'customization', name: 'Crest Customization', tagline: 'Let guests build their dish — sizes, add-ons, spice — on the till and the QR menu. Requires Crest POS.', pricing: pricing.customization },
+          { key: 'customization', name: 'Crest Customization', tagline: 'Let guests build their dish — sizes, add-ons, spice, build-your-own bowls — and sell combos at one price, on the till and the QR menu. Requires Crest POS.', pricing: pricing.customization },
         ].map(mod => {
           const price = annual ? mod.pricing.annual : mod.pricing.monthly
           return (

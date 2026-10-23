@@ -428,3 +428,86 @@ it('a poll that changes nothing does not redraw the page (S842)', async () => {
   await pollNow()
   expect(commits).toBe(settled)
 })
+
+// S862 TILL-GUEST-4: a cart restored on a reload is checked against the choices just read, so a
+// choice hidden in the meantime comes off its dish (and is named) instead of riding along unseen
+// until Place Order is refused and the whole dish is taken off.
+describe('a cart checked against the choices just read', () => {
+  const LATTE = { ...ROWS[0], recipe_id: 'r-latte', name: 'Cafe Latte', selling_price: 240, category: 'Coffee' }
+  const LATTE_OPTIONS = {
+    groups: [
+      { id: 'g-cup', name: 'Cup size', kind: 'size', min_select: 1, max_select: 1, included_count: 0, sort: 0, is_active: true },
+      { id: 'g-milk', name: 'Milk', kind: 'addon', min_select: 0, max_select: 1, included_count: 0, sort: 1, is_active: true },
+    ],
+    // Oat Milk has been hidden, so the guest read leaves it out.
+    options: [
+      { id: 'o-reg', group_id: 'g-cup', name: 'Regular', price_delta: 0, is_default: true, sort: 0, is_active: true },
+      { id: 'o-large', group_id: 'g-cup', name: 'Large', price_delta: 40, is_default: false, sort: 1, is_active: true },
+      { id: 'o-almond', group_id: 'g-milk', name: 'Almond Milk', price_delta: 80, is_default: false, sort: 1, is_active: true },
+    ],
+    attachments: [
+      { id: 'a1', recipe_id: 'r-latte', group_id: 'g-cup', sort: 0 },
+      { id: 'a2', recipe_id: 'r-latte', group_id: 'g-milk', sort: 1 },
+    ],
+  }
+  const storedCart = cart => sessionStorage.setItem('guestCart:t-1', JSON.stringify({ cart, covers: 2, guestNote: '' }))
+  const savedCart = () => JSON.parse(sessionStorage.getItem('guestCart:t-1')).cart
+
+  it('takes a hidden choice off a reloaded order, names the dish, and Change choices starts from what is left', async () => {
+    storedCart({ 'r-latte#o-large+o-oat': { recipe_id: 'r-latte', qty: 1, option_ids: ['o-large', 'o-oat'] } })
+    mockAnswers.get_guest_menu = { data: [...ROWS, LATTE], error: null }
+    mockAnswers.get_guest_menu_options = { data: LATTE_OPTIONS, error: null }
+    renderMenu()
+    expect(await screen.findByText('A choice on Cafe Latte is no longer offered, so it was taken off. The price in your order is the new one.')).toBeInTheDocument()
+    await waitFor(() => expect(savedCart()).toEqual({ 'r-latte#o-large': { recipe_id: 'r-latte', qty: 1, option_ids: ['o-large'] } }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Review order/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Change choices for Cafe Latte' }))
+    const sheet = screen.getByRole('dialog', { name: 'Cafe Latte' })
+    // 240 + 40, no VAT on this outlet.
+    expect(within(sheet).getByRole('button', { name: /Update · NPR 280/ })).toBeInTheDocument()
+  })
+
+  it('leaves a cart whose choices still fit untouched and says nothing', async () => {
+    storedCart({ 'r-latte#o-almond+o-large': { recipe_id: 'r-latte', qty: 2, option_ids: ['o-large', 'o-almond'] } })
+    mockAnswers.get_guest_menu = { data: [...ROWS, LATTE], error: null }
+    mockAnswers.get_guest_menu_options = { data: LATTE_OPTIONS, error: null }
+    renderMenu()
+    expect(await screen.findByRole('button', { name: /Review order/ })).toBeInTheDocument()
+    expect(screen.queryByText(/no longer offered/)).toBeNull()
+    expect(Object.keys(savedCart())).toEqual(['r-latte#o-almond+o-large'])
+  })
+
+  it('puts a turned-away order back without a choice hidden since it was sent', async () => {
+    sessionStorage.setItem('guestOrderReq:t-1', JSON.stringify({
+      requestId: 'req-7', items: [{ name: 'Cafe Latte (Large, Oat Milk)', qty: 1 }],
+      lines: [{ recipe_id: 'r-latte', qty: 1, option_ids: ['o-large', 'o-oat'] }], covers: 2, sentAt: new Date().toISOString(),
+    }))
+    mockProgress = { status: 'dismissed', kot_status: null, remaining_minutes: null, order_closed: false }
+    mockAnswers.get_guest_menu = { data: [...ROWS, LATTE], error: null }
+    mockAnswers.get_guest_menu_options = { data: LATTE_OPTIONS, error: null }
+    renderMenu()
+    fireEvent.click(await screen.findByRole('button', { name: 'Put it back in my order' }))
+    await waitFor(() => expect(savedCart()).toEqual({ 'r-latte#o-large': { recipe_id: 'r-latte', qty: 1, option_ids: ['o-large'] } }))
+    expect(screen.getByText('A choice on Cafe Latte is no longer offered, so it was taken off. The price in your order is the new one.')).toBeInTheDocument()
+  })
+
+  it('after a refusal, takes off only the dish the fresh menu dropped and says so', async () => {
+    storedCart({
+      'r-momo': { recipe_id: 'r-momo', qty: 1, option_ids: [] },
+      'r-latte#o-large': { recipe_id: 'r-latte', qty: 1, option_ids: ['o-large'] },
+    })
+    let reads = 0
+    mockAnswers.get_guest_menu = () => Promise.resolve({ data: (reads += 1) === 1 ? [...ROWS, LATTE] : [LATTE], error: null })
+    mockAnswers.get_guest_menu_options = { data: LATTE_OPTIONS, error: null }
+    mockAnswers.submit_guest_order = { data: null, error: { code: 'P0001', hint: 'unavailable_items', details: '["Veg Momo"]', message: 'unavailable' } }
+    renderMenu()
+    fireEvent.click(await screen.findByRole('button', { name: /Review order/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Place order/ }))
+    // Read inside the order sheet, and retried: the sheet re-renders as the re-read lands.
+    await waitFor(() => expect(within(screen.getByRole('dialog', { name: 'Your order' }))
+      .getByText(/Veg Momo is no longer available, so your order was not sent. It has been taken off your order/)).toBeInTheDocument())
+    await waitFor(() => expect(Object.keys(savedCart())).toEqual(['r-latte#o-large']))
+    expect(screen.getByText('Veg Momo is no longer on the menu, so it was taken off your order.')).toBeInTheDocument()
+  })
+})

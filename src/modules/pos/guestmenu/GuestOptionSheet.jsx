@@ -5,6 +5,7 @@ import { npr } from '../../../shared/nepalMoney'
 import {
   describeSelection, selectionProblems, defaultSelection, inclFromEx, scaledDelta,
 } from '../../../shared/optionPricing'
+import { offeredPicks } from '../../../shared/offeredPicks'
 import { tidyName } from './guestMenuHelpers'
 import GuestOptionGroup, { FOCUSABLE_CHIP, signedNpr } from './GuestOptionGroup'
 import { DietLabel, dietOfDish } from './DietMark'
@@ -60,7 +61,9 @@ const sameIds = (a, b) => {
 
 export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegistered, initialIds, editing, stepped = false, onConfirm, onClose, backRef }) {
   // Captured once: what the sheet opened with, so a backdrop tap can tell "looked" from "picked".
-  const [initial] = useState(() => initialIds ?? defaultSelection(dishGroups))
+  // S862 TILL-GUEST-4: only the picks the dish still offers, as the till window starts (S809 3o), so
+  // Update can never hand a hidden choice back to the cart.
+  const [initial] = useState(() => offeredPicks(initialIds ?? defaultSelection(dishGroups), dishGroups).kept)
   const [selected, setSelected] = useState(initial)
   const [tried, setTried] = useState(false)
   const groupRefs = useRef({})

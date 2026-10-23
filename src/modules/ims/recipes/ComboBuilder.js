@@ -15,6 +15,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import SearchableSelect from '../../../components/SearchableSelect'
 import { Link, Navigate } from 'react-router-dom'
 import { chipKeys } from '../../../shared/rovingFocus'
+import { vatModeOf, guestVatRate } from './menuPriceVat'
 
 const fmtNpr = npr
 const WINDOW_OPTIONS = [30, 90, 180]
@@ -44,7 +45,12 @@ export default function ComboBuilder() {
   // two dishes and the suggested price filled in; without it the bundle is still made by hand in
   // Menu Pricing.
   const { clientId, posEnabled, hasImsAccess, customizationEnabled } = useAuth()
-  const { settings } = useSettings()
+  const settingsCtx = useSettings()
+  const { settings } = settingsCtx
+  // S862 COMBOS-7: a PAN-bill outlet's guest pays the price itself (D31), so the suggestion and the
+  // price "Create as combo" fills in carry no VAT there, as Menu Repricing's do.
+  const vatMode = vatModeOf(settingsCtx, clientId)
+  const pan = vatMode === 'pan'
   const { scopedFrom } = useScopedDb()
   const pairReq = useLatestRequest()
 
@@ -291,7 +297,7 @@ export default function ComboBuilder() {
                   </th>
                   <th style={{ textAlign: 'right' }}>Combined Price</th>
                   <th style={{ textAlign: 'right' }}>
-                    <Tip text={`Combined price less ${discountPct}%, grossed up for VAT and rounded up to NPR 5 — the number to print. Suggestion only; nothing is created.`} width={280}>Suggested Combo Price</Tip>
+                    <Tip text={`Combined price less ${discountPct}%, ${pan ? 'with no VAT in it (this outlet gives PAN bills, so the till adds none),' : 'grossed up for VAT and'} rounded up to NPR 5 — the number to print. A suggestion only: ${customizationEnabled ? 'Create as combo opens the combo editor with this price filled in, and nothing is saved until you press Save there.' : 'nothing is created from it.'}`} width={280}>{pan ? 'Suggested Combo Price (no VAT)' : 'Suggested Combo Price'}</Tip>
                   </th>
                   <th style={{ textAlign: 'right' }}>Savings</th>
                   <th style={{ textAlign: 'right' }}>
@@ -312,7 +318,7 @@ export default function ComboBuilder() {
                   // shipped "because it is the number to print on the menu". It also quoted the
                   // figure ex-VAT, so it was not what a guest would pay either. getSuggestedPrice
                   // does both, given a cost and the FC% target that reproduces this discount.
-                  const vat = vatOf(anchor)
+                  const vat = guestVatRate(vatOf(anchor), vatMode)
                   const comboMenuPrice = Math.ceil((comboExVat * (1 + vat)) / 5) * 5
                   const pairCost = recipeCostOf(costMap, p.recipe)
                   const comboCost = (anchorCost == null || pairCost == null) ? null : anchorCost + pairCost

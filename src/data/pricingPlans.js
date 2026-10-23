@@ -139,7 +139,8 @@ export const POS_PRICING = {
 
 // Crest Customization (S758) — a flat add-on on top of Crest POS: sizes, add-ons, removals and
 // spice/prep choices on every dish, on the till and the guest QR menu, with each option carrying
-// its own ingredients when IMS is on. Cannot be bought without POS (the database refuses it). The
+// its own ingredients when IMS is on. Build-your-own dishes (S760) and combos (S839) are part of it
+// too, and the list says so (S862 ADD-6). Cannot be bought without POS (the database refuses it). The
 // shipped price is a placeholder the admin reprices in Settings > Plan Pricing like every other line.
 export const CUSTOMIZATION_PRICING = {
   monthly: 2000, annual: 1500,
@@ -148,6 +149,8 @@ export const CUSTOMIZATION_PRICING = {
     'Sizes & portions with their own price (Half / Full, Small / Large)',
     'Add-ons & removals — extra cheese +Rs, no onion',
     'Spice level & preparation choices, from a list not a note',
+    'Combos and set meals at one price, on the till and the QR menu',
+    'Build-your-own dishes, walked step by step, costed as a range with IMS',
     'Works on the till and the guest QR menu alike',
     'Kitchen tickets print every option — bold NO for removals',
     'Stock & food cost follow each option (with Crest IMS)',

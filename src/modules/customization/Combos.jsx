@@ -65,8 +65,10 @@ export default function Combos() {
   // An admin switching client mid-load must not let the previous tenant's combos land.
   const loadSeq = useRef(0)
 
+  // Answers the combos it read, or null when it read nothing current (S862 COMBOS-6: the editor's
+  // re-read after an unclear save asks what is listed).
   const load = useCallback(async ({ quiet = false } = {}) => {
-    if (!clientId) return
+    if (!clientId) return null
     const seq = ++loadSeq.current
     if (!quiet) setLoading(true)
     setLoadError(null)
@@ -84,19 +86,30 @@ export default function Combos() {
           .order('name').order('id')),
       ]), READ_TIMEOUT_MS, 'Loading combos')
     } catch (err) {
-      if (seq !== loadSeq.current) return
+      if (seq !== loadSeq.current) return null
       setLoadError(err)
       setLoading(false)
-      return
+      return null
     }
-    if (seq !== loadSeq.current) return
+    if (seq !== loadSeq.current) return null
     const failed = results.find(r => r.error)?.error
-    if (failed) { setLoadError(failed); setLoading(false); return }
+    if (failed) { setLoadError(failed); setLoading(false); return null }
     const [{ data: combos }, { data: groups }, { data: items }, { data: recs }] = results
     setRows({ combos: combos || [], groups: groups || [], items: items || [] })
     setRecipes(recs || [])
     setLoading(false)
+    return combos || []
   }, [clientId, scopedFrom])
+
+  // S862 COMBOS-6: after a new combo's Save lost its answer, or was refused as a name taken, the
+  // editor re-reads the list behind it. true / false: whether a combo of that name is listed now
+  // (trimmed, any case, as save_pos_combo compares); null when the re-read failed.
+  async function recheckList(name) {
+    const listed = await load({ quiet: true })
+    if (!listed) return null
+    const key = String(name || '').trim().toLowerCase()
+    return listed.some(c => String(c.name || '').trim().toLowerCase() === key)
+  }
 
   useEffect(() => { load() }, [load])
 
@@ -311,6 +324,7 @@ export default function Combos() {
           vatMode={vatMode}
           otherNames={combos.filter(c => c.id !== editor.state.id).map(c => c.name)}
           clientId={clientId}
+          recheckList={recheckList}
           onClose={() => setEditor(null)}
           onSaved={({ name, isNew }) => {
             setEditor(null)

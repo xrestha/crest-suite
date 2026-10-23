@@ -97,3 +97,11 @@ test('the mock pricing table has every section the page reads', () => {
   expect(p.imsTiers.length).toBeGreaterThan(0)
   for (const k of ['hr', 'pos', 'customization', 'suite']) expect(p[k]).toBeTruthy()
 })
+
+// S862 ADD-6: the Customization card names combos, beside the dish choices it always named.
+test('the Customization card sells combos and build-your-own dishes', () => {
+  renderPricing()
+  expect(screen.getByText(/build-your-own bowls — and sell combos at one price/)).toBeInTheDocument()
+  expect(screen.getByText('Combos and set meals at one price, on the till and the QR menu')).toBeInTheDocument()
+  expect(screen.getByText('Build-your-own dishes, walked step by step, costed as a range with IMS')).toBeInTheDocument()
+})

@@ -15,7 +15,8 @@ import GuestComboSheet, {
   comboOrderable, comboMatches, comboCartKey, comboUnitPrice, comboOrderItem, comboOrderName,
   comboLineProblem, comboCartWithout, comboContents, comboPicksOf, pickChoices,
 } from './GuestComboSheet'
-import { groupsForDish, describeSelection, lowestDishPrice, selectionProblems, inclFromEx } from '../../../shared/optionPricing'
+import { groupsForDish, describeSelection, lowestDishPrice, inclFromEx } from '../../../shared/optionPricing'
+import { checkGuestCart, cartCheckNote } from './guestCartCheck'
 import { selectionKeyOf } from '../orders/posOrdersConstants'
 import { playChime } from '../posChime'
 import { setIfChanged } from '../../../shared/setIfChanged'
@@ -341,6 +342,13 @@ export default function GuestMenu() {
       sessionStorage.setItem(cartSessionKey(tableId), JSON.stringify({ cart, covers, guestNote }))
     } catch { /* private-browsing / quota — cart still works for this session, just won't survive a reload */ }
   }, [tableId, cart, covers, guestNote])
+  // The cart as last rendered, for the check after a read of the choices (applyCartCheck), which
+  // lands after the render that started it.
+  const cartRef = useRef(cart)
+  useEffect(() => { cartRef.current = cart }, [cart])
+  // True once this table's choices have been read successfully, so "Order again" never checks a
+  // cart against the empty catalog a page starts with (which would strip every pick).
+  const choicesReadRef = useRef(false)
 
   // retryToken bumps on a manual Retry click, forcing the effect below to re-run against the
   // same tableId.
@@ -349,14 +357,21 @@ export default function GuestMenu() {
 
   useEffect(() => {
     let cancelled = false
+    choicesReadRef.current = false
     // GUEST-6 (S809 3b): a read that outruns MENU_TIMEOUT_MS is the failed-load card, whose Try again
     // reads again.
-    settleWithin(supabase.rpc('get_guest_menu', { p_table_id: tableId }), MENU_TIMEOUT_MS, 'Loading the menu').then(({ data, error: err }) => {
-      if (cancelled) return
-      if (err) { setError(true); setRows([]); return }
+    const menuRead = settleWithin(supabase.rpc('get_guest_menu', { p_table_id: tableId }), MENU_TIMEOUT_MS, 'Loading the menu').then(({ data, error: err }) => {
+      if (cancelled) return null
+      if (err) { setError(true); setRows([]); return null }
       setRows(data || [])
+      return data || []
     })
-    loadOptions(() => cancelled)
+    // S862 TILL-GUEST-4: the cart came back from sessionStorage with its picks, so it is checked
+    // against the choices just read (the menu read names the dishes in the note).
+    Promise.all([menuRead, loadOptions(() => cancelled)]).then(([menuRows, fresh]) => {
+      if (cancelled || !fresh) return
+      applyCartCheck(fresh, { menuRows })
+    })
     return () => { cancelled = true }
   }, [tableId, retryToken]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -381,7 +396,40 @@ export default function GuestMenu() {
         combos: Array.isArray(data?.combos) ? data.combos : [],
       }
       setOptionCatalog(next)
+      choicesReadRef.current = true
       return next
+    })
+  }
+
+  // S862 TILL-GUEST-4 (the guest twin of the till window's S809 3o fix): after a successful read of
+  // the choices, a pick a dish no longer offers comes off its line, and a line that then breaks its
+  // dish's rules (or a combo the menu no longer offers as it was) comes off the order, both named in
+  // restoreNote. It used to run only after Place Order was refused, so a reloaded phone showed a dish
+  // without its hidden pick, at a price never going to be charged, and lost the whole dish on send.
+  // `onMenu` (the refusal re-read) also takes off a dish the fresh menu no longer carries.
+  function applyCartCheck(cat, { menuRows = null, onMenu = null } = {}) {
+    const opts = { keyOf: cartKey, onMenu }
+    const result = checkGuestCart(cartRef.current, cat, opts)
+    if (!result.changed) return result
+    setCart(prev => checkGuestCart(prev, cat, opts).cart)
+    const note = cartCheckNoteFor(result, cat, menuRows)
+    if (note) setRestoreNote(note)
+    return result
+  }
+  // The note for a check, with names from what this phone has read, the menu on screen included (a
+  // dish the fresh menu dropped is named from it); a choice hidden before this phone ever read one
+  // has none.
+  function cartCheckNoteFor(result, cat, menuRows = null) {
+    const dishes = Object.fromEntries([...(rows || []), ...(menuRows || [])].map(r => [r.recipe_id, r.name]))
+    const combos = [...(optionCatalog.combos || []), ...(cat.combos || [])]
+    const inCombos = Object.fromEntries(combos.flatMap(c => (c.groups || []).flatMap(g => (g.items || []).map(it => [it.recipe_id, it.name]))))
+    const comboNames = Object.fromEntries(combos.map(c => [c.id, c.name]))
+    const options = Object.fromEntries([...optionCatalog.options, ...(cat.options || [])].map(o => [o.id, o.name]))
+    const named = n => (n ? tidyName(n) : null)
+    return cartCheckNote(result, {
+      dishName: id => named(dishes[id] || inCombos[id]),
+      comboName: id => named(comboNames[id]),
+      optionName: id => named(options[id]),
     })
   }
 
@@ -975,29 +1023,24 @@ export default function GuestMenu() {
           settleWithin(supabase.rpc('get_guest_menu', { p_table_id: tableId }), MENU_TIMEOUT_MS, 'Reloading the menu'),
           loadOptions(),
         ]).then(([{ data: fresh, error: freshErr }, freshOptions]) => {
-          if (freshErr) { console.error('get_guest_menu re-read after a refusal failed; the menu on screen is kept', freshErr); return }
-          if (!Array.isArray(fresh)) return
-          setRows(fresh)
+          if (freshErr) console.error('get_guest_menu re-read after a refusal failed; the menu on screen is kept', freshErr)
+          const menuOk = !freshErr && Array.isArray(fresh)
+          if (menuOk) setRows(fresh)
+          if (!menuOk && !freshOptions) return
           // A dish the fresh menu no longer carries would silently drop out of the order sheet
           // (cartLines filters on the menu), so take it off the cart and SAY it was taken off. Since
-          // S758 the same goes for a dish whose choices no longer fit what it offers.
-          const onMenu = new Set(fresh.map(r => r.recipe_id))
-          const cat = freshOptions || optionCatalog
-          // S839: a combo stays while the menu still offers it with these dishes and choices.
-          const freshCombos = Object.fromEntries((cat.combos || []).map(c => [c.id, c]))
-          const stillValid = l => {
-            if (l.combo_id) return !comboLineProblem(l, freshCombos, cat)
-            if (!onMenu.has(l.recipe_id)) return false
-            const dg = groupsForDish(l.recipe_id, cat)
-            if (dg.length === 0) return !(l.option_ids?.length)
-            const offered = new Set(dg.flatMap(d => d.options.map(o => o.id)))
-            return (l.option_ids || []).every(id => offered.has(id)) && selectionProblems(dg, l.option_ids).length === 0
-          }
-          const gone = Object.keys(cart).filter(k => !stillValid(cart[k]))
-          if (gone.length > 0) {
-            setCart(prev => Object.fromEntries(Object.entries(prev).filter(([, l]) => stillValid(l))))
-            if (refusal.removedText) setSubmitError(refusal.removedText)
-          }
+          // S758 the same goes for a dish whose choices no longer fit what it offers, and a combo
+          // (S839) no longer offered with these dishes and choices. Since S862 a pick no longer
+          // offered comes off its dish first, so the dish stays when what is left still fits.
+          // S862 review: never check the picks against a catalog this page never read (a failed read
+          // on the reload and again here), or every pick would read as no longer offered.
+          const catalog = freshOptions || (choicesReadRef.current ? optionCatalog : null)
+          if (!catalog) return
+          const result = applyCartCheck(catalog, {
+            menuRows: menuOk ? fresh : null,
+            onMenu: menuOk ? new Set(fresh.map(r => r.recipe_id)) : null,
+          })
+          if (result.dropped.length > 0 && refusal.removedText) setSubmitError(refusal.removedText)
         })
       }
       return
@@ -1055,30 +1098,39 @@ export default function GuestMenu() {
   function restoreRefusedOrder() {
     const lines = requestSnapshot?.lines || []
     const missing = []
-    setCart(prev => {
-      const next = { ...prev }
-      lines.forEach((l, i) => {
-        // S839: a combo comes back only as the menu still offers it, with the same dishes and choices.
-        if (l.combo_id) {
-          if (comboLineProblem(l, combosById, optionCatalog)) { missing.push(requestSnapshot.items?.[i]?.name || 'A combo'); return }
-          const key = comboCartKey(l.combo_id, l.picks)
-          next[key] = {
-            combo_id: l.combo_id, qty: Math.min(50, (next[key]?.qty || 0) + (Number(l.qty) || 1)),
-            picks: (l.picks || []).map(p => ({ group_id: p.group_id, recipe_id: p.recipe_id, option_ids: [...(p.option_ids || [])] })),
-          }
-          return
+    // Built from the cart as rendered, outside the updater, so the names collected stay a plain
+    // side effect of this click.
+    const next = { ...cartRef.current }
+    lines.forEach((l, i) => {
+      // S839: a combo comes back only as the menu still offers it, with the same dishes and choices.
+      if (l.combo_id) {
+        if (comboLineProblem(l, combosById, optionCatalog)) { missing.push(requestSnapshot.items?.[i]?.name || 'A combo'); return }
+        const key = comboCartKey(l.combo_id, l.picks)
+        next[key] = {
+          combo_id: l.combo_id, qty: Math.min(50, (next[key]?.qty || 0) + (Number(l.qty) || 1)),
+          picks: (l.picks || []).map(p => ({ group_id: p.group_id, recipe_id: p.recipe_id, option_ids: [...(p.option_ids || [])] })),
         }
-        if (!byRecipe[l.recipe_id]) { missing.push(requestSnapshot.items?.[i]?.name || 'A dish'); return }
-        const key = cartKey(l.recipe_id, l.option_ids || [])
-        next[key] = { recipe_id: l.recipe_id, qty: Math.min(50, (next[key]?.qty || 0) + (Number(l.qty) || 1)), option_ids: [...(l.option_ids || [])] }
-      })
-      return next
+        return
+      }
+      if (!byRecipe[l.recipe_id]) { missing.push(requestSnapshot.items?.[i]?.name || 'A dish'); return }
+      const key = cartKey(l.recipe_id, l.option_ids || [])
+      next[key] = { recipe_id: l.recipe_id, qty: Math.min(50, (next[key]?.qty || 0) + (Number(l.qty) || 1)), option_ids: [...(l.option_ids || [])] }
     })
-    setRestoreNote(missing.length ? `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} no longer on the menu.` : '')
+    // S862 TILL-GUEST-4: the order comes back through the same check as a reload, so a pick hidden
+    // since it was sent comes off its dish (and is named) rather than riding along unseen. Only
+    // against choices this page has read: the empty catalog it starts with would strip every pick.
+    const checked = choicesReadRef.current
+      ? checkGuestCart(next, optionCatalog, { keyOf: cartKey })
+      : { cart: next, changed: false, trimmed: [], dropped: [] }
+    setCart(checked.cart)
+    setRestoreNote([
+      missing.length ? `${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} no longer on the menu.` : '',
+      checked.changed ? cartCheckNoteFor(checked, optionCatalog) : '',
+    ].filter(Boolean).join(' '))
     clearTracker()
     // The order sheet opens over the page; when it closes, the review net above places focus. With
     // nothing to put back there is no sheet, and the button went with the card (S842).
-    if (lines.length > missing.length) setReviewOpen(true)
+    if (lines.length > missing.length + checked.dropped.length) setReviewOpen(true)
     else focusMenuTop()
   }
 

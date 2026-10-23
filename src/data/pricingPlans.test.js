@@ -70,6 +70,15 @@ describe('an override', () => {
     expect(p.customization.features).toEqual(CUSTOMIZATION_PRICING.features)
     expect(p.pos.monthly).toBe(POS_PRICING.monthly)
   })
+
+  // S862 ADD-6: the two parts most likely to sell it were missing from what /pricing lists.
+  it('names combos and build-your-own dishes among what Customization gives', () => {
+    const text = CUSTOMIZATION_PRICING.features.join(' | ')
+    expect(text).toMatch(/Combos and set meals at one price/)
+    expect(text).toMatch(/Build-your-own dishes/)
+    // Nine lines: the card shows every one without a "Show more" (Pricing.js COLLAPSE_AFTER + 2).
+    expect(CUSTOMIZATION_PRICING.features.length).toBeLessThanOrEqual(9)
+  })
 })
 
 describe('values that are not prices', () => {

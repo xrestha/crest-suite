@@ -5,6 +5,7 @@ import FieldError, { fieldAria } from '../../components/FieldError'
 import ActionError, { asActionError } from '../../components/ActionError'
 import { supabase } from '../../supabaseClient'
 import { settleWithin } from '../../utils/withTimeout'
+import { isTimeoutError, isNetworkError } from '../../shared/errorText'
 import { npr, nprPaisa } from '../../shared/nepalMoney'
 import { comboShares } from './comboPricing'
 import {
@@ -23,17 +24,23 @@ import ComboDishPicker from './ComboDishPicker'
 //
 // The price is what the guest pays (VAT included on a VAT outlet) and is stored as typed, so an
 // outlet whose VAT status is still loading only changes the label, never what is saved.
+//
+// S862 COMBOS-6: a NEW combo whose Save got no answer may have been created, and pressing again is
+// then refused as a name already taken. `recheckList(name)` re-reads the list behind the dialog and
+// answers whether a combo of that name is in it (null when the read failed), so the dialog can say so
+// rather than leave the owner to rename it into a duplicate.
 
 const SAVE_TIMEOUT_MS = 20000
 
 export default function ComboEditorModal({
-  initial, isNew, prefilled = false, dishes, recipeById, vatMode, otherNames, clientId, onClose, onSaved,
+  initial, isNew, prefilled = false, dishes, recipeById, vatMode, otherNames, clientId, onClose, onSaved, recheckList,
 }) {
   const [state, setState] = useState(initial)
   const initialRef = useRef(initial)
   const [tried, setTried] = useState(false) // field messages show once Save has been pressed
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState(null)
+  const [listNote, setListNote] = useState(null) // what the re-read list says after an unclear save
   const [pickerFor, setPickerFor] = useState(null) // pick key
 
   const vatReg = vatMode !== 'pan'
@@ -94,12 +101,29 @@ export default function ComboEditorModal({
     }
     setSaving(true)
     setActionError(null)
+    setListNote(null)
     const { data, error } = await settleWithin(
       supabase.rpc('save_pos_combo', { p_combo: comboPayload(state, clientId) }),
       SAVE_TIMEOUT_MS, 'Saving the combo',
     )
     setSaving(false)
-    if (error) { setActionError(asActionError(error)); return }
+    if (error) {
+      setActionError(asActionError(error))
+      const unanswered = isTimeoutError(error) || isNetworkError(error)
+      const nameTaken = error.hint === 'combo_name_taken' || /combo_name_taken/.test(error.message || '')
+      if (isNew && recheckList && (unanswered || nameTaken)) {
+        const name = state.name.trim()
+        const listed = await recheckList(name)
+        if (listed === true) {
+          setListNote(unanswered
+            ? `“${name}” is now in the combo list behind this window, so this save most likely went through. Close this window and check it there, rather than saving it again under another name.`
+            : `A combo named “${name}” is already in the list behind this window. If an earlier Save lost its answer, that is this combo: close this window and check it before giving this one another name.`)
+        } else if (listed === false && unanswered) {
+          setListNote(`The combo list behind this window was read again and “${name}” is not in it yet. Wait a moment, then check the list before saving again.`)
+        }
+      }
+      return
+    }
     onSaved({ id: data, name: state.name.trim(), isNew })
   }
 
@@ -323,6 +347,7 @@ export default function ComboEditorModal({
         )}
 
         <ActionError error={actionError} />
+        {listNote && <p role="status" className="note-banner" style={{ margin: 0 }}>{listNote}</p>}
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--theme-border)', flexShrink: 0 }}>
         <button type="button" className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
