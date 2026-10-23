@@ -68,7 +68,170 @@ the room map (its own project; cancelled S856) and a browser pass of the new scr
 
 **Status key:** 🔴 Missing · 🟡 Partial · 🔵 Deferred (decided to postpone) · ⚪ Open question (not engineering)
 
-Last updated: 2026-10-21 (S854 — the S853 "Build next" list shipped in one release: one Send, the leave ask, the till keys, Remove on any payment, Sales Report headings, the tile after a cancelled close, the payment window on a phone and its heading, deposits for party bookings and the walk-in waitlist; migrations `20261021100000` and `20261021110000` applied live, admin-user-ops v74, crest-v469, then the till floor 469 applied live after the deploy). Before that, 2026-10-15 (S846 — the 2026-10-15 POS critique closed in one release: food marks by shape and Egg dishes (migration `20261015160000`, applied live), the payment window money-first, one button per floor tile, Close Shift neutral until counted, POS's accent calmed like IMS and HR, one-tap kitchen Start; crest-v462; leftovers filed under B3). Before that, 2026-10-15 (S845 — B3's two shared-code leftovers closed: Excel waits for the letterhead's `ready` on the four POS reports and every IMS export, and the letterhead's blank row reaches the sheet; crest-v461). Before that, 2026-10-15 (S844 — the 2026-10-15 POS audit closed: P0/P1 in S841, P2 in S842, the P3 list and the Bill Register phone cards in S844, crest-v460; two shared-code leftovers filed under B3). Before that, 2026-10-15 (S840 — the combo leftovers and four parked items closed; migration `20261015100000`, crest-v456). Before that, 2026-10-14 (S839 — combos shipped, moved to POS_DECISIONS.md A; migration `20261014160000`). Before that, 2026-10-14 (S838 — Crest Customization's code follow-ups shipped, moved to POS_DECISIONS.md A; migration `20261014150000`). Before that, 2026-10-14 (S837 — kitchen and bar printers shipped, moved to POS_DECISIONS.md A; migration `20261014140000` applied live, crest-v453, admin-user-ops v70). Before that, 2026-10-14 (S836 — table move, join and split shipped, moved to POS_DECISIONS.md A; migration `20261014120000`, admin-user-ops v69, crest-v452, then `20261014130000` with the till floor at 452). Before that, 2026-10-14 (S835 — the S809.4 found-while-fixing lists closed in one pass: D37–D43, migration `20261014110000`, pos-payment-webhook redeployed, crest-v451; S834 was the first pass, D34–D36). Before that, 2026-10-13 (S832 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c shipped (S823: `20261013100000`, crest-v438, then the till floor `20261013100100` = 438 after the deploy); 5d shipped (S828, `20261013140000`, crest-v443); 5e shipped (S829, `20261013150000` then `20261013150100`, admin-user-ops v67, pos-staff-login v11, crest-v444); 5f designed and Q30–Q32 answered (S828); 5f-1 shipped (S830, `20261013160000`, crest-v445); 5f-2 shipped (S830, `20261013170000`, crest-v446, then `20261013180000` with the till floor at 446); 5f-3 shipped (S831, `20261013190000`, crest-v447); 5f-4 shipped (S832, `20261013200000`, crest-v448, then `20261013210000` with the till floor at 448); stages 6–7 outlined)
+Last updated: 2026-10-23 (S861 — Crest Customization re-analysed: 41 findings, 0 P0 · 0 P1 · 3 P2 · 38 P3, and six owner decisions CU1–CU6, filed below under "S861 Customization re-analysis"; docs only). Before that, 2026-10-21 (S854 — the S853 "Build next" list shipped in one release: one Send, the leave ask, the till keys, Remove on any payment, Sales Report headings, the tile after a cancelled close, the payment window on a phone and its heading, deposits for party bookings and the walk-in waitlist; migrations `20261021100000` and `20261021110000` applied live, admin-user-ops v74, crest-v469, then the till floor 469 applied live after the deploy). Before that, 2026-10-15 (S846 — the 2026-10-15 POS critique closed in one release: food marks by shape and Egg dishes (migration `20261015160000`, applied live), the payment window money-first, one button per floor tile, Close Shift neutral until counted, POS's accent calmed like IMS and HR, one-tap kitchen Start; crest-v462; leftovers filed under B3). Before that, 2026-10-15 (S845 — B3's two shared-code leftovers closed: Excel waits for the letterhead's `ready` on the four POS reports and every IMS export, and the letterhead's blank row reaches the sheet; crest-v461). Before that, 2026-10-15 (S844 — the 2026-10-15 POS audit closed: P0/P1 in S841, P2 in S842, the P3 list and the Bill Register phone cards in S844, crest-v460; two shared-code leftovers filed under B3). Before that, 2026-10-15 (S840 — the combo leftovers and four parked items closed; migration `20261015100000`, crest-v456). Before that, 2026-10-14 (S839 — combos shipped, moved to POS_DECISIONS.md A; migration `20261014160000`). Before that, 2026-10-14 (S838 — Crest Customization's code follow-ups shipped, moved to POS_DECISIONS.md A; migration `20261014150000`). Before that, 2026-10-14 (S837 — kitchen and bar printers shipped, moved to POS_DECISIONS.md A; migration `20261014140000` applied live, crest-v453, admin-user-ops v70). Before that, 2026-10-14 (S836 — table move, join and split shipped, moved to POS_DECISIONS.md A; migration `20261014120000`, admin-user-ops v69, crest-v452, then `20261014130000` with the till floor at 452). Before that, 2026-10-14 (S835 — the S809.4 found-while-fixing lists closed in one pass: D37–D43, migration `20261014110000`, pos-payment-webhook redeployed, crest-v451; S834 was the first pass, D34–D36). Before that, 2026-10-13 (S832 — stages 1–4 complete; Q19–Q23 answered; stage 4's slices 4a–4l all shipped: waves 1 (4a, 4b, 4c) and 2 (4d, 4e, 4f), then 4g (migration `20261012100000`), 4h (migration `20261012110000`), 4i (migration `20261012120000`), 4j (migration `20261012130000`), 4k (migration `20261012140000`) and 4l (app and docs only); stage 5 sliced 5a–5f and approved, Q28 (a), Q29 (b), 5a shipped (S821, `20261012150000`), 5b shipped (S822, `20261012170000`, crest-v437), 5c shipped (S823: `20261013100000`, crest-v438, then the till floor `20261013100100` = 438 after the deploy); 5d shipped (S828, `20261013140000`, crest-v443); 5e shipped (S829, `20261013150000` then `20261013150100`, admin-user-ops v67, pos-staff-login v11, crest-v444); 5f designed and Q30–Q32 answered (S828); 5f-1 shipped (S830, `20261013160000`, crest-v445); 5f-2 shipped (S830, `20261013170000`, crest-v446, then `20261013180000` with the till floor at 446); 5f-3 shipped (S831, `20261013190000`, crest-v447); 5f-4 shipped (S832, `20261013200000`, crest-v448, then `20261013210000` with the till floor at 448); stages 6–7 outlined)
+
+---
+
+# S861 Customization re-analysis (2026-10-23)
+
+The first whole-module review of Crest Customization. In S809 it was one area of the POS review
+(`docs/pos-review-s809/CUSTOMIZATION.md`, 8 findings, all fixed in slices 2h, 3o and 4h). No whole-module
+review had yet seen what was added after that:
+
+- Combos (S839);
+- comps costed with their choices, the HQ push of choices, and sub-recipe deletes that name the choices
+  using them (S838);
+- bounded waits (S852).
+
+**Method.** There were six read-only area reviews:
+
+- SETUP: Option Groups and its dialogs, build-your-own, the option tables and their guards;
+- PRICING: the three pricers and the line-price guards;
+- TILL-GUEST: the till's choice window, the cart, offline replay, tickets, bills and the QR option sheet;
+- COMBOS: combos, reviewed for the first time;
+- REPORTS-STOCK: the Customization Report, every reader of choice stock lines, comp costing, and the
+  till-to-Inventory post;
+- ACCESS-DATA-DOCS: entitlement, billing, guards, export and restore, the HQ push, grants, Help and the rules.
+
+Each area ran reviewer → adversarial verifier. The verifier re-opened every file:line and the LIVE function,
+trigger, policy and grant bodies. The owner approved read-only live checks, and each area file's
+`## Live checks (run 2026-10-23)` lists every query it ran. One reviewer's live reads were refused by the
+permission prompt, so its verifier ran them instead. Nothing was written to the live database, and no app
+code changed.
+
+**Result: 41 findings, 0 P0 · 0 P1 · 3 P2 · 38 P3.**
+
+- None was rejected. Two severities changed: REPORTS-STOCK-1 and TILL-GUEST-1 both went from P2 to P3.
+- The verifiers found two more (TILL-GUEST-6, ADD-7) and corrected many scenarios and fixes. Each finding's
+  "Verified:" line says what changed.
+- All 41 are new. Every S809 fix still holds: CUSTOMIZATION-1 to -8, GUEST-5, REPORTS-4 and -12, and
+  IMS-HANDOFF-3, -6 and -10, as does S848's FORECAST-3. Every live body matches its last migration.
+- Six findings need a migration. Two more do, depending on the answer to CU2 or CU3.
+- The six owner decisions, CU1–CU6, are in S861.1.
+
+The evidence for each ID is in `docs/customization-review-s861/<AREA>.md`.
+
+**Checked and sound.**
+
+- The three pricers agree to the paisa: the browser copy, the till's save and the QR order. They were
+  compared over 132,440 price × factor pairs, 73,441 two-size products and all 128 of BLOOM CAFE's live
+  selections.
+- Choices reach Inventory exactly. All 1,833 posted (bill, dish, item) groups match their stored choices,
+  and credit notes reverse them.
+- Every IMS reader that turns sales into usage takes choices through the one shared conversion.
+- Tenancy, rank checks and grants on the option and combo tables are sound, and every discount and
+  loyalty reader skips combo dishes.
+
+**No paying client is exposed.** No paying client has POS. Customization is on at BLOOM CAFE and BLOOM
+CAFE - PKR, internal demo outlets that are VAT-registered and whose order history is mostly seeded, and at
+"Test", a trial with no groups. CASA ACAI CAFE has POS off. The live examples in the area files are demo
+data.
+
+**The three P2s in plain words:**
+
+- **ADD-1:** Customization's end date stops nothing. A lapsed or never-dated Customization keeps choices,
+  combos and their pages working, while the MRR figure and the billing export stop counting it.
+  BLOOM CAFE - PKR reaches this on 2026-12-21; it is billed at 0, so no money is lost there.
+- **COMBOS-1:** swapping a dish in a combo already on a bill, or changing that dish's choices, prices the
+  new dish from today's split. If the combo's price, its picks or a dish's price changed mid-meal, BLOOM's
+  NPR 500 combo bills NPR 481.82, 486.17 or 419.11, although Help promises the combo keeps its price.
+- **COMBOS-2:** a combo whose last pick has no menu price can round to a −NPR 0.01 share, in about 1 of 100
+  two-dish combos and 1 of 8 three-dish ones. Every order of it is then refused at the till and on the QR
+  menu, with a sentence nobody can act on. No live combo is set up this way.
+
+**How it gets fixed.** All of it in one batch, in one session and one release, per the owner's standing
+preference. Each migration is planned first and applied only on the owner's "apply".
+
+## S861.0 Index
+
+Group: **A** = entitlement, tenant boundaries and admin tools; **B** = money and stock stored or printed
+wrong; **C** = screens that mislead, block service or lose work; **D** = copy, docs and polish. Within a
+severity, rows run A → D. Mig = the fix needs a migration (as its area file's Fix line says). Decision =
+the CU question in S861.1.
+
+### P2 (3)
+
+| ID | Finding | Group | Decision | Mig |
+| --- | --- | --- | --- | --- |
+| ADD-1 | Customization's end date gates nothing: the till keeps selling choices and combos while MRR and the billing export stop counting it | A | CU1 | yes |
+| COMBOS-1 | A dish swapped or re-chosen inside a combo already on a bill is priced from today's split, so the combo stops adding up to its price | B | CU2 | if (a) |
+| COMBOS-2 | A combo whose last pick has no menu price can round to a −NPR 0.01 share, and every order of it is refused | C |  | yes |
+
+### P3 (38)
+
+| ID | Finding | Group | Decision | Mig |
+| --- | --- | --- | --- | --- |
+| ADD-2 | Switching POS off, when that save fails, still flips Customization off on screen, and the next Save Subscription really switches it off | A |  |  |
+| ADD-3 | Any signed-in login can ask whether another outlet has Customization (and POS) switched on | A |  | yes |
+| SETUP-1 | Every save of a choice re-works its price from the whole-rupee figure on screen, so an unrelated edit moves it by up to 50 paisa (Extra Shot 60.00 → 60.18 on BLOOM's live rows) | B | CU4 |  |
+| SETUP-5 | An emptied full-price box saves a size as costing nothing | B |  |  |
+| SETUP-6 | A gap left by CUSTOMIZATION-1's fix: on a PAN-bill outlet, a choice editor opened before the VAT basis loaded saves the 13%-inclusive figure | B |  |  |
+| PRICING-1 | When two "first N free" choices tie in the list, a Nepali or Hindi browser (or two look-alike names) frees a different one from the server's | B |  |  |
+| TILL-GUEST-5 | A reprint, the Bill Register view and a bill printed after a lost close list the choices without their prices | B |  |  |
+| COMBOS-5 | A guest's cheaper-than-nothing choice on a combo-only side is dropped from the QR order, so the kitchen never sees it | B |  | yes |
+| COMBOS-7 | Combo Builder's "Create as combo" fills a PAN outlet's combo with a price grossed up 13% for VAT | B |  |  |
+| REPORTS-STOCK-1 | The Monthly Owner Report freezes a comped dish's food cost without its choices (BLOOM Shrawan NPR 211.78, should be 242.27); no screen shows the figure yet | B |  |  |
+| REPORTS-STOCK-2 | Stock Ageing and FIFO judge a choice by its own net sales, not its dish's, so a later-month credit note uses up stock the Stock Report put back (latent) | B |  |  |
+| REPORTS-STOCK-4 | A "not served" credit note never takes back an item a choice ADDED (Oat Milk on an Americano adds 150 ml milk), so Book Stock and usage disagree | B |  | yes |
+| SETUP-2 | Recipe Costing changes a dish price with no size notice and no below-zero refusal, which Menu Pricing has | C |  |  |
+| SETUP-3 | The Shown boxes and minimum fields in the edit dialogs, and the page's own Hide, skip the page's below-zero and hide warnings | C |  |  |
+| SETUP-7 | A stock line on a hidden item or sub-recipe opens as an empty box, though it still takes stock on every sale | C |  |  |
+| SETUP-8 | The build-your-own template runs again on a dish that already has its groups, giving it two Sizes and two Bases | C |  |  |
+| SETUP-9 | Menu Pricing treats a dish as having no choices while that read is pending (with no time limit), so a price saved then skips the size notice and the below-zero refusal | C |  |  |
+| SETUP-10 | The attach dialogs' removals and the editor's stock-line updates never check how many rows they touched | C |  |  |
+| PRICING-2 | A choice that brings a VAT dish to exactly NPR 0 passes the editors but is refused at the till and on the QR menu | C | CU3 | if (a)/(c) |
+| TILL-GUEST-1 | A till left open while Crest flips Customization keeps the old setting until it re-reads its login, and refuses every order with choices | C |  |  |
+| TILL-GUEST-2 | A dish printed offline whose choice was hidden meanwhile comes back "already sent", with no Change, and blocks every save of the table's order | C | CU5 |  |
+| TILL-GUEST-3 | Changing a choice while Send is on its way pulls the dish the bar was just sent, with no reason recorded, and sends a second | C |  |  |
+| TILL-GUEST-4 | After the guest's phone reloads, a dish whose choice was hidden shows at the lower price and Place Order is refused | C |  |  |
+| TILL-GUEST-6 | Changing a dish's choices to match another line of it merges the two and drops the kitchen note | C |  |  |
+| COMBOS-3 | The till's combo split is a paisa off the server's on about 1 combo in 200–300, so Charge stops once with "Prices were updated from the menu" | C |  | yes |
+| COMBOS-4 | A pick added or replaced while a till holds the old menu gets every new combo from that till refused as "missing a dish" until a table is reopened | C |  |  |
+| COMBOS-6 | A new combo whose Save loses its answer is created anyway, and the retry ends with two | C |  |  |
+| REPORTS-STOCK-3 | An ingredient used only by a choice reads "no recipe linked" on the variance pages in a counted month nobody picked it (latent) | C |  |  |
+| REPORTS-STOCK-5 | The Customization Report has no time limit on its reads, so a hung read spins for good | C |  |  |
+| REPORTS-STOCK-6 | "Extras earned" counts larger sizes as add-ons (about half of BLOOM's NPR 12,040), and a cheaper non-size choice would count as a size | C | CU6 |  |
+| ADD-7 | A Customization page opened while the module is off bounces silently to the dashboard instead of showing the "module missing" card | C |  |  |
+| SETUP-4 | Turning a group that holds a "No …" choice into a Size is refused with "Check the dates and amounts" | D |  |  |
+| PRICING-3 | Three refusal sentences point at the wrong thing: "Tap Choices" where the button says Change, "Try again" offline, a comma in a dish name | D |  |  |
+| COMBOS-8 | On a bill of combos only, the member card still says "10% member discount filled in", and the bill stores a NPR 0 member discount | D |  |  |
+| COMBOS-9 | The contract and Help say combos are "never" written through the tables and that two identical combos are "always" one | D |  |  |
+| ADD-4 | POS_TODO §A still lists as open the browser checks S856 already pressed | D |  |  |
+| ADD-5 | Six sentences in the Customization guide and the rules describe behaviour the code does not have | D |  |  |
+| ADD-6 | The pricing card and the plan's feature list leave out combos and build-your-own | D |  |  |
+
+## S861.1 Owner decisions (CU1–CU6)
+
+Each has a recommended answer. Answering "all as recommended" is enough to start; name any you want
+different.
+
+- **CU1 (ADD-1) When Customization's paid-through date passes, should the till and the QR menu stop offering
+  choices and combos?** **(a) Recommended:** yes, after the same 7-day grace as Suite; an outlet with no
+  Customization date stays open but is marked "no end date, not billed" on the admin screens. (b) Keep it
+  open, but every admin screen says "on, not billed" and Convert to Paid asks for a date. (c) (a), and Convert
+  to Paid is refused while Customization is on with no date. S848's SU5 settled only the account lock, so
+  this is a new question.
+- **CU2 (COMBOS-1) A dish swapped inside a combo already on the table, after the combo's price, its picks or
+  a dish's price changed: what should the new dish cost?** **(a) Recommended:** the combo keeps the price it
+  was ordered at, plus the new dish's own extra charge (what Help promises; needs a migration). (b) The new
+  dish follows today's prices, so the combo can come out at an odd total; only Help and the contract change.
+- **CU3 (PRICING-2) When a choice brings a dish to nothing, may it be sold?** (a) Yes: the till accepts any
+  dish that rounds to NPR 0.00, so "Kids eat free" works on every dish (against the 2026-10-09 rule that free
+  things go through Complimentary). **(b) Recommended:** the editors refuse exactly what the till refuses
+  today, so nothing passes the editor and then fails at the till; a choice landing on exactly NPR 0.00 stays
+  possible, as now. (c) Both refuse a dish brought to NPR 0 or less, the 2026-10-09 rule applied to choices.
+- **CU4 (SETUP-1) When the Owner saves a choice without touching its price, should the price change?**
+  **(a) Recommended:** no, it stays exactly as stored, even where it bills 67.80 under a "+NPR 68" label.
+  (b) It snaps to the whole rupee on screen, but the editor says so before saving ("Extra Shot will bill
+  NPR 68.00; it bills 67.80 now").
+- **CU5 (TILL-GUEST-2) A dish already made with a choice that has since been hidden: what may the till do?**
+  **(a) Recommended:** it says to turn the choice back on to bill the dish as made, or to remove it, so the
+  bill matches what was served. (b) It also allows Change, keeping the sent count so nothing prints again,
+  which bills the dish without the choice.
+- **CU6 (REPORTS-STOCK-6) What should "Extras earned" on the Customization Report count?** **(a)
+  Recommended:** every positive charge, larger sizes included, and the tip and guide say so; a cheaper
+  non-size choice gets its own line under the tiles. (b) Add-ons and choices only, and the size tile becomes
+  "Size changes", every size charge up and down, netted. (c) Leave the figures and fix only the tips.
 
 ---
 
