@@ -30,6 +30,18 @@ export function getDateStatus(endsAt) {
   return statusFromDays(days)
 }
 
+// The drawer's chip for Customization's own date (S862 ADD-1): it closes the add-on itself, so the
+// chip names the state the till is in rather than only the days. No date is a state too: open and
+// not billed, the one an operator must notice.
+export function getCustomizationDateStatus(endsAt) {
+  const cs = customizationState({ pos_enabled: true, customization_enabled: true, customization_ends_at: endsAt || null })
+  if (cs.noDate) return { label: 'No end date · not billed', days: null, color: 'var(--theme-text2)', bg: 'color-mix(in srgb, var(--theme-text2) 10%, var(--theme-card))', border: 'color-mix(in srgb, var(--theme-text2) 30%, transparent)' }
+  const red = { color: 'var(--theme-red-text)', bg: 'color-mix(in srgb, var(--theme-red) 12%, var(--theme-card))', border: 'color-mix(in srgb, var(--theme-red) 30%, transparent)' }
+  if (cs.lapsed) return { label: 'Lapsed · choices off', days: cs.daysLeft, ...red }
+  if (cs.inGrace) return { label: `Grace · ${GRACE_DAYS + cs.daysLeft}d left`, days: cs.daysLeft, ...red }
+  return statusFromDays(cs.daysLeft)
+}
+
 // Days of continued access after the last module end date passes. A lapsed invoice here is
 // usually a collection delay (cheque/cash pickup), not a decision to leave — cutting a live
 // restaurant off at midnight on the due date would strand a service in progress, so expiry
@@ -64,8 +76,9 @@ export function getAccessState(client) {
 
   // The main modules' dates and the legacy date only (S849 ACCESS-2, SU5 (a)). An add-on — Crest
   // Suite Pro or Customization — paid further ahead used to hold the whole outlet open after IMS, HR
-  // and POS had all run out. The add-ons keep their own dates for their own pages and their money
-  // (suiteState, clientMrr), never for the lock. client_access_open() weighs the same four.
+  // and POS had all run out. The add-ons' own dates close only the add-on itself (suiteState,
+  // customizationState) and its money (clientMrr), never the outlet. client_access_open() weighs
+  // the same four.
   const ends = [
     client.ims_ends_at,
     client.hr_ends_at,
@@ -130,6 +143,37 @@ export function suiteState(client) {
   const billEnd = client?.suite_ends_at || (imsWindowOpen ? imsEnd : null)
   const billed = subscribed && imsOn && !client?.is_internal && !!billEnd && days(billEnd) > 0
   return { subscribed, imsOn, endsAt, daysLeft, noDate, live, inGrace, lapsed, billed }
+}
+
+// Everything every screen needs to know about one client's Crest Customization, from one predicate
+// (S862 ADD-1, owner CU1 (a)): Suite's rule applied to the add-on ON POS. Until S862 the end date
+// gated nothing: a lapsed Customization kept choices and combos on the till and the QR menu while
+// clientMrr and the billing export stopped counting it. AuthContext reads `.live` for the module
+// switch; public.customization_live() is its SQL twin, and clientCustomizationLive.test.js holds the
+// two together.
+//   subscribed — POS on and the Customization flag on (the database refuses the flag without POS)
+//   endsAt     — customization_ends_at, or null; it has no fallback date of its own
+//   daysLeft   — whole days to endsAt, negative once past; null with no date
+//   noDate     — subscribed with no date: it stays open, is not billed, and the operator screens
+//                mark it "no end date"
+//   live       — the till, the QR menu and the pages offer it: subscribed, and no date or not more
+//                than GRACE_DAYS past
+//   inGrace    — live, but the date has passed (the 7 days after it)
+//   lapsed     — subscribed but past the grace week
+//   billed     — clientMrr's rule: POS's own window open, Customization's date still ahead, and not
+//                Crest's demo outlet
+export function customizationState(client) {
+  const subscribed = !!client?.pos_enabled && !!client?.customization_enabled
+  const endsAt = client?.customization_ends_at || null
+  const days = d => Math.ceil((new Date(d).getTime() - Date.now()) / 86400000)
+  const daysLeft = endsAt ? days(endsAt) : null
+  const noDate = subscribed && !endsAt
+  const live = subscribed && (daysLeft === null || daysLeft >= -GRACE_DAYS)
+  const inGrace = live && daysLeft !== null && daysLeft <= 0
+  const lapsed = subscribed && !live
+  const posWindowOpen = !!client?.pos_ends_at && days(client.pos_ends_at) > 0
+  const billed = subscribed && !client?.is_internal && posWindowOpen && daysLeft !== null && daysLeft > 0
+  return { subscribed, endsAt, daysLeft, noDate, live, inGrace, lapsed, billed }
 }
 
 // "+N days" on a subscription ADDS to the time the client already has. The base is the later of

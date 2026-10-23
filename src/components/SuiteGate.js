@@ -6,9 +6,10 @@ import { npr } from '../shared/nepalMoney'
 import ModuleMissingCard from './ModuleMissingCard'
 
 // Gates on the Crest Suite Pro axis (clients.suite_plan) + a required module set — independent of
-// PremiumGate's per-module plan/hasFeature() machinery. Unlike ModuleGate/PremiumGate, this never
-// navigates away on failure: the nav entry must always stay visible, and an ineligible viewer
-// lands on an inline explanation/upsell in place instead of being bounced.
+// PremiumGate's per-module plan/hasFeature() machinery. Like ModuleGate (since S862) and PremiumGate,
+// it never navigates away on failure: an ineligible viewer lands on an inline explanation in place
+// instead of being bounced. Here that matters most, because the nav entry must stay visible to be
+// sold, so it carries no featureKey/minPlan that would hide it.
 //
 // Suite has ONE tier. It used to carry starter/growth/pro ranks, but both call sites were
 // minTier="growth" — so Suite Starter unlocked nothing at all, and Suite Pro added nothing over

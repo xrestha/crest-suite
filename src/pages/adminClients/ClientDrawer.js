@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useSettings } from '../../context/SettingsContext'
 import { formatAd, BS_MONTHS, bsDayOrdinal } from '../../utils/bsCalendar'
 import BsCalendarPicker from '../../components/BsCalendarPicker'
-import { getDateStatus, extendedFrom, suiteState } from '../../utils/subscription'
+import { getDateStatus, getCustomizationDateStatus, extendedFrom, suiteState } from '../../utils/subscription'
 import { groupChangeCopy } from './groupChangeCopy'
 import { validateEmvQr } from '../../utils/emvQr'
 import Tip from '../../components/Tip'
@@ -749,6 +749,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   // that did not land left the switch flipped on screen while the row — and the client list
   // behind the drawer, after onClientUpdated re-read it — still showed the old state (S736). The
   // switch is set optimistically and put BACK on failure, so what is on screen is what is saved.
+  // Answers whether the write landed (S862 ADD-2), so a caller acts on the outcome, not the press.
   async function toggleModule(column, label, current, setter) {
     const next = !current
     setter(next)
@@ -757,10 +758,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     if (error) {
       setter(current)
       setSubMsg(`error:${label} is still ${current ? 'on' : 'off'} — the change did not save. ${errorLine(error)}`)
-      return
+      return false
     }
     onClientUpdated()
     if (client.id === adminViewClientId) refreshViewModules()
+    return true
   }
   // S849 (ACCESS-3): Crest Suite Pro is an IMS add-on, so switching IMS off while Suite is on asks
   // first and takes Suite off in the same write — otherwise every Suite page closes while Suite
@@ -802,11 +804,13 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
   }
   const handleToggleHr  = () => toggleModule('hr_enabled',  'Crest HR',  hrEnabled,  setHrEnabled)
   // POS off takes Customization with it — the database trigger does the same, so the switch on
-  // screen follows what the row will hold rather than waiting for the next re-read.
+  // screen follows what the row will hold rather than waiting for the next re-read. Only once the
+  // POS write landed (S862 ADD-2): a failed one left Customization off on screen with POS still on,
+  // and the next Save Subscription then switched a paying client's Customization off for real.
   const handleTogglePos = async () => {
     const wasOn = posEnabled
-    await toggleModule('pos_enabled', 'Crest POS', posEnabled, setPosEnabled)
-    if (wasOn && customizationEnabled) setCustomizationEnabled(false)
+    const saved = await toggleModule('pos_enabled', 'Crest POS', posEnabled, setPosEnabled)
+    if (saved && wasOn && customizationEnabled) setCustomizationEnabled(false)
   }
   const handleToggleCustomization = () => toggleModule('customization_enabled', 'Crest Customization', customizationEnabled, setCustomizationEnabled)
 
@@ -2138,7 +2142,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                   { key: 'customization', label: 'Crest Customization', enabled: posEnabled && customizationEnabled, plan: null, setPlan: null, endsAt: customizationEndsAt, setEndsAt: setCustomizationEndsAt },
                 ].map(mod => {
                   if (!mod.enabled) return null
-                  const s = getDateStatus(mod.endsAt)
+                  const s = mod.key === 'customization' ? getCustomizationDateStatus(mod.endsAt) : getDateStatus(mod.endsAt)
                   const flatPricing = mod.key === 'hr' ? pricing.hr : mod.key === 'pos' ? pricing.pos : mod.key === 'customization' ? pricing.customization : null
                   const accentInk  = MODULE_INK[mod.key]
                   // These sections used to be disabled whenever a Suite Bundle was selected,
@@ -2203,7 +2207,11 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
                       )}
                       {/* Date picker */}
                       <p style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '0 0 6px' }}>
-                        <Tip text="Date when this module's subscription expires. Client sees a warning in the last 7 days and is blocked after expiry." width={300}>Subscription end date</Tip>
+                        {/* S862 ADD-1: the old shared Tip said every module blocked the client at its own date,
+                            true of none of them unless it held the latest date of IMS, HR and POS. */}
+                        <Tip text={mod.key === 'customization'
+                          ? 'The date Customization is paid through. Seven days after it, the till, the QR menu and the Customization pages stop offering choices and combos. With no date it stays on and is not billed.'
+                          : 'The date this module is paid through; with no date it is not billed. The client sees a warning in the last 7 days, and the whole account locks 7 days after the latest of the IMS, HR and POS dates.'} width={300}>Subscription end date</Tip>
                       </p>
                       <div style={{ marginBottom: 8 }}>
                         <BsCalendarPicker value={mod.endsAt} onChange={mod.setEndsAt} clearable />

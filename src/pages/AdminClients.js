@@ -3,7 +3,7 @@ import { supabase } from '../supabaseClient'
 import { scopedInsert } from '../shared/scopedDb'
 import { invalidatePeriodList } from '../shared/periodList'
 import { getBsToday, formatAdAsBs } from '../utils/bsCalendar'
-import { getSubStatus, getAccessState, suiteState } from '../utils/subscription'
+import { getSubStatus, getAccessState, suiteState, customizationState } from '../utils/subscription'
 import { fetchAllRows } from '../shared/fetchAllRows'
 import { useConfirm } from '../shared/hooks/useConfirm'
 import { useAutoPurgeBackup, refreshBackupPermission } from '../modules/admin/dataExport/useAutoPurgeBackup'
@@ -37,6 +37,28 @@ function SubBadge({ client }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 const EMPTY_CLIENT_FORM = { name: '', location: '', contact_person: '', contact_phone: '' }
+
+// S862 ADD-1: Customization's pill says what the till and the QR menu do, through
+// customizationState(), the predicate AuthContext and customization_live() share: on, on with no
+// end date (open, not billed), the 7-day grace, or lapsed (choices and combos stopped).
+function customizationPill(c) {
+  const cs = customizationState(c)
+  const pill = { key: 'CUSTOM', plan: null, enabled: cs.live, color: 'var(--theme-amber-text)', borderRgba: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)' }
+  if (!cs.subscribed) return pill
+  if (cs.noDate) {
+    return { ...pill, text: 'CUSTOM · no end date', color: 'var(--theme-text2)', borderRgba: 'color-mix(in srgb, var(--theme-text2) 30%, transparent)',
+      tip: 'Crest Customization is on with no end date: the till and the QR menu offer choices and combos, and it is not billed. Set a Customization end date in Manage → Billing.' }
+  }
+  if (cs.inGrace) {
+    return { ...pill, text: 'CUSTOM · grace', color: 'var(--theme-red-text)', borderRgba: 'color-mix(in srgb, var(--theme-red) 35%, transparent)',
+      tip: `Crest Customization ended on ${formatAdAsBs(cs.endsAt)}. Choices and combos stay on for the 7-day grace and stop after; it is no longer billed.` }
+  }
+  if (cs.lapsed) {
+    return { ...pill, text: 'CUSTOM · lapsed',
+      tip: `Crest Customization lapsed: it ended on ${formatAdAsBs(cs.endsAt)} and the 7-day grace has passed, so the till and the QR menu offer no choices or combos, and it is not billed.` }
+  }
+  return { ...pill, tip: `Crest Customization is on to ${formatAdAsBs(cs.endsAt)}.` }
+}
 
 function relativeTime(iso) {
   if (!iso) return null
@@ -729,13 +751,15 @@ export default function AdminClients() {
                       { key: 'POS', enabled: !!c.pos_enabled,         plan: null,   color: 'var(--theme-purple-text)', borderRgba: 'color-mix(in srgb, var(--theme-purple) 35%, transparent)' },
                       // Customization (S758) is an add-on on POS — a billed axis, so it gets a
                       // pill in the same row (access-control.md: what a client pays for is
-                      // visible on the screen that bills it). Reads as on only while POS is on.
-                      { key: 'CUSTOM', enabled: !!c.pos_enabled && !!c.customization_enabled, plan: null, color: 'var(--theme-amber-text)', borderRgba: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)' },
-                    ].map(m => (
+                      // visible on the screen that bills it). Since S862 (ADD-1) it says what the
+                      // till does, through customizationState(): on, no end date, grace, lapsed.
+                      customizationPill(c),
+                    ].map(m => {
                       // minWidth + centred text so IMS/HR/POS line up as three columns down the
                       // list. Without it the pills are content-width, so "IMS · Starter" and
                       // "IMS · Pro" start at different x on adjacent rows and the whole block
                       // reads ragged — the widths vary by plan name, not by anything meaningful.
+                      const pill = (
                       <span key={m.key} style={{
                         fontSize: 12, fontWeight: 700, padding: '5px 10px', borderRadius: 'var(--radius-sm)',
                         border: `1px solid ${m.enabled ? m.borderRgba : 'var(--theme-border)'}`,
@@ -745,9 +769,13 @@ export default function AdminClients() {
                         // so every pill is the same width and the three columns line up exactly.
                         minWidth: 100, textAlign: 'center', boxSizing: 'border-box',
                       }}>
-                        {m.key}{!m.enabled ? ' · off' : m.plan ? ` · ${planLabel(m.plan)}` : ' · on'}
+                        {m.text || <>{m.key}{!m.enabled ? ' · off' : m.plan ? ` · ${planLabel(m.plan)}` : ' · on'}</>}
                       </span>
-                    ))}
+                      )
+                      return m.tip
+                        ? <Tip key={m.key} text={m.tip} width={280} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>{pill}</Tip>
+                        : pill
+                    })}
                     {/* Crest Suite Pro is an add-on on its own axis (clients.suite_plan), not a
                         fourth module — so it is rendered only when a client actually has it,
                         rather than joining the map above and printing "SUITE · off" on every row

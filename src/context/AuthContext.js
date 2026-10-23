@@ -7,7 +7,7 @@ import { accountOutlet, outletMovedElsewhere, announceOutletSwitch, listenForOut
 import { runBeforePosLock, lockedCartFor, sessionEndKeepsCart, beforePosLockRunning } from '../modules/pos/posLockedCart'
 import { outletSwitchArg, readTillDevice } from '../modules/pos/tillOutlet'
 import { signOutThisDevice } from '../shared/deviceSignOut'
-import { getAccessState, suiteLive, suiteState } from '../utils/subscription'
+import { getAccessState, suiteLive, suiteState, customizationState } from '../utils/subscription'
 import { setPageCacheUser, clearPageCache } from '../shared/sessionDataCache'
 import { docsRequiringReacceptance, reacceptDocTypes } from '../legal'
 import { weatherEntitled } from '../modules/dashboard/weatherSettings'
@@ -556,9 +556,11 @@ export function AuthProvider({ children }) {
   const hrEnabled  = isAdmin || (profile?.clients?.hr_enabled ?? false)
   // Crest Customization (S758) is an add-on ON POS: the database refuses the flag without
   // pos_enabled, and this mirrors it so a stale flag on a client whose POS was switched off can
-  // never light the module up here either. The operator's value is the viewed client's own switch
-  // (S819 4k, GAP-OPERATOR-2), resolved below once clientModules exists.
-  const ownCustomizationEnabled = posEnabled && (profile?.clients?.customization_enabled ?? false)
+  // never light the module up here either. Since S862 (ADD-1, owner CU1 (a)) it also honours
+  // customization_ends_at, with Suite's grace week: customizationState(client).live, whose SQL twin
+  // is customization_live(). The operator's value is the viewed client's own switch (S819 4k,
+  // GAP-OPERATOR-2), resolved below once clientModules exists.
+  const ownCustomizationEnabled = customizationState(profile?.clients).live
   // Admin gets 'manager'; owner (client with no pos_role/ims_role/hr_role) gets 'manager' on the
   // corresponding module when it's enabled; staff use their explicit pos_role/ims_role/hr_role. An
   // HR self-service account also has role 'client' with none of the four set — without excluding
@@ -848,12 +850,12 @@ export function AuthProvider({ children }) {
   // The viewed group's outlets, for the operator only (GAPS-6). null = not known (a failed read),
   // [] = no group.
   const [viewOutlets, setViewOutlets] = useState([])
-  const MODULE_COLS = 'ims_enabled, ims_since, hr_enabled, pos_enabled, customization_enabled'
+  const MODULE_COLS = 'ims_enabled, ims_since, hr_enabled, pos_enabled, customization_enabled, customization_ends_at'
   // imsSince (S831 5f-3, owner Q31 a): when this outlet's Inventory began, the start of the Nepal day
   // it was last switched on, or null for "from the start". A till bill closed before it is never sent
   // to Inventory, nor a credit note on it (posImsWaiting.js billCountsForIms).
   const modulesOf = data => (data
-    ? { ims: data.ims_enabled !== false, hr: !!data.hr_enabled, pos: !!data.pos_enabled, customization: !!data.pos_enabled && !!data.customization_enabled, imsSince: data.ims_since || null }
+    ? { ims: data.ims_enabled !== false, hr: !!data.hr_enabled, pos: !!data.pos_enabled, customization: customizationState(data).live, imsSince: data.ims_since || null }
     : null)
   // S834 (S809.4 4k): both reads below used to drop their error. A failed read still fails open
   // (clientModulesKnown false, the default module set), but it says so in the console, and a failed
@@ -912,13 +914,13 @@ export function AuthProvider({ children }) {
   // The DISPLAYED client's real module subscription (for nav visibility + dashboard sections).
   // Separate from imsEnabled/hrEnabled, which keep the admin route-access bypass.
   const cIms = profile?.clients?.ims_enabled, cHr = profile?.clients?.hr_enabled, cPos = profile?.clients?.pos_enabled
-  const cCust = profile?.clients?.customization_enabled
+  const cCust = customizationState(profile?.clients).live
   const cImsSince = profile?.clients?.ims_since || null
   const clientModules = useMemo(() => {
     if (isAdmin && adminViewClientId) return viewModules || { ims: true, hr: false, pos: false, customization: false, imsSince: null }
     if (isAdmin) return { ims: true, hr: true, pos: false, customization: false, imsSince: null } // admin's own view: full nav for management
     const pos = cPos ?? false
-    return { ims: cIms ?? true, hr: cHr ?? false, pos, customization: pos && (cCust ?? false), imsSince: cImsSince }
+    return { ims: cIms ?? true, hr: cHr ?? false, pos, customization: cCust, imsSince: cImsSince }
   }, [isAdmin, adminViewClientId, viewModules, cIms, cHr, cPos, cCust, cImsSince])
   // False only while an operator's view of a client is still reading that client's switches, when
   // clientModules holds the placeholder above. A gate that acts on a switch being OFF waits for it.

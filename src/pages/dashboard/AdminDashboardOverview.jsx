@@ -5,7 +5,7 @@ import { useSettings } from '../../context/SettingsContext'
 import { supabase } from '../../supabaseClient'
 import Tip from '../../components/Tip'
 import { BS_MONTHS, adToBsSafe } from '../../utils/bsCalendar'
-import { getSubStatus, getDateStatus, suiteState } from '../../utils/subscription'
+import { getSubStatus, getDateStatus, suiteState, customizationState } from '../../utils/subscription'
 import { suitePagesText } from '../../data/pricingPlans'
 import { clientMRR } from '../../shared/clientMrr'
 import { fetchAllRows } from '../../shared/fetchAllRows'
@@ -612,6 +612,10 @@ export default function AdminDashboardOverview() {
                     const suiteLive = ss.live
                     const suiteDays = ss.daysLeft
                     const suiteExpiring = ss.live && !ss.inGrace && suiteDays !== null && suiteDays <= 30
+                    // S862 ADD-1: Customization honours its own date too (customizationState), and
+                    // a lapse stops choices and combos on the till, so it warns like Suite.
+                    const cs = customizationState(c)
+                    const custExpiring = cs.live && !cs.inGrace && cs.daysLeft !== null && cs.daysLeft <= 30
 
                     return (
                       <Fragment key={c.id}>
@@ -652,9 +656,16 @@ export default function AdminDashboardOverview() {
                             )}
                             {/* Customization (S758) is an add-on on POS and a billed line, so it
                                 gets a pill beside the module it sits on. Amber as a categorical
-                                module hue, never a warning (pricingPlans.js MODULE_COLORS). */}
-                            {c.pos_enabled && c.customization_enabled && (
-                              <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', color: 'var(--theme-amber-text)', border: '1px solid color-mix(in srgb, var(--theme-amber) 20%, transparent)' }}>CUSTOM</span>
+                                module hue, never a warning (pricingPlans.js MODULE_COLORS). Since
+                                S862 (ADD-1) it follows customizationState(), as the till does: a
+                                lapsed one greys out, and "no end date" means open and not billed. */}
+                            {cs.subscribed && (
+                              <span title={cs.noDate ? 'On with no end date: open and not billed' : cs.lapsed ? 'Lapsed: the till and QR menu offer no choices or combos' : undefined}
+                                style={cs.live
+                                  ? { fontSize: 11, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'color-mix(in srgb, var(--theme-amber) 10%, transparent)', color: 'var(--theme-amber-text)', border: '1px solid color-mix(in srgb, var(--theme-amber) 20%, transparent)' }
+                                  : { fontSize: 11, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'transparent', color: 'var(--theme-text3)', border: '1px solid var(--theme-border)' }}>
+                                {cs.noDate ? 'CUSTOM · no end date' : cs.lapsed ? 'CUSTOM · lapsed' : 'CUSTOM'}
+                              </span>
                             )}
                             {/* Suite is an add-on ABOVE the modules, not a fourth one, so it takes
                                 the accent rather than a fourth hue — the star and the heavier fill
@@ -728,6 +739,15 @@ export default function AdminDashboardOverview() {
                             )}
                             {ss.lapsed && (
                               <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>{ss.imsOn ? 'Suite lapsed' : 'Suite needs IMS'}</div>
+                            )}
+                            {custExpiring && (
+                              <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>Custom exp. {cs.daysLeft}d</div>
+                            )}
+                            {cs.inGrace && (
+                              <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 4 }}>Custom in grace</div>
+                            )}
+                            {cs.lapsed && (
+                              <div style={{ fontSize: 11, color: 'var(--theme-red-text)', marginTop: 4 }}>Custom lapsed</div>
                             )}
                           </div>
                         </td>
