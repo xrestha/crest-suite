@@ -30,9 +30,10 @@ import ComboEditorModal from './ComboEditorModal'
 // the raw pos_role / ims_role columns as OptionGroups.jsx does. save_pos_combo refuses everyone else
 // (option_edit_rank), so the guard here only keeps a page from offering a save that will fail.
 //
-// Writes go through save_pos_combo / delete_pos_combo only: the tables refuse a direct write, and the
-// RPC keeps a combo whole (its picks and dishes in one transaction). Hide and "QR menu" on the list
-// re-send the saved combo with one flag changed.
+// A combo is created, edited and deleted through save_pos_combo / delete_pos_combo, which keep it
+// whole (its picks and dishes in one transaction). Hide and "QR menu" on the list write their one
+// flag straight to pos_combos (quickSave); guard_pos_combo_edit checks the rank, Customization and a
+// foreign dish on every write, through the RPCs or not (docs/pos-combos.md, S862 COMBOS-9).
 //
 // Combo Builder hands a pairing over as ?new=1&dishes=<id>,<id>&price=<suggested guest price>; the
 // page opens a new combo with one pick per dish, then drops the parameters so a reload does not.
@@ -146,7 +147,7 @@ export default function Combos() {
     setEditor({ state: editorFromCombo(c), isNew: false, prefilled: false })
   }
 
-  // Hide / Show and the QR-menu switch re-send the saved combo whole with one flag changed.
+  // Hide / Show and the QR-menu switch: one flag, written straight to pos_combos.
   async function quickSave(c, patch, doneText) {
     if (busyId) return
     setBusyId(c.id)
@@ -228,16 +229,15 @@ export default function Combos() {
       </div>
 
       {isAdmin && clientModules && !clientModules.customization && (
-        <div role="status" className="card" style={{ borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', marginBottom: 16 }}>
-          <strong style={{ color: 'var(--theme-amber-text)' }}>Crest Customization is off for this client.</strong>{' '}
-          <span style={{ color: 'var(--theme-text2)' }}>You can prepare combos now; nothing is offered on the till or guest menu until it is switched on in Admin → Clients.</span>
+        <div role="status" className="amber-banner">
+          <strong>Crest Customization is off for this client.</strong>{' '}
+          You can prepare combos now; nothing is offered on the till or guest menu until it is switched on in Admin → Clients.
         </div>
       )}
 
       <ActionError error={pageError} className="action-error--top" />
-      {notice && (
-        <p role="status" style={{ fontSize: 13, color: 'var(--theme-green-text)', margin: '0 0 12px' }}>{notice}</p>
-      )}
+      {/* Always mounted, so a screen reader is already listening when the text arrives (S863). */}
+      <p role="status" style={{ fontSize: 13, color: 'var(--theme-green-text)', margin: notice ? '0 0 12px' : 0 }}>{notice || ''}</p>
 
       {loading ? (
         <div className="loading-state">Loading…</div>

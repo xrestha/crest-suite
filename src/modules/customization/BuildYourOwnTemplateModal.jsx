@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { supabase } from '../../supabaseClient'
 import Modal from '../../components/Modal'
 import Tip from '../../components/Tip'
@@ -38,6 +38,9 @@ export default function BuildYourOwnTemplateModal({ dishes, buildYourOwn = [], g
   const [prefix, setPrefix] = useState('')
   const [errors, setErrors] = useState({})
   const [saving, setSaving] = useState(false)
+  // The button stays pressable while it writes (disabling it drops keyboard focus to the page), so a
+  // second press is turned away here; a ref, because a press can land before the re-render.
+  const busyRef = useRef(false)
   const [actionError, setActionError] = useState(null)
 
   const dish = dishes.find(d => d.id === dishId) || null
@@ -50,18 +53,20 @@ export default function BuildYourOwnTemplateModal({ dishes, buildYourOwn = [], g
   }, [groupNames, names]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function create() {
-    if (saving) return
+    if (busyRef.current || saving) return
     const e = {}
     if (!dishId) e.dish = 'Choose the dish guests build — e.g. Acai Bowl.'
     else if (sizeClash) e.dish = sizeClash
     if (taken.length) e.prefix = `A group called “${taken[0]}” already exists. Type a different name for the groups.`
     setErrors(e)
     if (Object.keys(e).length) return
+    busyRef.current = true
     setSaving(true)
     setActionError(null)
     const { data, error } = await settleWithin(supabase.rpc('create_build_your_own_template', {
       p_recipe_id: dishId, p_prefix: prefix.trim() || null,
     }), CUSTOMIZATION_WRITE_MS, 'Creating the groups')
+    busyRef.current = false
     setSaving(false)
     if (error) { setActionError(writeFailure(error)); return }
     onSaved({ dish, result: data })
@@ -105,10 +110,10 @@ export default function BuildYourOwnTemplateModal({ dishes, buildYourOwn = [], g
 
         <ActionError error={actionError} />
       </div>
-      <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
-        <button type="button" className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
-        <button type="button" className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }}
-          onClick={create} disabled={saving} aria-disabled={!!sizeClash || undefined} aria-busy={saving || undefined}>
+      <div className="form-actions form-actions--split">
+        <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn-primary"
+          onClick={create} aria-disabled={!!sizeClash || undefined} aria-busy={saving || undefined}>
           {saving ? 'Creating…' : 'Create the four groups'}
         </button>
       </div>

@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import ComboEditorModal from './ComboEditorModal'
+import ComboDishPicker from './ComboDishPicker'
 import { emptyCombo, prefillFromDishes } from './comboEditor'
 import { supabase } from '../../supabaseClient'
 
@@ -119,4 +120,36 @@ describe('a new combo whose save is unclear', () => {
     expect(await screen.findByRole('alert')).toBeInTheDocument()
     expect(notCalled).not.toHaveBeenCalled()
   })
+})
+
+// S863: the pressed Save stays enabled (a disabled button drops keyboard focus to the page), wears
+// aria-busy, and turns a second press away itself.
+it('Save stays pressable while it writes, and a second press sends nothing more', async () => {
+  supabase.rpc.mockResolvedValue({ data: 'new-combo-id', error: null })
+  const { onSaved } = renderEditor(prefillFromDishes(['veg'], 200, recipeById))
+  const save = screen.getByRole('button', { name: 'Create combo' })
+  fireEvent.click(save)
+  expect(save).toHaveAttribute('aria-busy', 'true')
+  expect(save).not.toBeDisabled()
+  fireEvent.click(save)
+  await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1))
+  expect(supabase.rpc).toHaveBeenCalledTimes(1)
+})
+
+it('the Picks heading is named "Picks", with its Tip beside it rather than inside', () => {
+  renderEditor(prefillFromDishes(['veg'], 200, recipeById))
+  expect(screen.getByRole('heading', { name: 'Picks' })).toBeInTheDocument()
+  expect(screen.getByText('About picks')).toBeInTheDocument()
+})
+
+// S863: ids were built from the category name with [a-z0-9] kept, so every Devanagari category came
+// out as "cdp--" and each section was named after the first one.
+it('names each category of the dish picker after itself, Devanagari names included', () => {
+  const nepali = [
+    { id: 'm1', name: 'Buff Momo', category: 'मःम', guestPrice: 226, is_active: true },
+    { id: 'p1', name: 'Lassi', category: 'पेय', guestPrice: 113, is_active: true },
+  ]
+  render(<ComboDishPicker pickName="Pick one" dishes={nepali} chosen={[]} onClose={() => {}} onDone={() => {}} />)
+  expect(screen.getByRole('region', { name: 'मःम' })).toHaveTextContent('Buff Momo')
+  expect(screen.getByRole('region', { name: 'पेय' })).toHaveTextContent('Lassi')
 })

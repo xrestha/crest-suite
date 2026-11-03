@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import Modal from '../../components/Modal'
 import Tip from '../../components/Tip'
 import FieldError, { fieldAria } from '../../components/FieldError'
@@ -71,6 +71,9 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, c
   const [moreOpen, setMoreOpen] = useState(() => !!(group && (group.kitchen_name || group.included_count || group.is_active === false)))
   const [nameError, setNameError] = useState('')
   const [saving, setSaving] = useState(false)
+  // Save stays pressable while it writes (disabling it drops keyboard focus to the page), so a second
+  // press is turned away here; a ref, because a press can land before the re-render.
+  const busyRef = useRef(false)
   const [actionError, setActionError] = useState(null)
 
   const isSize = kind === 'size'
@@ -101,7 +104,7 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, c
   }
 
   function save() {
-    if (saving) return
+    if (busyRef.current || saving) return
     if (!name.trim()) { setNameError('Give the group a name — guests see it, e.g. “Extras” or “Choose your size”.'); return }
     setNameError('')
     if (removalBlocksSize) return
@@ -130,6 +133,12 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, c
   }
 
   async function write(nextScaling) {
+    if (busyRef.current) return
+    busyRef.current = true
+    try { await writeRow(nextScaling) } finally { busyRef.current = false }
+  }
+
+  async function writeRow(nextScaling) {
     setSaving(true)
     setActionError(null)
     const row = {
@@ -173,8 +182,9 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, c
           <FieldError id="og-name" message={nameError} />
         </div>
 
-        <div>
-          <span className="field-label" id="og-kind-label" style={{ display: 'block', marginBottom: 8 }}>What is it?</span>
+        {/* Inside a .form-field, so the caption takes the same type as "Name" above it (S863). */}
+        <div className="form-field" style={{ margin: 0 }}>
+          <span className="field-label" id="og-kind-label">What is it?</span>
           <div role="radiogroup" aria-labelledby="og-kind-label"
             onKeyDown={e => moveRovingFocus(e, '[role="radio"]')?.click()}
             style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 }}>
@@ -191,12 +201,12 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, c
             })}
           </div>
           {removalBlocksSize && (
-            <p role="alert" className="field-error" style={{ margin: '8px 0 0' }}>
+            <p role="alert" className="field-error" style={{ margin: 0 }}>
               This group has a “No …” choice, and a size cannot be one. Delete the “No …” choice first, or keep the group as Add-ons or Choice.
             </p>
           )}
           {kindChangedLive && !removalBlocksSize && (
-            <p role="alert" style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+            <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--theme-amber-text)' }}>
               This group is on {attachedCount} dish{attachedCount === 1 ? '' : 'es'}. Changing its kind resets the pick rule to “{summary}” for all of them the moment you save, including any rule a dish had of its own; bills already rung are not affected.
             </p>
           )}
@@ -223,8 +233,8 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, c
         )}
 
         {!isSize && (
-          <div>
-            <span className="field-label" id="og-scaling-label" style={{ display: 'block', marginBottom: 8 }}>
+          <div className="form-field" style={{ margin: 0 }}>
+            <span className="field-label" id="og-scaling-label">
               <Tip width={320} text="For build-your-own dishes. A Size option carries a portion — Small 0.75, Large 1.5 — and this decides what that portion does to the picks in this group. Example: toppings on an acai bowl scale stock and price, so chicken popcorn on a Large bowl uses 1.5× the chicken and costs 1.5× as much.">When a bigger size is picked</Tip>
             </span>
             <div role="radiogroup" aria-labelledby="og-scaling-label"
@@ -240,7 +250,7 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, c
                 )
               })}
             </div>
-            <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>{SIZE_SCALING_HELP[scaling]}</p>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text2)' }}>{SIZE_SCALING_HELP[scaling]}</p>
           </div>
         )}
 
@@ -284,9 +294,9 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, c
         <ActionError error={actionError} />
       </div>
       {confirmEl}
-      <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
-        <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={save} disabled={saving}
+      <div className="form-actions form-actions--split">
+        <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={save}
           aria-disabled={removalBlocksSize || undefined} aria-busy={saving || undefined}>
           {saving ? 'Saving…' : group ? 'Save group' : 'Create group'}
         </button>

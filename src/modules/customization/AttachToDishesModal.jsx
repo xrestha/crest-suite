@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import Modal from '../../components/Modal'
 import ActionError from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
@@ -23,6 +23,7 @@ import { otherSizesText } from './optionChecks'
 // writes, so pressing Save again after a timeout makes the same change again (S852).
 
 const RETRY_IS_SAFE = 'Saving again is safe, because it makes the same change again.'
+const NOTHING_TO_SAVE = 'Nothing to save yet. Tick or untick a dish first.'
 
 // `catalog` (S835): the page's { groups, options, attachments }, so each dish is priced over every
 // group it offers, not this group alone.
@@ -36,7 +37,12 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
   const [picked, setPicked] = useState(() => new Set(initial))
   const [search, setSearch] = useState('')
   const [saving, setSaving] = useState(false)
+  // A second press while a save is in flight is dropped here, not by disabling the button: the
+  // button stays focused and wears aria-busy (DESIGN.md, Buttons). A ref, so two quick taps in one
+  // render cannot both read `saving` as false.
+  const savingRef = useRef(false)
   const [actionError, setActionError] = useState(null)
+  const [emptyPress, setEmptyPress] = useState(false) // Save pressed with nothing changed
 
   const byCategory = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -90,13 +96,25 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
     [group, dishes, picked, catalog],
   )
 
-  const toggle = id => setPicked(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const setMany = (ids, on) => setPicked(p => { const n = new Set(p); ids.forEach(id => (on ? n.add(id) : n.delete(id))); return n })
+  const toggle = id => { setEmptyPress(false); setPicked(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n }) }
+  const setMany = (ids, on) => { setEmptyPress(false); setPicked(p => { const n = new Set(p); ids.forEach(id => (on ? n.add(id) : n.delete(id))); return n }) }
 
   async function save() {
-    if (saving || refused) return
+    if (savingRef.current || refused) return
+    // A precondition, so the button stays pressable and the press says what is missing.
+    if (changed === 0) { setActionError(null); setEmptyPress(true); return }
+    savingRef.current = true
     setSaving(true)
     setActionError(null)
+    try {
+      await writeChanges()
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
+  }
+
+  async function writeChanges() {
     const nextSortByDish = {}
     attachments.forEach(a => { nextSortByDish[a.recipe_id] = Math.max(nextSortByDish[a.recipe_id] ?? -1, a.sort || 0) })
     const adds = dishes.filter(d => picked.has(d.id) && !initial.has(d.id)).map(d => ({
@@ -105,7 +123,7 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
     if (adds.length) {
       const { error } = await settleWithin(scopedUpsert('pos_recipe_option_groups', adds, { onConflict: 'recipe_id,group_id' }),
         CUSTOMIZATION_WRITE_MS, 'Saving the dishes')
-      if (error) { setSaving(false); setActionError(writeFailure(error, RETRY_IS_SAFE)); return }
+      if (error) { setActionError(writeFailure(error, RETRY_IS_SAFE)); return }
     }
     const removeRows = attachments.filter(a => a.group_id === group.id && !picked.has(a.recipe_id))
     const removeIds = removeRows.map(a => a.id)
@@ -123,7 +141,6 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
         return r
       })
       if (error || removeRows.some(a => !detached.has(a.id))) {
-        setSaving(false)
         const nameOf = a => dishById.get(a.recipe_id)?.name || 'a dish'
         setActionError(detachFailure({
           groupName: group.name,
@@ -137,12 +154,20 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
         return
       }
     }
-    setSaving(false)
     onSaved?.({ added: adds.length, removed: removeIds.length })
     onClose()
   }
 
   const pickedCount = dishes.filter(d => picked.has(d.id)).length
+  // S863: Select all acts on the dishes ON SCREEN. It used to tick every dish, so an owner who
+  // searched "momo" and pressed it put the group on the whole menu, drinks included.
+  const searching = search.trim() !== ''
+  const shown = byCategory.flatMap(([, list]) => list)
+  const shownOn = shown.filter(d => picked.has(d.id)).length
+  const allShownOn = shown.length > 0 && shownOn === shown.length
+  const bulkLabel = searching
+    ? `${allShownOn ? 'Clear' : 'Select'} all ${shown.length} shown`
+    : (allShownOn ? 'Clear all' : 'Select all')
 
   return (
     <Modal onClose={onClose} title={`Offer “${group.name}” on…`} maxWidth={620}
@@ -156,10 +181,12 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
         <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
           {pickedCount} of {dishes.length} dish{dishes.length === 1 ? '' : 'es'}
         </span>
-        <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }}
-          onClick={() => setMany(dishes.map(d => d.id), pickedCount < dishes.length)}>
-          {pickedCount < dishes.length ? 'Select all' : 'Clear all'}
-        </button>
+        {shown.length > 0 && (
+          <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }}
+            onClick={() => setMany(shown.map(d => d.id), !allShownOn)}>
+            {bulkLabel}
+          </button>
+        )}
       </div>
 
       <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -178,13 +205,15 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
                 <span id={`atd-${cat}`}>{cat}</span>
                 <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--theme-text3)' }}>{on} of {list.length}</span>
               </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 4, paddingLeft: 24 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(220px, 100%), 1fr))', gap: 4, paddingLeft: 24 }}>
                 {list.map(d => (
                   <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, minHeight: 32, cursor: 'pointer' }}>
                     <input type="checkbox" checked={picked.has(d.id)} onChange={() => toggle(d.id)} />
-                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
-                    <span style={{ fontSize: 11, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>
-                      {d.inclPrice > 0 ? npr(d.inclPrice) : ''}{d.pos_enabled ? '' : ' · not on POS'}
+                    {/* The name wraps (S863): cut off at one line, "Chicken Momo (Steam…" and "(Fried…" read the same. */}
+                    <span style={{ flex: 1, minWidth: 0, overflowWrap: 'break-word' }}>{d.name}</span>
+                    <span style={{ fontSize: 11, color: 'var(--theme-text3)', textAlign: 'right' }}>
+                      {d.inclPrice > 0 && <span style={{ whiteSpace: 'nowrap' }}>{npr(d.inclPrice)}</span>}
+                      {!d.pos_enabled && <span style={{ whiteSpace: 'nowrap' }}>{d.inclPrice > 0 ? ' · ' : ''}not on POS</span>}
                     </span>
                   </label>
                 ))}
@@ -213,11 +242,11 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
           △ {twoSizes}
         </p>
       )}
-      <ActionError error={actionError} />
-      <div style={{ display: 'flex', gap: 10, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--theme-border)', flexShrink: 0 }}>
-        <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={save}
-          disabled={saving || changed === 0} aria-disabled={refused || undefined} aria-busy={saving || undefined}>
+      <ActionError error={actionError || (emptyPress && changed === 0 ? NOTHING_TO_SAVE : null)} />
+      <div className="form-actions form-actions--split">
+        <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={save}
+          aria-disabled={(refused || changed === 0) || undefined} aria-busy={saving || undefined}>
           {saving ? 'Saving…' : changed ? `Save (${changed} change${changed === 1 ? '' : 's'})` : 'No changes'}
         </button>
       </div>

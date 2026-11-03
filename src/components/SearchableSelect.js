@@ -22,7 +22,10 @@ import { useState, useRef, useEffect, useMemo, useId } from 'react'
 // `aria-describedby` at the <FieldError> rendered beside it, which is the half a screen reader
 // actually receives; `aria-invalid` is deliberately NOT set, since this trigger is a <button> and
 // that attribute is unsupported on the button role.
-export default function SearchableSelect({ value, onChange, options, placeholder = '— Select —', style, id, touch = false, invalid = '' }) {
+// `ariaLabel` (S863) names a picker that has no visible <label>, e.g. one per row of a repeating
+// list. The trigger's name then CONTAINS its visible text, the current pick, so voice control can
+// still say what it sees (WCAG 2.5.3), and the filter box takes the bare name.
+export default function SearchableSelect({ value, onChange, options, placeholder = '— Select —', style, id, touch = false, invalid = '', ariaLabel }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [highlight, setHighlight] = useState(0)
@@ -121,6 +124,7 @@ export default function SearchableSelect({ value, onChange, options, placeholder
         className="picker-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-label={ariaLabel ? `${ariaLabel}: ${selected ? selected.label : placeholder}` : undefined}
         aria-describedby={invalid && id ? `${id}-err` : undefined}
         onClick={() => (open ? close() : openIt())}
         style={{
@@ -154,7 +158,8 @@ export default function SearchableSelect({ value, onChange, options, placeholder
             placeholder="Type to search…"
             autoComplete="off"
             role="combobox"
-            aria-labelledby={id}
+            aria-labelledby={ariaLabel ? undefined : id}
+            aria-label={ariaLabel}
             aria-expanded="true"
             aria-controls={listboxId}
             aria-autocomplete="list"

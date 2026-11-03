@@ -62,10 +62,12 @@ export default function ComboDishPicker({ pickName, dishes, chosen, onClose, onD
           <div className="empty-state">No dishes yet. Dishes are made in Recipe Costing (or Menu Pricing on a POS-only plan).</div>
         ) : byCategory.length === 0 ? (
           <div className="empty-state">No dishes match “{search.trim()}”.</div>
-        ) : byCategory.map(([cat, list]) => {
+        ) : byCategory.map(([cat, list], ci) => {
           const on = list.filter(d => picked.has(d.id)).length
           const all = on === list.length
-          const catId = `cdp-${cat.replace(/[^a-z0-9]+/gi, '-')}`
+          // From the position, not the name: a name in Devanagari has no [a-z0-9] in it, so every such
+          // category came out as "cdp--" and aria-labelledby named the first of them (S863).
+          const catId = `cdp-cat-${ci}`
           return (
             <section key={cat} aria-labelledby={catId}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13, marginBottom: 6, cursor: 'pointer' }}>
@@ -90,9 +92,9 @@ export default function ComboDishPicker({ pickName, dishes, chosen, onClose, onD
         })}
       </div>
 
-      <div style={{ display: 'flex', gap: 10, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--theme-border)', flexShrink: 0 }}>
-        <button type="button" className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
-        <button type="button" className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={done}>
+      <div className="form-actions form-actions--split">
+        <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={done}>
           {picked.size === 0 ? 'Done — no dishes' : `Done — ${picked.size} dish${picked.size === 1 ? '' : 'es'}`}
         </button>
       </div>

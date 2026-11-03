@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import OptionModal from './OptionModal'
 
 jest.mock('../../supabaseClient', () => ({ supabase: {} }))
@@ -34,11 +34,11 @@ const VAT = 0.13
 const latte = { id: 'latte', name: 'Latte', selling_price: 240, inclPrice: 240 * 1.13 }
 const cappuccino = { id: 'capp', name: 'Cappuccino', selling_price: 240, inclPrice: 240 * 1.13 }
 
-function renderOption({ group, option, dishes = [latte], catalog, ingredients = [], itemChoices = [], imsEnabled = false }) {
+function renderOption({ group, option, dishes = [latte], catalog, ingredients = [], itemChoices = [], imsEnabled = false, vatUnknown = false }) {
   const onSaved = jest.fn()
   render(
     <OptionModal group={{ ...group, options: option ? [option] : [] }} option={option} ingredients={ingredients}
-      attachedDishes={dishes} catalog={catalog} vat={VAT} imsEnabled={imsEnabled} itemChoices={itemChoices}
+      attachedDishes={dishes} catalog={catalog} vat={VAT} vatUnknown={vatUnknown} imsEnabled={imsEnabled} itemChoices={itemChoices}
       onClose={() => {}} onSaved={onSaved} />,
   )
   return { onSaved }
@@ -123,4 +123,100 @@ it('SETUP-10: a stock line changed on another device is reported, not said to be
   const [, opts] = onSaved.mock.calls[0]
   expect(opts.keepOpen).toBe(true)
   expect(opts.error).toMatch(/had changed on another device/)
+})
+
+// S863: the pressed Save stays enabled (a disabled button drops keyboard focus to the page), wears
+// aria-busy, and turns a second press away itself.
+it('Save stays pressable while it writes, and a second press sends nothing more', async () => {
+  const { onSaved } = renderOption({ group: extras, option: extraShot, catalog: extrasCatalog })
+  const save = screen.getByRole('button', { name: 'Save option' })
+  fireEvent.click(save)
+  expect(save).toHaveAttribute('aria-busy', 'true')
+  expect(save).not.toBeDisabled()
+  expect(save).toHaveTextContent('Saving…')
+  fireEvent.click(save)
+  await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1))
+  expect(mockWrites.filter(w => w.table === 'pos_options')).toHaveLength(1)
+})
+
+it('while the VAT basis is unknown, Save is aria-disabled and its press goes to the note that says why', () => {
+  renderOption({ group: extras, option: extraShot, catalog: extrasCatalog, vatUnknown: true })
+  const save = screen.getByRole('button', { name: 'Save option' })
+  expect(save).not.toBeDisabled()
+  expect(save).toHaveAttribute('aria-disabled', 'true')
+  expect(save).toHaveAccessibleDescription(/Nothing can be saved here yet/)
+  fireEvent.click(save)
+  expect(screen.getByRole('note')).toHaveFocus()
+  expect(mockWrites).toHaveLength(0)
+})
+
+it('adds / takes off is one radio group: one Tab stop, arrow keys move and pick', () => {
+  renderOption({ group: extras, option: extraShot, catalog: extrasCatalog })
+  const group = screen.getByRole('radiogroup', { name: 'Does it add something or take something off?' })
+  const [adds, takesOff] = screen.getAllByRole('radio')
+  expect(group).toContainElement(adds)
+  expect(adds).toHaveAttribute('aria-checked', 'true')
+  expect(adds).toHaveAttribute('tabindex', '0')
+  expect(takesOff).toHaveAttribute('tabindex', '-1')
+  adds.focus()
+  fireEvent.keyDown(adds, { key: 'ArrowRight' })
+  expect(takesOff).toHaveFocus()
+  expect(takesOff).toHaveAttribute('aria-checked', 'true')
+  expect(takesOff).toHaveAttribute('tabindex', '0')
+  expect(adds).toHaveAttribute('tabindex', '-1')
+  // A "No …" is free, so the price box goes.
+  expect(screen.queryByLabelText(/Extra charge/)).toBeNull()
+})
+
+it('a stock line names its picker, and an item and an amount that are wrong each say so under their own box', () => {
+  renderOption({ group: extras, option: extraShot, catalog: extrasCatalog, itemChoices: choices, imsEnabled: true })
+  fireEvent.click(screen.getByRole('button', { name: /Stock per plate/ }))
+  fireEvent.click(screen.getByRole('button', { name: '+ Add ingredient line' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save option' }))
+  expect(mockWrites).toHaveLength(0)
+
+  const picker = screen.getByRole('button', { name: /^Line 1: ingredient: / })
+  expect(picker).toHaveAccessibleDescription('Choose an item.')
+  const amount = screen.getByLabelText(/^Line 1: amount/)
+  expect(amount).toHaveAttribute('aria-invalid', 'true')
+  expect(amount).toHaveAccessibleDescription('Enter an amount above zero.')
+})
+
+it('an amount alone is flagged on the amount box, not on the item picker', () => {
+  renderOption({ group: extras, option: extraShot, catalog: extrasCatalog, ingredients: [{ ...butterLine[0], item_id: 'cheese' }], itemChoices: choices, imsEnabled: true })
+  fireEvent.change(screen.getByLabelText(/^Line 1: amount/), { target: { value: '0' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save option' }))
+  expect(screen.getByRole('button', { name: /^Line 1: ingredient: CHEESE/ })).not.toHaveAttribute('aria-describedby')
+  expect(screen.getByLabelText(/^Line 1: amount/)).toHaveAccessibleDescription('Enter an amount above zero.')
+  expect(screen.queryByText('Choose an item.')).toBeNull()
+})
+
+it('"none — stock will not change" is a warning only on an option that changes the price', () => {
+  renderOption({ group: sauce, option: chilli, catalog: sauceCatalog, imsEnabled: true })
+  expect(screen.getByRole('button', { name: /Stock per plate/ })).not.toHaveTextContent('△')
+  cleanup()
+  renderOption({ group: extras, option: extraShot, catalog: extrasCatalog, imsEnabled: true })
+  expect(screen.getByRole('button', { name: /Stock per plate/ })).toHaveTextContent('△ none — stock will not change')
+})
+
+describe('a size result below zero', () => {
+  const kids = { id: 'kids', name: 'Kids Momo', selling_price: 80, inclPrice: 90.4 }
+  const halfCatalog = {
+    groups: [cupSize], options: [],
+    attachments: [{ recipe_id: 'latte', group_id: 'g2', sort: 0 }, { recipe_id: 'kids', group_id: 'g2', sort: 0 }],
+  }
+
+  it('reads "NPR −10", the form the page and the attach dialogs use', () => {
+    renderOption({ group: cupSize, option: null, dishes: [latte, kids], catalog: halfCatalog })
+    fireEvent.change(screen.getByLabelText(/Price difference from the dish/), { target: { value: '-100' } })
+    expect(screen.getByText(/Kids Momo: NPR 90 → NPR −10/)).toBeInTheDocument()
+    expect(screen.queryByText(/−NPR/)).toBeNull()
+  })
+
+  it('a few paisa under reads in words, never as NPR 0', () => {
+    renderOption({ group: cupSize, option: null, dishes: [latte, kids], catalog: halfCatalog })
+    fireEvent.change(screen.getByLabelText(/Price difference from the dish/), { target: { value: '-90.43' } })
+    expect(screen.getByText(/Kids Momo: NPR 90 → a few paisa below NPR 0/)).toBeInTheDocument()
+    expect(screen.queryByText(/−NPR 0|NPR −0/)).toBeNull()
+  })
 })

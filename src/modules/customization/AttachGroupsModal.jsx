@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Modal from '../../components/Modal'
 import Tip from '../../components/Tip'
 import ActionError from '../../components/ActionError'
+import FieldError, { fieldAria } from '../../components/FieldError'
 import ReportLoadError from '../../components/ReportLoadError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { settleWithin, isTimeout } from '../../utils/withTimeout'
@@ -19,6 +20,9 @@ import { twoSizesText } from './optionChecks'
 // writes, so pressing Save again after a timeout sets the same groups again (S852).
 
 const RETRY_IS_SAFE = 'Saving again is safe, because it sets the same groups again.'
+// Save is a precondition press while the dialog cannot save (S863): it stays pressable and says why.
+const STILL_LOADING = 'The groups are still loading. Save once they appear.'
+const NOT_LOADED = 'The groups could not be loaded, so there is nothing to save yet. Press Try again above.'
 
 const toInt = v => (v === '' || v == null ? null : Number.parseInt(v, 10))
 
@@ -32,8 +36,13 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
   const [existing, setExisting] = useState([])
   const [draft, setDraft] = useState({}) // { [groupId]: { on, min, max, def, sort } }
   const [saving, setSaving] = useState(false)
+  // A second press mid-save is dropped by this ref, not by disabling the focused button (S863).
+  const savingRef = useRef(false)
   const [actionError, setActionError] = useState(null)
+  const [earlyPress, setEarlyPress] = useState(false) // Save pressed before the groups were read
   const [attempt, setAttempt] = useState(0) // Retry after a failed or timed-out load (S852)
+  // After a move, focus goes to the moved group's same arrow, or its other one at an end (S863).
+  const pendingFocus = useRef(null)
 
   useEffect(() => {
     let alive = true
@@ -70,6 +79,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
   function retryLoad() {
     setLoading(true)
     setLoadError(null)
+    setEarlyPress(false)
     setAttempt(n => n + 1)
   }
 
@@ -108,14 +118,19 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
   })
   const patch = (gid, p) => setDraft(d => ({ ...d, [gid]: { ...d[gid], ...p } }))
 
+  // `field` is the box that is wrong (S863), so the message sits under it and Save focuses it.
+  // 'both' is a minimum above a maximum this dish set too: one sentence names both boxes.
   function overrideError(g) {
     const d = draft[g.id]
     if (!d?.on || g.kind === 'size') return null
     const min = toInt(d.min), max = toInt(d.max)
-    if (d.min !== '' && (!Number.isInteger(min) || min < 0)) return 'Minimum must be 0 or more.'
-    if (d.max !== '' && (!Number.isInteger(max) || max < 1)) return 'Maximum must be 1 or more.'
+    if (d.min !== '' && (!Number.isInteger(min) || min < 0)) return { field: 'min', text: 'Minimum must be 0 or more.' }
+    if (d.max !== '' && (!Number.isInteger(max) || max < 1)) return { field: 'max', text: 'Maximum must be 1 or more.' }
     const rule = effectiveRule(g, { min_override: min, max_override: max })
-    if (rule.max != null && rule.min > rule.max) return 'Minimum cannot be above maximum for this dish.'
+    if (rule.max != null && rule.min > rule.max) {
+      const field = d.min !== '' && d.max !== '' ? 'both' : d.max !== '' ? 'max' : 'min'
+      return { field, text: 'Minimum cannot be above maximum for this dish.' }
+    }
     return null
   }
 
@@ -140,25 +155,48 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
     if (other < 0 || other >= ordered.length) return
     const seq = ordered.slice()
     ;[seq[idx], seq[other]] = [seq[other], seq[idx]]
+    pendingFocus.current = { id: ordered[idx].id, dir }
     setDraft(d => {
       const n = { ...d }
       seq.forEach((g, i) => { n[g.id] = { ...n[g.id], sort: i } })
       return n
     })
   }
+  // The arrow just pressed can land at an end of the list and turn disabled, which drops focus
+  // to the page; the moved group's other arrow takes it then.
+  useEffect(() => {
+    const t = pendingFocus.current
+    if (!t) return
+    pendingFocus.current = null
+    const arrow = d => document.getElementById(`att-move-${d < 0 ? 'up' : 'down'}-${t.id}`)
+    const same = arrow(t.dir)
+    ;(same && !same.disabled ? same : arrow(-t.dir))?.focus()
+  }, [draft])
 
   async function save() {
-    if (saving || belowZero.length) return
+    if (savingRef.current) return
+    if (loading || loadError) { setEarlyPress(true); return }
+    if (belowZero.length) return
     // The rule error is already under its own fields (inline, role="alert"); a second copy at the
-    // bottom was two channels for one message. Take the reader to the field instead.
-    const badGroup = chosen.find(g => overrideError(g))
+    // bottom was two channels for one message. Take the reader to the box that is wrong.
+    const badGroup = ordered.find(g => overrideError(g))
     if (badGroup) {
-      document.getElementById(`att-min-${badGroup.id}`)?.focus()
+      const { field } = overrideError(badGroup)
+      document.getElementById(`att-${field === 'max' ? 'max' : 'min'}-${badGroup.id}`)?.focus()
       return
     }
+    savingRef.current = true
     setSaving(true)
     setActionError(null)
+    try {
+      await writeChoices()
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
+  }
 
+  async function writeChoices() {
     const rows = ordered.map((g, i) => {
       const d = draft[g.id]
       return {
@@ -174,7 +212,6 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
       const { error } = await settleWithin(scopedUpsert('pos_recipe_option_groups', rows, { onConflict: 'recipe_id,group_id' }),
         CUSTOMIZATION_WRITE_MS, 'Saving the choices')
       if (error) {
-        setSaving(false)
         setActionError(writeFailure(error, RETRY_IS_SAFE))
         return
       }
@@ -185,7 +222,6 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
       const { data, error } = await settleWithin(scopedDelete('pos_recipe_option_groups').in('id', removedIds).select('id'),
         CUSTOMIZATION_WRITE_MS, 'Saving the choices')
       if (error) {
-        setSaving(false)
         const a = writeFailure(error, RETRY_IS_SAFE)
         setActionError(isTimeout(error)
           ? { text: `The groups you ticked were saved, but the server took too long to answer about the ones you unticked, so they may still be on ${recipe.name}. ${RETRY_IS_SAFE}`, detail: a.detail }
@@ -198,14 +234,12 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
       const gone = new Set((data || []).map(r => r.id))
       const left = removed.filter(a => !gone.has(a.id))
       if (left.length) {
-        setSaving(false)
         const nameOf = a => `“${groups.find(g => g.id === a.group_id)?.name || 'a group'}”`
         setActionError(`${rows.length ? 'The groups you ticked were saved, but ' : ''}${andList(left.map(nameOf))} may still be on ${recipe.name}: it may have changed on another device. Reload the page to check before you save again.`)
         onSaved?.(rows.length, { partial: true })
         return
       }
     }
-    setSaving(false)
     onSaved?.(rows.length)
     onClose()
   }
@@ -220,10 +254,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
         {loading ? (
           <div className="loading-state">Loading…</div>
         ) : loadError ? (
-          <>
-            <ReportLoadError error={loadError} />
-            <button type="button" className="btn btn-ghost" style={{ marginTop: 10 }} onClick={retryLoad}>Try again</button>
-          </>
+          <ReportLoadError error={loadError} onRetry={retryLoad} />
         ) : visibleGroups.length === 0 ? (
           <div className="empty-state">No option groups yet. Create one on the Option Groups page first — for example “Size” or “Extras”.</div>
         ) : (
@@ -235,21 +266,29 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
               const opts = optionsByGroup[g.id] || []
               const rule = effectiveRule(g, on ? { min_override: toInt(d.min), max_override: toInt(d.max) } : null)
               const err = overrideError(g)
+              // The box(es) the message is about; 'both' shares one message between the two boxes.
+              const errId = err ? `att-${err.field === 'max' ? 'max' : 'min'}-${g.id}` : null
+              const minAria = err && err.field !== 'max' ? fieldAria(errId, err.text) : {}
+              const maxAria = err && err.field !== 'min' ? fieldAria(errId, err.text) : {}
+              const earlier = `Show ${g.name} earlier`, later = `Show ${g.name} later`
               return (
                 <div key={g.id} className="card card--compact" style={{ margin: 0, borderColor: on ? 'var(--theme-accent)' : undefined }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                    {/* Wraps on a phone (S863), so the rule text never runs under the arrows. */}
+                    <label style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px 10px', cursor: 'pointer', flex: 1, minWidth: 0, minHeight: 30 }}>
                       <input type="checkbox" checked={on} onChange={() => toggle(g)} />
                       {on && <span style={{ fontSize: 11, color: 'var(--theme-text3)', minWidth: 14 }}>{pos + 1}.</span>}
-                      <span style={{ fontWeight: 600 }}>{g.name}</span>
+                      <span style={{ fontWeight: 600, minWidth: 0, overflowWrap: 'break-word' }}>{g.name}</span>
                       <span className="badge-gray">{KIND_LABEL[g.kind]}</span>
                       {g.is_active === false && <span className="badge-gray">Hidden</span>}
                       <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--theme-text2)' }}>{ruleText(rule)}</span>
                     </label>
                     {on && ordered.length > 1 && (
                       <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-                        <button type="button" className="btn btn-ghost btn-icon" aria-label={`Show ${g.name} earlier`} disabled={pos === 0} onClick={() => moveGroup(pos, -1)}>↑</button>
-                        <button type="button" className="btn btn-ghost btn-icon" aria-label={`Show ${g.name} later`} disabled={pos === ordered.length - 1} onClick={() => moveGroup(pos, 1)}>↓</button>
+                        <button type="button" id={`att-move-up-${g.id}`} className="btn btn-ghost btn-icon" aria-label={earlier} title={earlier}
+                          disabled={pos === 0} onClick={() => moveGroup(pos, -1)}>↑</button>
+                        <button type="button" id={`att-move-down-${g.id}`} className="btn btn-ghost btn-icon" aria-label={later} title={later}
+                          disabled={pos === ordered.length - 1} onClick={() => moveGroup(pos, 1)}>↓</button>
                       </div>
                     )}
                   </div>
@@ -265,6 +304,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
                               <Tip width={240} text="Leave blank to use the group's own rule. Set it to require a pick on this dish only.">Must pick (this dish)</Tip>
                             </label>
                             <input id={`att-min-${g.id}`} type="number" min="0" step="1" value={d.min} placeholder={String(g.min_select ?? 0)}
+                              aria-label={`Must pick (this dish) from ${g.name}`} {...minAria}
                               onChange={e => patch(g.id, { min: e.target.value })} style={{ width: 90 }} />
                           </div>
                           <div className="form-field" style={{ margin: 0 }}>
@@ -273,6 +313,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
                             </label>
                             <input id={`att-max-${g.id}`} type="number" min="1" step="1" value={d.max}
                               placeholder={g.max_select == null ? 'No limit' : String(g.max_select)}
+                              aria-label={`At most (this dish) from ${g.name}`} {...maxAria}
                               onChange={e => patch(g.id, { max: e.target.value })} style={{ width: 90 }} />
                           </div>
                         </>
@@ -282,13 +323,14 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
                           <label htmlFor={`att-def-${g.id}`}>
                             <Tip width={260} text="Pre-ticked when this dish is ordered. “Group default” uses whichever options are marked pre-selected in the group.">Pre-selected on this dish</Tip>
                           </label>
-                          <select id={`att-def-${g.id}`} className="form-select" value={d.def} onChange={e => patch(g.id, { def: e.target.value })}>
+                          <select id={`att-def-${g.id}`} className="form-select" value={d.def} onChange={e => patch(g.id, { def: e.target.value })}
+                            aria-label={`Pre-selected on this dish from ${g.name}`}>
                             <option value="">Group default</option>
                             {opts.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                           </select>
                         </div>
                       )}
-                      {err && <span className="field-error" role="alert" style={{ flexBasis: '100%' }}>{err}</span>}
+                      {err && <div style={{ flexBasis: '100%' }}><FieldError id={errId} message={err.text} /></div>}
                       {!err && shortNote(g, rule) && (
                         <span role="status" style={{ flexBasis: '100%', fontSize: 12, color: 'var(--theme-amber-text)' }}>△ {shortNote(g, rule)}</span>
                       )}
@@ -313,11 +355,11 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
           △ {recipe.name} can already reach {belowZeroAmount(alreadyBelow[0].incl)} with these choices, and the till refuses it at that price — fix its prices in Option Groups.
         </p>
       )}
-      <ActionError error={actionError} />
-      <div style={{ display: 'flex', gap: 10, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--theme-border)', flexShrink: 0 }}>
-        <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={save}
-          disabled={saving || loading || !!loadError} aria-disabled={belowZero.length > 0 || undefined} aria-busy={saving || undefined}>
+      <ActionError error={actionError || (earlyPress && loading ? STILL_LOADING : earlyPress && loadError ? NOT_LOADED : null)} />
+      <div className="form-actions form-actions--split">
+        <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={save}
+          aria-disabled={(belowZero.length > 0 || loading || !!loadError) || undefined} aria-busy={saving || undefined}>
           {saving ? 'Saving…' : `Save${chosen.length ? ` (${chosen.length} group${chosen.length === 1 ? '' : 's'})` : ''}`}
         </button>
       </div>

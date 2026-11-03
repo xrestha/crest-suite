@@ -65,3 +65,28 @@ it('SETUP-3: ticking Shown on a hidden group that takes a dish below zero is ref
   expect(screen.getByText(/“Portion” is still hidden\. Kids Momo would cost −NPR 23 with “Half”/)).toBeInTheDocument()
   expect(mockWrites).toHaveLength(0)
 })
+
+// S863: the pressed Save stays enabled (a disabled button drops keyboard focus to the page), wears
+// aria-busy, and turns a second press away itself.
+it('Save stays pressable while it writes, and a second press sends nothing more', async () => {
+  const extras = { id: 'g1', name: 'Extras', kind: 'addon', min_select: 0, max_select: null, included_count: 0, is_active: true, size_scaling: 'none' }
+  const options = [{ id: 'o1', group_id: 'g1', name: 'Extra cheese', price_delta: 50, is_removal: false, is_active: true }]
+  const { onSaved } = renderGroup({ ...extras, options }, { groups: [extras], options, attachments: [{ id: 'a1', recipe_id: 'bowl', group_id: 'g1', sort: 0 }] })
+  const save = screen.getByRole('button', { name: 'Save group' })
+  fireEvent.click(save)
+  expect(save).toHaveAttribute('aria-busy', 'true')
+  expect(save).not.toBeDisabled()
+  fireEvent.click(save)
+  await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1))
+  expect(mockWrites).toHaveLength(1)
+})
+
+// `.field-label` is styled only inside a `.form-field`, so outside one it rendered as body text.
+const fieldOf = el => el.closest('.form-field') // eslint-disable-line testing-library/no-node-access
+
+it('the "What is it?" and size captions sit in a form field, styled as "Name" is', () => {
+  renderGroup(null, null, [])
+  expect(fieldOf(screen.getByText('What is it?'))).not.toBeNull()
+  expect(fieldOf(screen.getByText('When a bigger size is picked'))).not.toBeNull()
+  expect(screen.getByRole('radiogroup', { name: 'What is it?' })).toBeInTheDocument()
+})

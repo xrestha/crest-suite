@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import Modal from '../../components/Modal'
 import Tip from '../../components/Tip'
 import SearchableSelect from '../../components/SearchableSelect'
@@ -9,7 +9,8 @@ import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { useConfirm } from '../../shared/hooks/useConfirm'
 import { settleWithin, isTimeout } from '../../utils/withTimeout'
 import { OPTION_COLS, DIET_LABEL, parseAllergens, CUSTOMIZATION_WRITE_MS, writeFailure } from './customizationData'
-import { signedPrice, dishesBelowZero, belowZeroText } from '../../shared/optionPricing'
+import { signedPrice, dishesBelowZero, belowZeroText, belowZeroAmount } from '../../shared/optionPricing'
+import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 import { fullPriceBase, priceSeed, priceEntry, optionLossText } from './optionChecks'
 import { VAT_MODE_UNKNOWN_TEXT } from '../ims/recipes/menuPriceVat'
 import { npr } from '../../shared/nepalMoney'
@@ -82,6 +83,10 @@ export default function OptionModal({
   const [stockOpen, setStockOpen] = useState(() => (ingredients || []).length > 0)
   const [errors, setErrors] = useState({})
   const [saving, setSaving] = useState(false)
+  // Save stays pressable while a write is in flight (disabling it drops keyboard focus to the page),
+  // so a second press is turned away here. A ref, because a press can land before the re-render.
+  const busyRef = useRef(false)
+  const vatNoteRef = useRef(null)
   const [actionError, setActionError] = useState(initialError)
   const set = patch => setForm(f => ({ ...f, ...patch }))
 
@@ -89,13 +94,19 @@ export default function OptionModal({
     option, seed: seed.price, price: form.price, isRemoval: form.is_removal, wasRemoval: seed.is_removal, base: basePrice, vat,
   })
   // S809 4h (CUSTOMIZATION-6): a result below zero reads as one, never as NPR 0. Both server
-  // pricers add the difference as it is, and since 4h refuse a line that ends below zero.
-  const resultText = v => (v < 0 ? `−${npr(Math.abs(v))}` : npr(v))
+  // pricers add the difference as it is, and since 4h refuse a line that ends below zero. S863: in
+  // the page's own form ("NPR −20", belowZeroAmount), so a few paisa under reads in words, never as
+  // "−NPR 0"; under a ten-thousandth is float noise, as the till compares it.
+  const resultText = v => (v < -0.0001 ? belowZeroAmount(v) : npr(Math.max(0, v)))
   const choiceByRef = useMemo(() => new Map(itemChoices.map(c => [c.value, c])), [itemChoices])
   // S862 SETUP-7: only shown items and sub-recipes are offered; a hidden one stays on the line that
   // already holds it, labelled, because that line still takes it off stock on every sale.
   const offeredChoices = useMemo(() => itemChoices.filter(c => !c.hidden), [itemChoices])
   const dishNameById = useMemo(() => new Map(attachedDishes.map(d => [d.id, d.name])), [attachedDishes])
+  // No stock lines is fine for a pick that leaves the price alone (a spice level, a same-price size,
+  // a "No …"), so it is said plainly; it is a warning only on an option that changes the price,
+  // where "Extra cheese" with no cheese is a plate sold with nothing taken off stock (S863).
+  const noStockWarning = lines.length === 0 && !form.is_removal && Math.abs(deltaIncl || 0) >= 0.005
   // What "More details" holds, said on the closed button so a folded section is not a hidden one.
   const detailSummary = [
     form.diet ? DIET_LABEL[form.diet] : null,
@@ -130,9 +141,11 @@ export default function OptionModal({
         }
       }
     }
-    lines.forEach((l, i) => {
-      if (!l.ref) e[`line${i}`] = 'Choose an item.'
-      else if (!(Number(l.qty) > 0)) e[`line${i}`] = 'Enter an amount above zero.'
+    // The item and the amount are told apart, each under its own box, and keyed by the line (not
+    // its position) so removing a line above never moves a message onto the wrong one.
+    lines.forEach(l => {
+      if (!l.ref) e[`line:${l.key}:item`] = 'Choose an item.'
+      if (!(Number(l.qty) > 0)) e[`line:${l.key}:qty`] = 'Enter an amount above zero.'
     })
     const refs = lines.map(l => l.ref).filter(Boolean)
     if (new Set(refs).size !== refs.length) e.lines = 'The same item is listed twice — combine them into one line.'
@@ -164,7 +177,15 @@ export default function OptionModal({
     // A typed price is converted through `vat`, so nothing is saved while the VAT basis is unknown
     // (S809 2h). Since S862 (SETUP-1) an untouched price box sends no price_delta at all, so a
     // rename or a stock-line edit keeps the stored price exactly.
-    if (saving || vatUnknown || !validate()) return
+    if (busyRef.current || saving) return
+    // A precondition, not a write in flight: the button stays pressable and the press takes the
+    // reader to the note that says why, which a disabled button could never point at.
+    if (vatUnknown) {
+      vatNoteRef.current?.scrollIntoView?.({ block: 'nearest' })
+      vatNoteRef.current?.focus()
+      return
+    }
+    if (!validate()) return
     // S862 SETUP-3: unticking Shown here is the page's Hide, so it asks the same question first.
     const loss = option && option.is_active !== false && !form.is_active
       ? optionLossText({ ...option, group_id: group.id, is_active: true }, catalog, id => dishNameById.get(id) || 'a dish')
@@ -183,6 +204,12 @@ export default function OptionModal({
   }
 
   async function commit() {
+    if (busyRef.current) return
+    busyRef.current = true
+    try { await write() } finally { busyRef.current = false }
+  }
+
+  async function write() {
     setSaving(true)
     setActionError(null)
     const row = {
@@ -301,15 +328,23 @@ export default function OptionModal({
           <FieldError id="opt-name" message={errors.name} />
         </div>
 
+        {/* One Tab stop and arrow keys between the two, as the group dialog's kind cards (S863). */}
         {!isSize && (
-          <div role="radiogroup" aria-label="Does this option add something or take something off?" className="tab-bar" style={{ margin: 0 }}>
-            {[[false, 'Adds or changes something'], [true, 'Takes something off (“No …”)']].map(([removal, label]) => (
-              <button key={String(removal)} type="button" role="radio" aria-checked={form.is_removal === removal}
-                className={`tab-btn${form.is_removal === removal ? ' tab-btn--active' : ''}`}
-                onClick={() => set({ is_removal: removal, ...(removal ? { price: '' } : {}) })}>
-                {label}
-              </button>
-            ))}
+          <div className="form-field" style={{ margin: 0 }}>
+            <span className="field-label" id="opt-removal-label">Does it add something or take something off?</span>
+            <div role="radiogroup" aria-labelledby="opt-removal-label"
+              onKeyDown={e => moveRovingFocus(e, '[role="radio"]')?.click()}
+              style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+              {[[false, 'Adds or changes something'], [true, 'Takes something off (“No …”)']].map(([removal, label]) => {
+                const on = form.is_removal === removal
+                return (
+                  <button key={String(removal)} type="button" role="radio" aria-checked={on} className="choice-chip"
+                    tabIndex={rovingTabIndex(on)} onClick={() => set({ is_removal: removal, ...(removal ? { price: '' } : {}) })}>
+                    <span className="choice-chip__name">{label}</span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
         )}
         {form.is_removal && (
@@ -439,8 +474,10 @@ export default function OptionModal({
           <button type="button" className="btn btn-ghost btn-sm" aria-expanded={stockOpen} aria-controls="opt-stock"
             onClick={() => setStockOpen(o => !o)}>
             {stockOpen ? '▾' : '▸'} Stock per plate
-            <span style={{ marginLeft: 8, fontWeight: 400, color: lines.length ? 'var(--theme-text3)' : 'var(--theme-amber-text)' }}>
-              {lines.length ? `${lines.length} ingredient line${lines.length === 1 ? '' : 's'}` : 'none — stock will not change'}
+            <span style={{ marginLeft: 8, fontWeight: 400, color: noStockWarning ? 'var(--theme-amber-text)' : 'var(--theme-text3)' }}>
+              {lines.length
+                ? `${lines.length} ingredient line${lines.length === 1 ? '' : 's'}`
+                : `${noStockWarning ? '△ ' : ''}none — stock will not change`}
             </span>
           </button>
           {stockOpen && (
@@ -456,6 +493,12 @@ export default function OptionModal({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {lines.map((l, i) => {
                 const choice = choiceByRef.get(l.ref)
+                // Each control names its own message: the picker through `invalid`, the amount through
+                // fieldAria, and FieldError derives the matching `-err` id from the same control id.
+                const itemId = `opt-line-${l.key}`
+                const qtyId = `opt-line-${l.key}-qty`
+                const itemError = errors[`line:${l.key}:item`]
+                const qtyError = errors[`line:${l.key}:qty`]
                 return (
                   <div key={l.key}>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -467,21 +510,27 @@ export default function OptionModal({
                       </select>
                       {/* Item first, then the amount in ITS unit — the unit was blank until an item was chosen. */}
                       <div style={{ flex: '1 1 200px', minWidth: 180 }}>
-                        <SearchableSelect id={`opt-line-${l.key}`} value={l.ref} options={choice?.hidden ? [...offeredChoices, choice] : offeredChoices}
+                        <SearchableSelect id={itemId} ariaLabel={`Line ${i + 1}: ingredient`} value={l.ref}
+                          options={choice?.hidden ? [...offeredChoices, choice] : offeredChoices}
                           placeholder="— Choose a stock item or sub-recipe —"
                           onChange={v => setLines(ls => ls.map(x => x.key === l.key ? { ...x, ref: v } : x))}
-                          invalid={errors[`line${i}`] || ''} />
+                          invalid={itemError || ''} />
                       </div>
-                      <QtyInput aria-label={`Line ${i + 1}: amount${choice?.unit ? ` in ${choice.unit}` : ''}`} className="form-input form-input--auto"
+                      <QtyInput id={qtyId} aria-label={`Line ${i + 1}: amount${choice?.unit ? ` in ${choice.unit}` : ''}`} className="form-input form-input--auto"
                         value={l.qty} placeholder="0"
                         onChange={v => setLines(ls => ls.map(x => x.key === l.key ? { ...x, qty: v === '' ? '' : String(v) } : x))}
                         onCommit={v => setLines(ls => ls.map(x => x.key === l.key ? { ...x, qty: v === '' ? '' : String(v) } : x))}
-                        style={{ width: 90 }} />
+                        style={{ width: 90 }} {...fieldAria(qtyId, qtyError)} />
                       <span style={{ fontSize: 12, color: 'var(--theme-text2)', minWidth: 32 }}>{choice?.unit || <span style={{ color: 'var(--theme-text3)' }}>unit</span>}</span>
                       <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove line ${i + 1}`}
                         onClick={() => setLines(ls => ls.filter(x => x.key !== l.key))}>Remove</button>
                     </div>
-                    {errors[`line${i}`] && <span className="field-error" role="alert">{errors[`line${i}`]}</span>}
+                    {(itemError || qtyError) && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
+                        <FieldError id={itemId} message={itemError} />
+                        <FieldError id={qtyId} message={qtyError} />
+                      </div>
+                    )}
                   </div>
                 )
               })}
@@ -499,14 +548,14 @@ export default function OptionModal({
         <ActionError error={actionError} />
         {confirmEl}
         {vatUnknown && (
-          <p role="note" id="opt-vat-unknown" style={{ margin: 0, fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          <p role="note" id="opt-vat-unknown" ref={vatNoteRef} tabIndex={-1} style={{ margin: 0, fontSize: 12, color: 'var(--theme-amber-text)' }}>
             △ Nothing can be saved here yet. {VAT_MODE_UNKNOWN_TEXT}
           </p>
         )}
       </div>
-      <div style={{ display: 'flex', gap: 10, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--theme-border)', flexShrink: 0 }}>
-        <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
-        <button className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={save} disabled={saving || vatUnknown} aria-busy={saving || undefined}
+      <div className="form-actions form-actions--split">
+        <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={save} aria-disabled={vatUnknown || undefined} aria-busy={saving || undefined}
           aria-describedby={vatUnknown ? 'opt-vat-unknown' : undefined}>
           {saving ? 'Saving…' : option ? 'Save option' : 'Add option'}
         </button>

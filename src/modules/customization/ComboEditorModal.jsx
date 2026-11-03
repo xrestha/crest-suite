@@ -39,6 +39,9 @@ export default function ComboEditorModal({
   const initialRef = useRef(initial)
   const [tried, setTried] = useState(false) // field messages show once Save has been pressed
   const [saving, setSaving] = useState(false)
+  // Save stays pressable while it writes (disabling it drops keyboard focus to the page), so a second
+  // press is turned away here; a ref, because a press can land before the re-render.
+  const busyRef = useRef(false)
   const [actionError, setActionError] = useState(null)
   const [listNote, setListNote] = useState(null) // what the re-read list says after an unclear save
   const [pickerFor, setPickerFor] = useState(null) // pick key
@@ -80,7 +83,7 @@ export default function ComboEditorModal({
   }
 
   async function save() {
-    if (saving) return
+    if (busyRef.current || saving) return
     const v = validateCombo(state, { recipeOf, otherNames })
     setTried(true)
     if (!v.ok) {
@@ -99,6 +102,7 @@ export default function ComboEditorModal({
       if (firstId) document.getElementById(firstId)?.focus()
       return
     }
+    busyRef.current = true
     setSaving(true)
     setActionError(null)
     setListNote(null)
@@ -106,6 +110,7 @@ export default function ComboEditorModal({
       supabase.rpc('save_pos_combo', { p_combo: comboPayload(state, clientId) }),
       SAVE_TIMEOUT_MS, 'Saving the combo',
     )
+    busyRef.current = false
     setSaving(false)
     if (error) {
       setActionError(asActionError(error))
@@ -184,10 +189,12 @@ export default function ComboEditorModal({
         </div>
 
         <div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
-            <h3 style={{ margin: 0, fontSize: 15 }}>
-              <Tip width={320} text="A pick is one dish the guest gets, chosen from the dishes you list in it. A pick with one dish is included automatically — that is how you build a set meal.">Picks</Tip>
-            </h3>
+          {/* The Tip sits BESIDE the heading: inside the <h3> it joined the heading's name (S863). */}
+          <div className="page-title-row" style={{ gap: 10, marginBottom: 6 }}>
+            <h3 style={{ margin: 0, fontSize: 15 }}>Picks</h3>
+            <Tip width={320} text="A pick is one dish the guest gets, chosen from the dishes you list in it. A pick with one dish is included automatically — that is how you build a set meal.">
+              <span aria-hidden="true">ⓘ</span><span className="sr-only">About picks</span>
+            </Tip>
             {hasPrice && state.picks.length > 0 && (
               <Tip width={340} text="The combo price is shared over the picks in proportion to each pick’s cheapest dish’s menu price, so reports show each dish’s fair share. Swapping a dish within a pick never moves the others; an extra charge goes to its own dish.">
                 <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>How the price is split</span>
@@ -341,7 +348,7 @@ export default function ComboEditorModal({
         </div>
 
         {hasPrice && state.picks.length > 0 && (
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--theme-text2)' }}>
+          <p className="page-footnote" style={{ margin: 0 }}>
             The bill prints one line — “{state.name.trim() || 'the combo'}”, NPR {nprPaisa(priceNum)} plus any extra charges — with its dishes listed under it. Each dish still goes to its own kitchen or bar, takes its own stock and keeps its own VAT.
           </p>
         )}
@@ -349,10 +356,9 @@ export default function ComboEditorModal({
         <ActionError error={actionError} />
         {listNote && <p role="status" className="note-banner" style={{ margin: 0 }}>{listNote}</p>}
       </div>
-      <div style={{ display: 'flex', gap: 10, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--theme-border)', flexShrink: 0 }}>
-        <button type="button" className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
-        <button type="button" className="btn btn-primary" style={{ flex: 2, justifyContent: 'center' }} onClick={save}
-          disabled={saving} aria-busy={saving || undefined}>
+      <div className="form-actions form-actions--split">
+        <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <button type="button" className="btn btn-primary" onClick={save} aria-busy={saving || undefined}>
           {saving ? 'Saving…' : isNew ? 'Create combo' : 'Save combo'}
         </button>
       </div>

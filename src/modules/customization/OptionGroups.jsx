@@ -7,8 +7,8 @@ import { useConfirm } from '../../shared/hooks/useConfirm'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { firstError } from '../../shared/queryError'
 import { npr } from '../../shared/nepalMoney'
-import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 import Tip from '../../components/Tip'
+import Tabs, { TabPanel } from '../../components/Tabs'
 import RowMenu from '../../components/RowMenu'
 import ReportLoadError from '../../components/ReportLoadError'
 import ActionError from '../../components/ActionError'
@@ -58,6 +58,17 @@ const pageFailure = error => writeFailure(error, PAGE_CHECK)
 
 const TABS = [['groups', 'Groups'], ['dishes', 'Dishes']]
 
+const NO_DISH_YET = 'Make a dish first in Recipe Costing (or Menu Pricing on a POS-only plan)'
+
+// S863: a priced choice with no stock lines is the one likely to be missing them ("Extra cheese"
+// adds NPR 50 and takes no cheese off stock). A free choice (spice, a "No …") and a size that
+// scales the portion are fine without, so they are not flagged.
+const missingIngredients = (g, o) => !o.is_removal && Math.abs(Number(o.price_delta) || 0) >= 0.005
+  && !(g.kind === 'size' && o.portion_factor != null)
+
+// The data attribute an arrow carries, so focus can find it again after the list reloads.
+const moveKey = (table, id, dir) => `${table}:${id}:${dir}`
+
 export default function OptionGroups() {
   const { isAdmin, isOwner, profile, clientId, clientModules } = useAuth()
   const settingsCtx = useSettings()
@@ -86,7 +97,13 @@ export default function OptionGroups() {
   // rather than vanishing on a timer nobody can recall.
   const [notice, setNotice] = useState(null)
   const [search, setSearch] = useState('')
-  const [moving, setMoving] = useState(false)
+  // The move in flight: { table, id, dir, via: 'arrow' | 'menu', from }. The control pressed stays
+  // enabled and wears aria-busy (DESIGN.md, Buttons), so keyboard focus is not dropped to the page;
+  // `movingRef` is the second-press guard, a ref so two quick taps cannot both read it as idle.
+  const [moving, setMoving] = useState(null)
+  const movingRef = useRef(null)
+  const focusAfterMove = useRef(null)
+  const pageErrorRef = useRef(null)
 
   const [groupModal, setGroupModal] = useState(null)   // { group? }
   const [optionModal, setOptionModal] = useState(null) // { groupId, optionId?, error? }
@@ -154,6 +171,24 @@ export default function OptionGroups() {
 
   useEffect(() => { load() }, [load])
 
+  // After a move lands and the list has reloaded (S863): focus the moved row's same arrow, or its
+  // other one when the row reached an end and that arrow turned disabled. A move from the group ⋯
+  // menu goes back to that menu's trigger. Skipped when the reader has gone somewhere else meanwhile.
+  useEffect(() => {
+    const t = focusAfterMove.current
+    if (!t || moving) return
+    focusAfterMove.current = null
+    const active = document.activeElement
+    if (active && active !== document.body && active !== t.from && document.body.contains(active)) return
+    if (t.via === 'menu') {
+      document.querySelector(`[data-group-actions="${t.id}"] [aria-haspopup="menu"]`)?.focus()
+      return
+    }
+    const arrow = dir => document.querySelector(`[data-move="${moveKey(t.table, t.id, dir)}"]`)
+    const same = arrow(t.dir)
+    ;(same && !same.disabled ? same : arrow(-t.dir))?.focus()
+  }, [moving, catalog])
+
   // ── Derived, once per catalog change ──
   const { groupRows, attachCountByGroup, groupsByDish, dishById } = useMemo(() => {
     const optsByGroup = {}
@@ -192,6 +227,13 @@ export default function OptionGroups() {
 
   const flash = (text, action = null) => setNotice({ text, action })
   const switchTab = k => { setTab(k); setNotice(null); setPageError(null) }
+  // A precondition press (S863): the button stays pressable and says what is missing, because a
+  // disabled button cannot be focused and its title never shows on a tablet.
+  const explain = text => {
+    setNotice(null)
+    setPageError(text)
+    requestAnimationFrame(() => pageErrorRef.current?.scrollIntoView?.({ block: 'nearest' }))
+  }
 
   function dishesForGroup(groupId) {
     return catalog.attachments.filter(a => a.group_id === groupId).map(a => dishById.get(a.recipe_id)).filter(Boolean)
@@ -203,35 +245,47 @@ export default function OptionGroups() {
   // POSITIONS as their new sorts rather than exchanging two equal numbers and moving nothing.
   async function swapSort(table, rows, idx, dir) {
     const other = idx + dir
-    if (other < 0 || other >= rows.length || moving) return
-    setMoving(true)
-    setPageError(null)
     const a = rows[idx], b = rows[other]
     const res = await bounded(Promise.all([
       scopedUpdate(table, { sort: other }).eq('id', a.id).select('id'),
       scopedUpdate(table, { sort: idx }).eq('id', b.id).select('id'),
     ]), 'Moving the row')
-    setMoving(false)
-    if (res.error) { setPageError(pageFailure(res.error)); return }
+    if (res.error) { setPageError(pageFailure(res.error)); return false }
     const [r1, r2] = res
     const err = r1.error || r2.error
-    if (err) { setPageError(pageFailure(err)); return }
-    if (!r1.data?.length || !r2.data?.length) { setPageError('One of those rows no longer exists — reload the page.'); return }
-    load({ quiet: true })
+    if (err) { setPageError(pageFailure(err)); return false }
+    if (!r1.data?.length || !r2.data?.length) { setPageError('One of those rows no longer exists — reload the page.'); return false }
+    return true
   }
   // Renumber first when two neighbours share a sort, otherwise the swap above is a no-op.
-  async function moveRow(table, rows, idx, dir) {
+  async function writeMove(table, rows, idx, dir) {
     const dense = rows.every((r, i) => (r.sort || 0) === i)
     if (dense) return swapSort(table, rows, idx, dir)
-    setMoving(true)
-    setPageError(null)
     const results = await bounded(Promise.all(rows.map((r, i) => scopedUpdate(table, { sort: i }).eq('id', r.id).select('id'))), 'Moving the row')
     const err = results.error || results.find(r => r.error)?.error
-    if (err) { setMoving(false); setPageError(pageFailure(err)); return }
-    const renumbered = rows.map((r, i) => ({ ...r, sort: i }))
-    setMoving(false)
-    return swapSort(table, renumbered, idx, dir)
+    if (err) { setPageError(pageFailure(err)); return false }
+    return swapSort(table, rows.map((r, i) => ({ ...r, sort: i })), idx, dir)
   }
+  // S863: the controls stay locked until the RELOAD has landed, not just the write. Clearing them
+  // first left the arrows live on the old order for the 1–3 s a reload takes on mobile data, and a
+  // quick second press wrote sort values worked out from rows that had already moved.
+  async function moveRow(table, rows, idx, dir, via = 'arrow') {
+    const other = idx + dir
+    if (movingRef.current || other < 0 || other >= rows.length) return
+    const target = { table, id: rows[idx].id, dir, via, from: document.activeElement }
+    movingRef.current = target
+    setMoving(target)
+    setPageError(null)
+    try {
+      if (await writeMove(table, rows, idx, dir)) await load({ quiet: true })
+    } finally {
+      movingRef.current = null
+      focusAfterMove.current = target
+      setMoving(null)
+    }
+  }
+  const isMoving = (table, id, dir, via = 'arrow') =>
+    !!moving && moving.table === table && moving.id === id && moving.dir === dir && moving.via === via
 
   // S835 (D17): showing a hidden group or option again puts its choices back on every dish it is
   // on, so it is checked like an edit: refused when it would let one of those dishes be ordered
@@ -398,7 +452,10 @@ export default function OptionGroups() {
         {tab === 'groups' && !loading && !loadError && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Tip width={300} text="For a dish guests build in steps, like an acai bowl, pizza or salad. Creates Size, Base, Sauces and Toppings groups on that dish in one go.">
-              <button className="btn btn-ghost" onClick={() => setTemplateOpen(true)} disabled={dishes.length === 0}>Build-your-own template</button>
+              <button type="button" className="btn btn-ghost" aria-disabled={dishes.length === 0 || undefined}
+                onClick={() => (dishes.length === 0 ? explain(`${NO_DISH_YET}, then use the template on it.`) : setTemplateOpen(true))}>
+                Build-your-own template
+              </button>
             </Tip>
             <button className="btn btn-primary" onClick={() => setGroupModal({})}>+ New Group</button>
           </div>
@@ -406,36 +463,42 @@ export default function OptionGroups() {
       </div>
 
       {isAdmin && clientModules && !clientModules.customization && (
-        <div role="status" className="card" style={{ borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', marginBottom: 16 }}>
-          <strong style={{ color: 'var(--theme-amber-text)' }}>Crest Customization is off for this client.</strong>{' '}
-          <span style={{ color: 'var(--theme-text2)' }}>You can prepare groups now; nothing is offered on the till or guest menu until it is switched on in Admin → Clients.</span>
+        <div role="status" className="amber-banner">
+          <strong>Crest Customization is off for this client.</strong>{' '}
+          You can prepare groups now; nothing is offered on the till or guest menu until it is switched on in Admin → Clients.
         </div>
       )}
 
       {vatMode == null && !settingsCtx.loading && (
-        <div role="status" className="card" style={{ borderColor: 'color-mix(in srgb, var(--theme-amber) 35%, transparent)', background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', marginBottom: 16 }}>
-          <strong style={{ color: 'var(--theme-amber-text)' }}>Options cannot be saved right now.</strong>{' '}
-          <span style={{ color: 'var(--theme-text2)' }}>{VAT_MODE_UNKNOWN_TEXT}</span>
+        <div role="status" className="amber-banner">
+          <strong>Options cannot be saved right now.</strong>{' '}
+          {VAT_MODE_UNKNOWN_TEXT}
         </div>
       )}
 
-      <div className="tab-bar" role="tablist" aria-label="Option Groups views"
-        onKeyDown={e => moveRovingFocus(e, '[role="tab"]')?.click()}>
-        {TABS.map(([k, label]) => (
-          <button key={k} role="tab" id={`og-tab-${k}`} aria-selected={tab === k} aria-controls={`og-panel-${k}`}
-            tabIndex={rovingTabIndex(tab === k)}
-            className={`tab-btn${tab === k ? ' tab-btn--active' : ''}`} onClick={() => switchTab(k)}>
-            {label}
-            {!loading && !loadError && (
-              <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 6 }}>
-                {k === 'groups' ? catalog.groups.length : `${customizableCount}/${dishes.length}`}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+      {/* The count is its own phrase in the tab name ("Groups, 5"), not run into it ("Groups5"). */}
+      <Tabs idBase="og" label="Option Groups views" hasPanel active={tab} onChange={switchTab}
+        tabs={TABS.map(([k, label]) => ({
+          key: k,
+          label: (
+            <>
+              {label}
+              {!loading && !loadError && (k === 'groups' ? (
+                <>
+                  <span className="sr-only">, </span>
+                  <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 6 }}>{catalog.groups.length}</span>
+                </>
+              ) : (
+                <>
+                  <span className="sr-only">, {customizableCount} of {dishes.length} offer choices</span>
+                  <span aria-hidden="true" style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 6 }}>{customizableCount}/{dishes.length}</span>
+                </>
+              ))}
+            </>
+          ),
+        }))} />
 
-      <ActionError error={pageError} className="action-error--top" />
+      <div ref={pageErrorRef}><ActionError error={pageError} className="action-error--top" /></div>
       {notice && (
         <p role="status" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 13, color: 'var(--theme-green-text)', margin: '0 0 12px' }}>
           <span>{notice.text}</span>
@@ -447,14 +510,11 @@ export default function OptionGroups() {
         </p>
       )}
 
-      <div role="tabpanel" id={`og-panel-${tab}`} aria-labelledby={`og-tab-${tab}`}>
+      <TabPanel idBase="og" active={tab}>
       {loading ? (
         <div className="loading-state">Loading…</div>
       ) : loadError ? (
-        <>
-          <ReportLoadError error={loadError} />
-          <button type="button" className="btn btn-ghost" style={{ marginTop: 12 }} onClick={() => load()}>Try again</button>
-        </>
+        <ReportLoadError error={loadError} onRetry={() => load()} />
       ) : tab === 'groups' ? (
         groupRows.length === 0 ? (
           <div className="empty-state">
@@ -482,16 +542,20 @@ export default function OptionGroups() {
                         {onDishes ? `On ${onDishes} dish${onDishes === 1 ? '' : 'es'}` : 'Not on any dish'}
                       </span>
                     </Tip>
-                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                      <button className="btn btn-primary btn-sm" onClick={() => setOptionModal({ groupId: g.id })}>+ Option</button>
-                      <button className={`btn btn-sm ${onDishes ? 'btn-ghost' : 'btn-primary'}`} onClick={() => setAttachGroup(g)}
-                        disabled={dishes.length === 0} title={dishes.length === 0 ? 'Make a dish first' : undefined}>
+                    {/* Every card has these two buttons, so each is described by its group's name (S863). */}
+                    <div data-group-actions={g.id} style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <button type="button" className="btn btn-primary btn-sm" aria-describedby={`grp-${g.id}`}
+                        onClick={() => setOptionModal({ groupId: g.id })}>+ Option</button>
+                      <button type="button" className={`btn btn-sm ${onDishes ? 'btn-ghost' : 'btn-primary'}`} aria-describedby={`grp-${g.id}`}
+                        aria-disabled={dishes.length === 0 || undefined}
+                        onClick={() => (dishes.length === 0 ? explain(`${NO_DISH_YET}, then put “${g.name}” on it.`) : setAttachGroup(g))}>
                         Put it on dishes
                       </button>
-                      <RowMenu label={`More for ${g.name}`} disabled={moving} items={[
+                      <RowMenu label={`More for ${g.name}`}
+                        disabled={!!moving && moving.id !== g.id} busy={!!moving && moving.id === g.id && moving.via === 'menu'} items={[
                         { key: 'edit', label: 'Edit group', onSelect: () => setGroupModal({ group: g }) },
-                        { key: 'up', label: 'Move up', disabled: gi === 0, onSelect: () => moveRow('pos_option_groups', catalog.groups, gi, -1) },
-                        { key: 'down', label: 'Move down', disabled: gi === groupRows.length - 1, onSelect: () => moveRow('pos_option_groups', catalog.groups, gi, 1) },
+                        { key: 'up', label: 'Move up', disabled: gi === 0, onSelect: () => moveRow('pos_option_groups', catalog.groups, gi, -1, 'menu') },
+                        { key: 'down', label: 'Move down', disabled: gi === groupRows.length - 1, onSelect: () => moveRow('pos_option_groups', catalog.groups, gi, 1, 'menu') },
                         { key: 'hide', label: g.is_active ? 'Hide from till and guest menu' : 'Show again', onSelect: () => toggleGroupActive(g) },
                         '-',
                         { key: 'delete', label: 'Delete group…', danger: true, onSelect: () => deleteGroup(g) },
@@ -525,51 +589,71 @@ export default function OptionGroups() {
                                 ? 'For a size group on dishes that all cost the same, the full price of that size. Otherwise, how much it adds or takes off.'
                                 : `What guests pay on top of the dish${vatReg ? ', including VAT' : ''}.`}>Price</Tip>
                             </th>
-                            <th><Tip width={240} text="Pre-selected options are ticked when the picker opens. A “No …” option prints as NO on the kitchen ticket. Hidden options are kept but not offered.">Shown as</Tip></th>
-                            <th><Tip width={220} text="What guests see beside the option on the QR menu.">Diet &amp; allergens</Tip></th>
-                            {imsOn && <th><Tip width={260} text="What picking this option does to stock and food cost, per plate.">Stock</Tip></th>}
+                            {/* On a phone these three fold away (S863), so Edit and ⋯ fit at 360px; the
+                                badges and a stock warning ride under the option name instead. */}
+                            <th className="phone-hide"><Tip width={240} text="Pre-selected options are ticked when the picker opens. A “No …” option prints as NO on the kitchen ticket. Hidden options are kept but not offered.">Shown as</Tip></th>
+                            <th className="phone-hide"><Tip width={220} text="What guests see beside the option on the QR menu.">Diet &amp; allergens</Tip></th>
+                            {imsOn && <th className="phone-hide"><Tip width={260} text="What picking this option does to stock and food cost, per plate.">Stock</Tip></th>}
                             <th style={{ width: 1 }}><span className="sr-only">Actions</span></th>
                           </tr>
                         </thead>
                         <tbody>
-                          {g.options.map((o, oi) => (
+                          {g.options.map((o, oi) => {
+                            const upLabel = `Move ${o.name} up`, downLabel = `Move ${o.name} down`
+                            const upBusy = isMoving('pos_options', o.id, -1), downBusy = isMoving('pos_options', o.id, 1)
+                            const badges = [
+                              o.is_removal && <span key="off" className="badge-gray">Takes off</span>,
+                              o.is_default && <span key="def" className="badge-gray">Pre-selected</span>,
+                              !o.is_active && <span key="hid" className="badge-gray">Hidden</span>,
+                            ].filter(Boolean)
+                            const noStock = imsOn && o.ingredients.length === 0
+                            const stockWarn = noStock && missingIngredients(g, o)
+                            return (
                             <tr key={o.id}>
                               <td style={{ whiteSpace: 'nowrap', padding: '4px 6px' }}>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                                  <button type="button" className="btn btn-ghost btn-icon" aria-label={`Move ${o.name} up`}
-                                    disabled={oi === 0 || moving} onClick={() => moveRow('pos_options', g.options, oi, -1)}>↑</button>
-                                  <button type="button" className="btn btn-ghost btn-icon" aria-label={`Move ${o.name} down`}
-                                    disabled={oi === g.options.length - 1 || moving} onClick={() => moveRow('pos_options', g.options, oi, 1)}>↓</button>
+                                  <button type="button" className="btn btn-ghost btn-icon" aria-label={upLabel} title={upLabel}
+                                    data-move={moveKey('pos_options', o.id, -1)} aria-busy={upBusy || undefined}
+                                    disabled={oi === 0 || (!!moving && !upBusy)} onClick={() => moveRow('pos_options', g.options, oi, -1)}>↑</button>
+                                  <button type="button" className="btn btn-ghost btn-icon" aria-label={downLabel} title={downLabel}
+                                    data-move={moveKey('pos_options', o.id, 1)} aria-busy={downBusy || undefined}
+                                    disabled={oi === g.options.length - 1 || (!!moving && !downBusy)} onClick={() => moveRow('pos_options', g.options, oi, 1)}>↓</button>
                                 </div>
                               </td>
-                              <td>
-                                <span style={{ whiteSpace: 'nowrap', fontWeight: 500, color: o.is_active ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{o.name}</span>
+                              <td style={{ overflowWrap: 'break-word' }}>
+                                <span style={{ fontWeight: 500, color: o.is_active ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{o.name}</span>
                                 {o.kitchen_name && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>Ticket: {o.kitchen_name}</div>}
+                                {(badges.length > 0 || stockWarn) && (
+                                  <div className="phone-only" style={{ marginTop: 4 }}>
+                                    {badges.length > 0 && <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>{badges}</div>}
+                                    {stockWarn && <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 2 }}>△ No ingredients</div>}
+                                  </div>
+                                )}
                               </td>
                               <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{priceCell(g, o)}</td>
-                              <td>
-                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                                  {o.is_removal && <span className="badge-gray">Takes off</span>}
-                                  {o.is_default && <span className="badge-gray">Pre-selected</span>}
-                                  {!o.is_active && <span className="badge-gray">Hidden</span>}
-                                </div>
+                              <td className="phone-hide">
+                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>{badges}</div>
                               </td>
-                              <td style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
+                              <td className="phone-hide" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
                                 {[o.diet ? DIET_LABEL[o.diet] : null, (o.allergens || []).length ? (o.allergens || []).join(', ') : null].filter(Boolean).join(' · ') || '—'}
                               </td>
                               {imsOn && (
-                                <td style={{ fontSize: 12 }}>
+                                <td className="phone-hide" style={{ fontSize: 12 }}>
                                   {o.ingredients.length
                                     ? <span style={{ color: 'var(--theme-text2)' }}>{o.ingredients.length} ingredient line{o.ingredients.length === 1 ? '' : 's'}</span>
-                                    : <Tip width={260} text="Picking this option will not change stock or food cost. Fine for a free choice like spice level; for “Extra cheese” add the cheese.">
-                                        <span style={{ color: 'var(--theme-amber-text)' }}>No ingredients</span>
-                                      </Tip>}
+                                    : stockWarn
+                                      ? <Tip width={260} text="This choice adds to the price but takes nothing off stock, so food cost reads low. For “Extra cheese”, add the cheese.">
+                                          <span style={{ color: 'var(--theme-amber-text)' }}>△ No ingredients</span>
+                                        </Tip>
+                                      : <Tip width={260} text="Picking this option does not change stock or food cost. That is fine for a free choice like spice level.">
+                                          <span style={{ color: 'var(--theme-text3)' }}>No ingredients</span>
+                                        </Tip>}
                                 </td>
                               )}
                               <td>
                                 <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                                  <button className="btn btn-ghost btn-sm" onClick={() => setOptionModal({ groupId: g.id, optionId: o.id })} aria-label={`Edit ${o.name}`}>Edit</button>
-                                  <RowMenu label={`More for ${o.name}`} disabled={moving} items={[
+                                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOptionModal({ groupId: g.id, optionId: o.id })} aria-label={`Edit ${o.name}`}>Edit</button>
+                                  <RowMenu label={`More for ${o.name}`} disabled={!!moving} items={[
                                     { key: 'hide', label: o.is_active ? 'Hide' : 'Show again', onSelect: () => toggleOptionActive(o) },
                                     '-',
                                     { key: 'delete', label: 'Delete…', danger: true, onSelect: () => deleteOption(o) },
@@ -577,7 +661,8 @@ export default function OptionGroups() {
                                 </div>
                               </td>
                             </tr>
-                          ))}
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -606,7 +691,8 @@ export default function OptionGroups() {
                 <thead>
                   <tr>
                     <th>Dish</th>
-                    <th style={{ textAlign: 'right' }}><Tip width={200} text={vatReg ? 'Menu price including VAT.' : 'Menu price.'}>Price</Tip></th>
+                    {/* The menu price folds away on a phone (S863): the choices are what this tab is for. */}
+                    <th className="phone-hide" style={{ textAlign: 'right' }}><Tip width={200} text={vatReg ? 'Menu price including VAT.' : 'Menu price.'}>Price</Tip></th>
                     <th><Tip width={240} text="The option groups this dish offers, in the order the picker shows them.">Choices</Tip></th>
                     <th style={{ width: 1 }}><span className="sr-only">Actions</span></th>
                   </tr>
@@ -616,8 +702,8 @@ export default function OptionGroups() {
                     const attached = (groupsByDish[d.id] || []).slice().sort((a, b) => (a.sort || 0) - (b.sort || 0))
                     return (
                       <tr key={d.id}>
-                        <td>
-                          <span style={{ whiteSpace: 'nowrap', fontWeight: 500 }}>{d.name}</span>
+                        <td style={{ overflowWrap: 'break-word' }}>
+                          <span style={{ fontWeight: 500 }}>{d.name}</span>
                           {byoSet.has(d.id) && (
                             <Tip width={260} text="Build-your-own: the till always opens this dish's choices, and the QR menu walks them one step at a time." style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: 6 }}>
                               <span className="badge-gray">Build-your-own</span>
@@ -627,7 +713,7 @@ export default function OptionGroups() {
                             {d.category || 'No category'}{d.pos_enabled ? '' : ' · not on POS'}
                           </div>
                         </td>
-                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{d.inclPrice > 0 ? npr(d.inclPrice) : '—'}</td>
+                        <td className="phone-hide" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{d.inclPrice > 0 ? npr(d.inclPrice) : '—'}</td>
                         <td>
                           {attached.length ? (
                             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -639,9 +725,12 @@ export default function OptionGroups() {
                         </td>
                         <td>
                           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                            <button className="btn btn-ghost btn-sm" onClick={() => setAttachFor(d)} disabled={catalog.groups.length === 0}
-                              aria-label={`Choices for ${d.name}`}
-                              title={catalog.groups.length === 0 ? 'Create an option group first' : undefined}>
+                            <button type="button" className="btn btn-ghost btn-sm" style={{ whiteSpace: 'nowrap' }}
+                              aria-disabled={catalog.groups.length === 0 || undefined}
+                              onClick={() => (catalog.groups.length === 0
+                                ? explain(`Make an option group first on the Groups tab, then add it to ${d.name}.`)
+                                : setAttachFor(d))}
+                              aria-label={attached.length ? `Choices for ${d.name}` : `Add choices for ${d.name}`}>
                               {attached.length ? 'Choices…' : 'Add choices'}
                             </button>
                             <RowMenu label={`More for ${d.name}`} busy={markBusy === d.id} items={[
@@ -661,7 +750,7 @@ export default function OptionGroups() {
           )}
         </>
       )}
-      </div>
+      </TabPanel>
 
       {groupModal && (
         <OptionGroupModal
