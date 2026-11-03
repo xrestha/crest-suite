@@ -42,7 +42,7 @@ import MenuGrid, { filterMenu } from './MenuGrid'
 import {
   COMBO_TAB, COMBO_TAB_LABEL, loadComboCatalog, comboAddsInOneTap, defaultComboPicks, buildComboLines, comboDishLine,
   comboIdOf, comboGroupOf, groupComboBlocks, cartRows, addComboLinesToCart, setComboQtyIn, comboUnitsPulled,
-  swapComboDish, picksOfCombo, collapseCombosForMove, expandComboPicks, guestLineOf, guestRequestText, swapShareOf, comboAsSold,
+  swapComboDish, picksOfCombo, collapseCombosForMove, expandComboPicks, guestLineOf, guestRequestText, swapShareOf, comboAsSold, swapPriceBasis,
 } from './comboCart'
 import { computeOrderAmounts, discountableSubtotal, isComboItem } from '../../../utils/posBillingMath'
 import { openBillTotal } from '../dashboard/posDashboardMath'
@@ -3783,8 +3783,12 @@ export default function PosOrders({ billingStation = false } = {}) {
       setMsg(`error:${item.combo_name || 'This combo'} no longer has that pick, so ${item.name} cannot be changed. Remove the combo to change it.`)
       return
     }
-    // S862 COMBOS-1: the window prices the combo as it was sold, as the swap will (comboAsSold).
-    setComboPicker({ combo: comboAsSold(combo, item), swap: { lineId, groupId }, initialPicks: picksOfCombo(orderItems, lineId) })
+    // S862 COMBOS-1: the window prices the combo as it was sold, as the swap will (comboAsSold). S864:
+    // and from the bill's own lines, so the other dishes show the price they were rung at.
+    setComboPicker({
+      combo: comboAsSold(combo, item), swap: { lineId, groupId }, initialPicks: picksOfCombo(orderItems, lineId),
+      basis: swapPriceBasis(orderItems, lineId, groupId, combo, comboRecipeOf, vatReg),
+    })
   }
 
   // The swap's answer: the new dish takes the old one's place in the same combo and pick. A dish the
@@ -8541,6 +8545,8 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           initialQty={comboPicker.swap
             ? orderItems.find(i => comboIdOf(i) === comboPicker.swap.lineId && comboGroupOf(i) === String(comboPicker.swap.groupId).toLowerCase())?.qty
             : undefined}
+          soldLines={comboPicker.basis?.soldLines || null}
+          swapShare={comboPicker.basis?.share ?? null}
           confirmLabel={comboPicker.swap ? 'Swap dish' : 'Add to order'}
           onClose={() => setComboPicker(null)}
           onConfirm={({ picks, qty }) => {

@@ -214,6 +214,24 @@ describe('ComboPickerModal (S863 till audit)', () => {
     expect(screen.getByTestId('combo-picker-total')).toHaveTextContent('NPR 1,050')
   })
 
+  test('a Swap prices from the bill: the other dishes as rung, the swapped one from its share (S864)', () => {
+    const combo = { ...momoCombo, groups: momoCombo.groups.map(g => (g.id === 'g-drink'
+      ? { ...g, items: g.items.map(i => (i.recipe_id === 'r-coke' ? { ...i, extra_price: 20 } : i)) } : g)) }
+    const picksNow = [{ group_id: 'g-momo', recipe_id: 'r-momo-c', option_ids: [] }, { group_id: 'g-drink', recipe_id: 'r-tea', option_ids: [] }]
+    // Rung when Chicken's extra was NPR 60 and the drink's share NPR 90: the bill holds 270 + 90.
+    const soldLines = [{ group_id: 'g-momo', incl: 270 }, { group_id: 'g-drink', incl: 90 }]
+    render(<ComboPickerModal combo={combo} recipeOf={recipeOf} onlyGroupId="g-drink" showQty={false}
+      initialQty={1} initialPicks={picksNow} soldLines={soldLines} swapShare={90}
+      confirmLabel="Swap dish" onConfirm={jest.fn()} onClose={jest.fn()} />)
+    // The dish it holds reads the bill's own figure, not today's 350 plus Chicken's 50.
+    expect(screen.getByTestId('combo-picker-total')).toHaveTextContent('NPR 360')
+    fireEvent.click(screen.getByRole('radio', { name: /Coke/ }))
+    // Coke takes the tea's share (90) and its own extra today (20); the momo stays at 270.
+    expect(screen.getByTestId('combo-picker-total')).toHaveTextContent('NPR 380')
+    fireEvent.click(screen.getByRole('radio', { name: /Tea/ }))
+    expect(screen.getByTestId('combo-picker-total')).toHaveTextContent('NPR 360')
+  })
+
   test('a Swap on one combo keeps its old wording', () => {
     render(<ComboPickerModal combo={momoCombo} recipeOf={recipeOf} onlyGroupId="g-drink" showQty={false}
       initialQty={1} initialPicks={[{ group_id: 'g-momo', recipe_id: 'r-momo-v', option_ids: [] }, { group_id: 'g-drink', recipe_id: 'r-tea', option_ids: [] }]}

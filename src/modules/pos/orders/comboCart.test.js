@@ -2,7 +2,7 @@ import {
   nestCombos, comboAddsInOneTap, defaultComboPicks, buildComboLines, comboIdOf, comboGroupOf, groupComboBlocks,
   cartRows, addComboLinesToCart, setComboQtyIn, comboUnitsPulled, swapComboDish, picksOfCombo,
   collapseCombosForMove, expandComboPicks, guestLineOf, guestRequestText, isMissingTable, comboSignature, comboSharesOf,
-  swapShareOf, comboAsSold, comboDishLine,
+  swapShareOf, comboAsSold, comboDishLine, swapPriceBasis,
 } from './comboCart'
 import { lineKeyOf, toItemPayload, lineOptionIds } from './posOrdersConstants'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
@@ -272,5 +272,22 @@ describe('a swap keeps the price the combo was ordered at', () => {
     expect(priced.groups).toBe(momoCombo.groups)
     expect(comboAsSold(momoCombo, { combo_share: null, combo_price: 400 })).toBe(momoCombo)
     expect(comboAsSold(momoCombo, { combo_share: 210, combo_price: null })).toBe(momoCombo)
+  })
+
+  // S864: the swap window's total is the bill's, so it reads the dishes as they stand on the cart.
+  test('the swap basis is each dish of the combo as rung, and the swapped dish\'s own share', () => {
+    const lines = comboOf('aaaa', 'r-momo-c', 'r-tea')
+    const rung = [{ ...lines[0], unit_price: 230, combo_share: 200 }, { ...lines[1], unit_price: 80, combo_share: 90 }]
+    const other = comboOf('bbbb')
+    const basis = swapPriceBasis([plain, ...rung, ...other], 'AAAA', 'G-DRINK', momoCombo, recipeOf, true)
+    expect(basis.soldLines).toEqual([
+      { group_id: 'g-momo', incl: 230 * 1.13 },
+      { group_id: 'g-drink', incl: 80 * 1.13 },
+    ])
+    expect(basis.share).toBe(90)
+    // A PAN outlet adds no VAT to what the guest pays.
+    expect(swapPriceBasis(rung, 'aaaa', 'g-drink', momoCombo, recipeOf, false).soldLines[1].incl).toBe(80)
+    // A combo not on the cart has nothing to price from.
+    expect(swapPriceBasis(rung, 'zzzz', 'g-drink', momoCombo, recipeOf, true)).toEqual({ soldLines: [], share: null })
   })
 })

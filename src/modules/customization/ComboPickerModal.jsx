@@ -32,10 +32,15 @@ import OptionPickerModal, { PICKER_PANEL_STYLE } from './OptionPickerModal'
 const lower = v => (v == null ? '' : String(v).toLowerCase())
 const bySort = (a, b) => ((Number(a.sort) || 0) - (Number(b.sort) || 0)) || (lower(a.id) < lower(b.id) ? -1 : lower(a.id) > lower(b.id) ? 1 : 0)
 const attachOf = dishGroups => Object.fromEntries((dishGroups || []).map(d => [d.group.id, d.attachment]))
+const sameIds = (a, b) => {
+  const x = (a || []).map(String).sort()
+  const y = (b || []).map(String).sort()
+  return x.length === y.length && x.every((v, i) => v === y[i])
+}
 
 export default function ComboPickerModal({
   combo, recipeOf, vatReg = true, dishGroupsOf = () => undefined, catalog = {},
-  initialPicks = null, onlyGroupId = null, initialQty = 1, showQty = true,
+  initialPicks = null, onlyGroupId = null, initialQty = 1, showQty = true, soldLines = null, swapShare = null,
   confirmLabel = 'Add to order', onConfirm, onClose, zIndex = 1100,
 }) {
   const groups = useMemo(() => [...(combo?.groups || [])].sort(bySort), [combo])
@@ -97,7 +102,25 @@ export default function ComboPickerModal({
     const item = g.items.find(i => i.recipe_id === p.recipe_id)
     return Math.round(Number(item?.extra_price) || 0) + choiceChargeOf(p.recipe_id, describeFor(p.recipe_id, p.option_ids))
   }
-  const unit = Math.round(Number(combo?.guest_price) || 0) + groups.reduce((s, g) => s + pickCharge(g), 0)
+  // S864: a Swap prices from the bill, as save_pos_order_items does. Every other dish of the combo keeps
+  // the price it was rung at (`soldLines`), and the dish swapped in takes the replaced dish's share
+  // (`swapShare`) plus its own extra and choices at today's prices. Re-picking the dish it holds, with
+  // the same choices, shows the bill's own figure. Without the basis (an older caller) the combo's
+  // price plus every pick's charge, as before.
+  const swapUnit = (() => {
+    const g = onlyGroupId ? shown[0] : null
+    if (!g || !soldLines || swapShare == null) return null
+    const gid = lower(g.id)
+    const others = soldLines.filter(l => lower(l.group_id) !== gid).reduce((s, l) => s + (Number(l.incl) || 0), 0)
+    const own = soldLines.find(l => lower(l.group_id) === gid)
+    const p = picks[g.id]
+    const s0 = start[g.id]
+    if (own && p && s0 && p.recipe_id === s0.recipe_id && sameIds(p.option_ids, s0.option_ids)) {
+      return Math.round(others + (Number(own.incl) || 0))
+    }
+    return Math.round(others + Number(swapShare)) + pickCharge(g)
+  })()
+  const unit = swapUnit ?? Math.round(Number(combo?.guest_price) || 0) + groups.reduce((s, g) => s + pickCharge(g), 0)
 
   // What still needs an answer, per shown pick: a dish (`kind: 'dish'`), or a choice the dish
   // requires (`kind: 'choice'`).

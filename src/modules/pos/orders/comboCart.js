@@ -131,6 +131,31 @@ export function comboAsSold(combo, old) {
   return { ...combo, guest_price: sold }
 }
 
+/**
+ * S864: what the swap window prices from, so the total it shows is the one the bill will carry. Each
+ * dish of this combo as it stands on the cart (`incl`: one unit, as the guest pays it), and the share
+ * the swapped dish is priced from (swapShareOf, exactly as confirmComboSwap uses it). The other dishes
+ * keep the price they were rung at; save_pos_order_items never re-prices an existing line.
+ */
+export function swapPriceBasis(orderItems, lineId, groupId, combo, recipeOf, vatReg) {
+  const lid = lower(lineId)
+  const gid = lower(groupId)
+  const soldLines = []
+  const seen = new Set()
+  let old = null
+  for (const i of orderItems || []) {
+    if (comboIdOf(i) !== lid) continue
+    const g = comboGroupOf(i)
+    if (g === gid && !old) old = i
+    if (seen.has(g)) continue
+    seen.add(g)
+    soldLines.push({ group_id: g, incl: num(i.unit_price) * (1 + (vatReg ? num(i.vat_rate) : 0)) })
+  }
+  const group = (combo?.groups || []).find(g => lower(g.id) === gid)
+  const share = old && group ? swapShareOf(old, combo, group.id, recipeOf, vatReg) : null
+  return { soldLines, share: share == null || !Number.isFinite(Number(share)) ? null : Number(share) }
+}
+
 /** The dish a pick starts on: the one the owner marked default, else the first. */
 export const defaultDishOf = group => (group?.items || []).find(i => i.is_default) || group?.items?.[0] || null
 

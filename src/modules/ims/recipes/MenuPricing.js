@@ -28,6 +28,7 @@ import PanPriceBanner from './PanPriceBanner'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
+import FcBandKey from '../../../components/FcBandKey'
 
 
 function vatOf(r) {
@@ -1123,6 +1124,8 @@ export default function MenuPricing() {
           </p>
         </div>
       ) : (
+        <>
+        <FcBandKey settings={settings} />
         <div className="table-wrap">
           <table className="data-table">
             <thead>
@@ -1313,6 +1316,7 @@ export default function MenuPricing() {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {/* Rendered in BOTH returns — this page has two (component-library.md). */}

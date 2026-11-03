@@ -43,6 +43,7 @@ import { vatModeOf, guestVatRate, storedFromMenuPrice, panPriceMismatches, PAN_L
 import PanPriceBanner from './PanPriceBanner'
 import { findRecipeCycle, isRecipeCycleError, recipeCycleText } from './recipeCycle'
 import { CHOICE_LINE_COLS, recipeNamesOf, choiceNamesOf, subRecipeInUseText } from './subRecipeInUse'
+import FcBandKey from '../../../components/FcBandKey'
 
 // How long any single save request may hang before the button gives up and re-enables itself.
 // Same class of bug as Sales Entry's S449-S455: `save()` below is several sequential network
@@ -1903,6 +1904,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
             ) : (
               /* ── Regular recipes tab (All / per-category) ── */
               <>
+              <FcBandKey settings={settings} />
               {/* Below 600px (S796): one row per dish with its food cost % on the first line. The
                   table put FC% — the reason to open this page on a phone — past the right edge. */}
               <ul className="phone-cards phone-only" aria-label="Recipes">
