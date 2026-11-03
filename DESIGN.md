@@ -1079,7 +1079,10 @@ cards in the option-group dialog; `.gm-option` on the guest menu, the same state
 radio, since there is no corner left to tell them apart). The rule the class exists for: **a checked
 chip must not change size.** The checked state
 is a 1px accent border plus a 1px inset ring, never a 2px border, so a grid of chips does not
-reflow by 2px on every tap. Every chip carries the product's focus pair. A single-pick group is ONE
+reflow by 2px on every tap. Every chip carries the product's focus pair. **A picked chip's quiet lines take
+darker inks (S863)**: the checked fill took Light's text3 to 3.71:1 and text2 to 4.40:1 on the 11px
+price and "Included" lines, so a checked chip re-points both tokens for its children to text2/text1
+mixes (6.53 / 5.35 on Light); `.kind-card` and the guest sheet's `.gm-option` do the same. A single-pick group is ONE
 Tab stop with arrow keys between its members (`src/shared/rovingFocus.js`); in a group where several
 can be picked each chip is its own Tab stop, as the WAI-ARIA checkbox pattern gives it (S862 ADD-5). A pick that is free under a
 first-N deal reads **Included** with its list price struck through — a price a guest will not pay
@@ -1113,7 +1116,11 @@ important words on the sheet), because its label already says what is missing; a
 maximum is capped at the choices offered ("Pick 2 to 3", never "Pick 2 to 10" over three).
 
 The till does NOT step (owner decision, S760): a cashier mid-queue needs one screen, and the one-tap
-default stays for every dish that is not build-your-own.
+default stays for every dish that is not build-your-own. It does follow the first two price rules since S863
+(owner decision): a size on a dish of its own shows the whole dish price at that size, and no total
+is quoted while a required group is unanswered ("Choose a size"). Inside a combo a size keeps its
+extra charge and the footer says what the choices add ("No extra charge"), because the combo prices
+the dish.
 
 ### Combos (S839)
 
