@@ -5,6 +5,10 @@ Crest Customization release 2. A **combo** is sold at one price ("Momo Combo, NP
 optional extra charge per dish ("Chicken +50"). A **set meal** is a combo whose every pick lists one
 dish, so the till adds it in one tap; a **pick-your-own deal** asks one question per pick.
 
+**Since S867 the screens call a pick a part** ("Part 1", "+ Add a part", the report's "Combo parts"
+sheet). This contract, the code (`combo_pick_*`, `combo_needs_picks`) and the tables
+(`pos_combo_groups`) keep "pick".
+
 Owner decisions (2026-10-14): both kinds; part of the paid Customization add-on; the bill prints one
 line "Momo Combo … NPR 350" with its dishes listed underneath unpriced; guests order combos from the
 table QR menu; a dish inside a combo may take its own choices (sizes, add-ons), charged on top; a guest
