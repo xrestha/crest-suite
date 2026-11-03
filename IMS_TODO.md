@@ -324,7 +324,7 @@ access. High-severity claims were spot-checked against source before any decisio
 - ✅ S756 stage 4 — Stock Ageing count surpluses: kept cautious (owner decision, no change).
 - ✅ S855: Budget vs Actual's provisional line talks about spend rather than food cost — wording only. Resolved as "actual net purchases read low": the page measures purchases, and D30 forbids a food-cost label on them.
 - ✅ S855 (`useUnsavedDishPhotos`): Dish photos uploaded to a NEW recipe that is then cancelled leave an unused file in storage.
-- ⚪ **S761 left the counter trim as a DISPLAY control, and the owner knows.** Only `closing_stock`
+- ✅ S792 DATABASE-4 (checked live S874: `ims_rank_guard` on all three tables, and `ims_caller_has_rank` refuses an `ims_email` login) **S761 left the counter trim as a DISPLAY control, and the owner knows.** Only `closing_stock`
   carries counter-scoped RESTRICTIVE policies (`ims_count_scope_*`, migration `20260910120000`);
   `opening_stock`, `wastages` and `staff_meals` have none, so a count PIN's JWT can still write
   them over REST even though the tabs are gone. Blind count and section scoping already carry the

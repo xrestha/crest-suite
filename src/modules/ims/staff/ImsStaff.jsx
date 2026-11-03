@@ -13,7 +13,7 @@ import { edgeFunctionFailure, failedMovesMessage } from '../../../shared/edgeFun
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../../../utils/weakPasswords'
 import { chipKeys } from '../../../shared/rovingFocus'
-import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
+import { nepalBsLong, nepalDateLong, nepalTime } from '../../../shared/nepalTime'
 
 // Mirrors src/modules/pos/staff/PosStaff.jsx structurally — same role model, same custom-role
 // mapping, same Edge Function call pattern — adapted for real email+password login instead of a
@@ -459,6 +459,12 @@ export default function ImsStaff() {
     setNotice(isPin
       ? `PIN for ${pwTarget.full_name} changed — the old one no longer works. Tell them the new one directly.`
       : `Password for ${pwTarget.full_name} changed — the old one no longer works. Share the new one with them directly.`)
+    // A PIN reset ends a lockout (S874, as POS Staff's has since S809). If the server saved the PIN
+    // but could not lift a lockout that is still running, the counting tablet refuses the new PIN
+    // until then, so say so. Pressing Reset PIN again retries the lift.
+    if (isPin && data?.lockout_cleared === false && data?.locked_until) {
+      setMsg(`${pwTarget.full_name || 'This login'}’s new PIN is saved, but the lockout from wrong tries could not be lifted, so the counting tablet will refuse it until ${nepalTime(data.locked_until)}. Reset the PIN again to lift the lockout now.`)
+    }
     setPwTarget(null); setResetting(false)
   }
 

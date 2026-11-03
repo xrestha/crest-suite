@@ -277,6 +277,7 @@ export const IMS_GUIDE_GROUPS = [
           '"+ New Gate Pass": pick an existing Vendor or type a free-text company name, plus Driver Name, Vehicle Number, Purpose (Delivery/Pickup/Maintenance/Other), optional Notes.',
           'Saving auto-prints a gate-pass voucher and sets status = open.',
           '"Mark Exited" sets status = closed and records the exit time. "Reprint" re-prints and increments a print counter.',
+          'A pass cannot be edited once issued. A wrong detail is fixed by voiding it (a supervisor, with a reason) and issuing the next pass, which takes the next number.',
           'Any pass still open from a previous calendar day is auto-swept to closed (flagged auto_closed) the next time the page loads — there is no server-side cron for this.',
           'S756: the auto-close boundary is 6 AM Nepal time (the POS parking service day), not the viewer\'s midnight. Void (supervisor+, required reason) sets status = voided with voided_at/void_reason; voided_by is stamped by the database (ims_gate_pass_void_guard) and a voided pass is final. exited_by is recorded on Mark Exited, and Reprint really increments print_count (it was never sent before).',
         ],

@@ -371,10 +371,14 @@ Four properties worth keeping:
 - **`dry_run` defaults TRUE.** An unattended deleter whose default is "delete" is one hand-run away
   from disaster. Cron passes `dry_run: false` explicitly.
 
-Two settings must be set before it can do anything (`app.settings.functions_url`,
-`app.settings.anon_key`); until then the POST goes nowhere and fails harmlessly. Authentication is a
-DB-generated `app_secrets.purge_secret`, so there is nothing to copy by hand — the `pin_pepper`
-precedent.
+**It never ran until S874.** The cron command called `extensions.http_post` (pg_net's is
+`net.http_post`) and read two `app.settings` values nobody set, so all 61 nightly runs to 2026-11-02
+failed and no trial was purged. Since `20261103150000` the job calls `request_trial_purge(false)`,
+which reads the functions URL and the anon key from Vault (`crest_functions_url`, `crest_anon_key`)
+and refuses by name when either is missing. The job is created switched off; it is switched on only
+after the owner has read `trials_due_for_purge()`'s list. pg_net is asynchronous, so a "succeeded"
+cron run means queued: what the purge did is `trial_purge_log`. Authentication is still the
+DB-generated `app_secrets.purge_secret`, the `pin_pepper` precedent.
 
 ## Clauses that promise more than the code does — read before publishing
 

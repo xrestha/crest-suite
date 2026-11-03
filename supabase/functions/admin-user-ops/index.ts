@@ -1055,11 +1055,12 @@ Deno.serve(async (req) => {
 
     // The POS powers and lock stamp are read for reset_pos_pin (S809 1f): its power check compares the
     // target's discount limit and Void against the caller's, and its audit row says whether the reset
-    // ended a lockout. The two block stamps are read for Block / Unblock (S809 3i).
+    // ended a lockout. The two block stamps are read for Block / Unblock (S809 3i). The IMS lock stamp
+    // is read for reset_ims_pin the same way (S874).
     async function loadTarget(userId: string) {
       const { data } = await admin
         .from('profiles')
-        .select('id, role, client_id, full_name, pos_role, pos_email, pos_discount_limit, pos_allow_void, pos_pin_locked_until, pos_blocked_at, settlement_blocked_by, ims_role, ims_email, hr_role, hr_self_service')
+        .select('id, role, client_id, full_name, pos_role, pos_email, pos_discount_limit, pos_allow_void, pos_pin_locked_until, pos_blocked_at, settlement_blocked_by, ims_role, ims_email, ims_pin_locked_until, hr_role, hr_self_service')
         .eq('id', userId).single()
       return data as Record<string, unknown> | null
     }
@@ -2250,7 +2251,37 @@ Deno.serve(async (req) => {
 
       await vaultPin(userId, pinTarget.client_id as string, 'ims_count', pin)
 
-      return json({ success: true })
+      // A reset ends a lockout, as reset_pos_pin's does (S809 DOCS-1; filed for IMS in S809.3, fixed
+      // S874). Until then ims-staff-login refused the new PIN until the 15 minutes ran out, while the
+      // count tablet told the counter to ask for exactly this reset. Same order and same reasons as
+      // there: after the password, never before, and a failure is reported, not thrown.
+      const imsLockStamp = pinTarget.ims_pin_locked_until
+      const imsLockedUntil = typeof imsLockStamp === 'string' && Date.parse(imsLockStamp) > Date.now() ? imsLockStamp : null
+      const { error: imsUnlockErr } = await admin.rpc('record_ims_pin_attempt', { p_staff_id: userId, p_success: true })
+      if (imsUnlockErr) console.error('[admin-user-ops] reset_ims_pin: PIN changed but the lockout was not cleared:', imsUnlockErr.message)
+
+      // The trace reset_pos_pin leaves (S809 ACCESS-3), filed under the same "Staff PIN" table: who
+      // reset which counter's PIN, and when; never the PIN. Best-effort after the change.
+      const { data: imsPinClient } = await admin
+        .from('clients').select('name').eq('id', pinTarget.client_id).maybeSingle()
+      const { error: imsPinAuditErr } = await admin.from('audit_logs').insert({
+        client_id:   pinTarget.client_id,
+        client_name: imsPinClient?.name ?? null,
+        user_id:     user.id,
+        user_name:   profile?.full_name ?? user.email ?? null,
+        table_name:  'staff_pin_vault',
+        action:      'UPDATE',
+        record_id:   userId,
+        new_data:    {
+          kind:         'ims_count',
+          staff_member: pinTarget.full_name ?? null,
+          pin_reset:    true,
+          ...(imsLockedUntil ? { lockout_ended: !imsUnlockErr } : {}),
+        },
+      })
+      if (imsPinAuditErr) console.error('[admin-user-ops] reset_ims_pin audit insert failed:', imsPinAuditErr.message)
+
+      return json({ success: true, lockout_cleared: !imsUnlockErr, locked_until: imsUnlockErr ? imsLockedUntil : null })
     }
 
     // ── Update an IMS staff member's role ────────────────────────────────────
