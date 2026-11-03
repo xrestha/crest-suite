@@ -8538,6 +8538,9 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
           initialPicks={comboPicker.initialPicks || null}
           onlyGroupId={comboPicker.swap?.groupId || null}
           showQty={!comboPicker.swap}
+          initialQty={comboPicker.swap
+            ? orderItems.find(i => comboIdOf(i) === comboPicker.swap.lineId && comboGroupOf(i) === String(comboPicker.swap.groupId).toLowerCase())?.qty
+            : undefined}
           confirmLabel={comboPicker.swap ? 'Swap dish' : 'Add to order'}
           onClose={() => setComboPicker(null)}
           onConfirm={({ picks, qty }) => {

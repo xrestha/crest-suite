@@ -6,7 +6,7 @@ import {
 } from '../../shared/optionPricing'
 import { offeredPicks } from '../../shared/offeredPicks'
 import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
-import OptionPickerModal from './OptionPickerModal'
+import OptionPickerModal, { PICKER_PANEL_STYLE } from './OptionPickerModal'
 
 // Combos (S839, docs/pos-combos.md): the till's window for a combo whose picks need an answer — a
 // pick-your-own deal, or a set meal whose dish needs a choice of its own. One section per pick, a
@@ -21,6 +21,13 @@ import OptionPickerModal from './OptionPickerModal'
 // guest pays them. save_pos_order_items prices each dish of the combo itself from today's split.
 // `onConfirm({ picks: [{ group_id, recipe_id, option_ids }], qty })` — every pick, the shown ones
 // as answered here, the others as they started.
+//
+// S863 (till audit): a Swap is told the combo's quantity (`initialQty` with `showQty={false}`), since
+// the swap changes the dish in every unit of the combo, and the footer says so ("Both (×2) get this
+// dish") beside the total for all of them. Picking a dish whose required choice has no default opens
+// that dish's choices at once. Each part and the total are shown in whole rupees from the same
+// figures, so the parts on screen add up to the total under them. A stray backdrop tap no longer
+// drops the picks or the quantity.
 
 const lower = v => (v == null ? '' : String(v).toLowerCase())
 const bySort = (a, b) => ((Number(a.sort) || 0) - (Number(b.sort) || 0)) || (lower(a.id) < lower(b.id) ? -1 : lower(a.id) > lower(b.id) ? 1 : 0)
@@ -62,63 +69,87 @@ export default function ComboPickerModal({
     return out
   })
   const [picks, setPicks] = useState(start)
-  const [qty, setQty] = useState(() => Math.max(1, Number(initialQty) || 1))
+  const [startQty] = useState(() => Math.max(1, Number(initialQty) || 1))
+  const [qty, setQty] = useState(startQty)
   const [tried, setTried] = useState(false)
   const [choicesFor, setChoicesFor] = useState(null)
   const sectionRefs = useRef({})
-  const dirty = picks !== start
+  // Chip taps fire neither input nor change, so Modal's own guard never turns on: say it outright.
+  const dirty = picks !== start || (showQty && qty !== startQty)
+  // Without a stepper the quantity is the caller's: a Swap's is the combo's own, every unit of which
+  // takes the new dish.
+  const fixedQty = Math.max(1, Number(initialQty) || 1)
+  const shownQty = showQty ? qty : fixedQty
 
   const describeFor = (rid, ids) => {
     const dg = dishGroupsOf(rid)
     if (!dg || !(ids || []).length) return null
     return describeSelection(ids, { ...catalog, attachByGroup: attachOf(dg) })
   }
-  // What a guest pays for this pick on top of the combo price: the dish's extra and its choices.
+  // A dish's choices as the guest pays for them, in the whole rupees the section line shows.
+  const choiceChargeOf = (rid, desc) => (desc ? Math.round(inclFromEx(desc.delta, vatOfDish(rid))) : 0)
+  // What a guest pays for this pick on top of the combo price: the dish's extra and its choices. Each
+  // part is rounded as it is shown (the chip, the section line), so the total is the sum of what the
+  // waiter can see (S863). Display only: save_pos_order_items prices every dish itself.
   const pickCharge = g => {
     const p = picks[g.id]
     if (!p?.recipe_id) return 0
     const item = g.items.find(i => i.recipe_id === p.recipe_id)
-    const desc = describeFor(p.recipe_id, p.option_ids)
-    return (Number(item?.extra_price) || 0) + (desc ? inclFromEx(desc.delta, vatOfDish(p.recipe_id)) : 0)
+    return Math.round(Number(item?.extra_price) || 0) + choiceChargeOf(p.recipe_id, describeFor(p.recipe_id, p.option_ids))
   }
-  const unit = (Number(combo?.guest_price) || 0) + groups.reduce((s, g) => s + pickCharge(g), 0)
+  const unit = Math.round(Number(combo?.guest_price) || 0) + groups.reduce((s, g) => s + pickCharge(g), 0)
 
-  // What still needs an answer, per shown pick: a dish, or a choice the dish requires.
+  // What still needs an answer, per shown pick: a dish (`kind: 'dish'`), or a choice the dish
+  // requires (`kind: 'choice'`).
   const problemOf = g => {
     const p = picks[g.id]
-    if (!p?.recipe_id) return `Pick one from ${g.name}.`
+    if (!p?.recipe_id) return { kind: 'dish', text: `Pick one from ${g.name}.` }
     const dg = dishGroupsOf(p.recipe_id)
     if (!dg) return null
     const first = selectionProblems(dg, p.option_ids || [])[0]
     if (!first) return null
     const name = recipeOf(p.recipe_id)?.name || 'this dish'
-    return first.count < (Number(first.rule?.min) || 0)
-      ? `Choose ${first.rule.min - first.count} more from ${first.group.name} for ${name}. Tap Choices.`
-      : `Too many picked in ${first.group.name} for ${name}. Tap Choices.`
+    return {
+      kind: 'choice',
+      text: first.count < (Number(first.rule?.min) || 0)
+        ? `Choose ${first.rule.min - first.count} more from ${first.group.name} for ${name}. Tap Choices.`
+        : `Too many picked in ${first.group.name} for ${name}. Tap Choices.`,
+    }
   }
-  const problems = shown.map(g => ({ g, text: problemOf(g) })).filter(x => x.text)
+  const problems = shown.map(g => ({ g, ...problemOf(g) })).filter(x => x.text)
 
   function choose(g, recipeId) {
-    setPicks(prev => {
-      if (prev[g.id]?.recipe_id === recipeId) return prev
-      return { ...prev, [g.id]: { recipe_id: recipeId, option_ids: defaultIdsOf(recipeId) } }
-    })
+    if (picks[g.id]?.recipe_id === recipeId) return
+    const ids = defaultIdsOf(recipeId)
+    setPicks(prev => ({ ...prev, [g.id]: { recipe_id: recipeId, option_ids: ids } }))
+    // S863: a dish whose required choice has no default opens its choices at once, rather than
+    // leaving the waiter to notice the line under it and tap Choices.
+    const dg = dishGroupsOf(recipeId)
+    if (dg && selectionProblems(dg, ids).length) setChoicesFor(g.id)
+  }
+
+  // A selector list answers in DOCUMENT order, not in the order it is written, so one query put the
+  // section's first chip ahead of its checked one and of its Choices button. Asked one at a time.
+  function focusProblem({ g, kind }) {
+    const el = sectionRefs.current[g.id]
+    if (!el) return
+    el.scrollIntoView?.({ block: 'center' })
+    const order = kind === 'choice'
+      ? ['[data-combo-choices]', '[role="radio"][aria-checked="true"]', '[role="radio"]']
+      : ['[role="radio"][aria-checked="true"]', '[role="radio"]']
+    const target = order.map(sel => el.querySelector(sel)).find(Boolean)
+    ;(target || el).focus?.()
   }
 
   function confirm() {
     if (problems.length) {
       setTried(true)
-      const el = sectionRefs.current[problems[0].g.id]
-      if (el) {
-        el.scrollIntoView?.({ block: 'center' })
-        const target = el.querySelector('[role="radio"][aria-checked="true"], [role="radio"], button')
-        ;(target || el).focus?.()
-      }
+      focusProblem(problems[0])
       return
     }
     onConfirm({
       picks: groups.map(g => ({ group_id: g.id, recipe_id: picks[g.id]?.recipe_id || null, option_ids: picks[g.id]?.option_ids || [] })),
-      qty: showQty ? qty : Math.max(1, Number(initialQty) || 1),
+      qty: shownQty,
     })
   }
 
@@ -126,12 +157,17 @@ export default function ComboPickerModal({
   const choicesPick = choicesGroup ? picks[choicesGroup.id] : null
   const choicesRecipe = choicesPick ? recipeOf(choicesPick.recipe_id) : null
   const title = onlyGroupId && shown[0] ? `${combo.name}: ${shown[0].name}` : combo?.name || 'Combo'
+  const footNote = !onlyGroupId
+    ? 'The combo price, with any extra charge picked'
+    : shownQty === 1 ? 'The combo with this dish'
+      : shownQty === 2 ? 'Both (×2) get this dish'
+        : `All ${shownQty} (×${shownQty}) get this dish`
 
   return (
     <>
       <Modal onClose={onClose} title={title} maxWidth={560} zIndex={zIndex} dirty={dirty}
-        panelStyle={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 18, paddingRight: 2 }}>
+        panelStyle={PICKER_PANEL_STYLE}>
+        <div className="picker-body">
           {!onlyGroupId && combo?.description && (
             <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.45 }}>{combo.description}</p>
           )}
@@ -147,7 +183,7 @@ export default function ComboPickerModal({
             const anyChecked = !!p?.recipe_id
             const dg = p?.recipe_id ? dishGroupsOf(p.recipe_id) : null
             const desc = p?.recipe_id ? describeFor(p.recipe_id, p.option_ids) : null
-            const choiceCharge = desc ? Math.round(inclFromEx(desc.delta, vatOfDish(p.recipe_id))) : 0
+            const choiceCharge = desc ? choiceChargeOf(p.recipe_id, desc) : 0
             const problem = tried ? problems.find(x => x.g.id === g.id)?.text : null
             const dishName = p?.recipe_id ? recipeOf(p.recipe_id)?.name || 'this dish' : ''
             return (
@@ -184,7 +220,7 @@ export default function ComboPickerModal({
                     <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: 'var(--theme-text2)', lineHeight: 1.4 }}>
                       {dishName}: {desc?.summary || 'no choices picked'}{choiceCharge ? ` · ${signedPrice(choiceCharge)}` : ''}
                     </span>
-                    <button type="button" className="btn btn-ghost btn-sm till-hit--row"
+                    <button type="button" className="btn btn-ghost btn-sm till-hit--row" data-combo-choices
                       aria-label={`Choices for ${dishName}`} onClick={() => setChoicesFor(g.id)}>Choices</button>
                   </div>
                 )}
@@ -194,23 +230,21 @@ export default function ComboPickerModal({
           })}
         </div>
 
-        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, borderTop: '1px solid var(--theme-border)', paddingTop: 12, marginTop: 12, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 160 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--theme-text1)' }} data-testid="combo-picker-total">
-              {npr(unit * (showQty ? qty : 1))}
-              {showQty && qty > 1 && (
-                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--theme-text3)', marginLeft: 6 }}>{npr(unit)} × {qty}</span>
-              )}
+        <div className="picker-footer">
+          <div className="picker-footer__total">
+            <div className="picker-footer__price" data-testid="combo-picker-total">
+              {npr(unit * shownQty)}
+              {shownQty > 1 && <span className="picker-footer__each">{npr(unit)} × {shownQty}</span>}
             </div>
-            <div style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
-              {onlyGroupId ? 'The combo with this dish' : 'The combo price, with any extra charge picked'}
-            </div>
+            <div className="picker-footer__note">{footNote}</div>
           </div>
           {showQty && (
-            <div role="group" aria-label="Quantity" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <button type="button" className="btn btn-ghost till-hit" onClick={() => setQty(q => Math.max(1, q - 1))}
-                disabled={qty <= 1} aria-label={`One fewer ${combo?.name || 'combo'}`}>−</button>
-              <span aria-live="polite" style={{ minWidth: 28, textAlign: 'center', fontWeight: 700, fontSize: 15, color: 'var(--theme-text1)' }}>{qty}</span>
+            <div role="group" aria-label="Quantity" className="picker-qty">
+              {/* aria-disabled, not disabled, at 1: a disabled button drops the focus of the finger or
+                  key that just pressed it to the top of the page. The press does nothing there. */}
+              <button type="button" className="btn btn-ghost till-hit" onClick={() => setQty(q => (q <= 1 ? q : q - 1))}
+                aria-disabled={qty <= 1} aria-label={`One fewer ${combo?.name || 'combo'}`}>−</button>
+              <span aria-live="polite" className="picker-qty__value">{qty}</span>
               <button type="button" className="btn btn-ghost till-hit" onClick={() => setQty(q => q + 1)}
                 aria-label={`One more ${combo?.name || 'combo'}`}>+</button>
             </div>
@@ -221,8 +255,8 @@ export default function ComboPickerModal({
       </Modal>
 
       {/* The picked dish's own choices, in the ordinary choice window, above this one. Its price line
-          reads the choices' charge alone (the dish is priced by the combo); its quantity is the combo's,
-          so it shows no stepper of its own. */}
+          reads the choices' charge alone (`inCombo`: the dish is priced by the combo); its quantity is
+          the combo's, so it shows no stepper of its own. */}
       {choicesGroup && choicesRecipe && (
         <OptionPickerModal
           recipe={{ ...choicesRecipe, name: `${choicesRecipe.name} (in ${combo.name})`, selling_price: 0 }}
@@ -232,6 +266,7 @@ export default function ComboPickerModal({
           initialIds={choicesPick.option_ids}
           confirmLabel="Use these choices"
           showQty={false}
+          inCombo
           zIndex={zIndex + 100}
           onClose={() => setChoicesFor(null)}
           onConfirm={ids => {

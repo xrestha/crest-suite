@@ -772,6 +772,14 @@
   border-color: var(--theme-accent);
   box-shadow: inset 0 0 0 1px var(--theme-accent);
   background: color-mix(in srgb, var(--theme-accent) 10%, var(--theme-card));
+  /* The picked card's quiet lines (S863): text3 measured 3.93:1 on this fill on Light (the meta line
+     and the struck list price). Same move as .choice-chip in Layout.css: mix on the card, hand down. */
+  --tinted-ink-2: color-mix(in srgb, var(--theme-text2) 60%, var(--theme-text1));
+  --tinted-ink-3: color-mix(in srgb, var(--theme-text2) 80%, var(--theme-text1));
+}
+.guest-menu .gm-option[aria-checked="true"] > * {
+  --theme-text2: var(--tinted-ink-2);
+  --theme-text3: var(--tinted-ink-3);
 }
 /* A chip the group's maximum has shut is told why in its price slot ("Max 3"). */
 .guest-menu .gm-option:disabled {

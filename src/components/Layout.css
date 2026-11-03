@@ -1835,6 +1835,63 @@ tr.interactive-row:focus-visible {
   font-size: 11px;
   color: var(--theme-text3);
 }
+/* A PICKED chip's quiet lines (S863). The checked fill is the accent mixed into the card, and on
+   Modernist Light that ground took the 11px price line (text3) to 3.71:1 and the "Included" line
+   (text2) to 4.40:1, under AA, on the chip a waiter has just tapped. Most of those lines are inline
+   `color: var(--theme-text…)`, which no selector can beat, so the TOKENS are re-pointed for the
+   chip's children (the `tr.row-tinted` move). A token cannot be re-defined from itself on one
+   element, so the mixes are taken on the chip and handed down. Measured on the 14% fill: Light
+   6.53 / 5.35, Night 8.48 / 7.50. `.kind-card` and the guest sheet's `.gm-option` take the same. */
+.choice-chip[aria-checked="true"],
+.kind-card[aria-checked="true"] {
+  --tinted-ink-2: color-mix(in srgb, var(--theme-text2) 60%, var(--theme-text1));
+  --tinted-ink-3: color-mix(in srgb, var(--theme-text2) 80%, var(--theme-text1));
+}
+.choice-chip[aria-checked="true"] > *,
+.kind-card[aria-checked="true"] > * {
+  --theme-text2: var(--tinted-ink-2);
+  --theme-text3: var(--tinted-ink-3);
+}
+
+/* The till choice window's and combo window's pinned footer (S863): total, quantity, Cancel, Add.
+   Both windows had typed the same seven inline objects out and had already drifted (48px versus
+   44px steppers, one naming its dish and one not). Its controls take `till-hit` for the floor. */
+.picker-body {
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-right: 2px;
+}
+.picker-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-top: 1px solid var(--theme-border);
+  padding-top: 12px;
+  margin-top: 12px;
+}
+.picker-footer__total { flex: 1; min-width: 160px; }
+.picker-footer__price {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--theme-text1);
+  font-variant-numeric: tabular-nums;
+}
+.picker-footer__each { font-size: 12px; font-weight: 500; color: var(--theme-text3); margin-left: 6px; }
+.picker-footer__note { font-size: 12px; color: var(--theme-text3); }
+.picker-qty { display: flex; align-items: center; gap: 4px; }
+.picker-qty__value {
+  min-width: 28px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--theme-text1);
+  font-variant-numeric: tabular-nums;
+}
 
 /* The three "what is it?" cards in the option-group dialog (S759) — same reasoning as
    .choice-chip: they were role="radio" buttons styled inline, with no focus ring and a border
@@ -3434,6 +3491,18 @@ table.data-table td input[readonly] {
   padding-top: 20px;
   border-top: 1px solid var(--theme-border);
 }
+/* A dialog's Cancel + commit pair spread across the footer (S863), the commit twice as wide. The
+   Customization dialogs typed this out seven times with `justifyContent: 'center'` on both, the
+   centred label DESIGN.md → Buttons names as the generic-dialog tell; a .btn left at its default
+   justification keeps its label flush left. flex-shrink: 0 keeps it pinned under a scrolling body. */
+.form-actions--split {
+  justify-content: flex-start;
+  margin-top: 16px;
+  padding-top: 16px;
+  flex-shrink: 0;
+}
+.form-actions--split > .btn { flex: 1; }
+.form-actions--split > .btn-primary { flex: 2; }
 
 .empty-state {
   text-align: center;
@@ -3448,6 +3517,15 @@ table.data-table td input[readonly] {
 
 .empty-state-text {
   font-size: 14px;
+}
+
+/* "Loading…" in a list or a dialog body. Twelve call sites carried this class with no rule behind
+   it anywhere in src/ (found S863), so each rendered as bare body text flush against the edge. */
+.loading-state {
+  text-align: center;
+  padding: 32px 16px;
+  font-size: 14px;
+  color: var(--theme-text2);
 }
 
 .tab-btn {
