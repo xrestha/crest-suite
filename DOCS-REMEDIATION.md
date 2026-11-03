@@ -502,6 +502,9 @@ it was deferred.
 
 **This is the only task on this list that is a launch blocker.**
 
+**DONE S872 (2026-11-03). T6 no longer blocks a launch.** Item 2 was checked live the day it shipped (below);
+item 3's POS half closed in S833 (`POS_TODO.md` B3). The paragraph that follows is the status before S872.
+
 **PARTLY DONE. Items 1 and 3 have shipped; item 2, the actual monitoring, has not — so the task
 stays open and stays the blocker.** Read the item statuses below rather than the paragraph after
 this one, which is preserved as it was written.
@@ -530,10 +533,10 @@ may go to Sentry; customer names, bill contents and pay never do.
   breadcrumb. It is better placed than Stock Count was — `pendingOrderIds` and the conflict list
   are real UI — but a sync that keeps failing for a reason the cashier could act on still says
   nothing. Filed in `POS_TODO.md` under B3.
-- **Item 2 — BUILT S872; the live check runs after the deploy.** Sentry, errors only, from the deployed
+- **Item 2 — DONE S872, checked live 2026-11-03.** Sentry, errors only, from the deployed
   app (`src/shared/monitoring.js`, rules in `.claude/rules/support-contact.md`), with Privacy Policy v1.1
-  listing it. The acceptance criterion below is met once `crestTestCrash()` on the live site shows up in
-  Sentry tagged and scrubbed. *As first written:* No error reporting service is wired. This is what keeps T6 open: a
+  listing it. `crestTestCrash()` on crest-inventory.vercel.app reached Sentry within a minute, tagged
+  and scrubbed, which meets the acceptance criterion below. *As first written:* No error reporting service is wired. This is what keeps T6 open: a
   boundary tells the person in front of the screen, and tells nobody else. When a till throws at
   8pm on a Friday the detection mechanism is still the client phoning.
 
@@ -555,7 +558,7 @@ they do.
    are currently invisible and are the highest-consequence silent failure in the product.
 
 **Acceptance criteria.** A deliberately thrown error in POS surfaces in the dashboard within 60
-seconds, tagged, with no PII in the payload. **Unmet** — nothing leaves the browser today.
+seconds, tagged, with no PII in the payload. **Met S872** (it was unmet until then: nothing left the browser).
 
 **One thing the boundary work added that this task did not ask for, and that should not be undone:**
 a dynamic-import failure is not a crash, it is a deploy. Every page is `React.lazy` and `xlsx` is
