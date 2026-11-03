@@ -36,6 +36,11 @@
 //     it), and no festival day judges their pace either.
 // The snapshot keeps the usual week; festivals are applied when the line is drawn, so a multiplier
 // set after the Target was captured still shows on its day.
+//
+// CLOSED DAYS (S866, owner decisions): guessed, never ticked. A festival day that is over with
+// nothing at all entered for it is taken as closed (emptyDays): both Targets and both forecasts are
+// zero on it, and entering anything for that day reopens it. Any other finished day with no sales
+// entry is "no sales entered", a day not typed in yet, and moves nothing.
 import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
 import { holidayKey } from '../../utils/demandForecastMath'
 import { returnCostValue } from '../ims/reports/supplierAttribution'
@@ -197,21 +202,45 @@ export function dayRanges(days) {
 
 // What a festival does to each metric's line (see the header): sales scale by the multiplier and
 // judge the pace only where one is set; purchases never scale and no festival judges their pace.
-export const salesFestivalFactor = festivals => d => festivals?.[d]?.multiplier ?? 1
+// A closed day (emptyDays) is zero on both (S866).
+export const salesFestivalFactor = (festivals, closed = []) => d => (closed.includes(d) ? 0 : festivals?.[d]?.multiplier ?? 1)
+export const purchClosedFactor = (closed = []) => d => (closed.includes(d) ? 0 : 1)
 export const salesFestivalJudged = festivals => d => !(festivals?.[d] && festivals[d].multiplier == null)
 export const purchFestivalJudged = festivals => d => !festivals?.[d]
 
 // The sales forecast's festivals that learn their own rate (S851), as runs of day numbers: back-to-back
 // festival days are one festival, and only its days with no Demand Multiplier learn. A day with one
 // keeps it and does not split the festival, so { 1, 2: ×0.3, 3 } is one festival learning on 1 and 3.
-export function festivalLearnRuns(festivals) {
+// A closed day (S866) is the same: it stays in the festival and does not learn.
+export function festivalLearnRuns(festivals, closed = []) {
   const days = Object.keys(festivals || {}).map(Number).sort((a, b) => a - b)
   const runs = []
   days.forEach((d, i) => {
     if (i === 0 || d !== days[i - 1] + 1) runs.push([])
-    if (festivals[d].multiplier == null) runs[runs.length - 1].push(d)
+    if (festivals[d].multiplier == null && !closed.includes(d)) runs[runs.length - 1].push(d)
   })
   return runs.filter(r => r.length)
+}
+
+// The open month's finished days that hold no sales entry, and why (S866, see the header).
+//   closed:  a festival day with nothing at all entered (no sales, no purchase bill, no return).
+//   noSales: any other day with no sales entry. Purchases get no such mark: a day with no bill is a
+//            real zero, not a gap.
+// Only days before `today` (a day in progress is never judged) and from the month's first entry
+// (before it Inventory was not in use, as in historyWindowDays). Nothing for a past month (`today`
+// null), for a month with no day-attributed sales (bulk entries carry no day), or with `festivals`
+// null (Holiday Calendar unread), because closed and not entered could not be told apart.
+export function emptyDays({ festivals, daySalesMap, dayPurchMap, today }) {
+  const out = { closed: [], noSales: [] }
+  const dayNums = map => Object.keys(map || {}).map(Number).filter(d => d > 0)
+  const salesDays = dayNums(daySalesMap)
+  if (today == null || !festivals || !salesDays.length) return out
+  for (let d = Math.min(...salesDays, ...dayNums(dayPurchMap)); d < today; d++) {
+    if (daySalesMap[d] != null) continue
+    if (festivals[d] && dayPurchMap?.[d] == null) out.closed.push(d)
+    else out.noSales.push(d)
+  }
+  return out
 }
 
 // The day in progress is never a sample (S792 PLANNING-2/3; the rule Demand Forecast has kept since
@@ -356,6 +385,7 @@ export const isCurrentSnapshot = (kind, snap) =>
 export const staleSnapshotFilter = (kind, column) =>
   `${column}->>model.is.null,${column}->>model.neq.${SNAPSHOT_MODEL[kind]}`
 
-// The Target on one day: its weekday's usual × `factor` (a sales festival's Demand Multiplier).
+// The Target on one day: its weekday's usual × `factor` (a sales festival's Demand Multiplier, or 0
+// on a closed day).
 export const targetValue = (kind, snap, dow, factor = 1) =>
   (isCurrentSnapshot(kind, snap) ? Math.round(snap.byWeekday[dow] * factor) : null)

@@ -2,7 +2,7 @@ import {
   dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
   projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue, HISTORY_DAYS,
   splitAtToday, SNAPSHOT_MODEL, monthFestivals, salesFestivalFactor, salesFestivalJudged,
-  purchFestivalJudged, targetTotal, dayRanges, canCaptureTarget, festivalLearnRuns,
+  purchFestivalJudged, targetTotal, dayRanges, canCaptureTarget, festivalLearnRuns, emptyDays, purchClosedFactor,
 } from './dailyForecast'
 import { bsToAd, daysInBsMonth } from '../../utils/bsCalendar'
 import { holidayKey, holidaysByKeyOf } from '../../utils/demandForecastMath'
@@ -548,5 +548,71 @@ describe('a festival learns its own rate (S851)', () => {
     const r = projectMonth({ base, valueMap: {}, expectDays: [1, 2], fromDay: 3, monthEndDay, weekdayOf, judged: purchFestivalJudged(dashain) })
     expect(r.projDays[3]).toBe(10000)
     expect(r.learned).toEqual([])
+  })
+})
+
+describe('a holiday with nothing entered is taken as closed (S866)', () => {
+  const base = { byWeekday: Array(7).fill(10000) }
+  const span = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i)
+  const dashain = Object.fromEntries(span(1, 6).map(d => [d, { name: 'Dashain', multiplier: null }]))
+  // CASA ACAI CAFE, Kartik 2083, as read from the live rows on Kartik 17: shut Kartik 4–6.
+  const kartikSales = { 1: 1673, 2: 5465, 3: 894, 7: 13234, 8: 11671, 9: 11209 }
+  const kartikPurch = { 3: 694, 7: 4082, 8: 4815, 9: 2036 }
+
+  test('Kartik 2083: the three Dashain days with nothing entered are closed, and nothing else is marked', () => {
+    expect(emptyDays({ festivals: dashain, daySalesMap: kartikSales, dayPurchMap: kartikPurch, today: 10 }))
+      .toEqual({ closed: [4, 5, 6], noSales: [] })
+  })
+
+  test('a holiday with a bill entered is open; it and a usual day with no sales are "no sales entered"', () => {
+    const r = emptyDays({ festivals: dashain, daySalesMap: { 1: 500, 3: 800, 8: 900 }, dayPurchMap: { 2: 300, 7: 400 }, today: 9 })
+    expect(r).toEqual({ closed: [4, 5, 6], noSales: [2, 7] })
+  })
+
+  test('today is never judged, and days before the first entry of the month are neither', () => {
+    expect(emptyDays({ festivals: {}, daySalesMap: { 5: 900 }, dayPurchMap: { 4: 300 }, today: 8 }))
+      .toEqual({ closed: [], noSales: [4, 6, 7] })
+    expect(emptyDays({ festivals: dashain, daySalesMap: { 1: 500 }, dayPurchMap: {}, today: 2 }))
+      .toEqual({ closed: [], noSales: [] })
+  })
+
+  test('nothing for a past month, an unread Holiday Calendar or a month with no daily sales', () => {
+    const none = { closed: [], noSales: [] }
+    expect(emptyDays({ festivals: dashain, daySalesMap: kartikSales, dayPurchMap: kartikPurch, today: null })).toEqual(none)
+    expect(emptyDays({ festivals: null, daySalesMap: kartikSales, dayPurchMap: kartikPurch, today: 10 })).toEqual(none)
+    expect(emptyDays({ festivals: dashain, daySalesMap: {}, dayPurchMap: kartikPurch, today: 10 })).toEqual(none)
+  })
+
+  test('a closed day is zero on both Targets, and the month totals leave it out', () => {
+    const festivals = { ...dashain, 2: { name: 'Tika', multiplier: 0.5 } }
+    const sales = salesFestivalFactor(festivals, [4, 5, 6])
+    const purch = purchClosedFactor([4, 5, 6])
+    expect([1, 2, 4, 7].map(sales)).toEqual([1, 0.5, 0, 1])
+    expect([3, 4, 6, 7].map(purch)).toEqual([1, 0, 0, 1])
+    const snap = makeSnapshot('purch', base, { monthEndDay, weekdayOf, capturedDay: 1 })
+    expect(targetValue('purch', snap, weekdayOf(4), purch(4))).toBe(0)
+    expect(targetTotal(base.byWeekday, { monthEndDay, weekdayOf, dayFactor: purch })).toBe((monthEndDay - 3) * 10000)
+  })
+
+  test('a closed day stays in its festival without learning or splitting it', () => {
+    expect(festivalLearnRuns(dashain, [4, 5, 6])).toEqual([[1, 2, 3]])
+    expect(festivalLearnRuns(dashain, [3])).toEqual([[1, 2, 4, 5, 6]])
+  })
+
+  test('closed days the forecast has not reached yet forecast nothing, for sales and purchases', () => {
+    // Today is Kartik 7, nothing entered since day 3: both forecasts start at day 4.
+    const closed = [4, 5, 6]
+    const s = projectMonth({
+      base, weekdayOf, monthEndDay, valueMap: { 1: 1700, 2: 6300, 3: 900 }, expectDays: [1, 2, 3], fromDay: 4,
+      dayFactor: salesFestivalFactor(dashain, closed), judged: salesFestivalJudged(dashain), learnRuns: festivalLearnRuns(dashain, closed),
+    })
+    expect(span(4, 7).map(d => s.projDays[d])).toEqual([0, 0, 0, 10000])
+    expect(s.learned).toEqual([])
+    expect(s.projectedTotal).toBe(1700 + 6300 + 900 + (monthEndDay - 6) * 10000)
+    const p = projectMonth({
+      base, weekdayOf, monthEndDay, valueMap: { 3: 694 }, expectDays: [1, 2, 3], fromDay: 4,
+      dayFactor: purchClosedFactor(closed), judged: purchFestivalJudged(dashain),
+    })
+    expect(span(4, 7).map(d => p.projDays[d])).toEqual([0, 0, 0, 10000])
   })
 })

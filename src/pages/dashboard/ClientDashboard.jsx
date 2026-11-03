@@ -12,7 +12,7 @@ import {
   dailySalesMap, dailyPurchaseMap, historyWindowDays, baseFromHistory, baseFromMonth,
   projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue, splitAtToday,
   monthFestivals, salesFestivalFactor, salesFestivalJudged, purchFestivalJudged, targetTotal, dayRanges, canCaptureTarget,
-  festivalLearnRuns,
+  festivalLearnRuns, emptyDays, purchClosedFactor,
 } from '../../modules/dashboard/dailyForecast'
 import { holidaysByKeyOf } from '../../utils/demandForecastMath'
 import {
@@ -31,7 +31,7 @@ import { fcTrendView, MIN_COMPARED_MONTHS } from '../../modules/dashboard/fcTren
 import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
-  LineChart, Line, ComposedChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine,
+  LineChart, Line, ComposedChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine, ReferenceArea,
   BarChart, Bar, Dot, ErrorBar
 } from 'recharts'
 import { chartMotion } from '../../shared/chartMotion'
@@ -257,6 +257,16 @@ const TARGET_TOLERANCE_NPR = 100
 function TrendTooltipContent({ active, payload, label, big }) {
   if (!active || !payload?.length) return null
   const row = payload[0]?.payload || {}
+  const note = { margin: '2px 0 0', color: 'var(--theme-text3)', fontSize: big ? 11 : 10 }
+  // S866: a closed day is all zeros, so the box says why instead of listing them.
+  if (row.closed) return (
+    <div style={{ ...TOOLTIP_CHROME, ...(big && { fontSize: 12 }), color: 'var(--theme-text1)', padding: '8px 16px', whiteSpace: 'nowrap' }}>
+      <p style={{ margin: 0, fontWeight: 600 }}>{label} · Closed</p>
+      <p style={note}>{row.festival?.name}: nothing was entered on this holiday,</p>
+      <p style={note}>so it is taken as closed and expects no sales or purchases.</p>
+      <p style={note}>Enter anything for this day and it counts as open again.</p>
+    </div>
+  )
   const shown = payload.filter(en => {
     if (en.value == null) return false
     const actualKey = PROJ_ACTUAL_KEY[en.dataKey]
@@ -265,13 +275,17 @@ function TrendTooltipContent({ active, payload, label, big }) {
     if (actualKey && row[actualKey] != null && !row.inProgress) return false
     return true
   }).sort((a, b) => Number(b.value) - Number(a.value))
-  if (!shown.length) return null
+  if (!shown.length && !row.noSales) return null
   return (
     <div style={{ ...TOOLTIP_CHROME, ...(big && { fontSize: 12 }), color: 'var(--theme-text1)', padding: '8px 16px', whiteSpace: 'nowrap' }}>
       <p style={{ margin: 0, fontWeight: 600 }}>{label}</p>
+      {/* S866: a finished day with no sales typed in, which the line otherwise bridges in silence. */}
+      {row.noSales && (
+        <p style={{ ...note, color: 'var(--theme-amber-text)' }}>No sales entered for this day</p>
+      )}
       {/* S850: a festival's day says which festival, and what it does to the sales lines. */}
       {row.festival && (
-        <p style={{ margin: '2px 0 0', color: 'var(--theme-text3)', fontSize: big ? 11 : 10 }}>
+        <p style={note}>
           {row.festival.name} · {row.festival.multiplier != null
             ? `Demand Multiplier ×${row.festival.multiplier} on sales`
             : row.festLearned
@@ -489,6 +503,8 @@ export default function ClientDashboard({ scope = 'home' }) {
   const [festivalsUnread, setFestivalsUnread] = useState(() => readDashboardCache('festivalsUnread', effectiveClientId) ?? false)
   // The sales Target's month total with each festival at its Demand Multiplier (S850).
   const [salesTargetTotal, setSalesTargetTotal] = useState(() => readDashboardCache('salesTargetTotal', effectiveClientId) ?? null)
+  // The purchase Target's, with closed days at zero (S866).
+  const [purchTargetTotal, setPurchTargetTotal] = useState(() => readDashboardCache('purchTargetTotal', effectiveClientId) ?? null)
   // What the rain adjustment (S784) re-runs the sales forecast from at render time, so the weather,
   // which arrives on its own, never has to wait for or re-run loadStats. salesDayLog is the days the
   // outlet's own rainy-day effect is measured over: the Target's history window plus this month.
@@ -1057,7 +1073,15 @@ export default function ClientDashboard({ scope = 'home' }) {
       festivals = monthFestivals(forecastHistory.holidays, period.bs_year, period.bs_month, monthEndDay)
     }
     const isFestival = d => !!festivals[d]
-    const salesFactorOf = salesFestivalFactor(festivals)
+    // S866: a festival day that is over with nothing entered is taken as closed, zero on both
+    // Targets and both forecasts; any other finished day with no sales is marked "no sales entered".
+    // Neither is judged without the holiday calendar, since the two could not be told apart.
+    const festivalsKnown = isCurrentMonth && !!forecastHistory && !historyFailed
+    const { closed: closedDays, noSales: noSalesDays } = emptyDays({
+      festivals: festivalsKnown ? festivals : null, daySalesMap, dayPurchMap, today: todayDay,
+    })
+    const salesFactorOf = salesFestivalFactor(festivals, closedDays)
+    const purchFactorOf = purchClosedFactor(closedDays)
     put(setFestivalsUnread, 'festivalsUnread', historyFailed)
 
     // The frozen Target: captured once per period, never recalculated, so a later visit can judge
@@ -1097,9 +1121,13 @@ export default function ClientDashboard({ scope = 'home' }) {
     put(setPurchTargetSnap, 'purchTargetSnap', nextPurchTargetSnap)
     put(setForecastHistoryFailed, 'forecastHistoryFailed', historyFailed && (!nextSalesTargetSnap || !nextPurchTargetSnap))
     // The sales Target's month total with each festival at its multiplier (S850); the stored
-    // projectedMonthEnd is the usual week's. Purchases are never scaled, so theirs is the stored one.
+    // projectedMonthEnd is the usual week's. Purchases are never scaled by a festival, but a closed
+    // day is zero on both (S866).
     put(setSalesTargetTotal, 'salesTargetTotal', nextSalesTargetSnap
       ? targetTotal(nextSalesTargetSnap.byWeekday, { monthEndDay, weekdayOf, dayFactor: salesFactorOf })
+      : null)
+    put(setPurchTargetTotal, 'purchTargetTotal', nextPurchTargetSnap
+      ? targetTotal(nextPurchTargetSnap.byWeekday, { monthEndDay, weekdayOf, dayFactor: purchFactorOf })
       : null)
 
     // The live forecast leans on the Target's weekday pattern (or, before one exists, the history
@@ -1107,17 +1135,17 @@ export default function ClientDashboard({ scope = 'home' }) {
     const salesTrend = (dailySalesOn && isCurrentMonth)
       ? projectMonth({
           base: nextSalesTargetSnap || historyBase.sales, valueMap: daySalesMap, expectDays: salesDone, fromDay: salesFrom, monthEndDay, weekdayOf,
-          dayFactor: salesFactorOf, judged: salesFestivalJudged(festivals), learnRuns: festivalLearnRuns(festivals),
+          dayFactor: salesFactorOf, judged: salesFestivalJudged(festivals), learnRuns: festivalLearnRuns(festivals, closedDays),
         })
       : null
     // The same call's inputs, kept for the rain adjustment to re-run at render (S784). Sales only:
     // purchases follow restock days, whatever the weather. `festivals` rides along so the re-run
-    // keeps each festival's multiplier beside the rain (S850).
+    // keeps each festival's multiplier beside the rain (S850), and `closed` its closed days (S866).
     const salesBase = nextSalesTargetSnap || historyBase.sales
     put(setSalesForecastInputs, 'salesForecastInputs', salesTrend ? {
       base: salesBase ? { byWeekday: salesBase.byWeekday } : null,
       valueMap: daySalesMap, expectDays: salesDone, fromDay: salesFrom,
-      monthEndDay, bsYear: period.bs_year, bsMonth: period.bs_month, lastActualSalesDay, festivals,
+      monthEndDay, bsYear: period.bs_year, bsMonth: period.bs_month, lastActualSalesDay, festivals, closed: closedDays,
     } : null)
     // The measured rain effect's samples: finished days only, like the pace, and no festival day,
     // whose sales say nothing about what rain does to a usual one (S850).
@@ -1128,7 +1156,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     const purchTrend = (isCurrentMonth && elapsedDay > 0)
       ? projectMonth({
           base: nextPurchTargetSnap || historyBase.purch, valueMap: dayPurchMap, expectDays: Array.from({ length: purchElapsed }, (_, i) => i + 1), fromDay: purchFrom, monthEndDay, weekdayOf,
-          judged: purchFestivalJudged(festivals),
+          dayFactor: purchFactorOf, judged: purchFestivalJudged(festivals),
         })
       : null
     const projDays = salesTrend?.projDays || {}
@@ -1150,14 +1178,19 @@ export default function ClientDashboard({ scope = 'home' }) {
       const isProj = projDays[d] != null
       const isPurchProj = purchProjDays[d] != null
       const today = d === todayDay
+      // S866: a closed day sold and bought nothing, so it is drawn at zero rather than bridged by
+      // the line from the day before to the day after, which drew trade on a day the shop was shut.
+      const closed = closedDays.includes(d)
       trend.push({
         day: `Day ${d}`,
         // Today, still trading (S792 PLANNING-2): its actual is sold-so-far, drawn beside its
         // forecast rather than replacing it. Since S851 it is its own key, drawn as a hollow dot
         // apart from the actual line, so a part-day never reads as the line falling. The tooltip
         // and the projection's dot key off inProgress.
-        purchases: !today && dayPurchMap[d] != null ? dayPurchMap[d] : null,
-        sales: !today && dailySalesOn && daySalesMap[d] != null ? daySalesMap[d] : null,
+        purchases: closed ? 0 : !today && dayPurchMap[d] != null ? dayPurchMap[d] : null,
+        sales: closed ? 0 : !today && dailySalesOn && daySalesMap[d] != null ? daySalesMap[d] : null,
+        ...(closed && { closed: true }),
+        ...(noSalesDays.includes(d) && { noSales: true }),
         ...(today && {
           purchToday: dayPurchMap[d] ?? null,
           salesToday: dailySalesOn ? daySalesMap[d] ?? null : null,
@@ -1172,9 +1205,10 @@ export default function ClientDashboard({ scope = 'home' }) {
         // Frozen full-month line, unlike salesProj/purchProj above — non-null for every day in
         // range (not just from the last actual onward) so it's a static reference the actual line
         // can be compared against retroactively, not just a forward-looking tail.
-        // A festival's multiplier scales its day on the sales Target (S850); purchases never.
+        // A festival's multiplier scales its day on the sales Target (S850); purchases never. A
+        // closed day is zero on both (S866).
         salesTarget: targetValue('sales', nextSalesTargetSnap, weekdayOf(d), salesFactorOf(d)),
-        purchTarget: targetValue('purch', nextPurchTargetSnap, weekdayOf(d)),
+        purchTarget: targetValue('purch', nextPurchTargetSnap, weekdayOf(d), purchFactorOf(d)),
         // For the tooltip and the footer: { name, multiplier } on a festival, else absent.
         ...(festivals[d] && { festival: festivals[d] }),
       })
@@ -1836,20 +1870,22 @@ export default function ClientDashboard({ scope = 'home' }) {
     : null
   const rainAheadView = weatherByAd ? rainAhead({ weatherByAd, todayAd: weatherTodayAd, forecastAd: weatherForecastAd }) : null
   // A festival's multiplier stays on its day beside the rain (S850): the two multiply. An input
-  // cached before S850 has no `festivals`, which reads as none.
+  // cached before S850 has no `festivals`, which reads as none; one before S866 no `closed`.
   const inputFestivals = salesForecastInputs?.festivals || {}
+  const inputClosed = salesForecastInputs?.closed || []
   const rainTrend = rainAdj
     ? projectMonth({
         ...salesForecastInputs,
         weekdayOf: d => bsToAd(salesForecastInputs.bsYear, salesForecastInputs.bsMonth, d).getDay(),
-        dayFactor: d => rainAdj.factorOf(d) * salesFestivalFactor(inputFestivals)(d),
+        dayFactor: d => rainAdj.factorOf(d) * salesFestivalFactor(inputFestivals, inputClosed)(d),
         judged: salesFestivalJudged(inputFestivals),
-        learnRuns: festivalLearnRuns(inputFestivals),
+        learnRuns: festivalLearnRuns(inputFestivals, inputClosed),
       })
     : null
-  // The days AHEAD the rain moved, for the footer. A rainy day already gone only corrected the pace.
+  // The days AHEAD the rain moved, for the footer. A rainy day already gone only corrected the pace,
+  // and a closed one forecasts nothing either way.
   const rainForecastDays = rainTrend
-    ? Object.keys(rainAdj.byDay).map(Number).filter(d => rainTrend.projDays[d] != null).sort((a, b) => a - b)
+    ? Object.keys(rainAdj.byDay).map(Number).filter(d => rainTrend.projDays[d] != null && !inputClosed.includes(d)).sort((a, b) => a - b)
     : []
   const salesProjectionView = rainTrend ? { projectedMonthEnd: rainTrend.projectedTotal, learned: rainTrend.learned } : salesProjection
   // S851: festivals whose sales forecast follows their own finished days, for the footer and the
@@ -1914,11 +1950,17 @@ export default function ClientDashboard({ scope = 'home' }) {
   // What the sales Target line adds up to, festivals at their multipliers (S850). The stored figure
   // is the usual week's, and stands in only until loadStats has worked the month out.
   const salesTargetMonthEnd = salesTarget ? (salesTargetTotal ?? salesTarget.projectedMonthEnd) : null
+  // The purchase Target's, closed days at zero (S866); the stored figure stands in the same way.
+  const purchTargetMonthEnd = purchTarget ? (purchTargetTotal ?? purchTarget.projectedMonthEnd) : null
   // This month's festivals, off the chart's own rows, for the footer: which days, and how many of
   // them carry no Demand Multiplier: usual days on the Target, learning on the forecast (S851).
+  const rowDay = r => parseInt(String(r.day).replace('Day ', ''), 10)
   const festivalRows = dailyTrend.filter(r => r.festival)
-  const festivalDayNums = festivalRows.map(r => parseInt(String(r.day).replace('Day ', ''), 10))
+  const festivalDayNums = festivalRows.map(rowDay)
   const festivalsUnset = festivalRows.filter(r => r.festival.multiplier == null).length
+  // S866: the finished days the chart marks, off its own rows, for the legend, footer and summary.
+  const closedDayNums = dailyTrend.filter(r => r.closed).map(rowDay)
+  const noSalesDayNums = dailyTrend.filter(r => r.noSales).map(rowDay)
   // Where a Target came from, in the words the footer and the screen-reader summary use.
   const targetBasis = snap => (snap.source === 'history'
     ? "last 4 weeks' pace"
@@ -1927,7 +1969,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     ? 'Purchases or sales could not be loaded, so the trend is not shown.'
     : dailyTrend.length === 0
     ? 'No purchase or sales data for this period.'
-    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}.` : ''}${salesProjectionView ? ` Projected month-end revenue: NPR ${salesProjectionView.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${rainForecastDays.length ? ` The sales forecast allows for rain on day ${rainForecastDays.join(', ')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${salesTarget ? ` Sales target (${targetBasis(salesTarget)}): NPR ${salesTargetMonthEnd.toLocaleString('en-IN')}.` : ''}${purchTarget ? ` Purchase target (${targetBasis(purchTarget)}): NPR ${purchTarget.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${festivalDayNums.length ? ` Festival days from Holiday Calendar: day ${dayRanges(festivalDayNums)}.` : ''}${festivalLearned.map(l => ` The sales forecast for day ${dayRanges(l.days)} is ${l.pct}% of a usual day, from how day ${dayRanges(l.from)} sold.`).join('')}`
+    : `Purchases and sales trend, ${periodLabel}. Purchases shown so far total NPR ${dailyTrendPurchTotal.toLocaleString('en-IN')}.${hasDailySales ? ` Sales shown so far total NPR ${dailyTrendSalesTotal.toLocaleString('en-IN')}.` : ''}${salesProjectionView ? ` Projected month-end revenue: NPR ${salesProjectionView.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${rainForecastDays.length ? ` The sales forecast allows for rain on day ${rainForecastDays.join(', ')}.` : ''}${purchProjection ? ` Projected month-end purchases: NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}.` : ''}${salesTarget ? ` Sales target (${targetBasis(salesTarget)}): NPR ${salesTargetMonthEnd.toLocaleString('en-IN')}.` : ''}${purchTarget ? ` Purchase target (${targetBasis(purchTarget)}): NPR ${purchTargetMonthEnd.toLocaleString('en-IN')}.` : ''}${festivalDayNums.length ? ` Festival days from Holiday Calendar: day ${dayRanges(festivalDayNums)}.` : ''}${festivalLearned.map(l => ` The sales forecast for day ${dayRanges(l.days)} is ${l.pct}% of a usual day, from how day ${dayRanges(l.from)} sold.`).join('')}${closedDayNums.length ? ` Taken as closed, a holiday with nothing entered: day ${dayRanges(closedDayNums)}.` : ''}${noSalesDayNums.length ? ` No sales entered: day ${dayRanges(noSalesDayNums)}.` : ''}`
   const topItemSpendSummary = imsFailed.spend
     ? ''
     : topItemSpend.length === 0
@@ -2808,10 +2850,24 @@ export default function ClientDashboard({ scope = 'home' }) {
                 <Tip text="Today is still trading. The hollow dot is what today has sold or bought so far, so it usually sits below the line. It joins the line once the day is over.">Today so far</Tip>
               </span>
             )}
+            {/* S866: the shaded band and the dashed amber line, in their own colours. */}
+            {closedDayNums.length > 0 && (
+              <span style={{ color: 'var(--theme-text2)' }}>
+                <span aria-hidden="true" style={{ display: 'inline-block', width: 10, height: 10, background: colors.text3, opacity: 0.35, verticalAlign: 'middle' }} />{' '}
+                <Tip text="A holiday that is over with nothing entered for it is taken as closed: shaded, with no sales or purchases expected. Enter anything for that day and it counts as open again.">Closed</Tip>
+              </span>
+            )}
+            {noSalesDayNums.length > 0 && (
+              <span style={{ color: 'var(--theme-text2)' }}>
+                <span aria-hidden="true" style={{ color: colors.amber }}>┆</span>{' '}
+                <Tip text="A finished day with no sales entered. The sales line runs straight past it, so this line marks it.">No sales entered</Tip>
+              </span>
+            )}
             {!hasDailySales && <span style={{ color: 'var(--theme-text3)' }}>Enter daily sales to see the sales trend</span>}
           </>}
           footer={<>
-            {!imsFailed.trend && (salesProjection || purchProjection || salesTarget || purchTarget || forecastHistoryFailed || festivalsUnread) && (
+            {!imsFailed.trend && (salesProjection || purchProjection || salesTarget || purchTarget || forecastHistoryFailed || festivalsUnread
+              || closedDayNums.length > 0 || noSalesDayNums.length > 0) && (
               <div style={{ marginTop: 8, fontSize: 11, color: 'var(--theme-text2)', display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
                 {/* S851: each figure is led by its line's own glyph and hue, as in the legend, and
                     the figure itself is plain text1. It was purple for sales and red for purchases:
@@ -2838,7 +2894,7 @@ export default function ClientDashboard({ scope = 'home' }) {
                 {purchTarget && (
                   <span>
                     <span style={{ color: DAILY_TREND_COLORS.purchTarget, letterSpacing: '-2px' }}>⋯</span>{' '}
-                    Purchase target ({targetBasis(purchTarget)}): <strong style={{ color: 'var(--theme-text1)' }}>NPR {purchTarget.projectedMonthEnd.toLocaleString('en-IN')}</strong>
+                    Purchase target ({targetBasis(purchTarget)}): <strong style={{ color: 'var(--theme-text1)' }}>NPR {purchTargetMonthEnd.toLocaleString('en-IN')}</strong>
                   </span>
                 )}
                 {/* S850: printed, not only hovered, so a screenshot keeps which days are festivals. */}
@@ -2860,6 +2916,23 @@ export default function ClientDashboard({ scope = 'home' }) {
                     Sales forecast for Day {dayRanges(l.days)}: {l.pct}% of a usual day, from how Day {dayRanges(l.from)} sold
                   </span>
                 ))}
+                {/* S866: printed, so a screenshot keeps which days were taken as closed and which
+                    have no sales, and why the month's targets came down. */}
+                {closedDayNums.length > 0 && (
+                  <span>
+                    <Tip text="A holiday from Holiday Calendar that is over with no sales, purchase or return entered for it is taken as closed. Its sales and purchase targets are zero, so the month's targets leave it out. Enter anything for that day and it counts as open again.">
+                      Closed
+                    </Tip>: Day {dayRanges(closedDayNums)}
+                    <span style={{ color: 'var(--theme-text3)' }}> · a holiday with nothing entered</span>
+                  </span>
+                )}
+                {noSalesDayNums.length > 0 && (
+                  <span style={{ color: 'var(--theme-amber-text)' }}>
+                    <Tip text="A finished day with no sales entered. It is left out when working out how the month is going, so it does not pull the forecast down, but the sales so far are short by whatever that day took. If the shop traded that day, its sales still need entering.">
+                      No sales entered
+                    </Tip>: Day {dayRanges(noSalesDayNums)}
+                  </span>
+                )}
                 {/* S851: said in words because the two lines are one line here, dotted over dashed. */}
                 {(salesOnTarget || purchOnTarget) && (
                   <span style={{ color: 'var(--theme-text3)' }}>
@@ -2958,6 +3031,14 @@ export default function ClientDashboard({ scope = 'home' }) {
             )
             const big = h > 200
             const chartData = big ? dailyTrendView : dailyTrendWindowed
+            // S866: the closed days on screen as runs, one shaded band and one "Closed" label each.
+            const closedRuns = []
+            chartData.forEach((r, i) => {
+              if (!r.closed) return
+              const last = closedRuns[closedRuns.length - 1]
+              if (last && last.end === i - 1) Object.assign(last, { end: i, x2: r.day })
+              else closedRuns.push({ end: i, x1: r.day, x2: r.day })
+            })
             // Two-line X-axis tick: the BS day number, and below it the day-of-week initial —
             // needs activePeriod's bs_year/bs_month to convert each day to an AD date for
             // .getDay(). Recharts passes the RAW "Day N" axis value via payload.value to a custom
@@ -3016,12 +3097,24 @@ export default function ClientDashboard({ scope = 'home' }) {
                       thins its days on a narrow screen (S852): every one of 30 at 390px overlapped.
                       Recharts measures the tickFormatter's text to decide, so it measures the day
                       number the tick draws, not "Day 12". */}
-                  <XAxis dataKey="day" tick={dayAxisTick} height={big ? 32 : 34} tickLine={false} axisLine={false}
+                  {/* A band scale (S866), so each day owns its whole slot and a closed day's band
+                      covers it: on the point scale this had, a one-day area has no width and never
+                      drew. Points and ticks stay at each slot's centre. */}
+                  <XAxis dataKey="day" scale="band" tick={dayAxisTick} height={big ? 32 : 34} tickLine={false} axisLine={false}
                     interval={big ? 'preserveStartEnd' : 0} minTickGap={big ? 6 : 5} tickFormatter={v => String(v).replace('Day ', '')} />
                   <YAxis tick={{ fill: colors.text3, fontSize: big ? 11 : 10 }} tickLine={false} axisLine={false} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} width={big ? 40 : 32} />
                   {/* See TrendTooltipContent at module scope for why this chart needs custom
                       content (anchor-day suppression, value-sorted rows, the target arrows). */}
                   <Tooltip content={<TrendTooltipContent big={big} />} />
+                  {/* S866, under every line: a closed day shaded, and a finished day with no sales
+                      entered as a dashed amber line, since the sales line bridges it in silence. */}
+                  {closedRuns.map(run => (
+                    <ReferenceArea key={run.x1} x1={run.x1} x2={run.x2} fill={colors.text3} fillOpacity={0.14} stroke="none"
+                      label={{ value: 'Closed', position: 'insideTop', fill: colors.text3, fontSize: 10 }} />
+                  ))}
+                  {chartData.filter(r => r.noSales).map(r => (
+                    <ReferenceLine key={r.day} x={r.day} stroke={colors.amber} strokeDasharray="3 3" strokeOpacity={0.8} />
+                  ))}
                   {/* Paint order, bottom to top: the dashed forecasts, the dotted Targets, the actuals,
                       today's hollow dots. The Targets used to go first, under everything, and on a
                       month where the forecast equals the Target (no usual day over yet) the dashed
@@ -3063,7 +3156,7 @@ export default function ClientDashboard({ scope = 'home' }) {
                     {salesProjectionView && <StatPill label="Projected sales" value={`NPR ${salesProjectionView.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.sales} />}
                     {purchProjection && <StatPill label="Projected purchases" value={`NPR ${purchProjection.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchases} />}
                     {salesTarget && <StatPill label="Sales target" value={`NPR ${salesTargetMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.salesTarget} />}
-                    {purchTarget && <StatPill label="Purchase target" value={`NPR ${purchTarget.projectedMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchTarget} />}
+                    {purchTarget && <StatPill label="Purchase target" value={`NPR ${purchTargetMonthEnd.toLocaleString('en-IN')}`} color={DAILY_TREND_COLORS.purchTarget} />}
                     <StatPill label="Period" value={periodLabel} />
                   </div>
                 )}
