@@ -1,0 +1,155 @@
+// Crest's guess at an ingredient's allergens from its NAME (S870). A guess only: the Check allergens
+// list shows it with the word it came from, and nothing counts as checked until a person confirms.
+//
+// Why a word list and not the nutrition library: the library matches loosely ("OAT MILK" found
+// "Buffalo milk"), which is fine for a calorie estimate and wrong for an allergen. Here every rule
+// is a whole word or phrase, longer phrases win and use up their words, so "oat milk" is gluten and
+// never milk, "peanut butter" is peanuts and never milk, and "corn flour" is nothing.
+//
+// Three other answers besides allergens:
+//  - checkLabel: a mixed or branded product (a sauce, a spice mix, a sausage) whose allergens only
+//    its label knows. Never confirmed in bulk.
+//  - notFood: packaging (a cup, a lid). Suggested only when no allergen word matched, so "MILK
+//    CARTON" stays milk.
+//  - nothing matched: shown as "no allergen words found", which a person may confirm as none.
+
+import { ALLERGEN_KEYS } from './allergens'
+
+// [phrase, keys]. An empty keys list is a phrase that USES UP its words and means "none": "coconut
+// milk" must not fall through to "milk".
+const RULES = [
+  // Plant milks, butters and flours that only look like an allergen.
+  ['oat milk', ['gluten']], ['almond milk', ['tree nuts']], ['soy milk', ['soy']], ['soya milk', ['soy']],
+  ['coconut milk', []], ['coconut cream', []], ['rice milk', []],
+  ['peanut butter', ['peanuts']], ['cocoa butter', []], ['butter beans', []], ['shea butter', []],
+  ['corn flour', []], ['cornflour', []], ['rice flour', []], ['gram flour', []], ['besan', []],
+  ['buckwheat flour', []], ['buckwheat', []], ['coconut flour', []], ['almond flour', ['tree nuts']],
+  ['cream of tartar', []], ['nutmeg', []], ['soy sauce', ['soy', 'gluten']], ['soya sauce', ['soy', 'gluten']],
+  ['oyster sauce', ['molluscs']], ['fish sauce', ['fish']], ['egg noodles', ['eggs', 'gluten']],
+  ['ice cream', ['milk']], ['milk powder', ['milk']], ['condensed milk', ['milk']],
+  ['mustard oil', ['mustard']], ['sesame oil', ['sesame']], ['celery salt', ['celery']],
+  ['pizza base', ['gluten']], ['bread crumbs', ['gluten']], ['dried apricot', ['sulphites']],
+  ['dried apricots', ['sulphites']], ['pine nut', ['tree nuts']], ['pine nuts', ['tree nuts']],
+  ['brazil nut', ['tree nuts']], ['brazil nuts', ['tree nuts']], ['wai wai', ['gluten']],
+  // Gluten
+  ['wheat', ['gluten']], ['maida', ['gluten']], ['atta', ['gluten']], ['aata', ['gluten']], ['flour', ['gluten']],
+  ['bread', ['gluten']], ['bun', ['gluten']], ['buns', ['gluten']], ['baguette', ['gluten']], ['croissant', ['gluten']],
+  ['croissants', ['gluten']], ['roti', ['gluten']], ['naan', ['gluten']], ['paratha', ['gluten']], ['pasta', ['gluten']],
+  ['spaghetti', ['gluten']], ['macaroni', ['gluten']], ['penne', ['gluten']], ['fusilli', ['gluten']],
+  ['noodle', ['gluten']], ['noodles', ['gluten']], ['chowmein', ['gluten']], ['semolina', ['gluten']],
+  ['suji', ['gluten']], ['sooji', ['gluten']], ['barley', ['gluten']], ['rye', ['gluten']], ['oat', ['gluten']],
+  ['oats', ['gluten']], ['oatmeal', ['gluten']], ['granola', ['gluten']], ['muesli', ['gluten']],
+  ['biscuit', ['gluten']], ['biscuits', ['gluten']], ['cookie', ['gluten']], ['cookies', ['gluten']],
+  ['cake', ['gluten']], ['rusk', ['gluten']], ['cracker', ['gluten']], ['crackers', ['gluten']],
+  ['breadcrumbs', ['gluten']], ['panko', ['gluten']], ['couscous', ['gluten']], ['bulgur', ['gluten']],
+  ['beer', ['gluten']], ['waffle', ['gluten']], ['pancake', ['gluten']], ['tortilla', ['gluten']],
+  ['donut', ['gluten']], ['doughnut', ['gluten']], ['muffin', ['gluten']], ['brownie', ['gluten']],
+  ['ramen', ['gluten']], ['tiramisu', ['milk', 'eggs']],
+  // Milk
+  ['milk', ['milk']], ['dairy', ['milk']], ['paneer', ['milk']], ['cheese', ['milk']], ['cheddar', ['milk']],
+  ['mozzarella', ['milk']], ['parmesan', ['milk']], ['cream', ['milk']], ['butter', ['milk']], ['ghee', ['milk']],
+  ['curd', ['milk']], ['dahi', ['milk']], ['yogurt', ['milk']], ['yoghurt', ['milk']], ['khuwa', ['milk']],
+  ['khoa', ['milk']], ['mawa', ['milk']], ['whey', ['milk']], ['casein', ['milk']], ['lactose', ['milk']],
+  ['buttermilk', ['milk']], ['chhurpi', ['milk']], ['custard', ['milk', 'eggs']], ['pesto', ['milk', 'tree nuts']],
+  // Eggs
+  ['egg', ['eggs']], ['eggs', ['eggs']], ['anda', ['eggs']], ['mayonnaise', ['eggs']], ['mayo', ['eggs']],
+  ['meringue', ['eggs']],
+  // Peanuts, and "badam", which is peanut in Nepali and almond in Hindi: both, the safe side.
+  ['peanut', ['peanuts']], ['peanuts', ['peanuts']], ['groundnut', ['peanuts']], ['groundnuts', ['peanuts']],
+  ['badam', ['peanuts', 'tree nuts']],
+  // Tree nuts
+  ['almond', ['tree nuts']], ['almonds', ['tree nuts']], ['cashew', ['tree nuts']], ['cashews', ['tree nuts']],
+  ['kaju', ['tree nuts']], ['walnut', ['tree nuts']], ['walnuts', ['tree nuts']], ['akhrot', ['tree nuts']],
+  ['pistachio', ['tree nuts']], ['pistachios', ['tree nuts']], ['pista', ['tree nuts']], ['hazelnut', ['tree nuts']],
+  ['hazelnuts', ['tree nuts']], ['pecan', ['tree nuts']], ['pecans', ['tree nuts']], ['macadamia', ['tree nuts']],
+  ['praline', ['tree nuts']], ['marzipan', ['tree nuts']], ['nut', ['tree nuts']], ['nuts', ['tree nuts']],
+  // Soy
+  ['soy', ['soy']], ['soya', ['soy']], ['soybean', ['soy']], ['soybeans', ['soy']], ['bhatmas', ['soy']],
+  ['tofu', ['soy']], ['edamame', ['soy']], ['miso', ['soy']], ['tempeh', ['soy']],
+  // Sesame
+  ['sesame', ['sesame']], ['til', ['sesame']], ['tahini', ['sesame']],
+  // Fish
+  ['fish', ['fish']], ['machha', ['fish']], ['tuna', ['fish']], ['salmon', ['fish']], ['sardine', ['fish']],
+  ['sardines', ['fish']], ['anchovy', ['fish']], ['anchovies', ['fish']], ['cod', ['fish']], ['tilapia', ['fish']],
+  ['rohu', ['fish']], ['trout', ['fish']], ['basa', ['fish']], ['mackerel', ['fish']],
+  // Crustaceans
+  ['prawn', ['crustaceans']], ['prawns', ['crustaceans']], ['shrimp', ['crustaceans']], ['shrimps', ['crustaceans']],
+  ['crab', ['crustaceans']], ['lobster', ['crustaceans']], ['crayfish', ['crustaceans']], ['jhinga', ['crustaceans']],
+  // Molluscs
+  ['squid', ['molluscs']], ['calamari', ['molluscs']], ['octopus', ['molluscs']], ['mussel', ['molluscs']],
+  ['mussels', ['molluscs']], ['clam', ['molluscs']], ['clams', ['molluscs']], ['oyster', ['molluscs']],
+  ['oysters', ['molluscs']], ['scallop', ['molluscs']], ['scallops', ['molluscs']],
+  ['shellfish', ['crustaceans', 'molluscs']],
+  // Mustard, celery, sulphites, lupin
+  ['mustard', ['mustard']], ['tori', ['mustard']], ['celery', ['celery']], ['celeriac', ['celery']],
+  ['wine', ['sulphites']], ['raisin', ['sulphites']], ['raisins', ['sulphites']], ['rasins', ['sulphites']],
+  ['kishmish', ['sulphites']],
+  ['lupin', ['lupin']], ['lupine', ['lupin']],
+]
+
+// Mixed or branded products: their allergens are on the label, not in the name. A plain ground
+// spice ("cumin powder") is not one, so "powder" alone is not here; baking powder is, by phrase.
+const CHECK_LABEL = new Set([
+  'sauce', 'ketchup', 'mix', 'masala', 'seasoning', 'spread', 'jam', 'sausage', 'sausages', 'salami', 'nugget',
+  'nuggets', 'patty', 'patties', 'dressing', 'chocolate', 'premix', 'paste', 'stock', 'cube', 'cubes', 'gravy',
+  'cereal', 'ham', 'bacon', 'chips', 'biscoff', 'nutella', 'marinade', 'dip', 'pickle', 'achar',
+  'topping', 'filling', 'batter', 'crumb', 'coating',
+])
+const CHECK_LABEL_PHRASES = ['baking powder', 'custard powder', 'cheese powder']
+
+// Packaging, cleaning and other supplies, as words and as phrases. Read against the real item book:
+// cups and lids, but also mops, LPG and a software subscription sit in Item Master. "paper" is not
+// food unless it is rice paper; a bag is not food unless it is a tea bag.
+const NOT_FOOD = new Set([
+  'cup', 'cups', 'lid', 'lids', 'bowl', 'bowls', 'straw', 'straws', 'napkin', 'napkins', 'tissue', 'tissues',
+  'foil', 'cling', 'container', 'containers', 'spoon', 'spoons', 'fork', 'forks', 'plate', 'plates', 'box',
+  'boxes', 'sticker', 'stickers', 'carton', 'cartons', 'bag', 'bags', 'pouch', 'pouches', 'tray', 'trays',
+  'glove', 'gloves', 'toothpick', 'toothpicks', 'sleeve', 'sleeves', 'kraft', 'plastic', 'disposable',
+  'takeaway', 'cutlery', 'stirrer', 'stirrers', 'detergent', 'sanitizer', 'sanitiser', 'soap',
+  'paper', 'brush', 'cleaner', 'mop', 'pad', 'handwash', 'towel', 'towels', 'cylinder', 'lpg', 'mosquito',
+  'freshner', 'freshener', 'scrub', 'toilet', 'thermal', 'charge', 'software', 'lizol', 'surf', 'garbage',
+  'dustpan', 'broom', 'wipes', 'sponge', 'bin',
+])
+const NOT_FOOD_PHRASES = ['food wrap', 'cling film', 'cling wrap', 'kitchen roll']
+const FOOD_DESPITE = ['rice paper', 'tea bag', 'tea bags']
+
+// Longest phrases first, so a phrase uses up its words before a shorter rule can see them.
+const COMPILED = RULES
+  .map(([phrase, keys]) => ({ phrase, words: phrase.split(' '), keys }))
+  .sort((a, b) => b.words.length - a.words.length)
+
+function tokens(name) {
+  return String(name || '').toLowerCase().replace(/[^a-z]+/g, ' ').trim().split(' ').filter(Boolean)
+}
+
+/**
+ * The guess for one ingredient name.
+ * → { keys: [list order], reasons: { key: ['word', …] }, checkLabel: ['sauce', …], notFood: 'cup' | null }
+ */
+export function suggestAllergens(name) {
+  const t = tokens(name)
+  const used = new Array(t.length).fill(false)
+  const reasons = {}
+  for (const rule of COMPILED) {
+    const n = rule.words.length
+    for (let i = 0; i + n <= t.length; i++) {
+      if (used.slice(i, i + n).some(Boolean)) continue
+      if (rule.words.every((w, j) => t[i + j] === w)) {
+        for (let j = 0; j < n; j++) used[i + j] = true
+        rule.keys.forEach(k => { (reasons[k] = reasons[k] || []).includes(rule.phrase) || reasons[k].push(rule.phrase) })
+      }
+    }
+  }
+  const keys = ALLERGEN_KEYS.filter(k => reasons[k])
+  const joined = ` ${t.join(' ')} `
+  const has = phrase => joined.includes(` ${phrase} `)
+  // A packaging word outranks a label word ("dip cup" is a cup), never an allergen word ("milk carton").
+  const packWord = keys.length === 0 && !FOOD_DESPITE.some(has)
+    ? NOT_FOOD_PHRASES.find(has) || t.find(w => NOT_FOOD.has(w)) || null
+    : null
+  const checkLabel = packWord ? [] : [
+    ...CHECK_LABEL_PHRASES.filter(has),
+    ...t.filter((w, i) => !used[i] && CHECK_LABEL.has(w)),
+  ]
+  return { keys, reasons, checkLabel: [...new Set(checkLabel)], notFood: packWord }
+}

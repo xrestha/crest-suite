@@ -26,7 +26,8 @@ import { unitRateText, unitRateCell } from '../../../shared/unitRate'
 import { FilterChips } from '../../../components/Tabs'
 import { vatModeOf } from '../recipes/menuPriceVat'
 import NutritionEditorModal from '../nutrition/NutritionEditorModal'
-import { allergensChecked } from '../../../utils/nutrition'
+import AllergenReviewModal from '../nutrition/AllergenReviewModal'
+import { allergensChecked, isNotFood } from '../../../utils/nutrition'
 import { normaliseAllergens, allergenLabel } from '../../../shared/constants/allergens'
 
 const DEFAULT_CATEGORIES = [
@@ -129,6 +130,9 @@ export default function Items() {
   const [sortConvFirst, setSortConvFirst] = useState(false)
   const [onlyUnchecked, setOnlyUnchecked] = useState(false)
   const [nutriItemId, setNutriItemId] = useState(null)
+  // S870: the Check allergens list, and the guess it hands the Nutrition form when a row is changed.
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [nutriGuess, setNutriGuess] = useState(null)
   const [initingCats, setInitingCats] = useState(false)
   // Every referencing row, whatever its quantity — `{ [itemId]: ['CS', 'P'] }`. ONE map drives the
   // Used In chip, the Used In filters and the delete guard, so the column can never show "—" for an
@@ -907,10 +911,18 @@ export default function Items() {
 
   const nutriItem = nutriItemId ? items.find(i => i.id === nutriItemId) || null : null
   function handleNutriSaved(itemId, payload) {
-    const next = items.map(i => i.id === itemId ? { ...i, nutrition: payload } : i)
+    handleReviewSaved({ [itemId]: payload })
+    closeNutri()
+  }
+  function closeNutri() {
+    setNutriItemId(null)
+    setNutriGuess(null)
+  }
+  // Several items at once from the Check allergens list: `{ [itemId]: nutrition }`.
+  function handleReviewSaved(saved) {
+    const next = items.map(i => saved[i.id] ? { ...i, nutrition: saved[i.id] } : i)
     setItems(next)
     writePageCache('items', 'items', clientId, next)
-    setNutriItemId(null)
   }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
@@ -1315,6 +1327,11 @@ export default function Items() {
             </button>
           </Tip>
         )}
+        {showNutrition && (
+          <Tip width={280} text="Crest guesses the allergens of each unchecked ingredient from its name and shows the word each came from. Confirm what is right, row by row or all at once, and open the rest.">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setReviewOpen(true)}>Check allergens…</button>
+          </Tip>
+        )}
       </div>
 
       {/* Category filter (S796). A hand-rolled row of bare buttons with no pressed state, so which
@@ -1435,6 +1452,7 @@ export default function Items() {
                           {(() => {
                             const { keys, other } = normaliseAllergens(item.nutrition?.allergens)
                             const words = [...keys, ...other].map(allergenLabel).join(', ')
+                            if (isNotFood(item.nutrition)) return <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Not food</span>
                             return allergensChecked(item.nutrition)
                               ? <span style={{ fontSize: 12, color: 'var(--theme-text1)' }}><span aria-hidden="true" style={{ color: 'var(--theme-green-text)' }}>✓ </span>{words || 'None'}</span>
                               : <span style={{ fontSize: 12, color: 'var(--theme-amber-text)' }}>△ Not checked{words ? ` (${words})` : ''}</span>
@@ -1492,8 +1510,13 @@ export default function Items() {
         )}
       </div>
 
+      {reviewOpen && (
+        <AllergenReviewModal items={items} onClose={() => setReviewOpen(false)} onSaved={handleReviewSaved}
+          onChange={(item, keys, note) => { setNutriGuess({ keys, note }); setNutriItemId(item.id) }} />
+      )}
       {nutriItem && (
-        <NutritionEditorModal item={nutriItem} onClose={() => setNutriItemId(null)} onSaved={handleNutriSaved} />
+        <NutritionEditorModal key={nutriItem.id} item={nutriItem} onClose={closeNutri} onSaved={handleNutriSaved}
+          initialAllergens={nutriGuess?.keys ?? null} guessNote={nutriGuess?.note || ''} />
       )}
       {confirmEl}
     </div>

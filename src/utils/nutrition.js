@@ -91,6 +91,13 @@ export function allergensChecked(n) {
   return n?.allergens_checked === true
 }
 
+// S870: an item marked "not food" (a cup, a lid, a mop) has no nutrition and no allergens. It is
+// checked, and it is left out of a recipe's nutrition data count, so a takeaway cup on a dish no
+// longer reads as missing data.
+export function isNotFood(n) {
+  return n?.not_food === true
+}
+
 // Nutrition contribution of `qty` (in the item's uom) of a single item.
 // → { has, checked, values:{...nutrient keys}, allergens:[] }
 export function itemNutrition(item, qty) {
@@ -198,7 +205,7 @@ export function calcRecipeNutrition(recipe, allRecipes) {
 
   ;(recipe?.recipe_ingredients || []).forEach(ri => {
     if (ri.item_id && ri.items) {
-      total += 1
+      if (!isNotFood(ri.items.nutrition)) total += 1
       const r = itemNutrition(ri.items, ri.qty_per_portion)
       if (r.has) have += 1
       noteItem(check, ri.item_id, ri.items)
@@ -235,7 +242,7 @@ export function calcLiveNutrition(ingList, itemsList, allRecipes) {
       if (!ing.item_id || !ing.qty_per_portion) return
       const item = itemsList.find(i => i.id === ing.item_id)
       if (!item) return
-      total += 1
+      if (!isNotFood(item.nutrition)) total += 1
       const r = itemNutrition(item, ing.qty_per_portion)
       if (r.has) have += 1
       noteItem(check, item.id, item)
@@ -262,6 +269,7 @@ export function calcLiveNutrition(ingList, itemsList, allRecipes) {
 // `form.allergens` may be free text or an array of words; an unmatched word leaves it not checked.
 export function buildNutritionPayload(form, fallbackUnit) {
   if (!form) return null
+  if (form.not_food) return notFoodPayload()
   const out = {
     basis_qty: parseFloat(form.basis_qty) > 0 ? parseFloat(form.basis_qty) : 100,
     basis_unit: (form.basis_unit || fallbackUnit || '').toUpperCase(),
@@ -293,4 +301,22 @@ export function mergeNutritionFill(existing, fill) {
   else delete out.allergens
   out.allergens_checked = allergensChecked(existing) && parsed.other.length === 0
   return out
+}
+
+// The Check allergens list (S870): a person confirmed these allergens for the ingredient. Its
+// figures and everything else it holds stay as they are.
+export function confirmAllergensPayload(existing, words) {
+  const out = { ...(existing && typeof existing === 'object' ? existing : {}) }
+  delete out.not_food
+  const parsed = normaliseAllergens(words)
+  const text = allergensToText(parsed)
+  if (text) out.allergens = text
+  else delete out.allergens
+  out.allergens_checked = parsed.other.length === 0
+  return out
+}
+
+// Not food: nothing else to say about it.
+export function notFoodPayload() {
+  return { not_food: true, allergens_checked: true }
 }

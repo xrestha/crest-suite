@@ -21,15 +21,17 @@ function withAllergens(current, added) {
   return allergenWords([...(current || []), ...allergenWords(added)])
 }
 
-// Builds the initial form from an item's saved nutrition (or sensible defaults).
-function initFormFromItem(item) {
+// Builds the initial form from an item's saved nutrition (or sensible defaults). `initialAllergens`
+// (the Check allergens list's guess) are ticked on top of what the item already carries.
+function initFormFromItem(item, initialAllergens) {
   const n = item?.nutrition || {}
   const form = {
     basis_qty: n.basis_qty != null ? n.basis_qty : 100,
     // Default to GM/ML for mass/volume items so per-100g table values drop in directly;
     // the engine converts the recipe qty (e.g. 0.009 KG) into this unit automatically.
     basis_unit: n.basis_unit || defaultBasisUnit(item?.uom),
-    allergens: allergenWords(n.allergens),
+    allergens: initialAllergens ? withAllergens(allergenWords(n.allergens), initialAllergens) : allergenWords(n.allergens),
+    not_food: n.not_food === true,
     grams_per_unit: n.grams_per_unit != null ? n.grams_per_unit : '',
     source: n.source || '',
   }
@@ -42,8 +44,10 @@ function initFormFromItem(item) {
 // edited and gets onSaved(itemId, payload) so it can update its local items/recipes caches.
 // Opened from a recipe's ingredient row and, since S870, from Item Master. Saving marks the
 // ingredient checked for allergens (buildNutritionPayload), even with nothing ticked.
-export default function NutritionEditorModal({ item, onClose, onSaved }) {
-  const [nutriForm, setNutriForm] = useState(() => item ? initFormFromItem(item) : { ...EMPTY_NUTRITION, allergens: [] })
+// `initialAllergens` and `guessNote` come from the Check allergens list (AllergenReviewModal): the
+// form opens with Crest's guess ticked and says where it came from.
+export default function NutritionEditorModal({ item, onClose, onSaved, initialAllergens = null, guessNote = '' }) {
+  const [nutriForm, setNutriForm] = useState(() => item ? initFormFromItem(item, initialAllergens) : { ...EMPTY_NUTRITION, allergens: [] })
   const [nutriMatches, setNutriMatches] = useState([])
   const [nutriMatchSource, setNutriMatchSource] = useState('')
   const [nutriSaving, setNutriSaving] = useState(false)
@@ -172,6 +176,16 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
         {' '}Saved to the ingredient, so it fills <strong style={{ color: 'var(--theme-text1)' }}>every recipe</strong> that uses it.
       </p>
 
+      <label className="form-check" style={{ marginBottom: 12 }}>
+        <input type="checkbox" checked={!!nutriForm.not_food} disabled={nutriSaving}
+          onChange={e => setNF({ not_food: e.target.checked })} />
+        <span>
+          Not food
+          <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text3)' }}>Cups, lids, packaging, cleaning supplies: no nutrition and no allergens, and never counted as missing data in a recipe.</span>
+        </span>
+      </label>
+      {!nutriForm.not_food && (<>
+
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
         <div className="form-field" style={{ width: 110 }}>
           <label htmlFor="nutrit-f1"><Tip width={240} text="Reference amount these values describe. Food tables use 100 (per 100 GM/ML). For counted items use 1 (per piece).">Per (qty)</Tip></label>
@@ -293,12 +307,16 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
         <span className="field-label" id="nutrit-allergens-label">
           <Tip width={300} text="Tick every allergen this ingredient contains. Saving marks the ingredient as checked, even with nothing ticked, and every dish using it carries what you tick. On the guest menu, a dish with an ingredient nobody checked asks the guest to check with staff.">Allergens it contains</Tip>
         </span>
+        {guessNote && (
+          <p role="note" style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '0 0 6px' }}>{guessNote}</p>
+        )}
         <AllergenTicks id="nutrit-allergens" value={nutriForm.allergens} onChange={allergens => setNF({ allergens })} disabled={nutriSaving} />
       </div>
 
       <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '12px 0 0' }}>
         Library values are reference estimates — verify for branded or prepared items.
       </p>
+      </>)}
       <ActionError error={nutriError} />
       <div className="form-actions" style={{ marginTop: 16, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>

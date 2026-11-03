@@ -1,6 +1,6 @@
 import {
   itemNutrition, calcRecipeNutrition, calcLiveNutrition, buildNutritionPayload, mergeNutritionFill, convertQty,
-  needsPieceWeight,
+  needsPieceWeight, isNotFood, confirmAllergensPayload, notFoodPayload,
 } from './nutrition'
 
 // The guest menu hides a dish from a guest filtering out an allergen when any ingredient was never
@@ -161,5 +161,28 @@ describe('items counted in pieces (S870)', () => {
       .toMatchObject({ grams_per_unit: 50 })
     expect(mergeNutritionFill({ grams_per_unit: 50 }, { basis_qty: 100, basis_unit: 'GM', energy_kcal: 155 }))
       .toMatchObject({ grams_per_unit: 50, energy_kcal: 155 })
+  })
+})
+
+describe('not food and the Check allergens list (S870)', () => {
+  test('a not-food item is checked and leaves the nutrition data count alone', () => {
+    const cup = item('cup', notFoodPayload(), 'PCS')
+    const paneer = item('paneer', { basis_qty: 100, basis_unit: 'GM', energy_kcal: 265, allergens: 'milk', allergens_checked: true })
+    const r = calcRecipeNutrition({ id: 'r', recipe_ingredients: [line(paneer, 100), line(cup, 1)] }, [])
+    expect(isNotFood(cup.nutrition)).toBe(true)
+    expect(r.coverage).toEqual({ have: 1, total: 1 })
+    expect(r.allergenCheck.complete).toBe(true)
+  })
+
+  test('the form saves not food as just that', () => {
+    expect(buildNutritionPayload({ not_food: true, energy_kcal: '10', allergens: ['milk'] }))
+      .toEqual({ not_food: true, allergens_checked: true })
+  })
+
+  test('confirming keeps the figures and replaces the allergens', () => {
+    const existing = { basis_qty: 100, basis_unit: 'GM', energy_kcal: 265, allergens: 'kiwi', not_food: true }
+    expect(confirmAllergensPayload(existing, ['milk']))
+      .toEqual({ basis_qty: 100, basis_unit: 'GM', energy_kcal: 265, allergens: 'milk', allergens_checked: true })
+    expect(confirmAllergensPayload(null, [])).toEqual({ allergens_checked: true })
   })
 })

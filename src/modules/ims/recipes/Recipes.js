@@ -14,7 +14,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { nprInt } from '../../../shared/nepalMoney'
-import { NUTRIENTS, calcRecipeNutrition, calcLiveNutrition, hasNutrition, allergensChecked, mergeNutritionFill, needsPieceWeight } from '../../../utils/nutrition'
+import { NUTRIENTS, calcRecipeNutrition, calcLiveNutrition, hasNutrition, allergensChecked, mergeNutritionFill, needsPieceWeight, isNotFood } from '../../../utils/nutrition'
 import { allergenLabel } from '../../../shared/constants/allergens'
 import { getSuggestedPrice } from '../../../utils/recipeCost'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -2539,7 +2539,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                                 aria-label={`Nutrition and allergens for ${it?.name || 'this ingredient'}${notes.length ? `, ${notes.join(', ')}` : ''}`}
                                 title={notes.length ? notes.join(', ') : undefined}
                                 style={{ background: 'none', border: `1px solid ${has ? 'color-mix(in srgb, var(--theme-green) 40%, transparent)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: 11, color: has ? 'var(--theme-green-text)' : 'var(--theme-text2)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                                {has ? '● Edit' : needsWeight ? '+ Weight' : '+ Add'}
+                                {isNotFood(it?.nutrition) ? 'Not food' : has ? '● Edit' : needsWeight ? '+ Weight' : '+ Add'}
                                 {!checked && <span aria-hidden="true" style={{ color: 'var(--theme-amber-text)', marginLeft: 4 }}>△</span>}
                               </button>
                             )
