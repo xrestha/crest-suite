@@ -424,7 +424,8 @@ describe('the Customization Report page', () => {
   })
   test('the costing is bounded in its own try, so a hang reaches costError only', () => {
     expect(src).toMatch(/try \{ const \{ explosion, rateOf \} = await withTimeout\(posDeltaCosting\(supabase, clientId, deltaSets\), readMs, /)
-    expect(src).toMatch(/setCostError\(e\)/)
+    // S863: converted at the call site, for ActionError's detail line (the consequence is the page's own).
+    expect(src).toMatch(/setCostError\(\{ text: COST_ERROR_TEXT, detail: asActionError\(e\)\.detail \}\)/)
   })
   // S862 REPORTS-STOCK-6: only a size below the dish is greyed as part of the dish cost.
   test('a choice below the dish is greyed as a size only when it is a size', () => {

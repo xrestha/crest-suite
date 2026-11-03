@@ -7,15 +7,19 @@ import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
 import { useBizInfo } from '../../shared/hooks/useBizInfo'
 import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { firstError } from '../../shared/queryError'
-import { npr, nprInt } from '../../shared/nepalMoney'
+import { npr, nprExact, nprInt } from '../../shared/nepalMoney'
 import { sheetWithLetterhead } from '../../shared/excelLetterhead'
-import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 import ReportPage from '../../components/ReportPage'
+import PeriodScope from '../../components/PeriodScope'
+import Tabs, { TabPanel } from '../../components/Tabs'
+import FieldError from '../../components/FieldError'
+import ActionError, { asActionError } from '../../components/ActionError'
 import Tip from '../../components/Tip'
 import BsCalendarPicker from '../../components/BsCalendarPicker'
 import RangePresets from '../pos/reports/RangePresets'
 import { settleAll, rangeReadMs } from '../pos/reports/reportTimeout'
 import { withTimeout } from '../../utils/withTimeout'
+import { adToBsSafe, BS_MONTHS, daysInBsMonth, formatAdAsBs } from '../../utils/bsCalendar'
 import { nepalDayStartTs, nepalDayEndTs, bsSlash, bsMonthRangeIso } from '../pos/reports/reportRange'
 import { deltaItems } from '../../utils/orderLineIngredients'
 import { posDeltaCosting } from '../pos/orders/posRecipeBook'
@@ -32,8 +36,8 @@ import { CHART_COLORS } from '../../shared/chartColors'
 // which are picked, how often guests customize at all, what the "No …" requests are, and — with
 // IMS — whether a paid choice earns more than it costs.
 //
-// Who (owner decision): the Owner, a POS manager or an IMS manager, plus admin — the same set that
-// edits Option Groups, tested on the RAW role columns for the reason OptionGroups.jsx gives.
+// Who (owner decision, narrowed S835 D42): the Owner, a POS manager, plus admin, tested on the RAW
+// role column for the reason OptionGroups.jsx gives. Not an IMS manager: see the guard below.
 //
 // Basis, stated on the page, the print-free export and the footnote alike: paid bills closed in the
 // range; choice prices ex-VAT and before bill discounts; credit notes are not netted off.
@@ -44,6 +48,12 @@ import { CHART_COLORS } from '../../shared/chartColors'
 //
 // S839, combos (docs/pos-combos.md): a Combos tab — per combo, how many sold, what they brought in
 // (ex-VAT; a bill discount never touches a combo) and each pick's dish mix (buildComboReport).
+//
+// S863 audit fixes: the range controls live in the header's action group, which ReportPage never
+// hides, so a pick no longer unmounts them (focus fell to <body>) and a failed read keeps them on
+// screen beside a Try again. A backwards range is refused before any read. Per-plate figures are
+// to the paisa and Margin is Charged minus Cost as shown. The workbook gains Summary and Weekly
+// sheets and keeps a Choice margin sheet when costing failed.
 
 const TABS = [
   { key: 'popular',  label: 'Popular choices' },
@@ -52,6 +62,7 @@ const TABS = [
   { key: 'margin',   label: 'Choice margin' },
   { key: 'combos',   label: 'Combos' },
 ]
+const REMOVALS_TAB_LABEL = TABS.find(t => t.key === 'removals').label
 
 const DEFAULT_SORT = {
   popular:  { key: 'picks',  dir: 'desc' },
@@ -71,16 +82,154 @@ const pct = v => (v == null ? '—' : `${(v * 100).toFixed(1)}%`)
 const isoMs = iso => { const [y, m, d] = iso.split('-').map(Number); return Date.UTC(y, m - 1, d) }
 const shiftIso = (iso, days) => new Date(isoMs(iso) + days * 86400000).toISOString().slice(0, 10)
 const MUTED = '#6b7280' // chart-tick, for Recharts SVG props only
+// A second cue beside the colour for the five trend lines (S863): solid, dashed, dotted, dash-dot,
+// sparse dots. The legend swatch draws the same pattern, so a line can be named without its hue.
+const LINE_DASHES = ['', '6 3', '2 3', '8 3 2 3', '1 4']
+const NOWRAP = { whiteSpace: 'nowrap' }
+const FIG = { textAlign: 'right', whiteSpace: 'nowrap' }
+
+// Excel number formats. The workbook carries numbers, never formatted strings, so a reader can sum
+// and re-check them (S863).
+const MONEY_Z = '#,##0.00'
+const MONEY_CHANGE_Z = '+#,##0.00;-#,##0.00;0.00'
+const COUNT_Z = '#,##0'
+const COUNT_CHANGE_Z = '+#,##0;-#,##0;0'
+const PCT_Z = '0.0%'
+const PCT_CHANGE_Z = '+0.0%;-0.0%;0.0%'
+const POINTS_Z = '+0.0" points";-0.0" points";0.0" points"'
+
+const COST_ERROR_TEXT = 'The stock lines or item rates could not be read, so choice costs are not shown. The other tabs are not affected.'
+const COST_ERROR_SHEET_NOTE = 'The stock lines or item rates could not be read, so no cost or margin is in this sheet. The charged figures are complete.'
+const BASIS_TIP = {
+  free: 'Free choice: its cost is part of the dish food cost, not a loss on an upsell.',
+  sizeBelow: 'A size priced below the dish: its cost is part of the dish food cost, not a loss on an upsell.',
+}
+const BASIS_NOTE = {
+  free: 'Free choice: its cost is part of the dish food cost',
+  sizeBelow: 'Size priced below the dish: its cost is part of the dish food cost',
+}
+
+// ── Pure helpers, exported for the tests ─────────────────────────────────────────────────────────
+
+/** A figure to the paisa, as the per-plate columns and the workbook carry it. */
+export const round2 = n => Math.round((Number(n) || 0) * 100) / 100
+
+/** "+NPR 47.50", "−NPR 0.30", or "NPR 0.00": a per-plate figure to the paisa, signed. */
+export function signed2(n) {
+  const r = round2(n)
+  return r === 0 ? nprExact(0) : `${r > 0 ? '+' : '−'}${nprExact(Math.abs(r))}`
+}
+
+/**
+ * One choice's three per-plate figures as the page shows them (S863). Each is taken to the paisa,
+ * and Margin is the shown Charged minus the shown Cost, so the three columns reconcile on screen and
+ * in the workbook: rounding each to the rupee separately printed "+NPR 48 − NPR 30 = +NPR 17".
+ * `loss` is read off the SHOWN margin, so a −0.003 margin (shown NPR 0.00) is not painted red,
+ * and a −0.30 one is red with ▼ and its figure, never a red "NPR 0".
+ */
+export function perPlateFigures(o) {
+  const charged = round2(o?.chargedPerPick)
+  const cost = o?.costPerPick == null ? null : round2(o.costPerPick)
+  const margin = cost == null ? null : round2(charged - cost)
+  return { charged, cost, margin, loss: margin != null && margin < 0 }
+}
+
+/**
+ * Why a choice's margin is not a verdict, or null when it is one. S809 3o (REPORTS-12): free only
+ * when every plate was BILLED at a list price of 0. S862 REPORTS-STOCK-6: only a SIZE below the dish
+ * is part of the dish cost by design; any other choice priced below the dish keeps its verdict.
+ */
+export function marginBasis(o) {
+  const free = o.freeByDesign || (o.listPriceDelta == null && o.chargedPerPick === 0)
+  const sizeBelow = o.group_kind === 'size' && o.listPriceDelta != null && o.listPriceDelta < 0
+  return free ? 'free' : sizeBelow ? 'sizeBelow' : null
+}
+
+/** The refusal for a range that runs backwards, or null. ISO dates compare as strings. */
+export function rangeProblem(fromIso, toIso) {
+  if (!fromIso || !toIso || fromIso <= toIso) return null
+  return 'The To date is before the From date. Pick a To date on or after the From date.'
+}
+
+// An AD `YYYY-MM-DD` as its BS date, read at local midnight (a bare ISO string is UTC midnight,
+// which adToBs would read as the previous day west of UTC).
+function bsOfIso(iso) {
+  const [y, m, d] = String(iso || '').split('-').map(Number)
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null
+  return adToBsSafe(new Date(y, m - 1, d))
+}
+
+/** The chip's BS label: "Bhadra 2082" for a whole month, else "5 Bhadra – 20 Ashwin 2082". */
+export function bsRangeLabel(fromIso, toIso) {
+  const a = bsOfIso(fromIso)
+  const b = bsOfIso(toIso)
+  if (!a || !b) return `${formatAdAsBs(fromIso)} – ${formatAdAsBs(toIso)}`
+  const month = bs => BS_MONTHS[bs.month - 1]
+  if (a.year === b.year && a.month === b.month && a.day === b.day) return `${a.day} ${month(a)} ${a.year}`
+  if (a.year === b.year && a.month === b.month && a.day === 1 && b.day === daysInBsMonth(b.year, b.month)) {
+    return `${month(a)} ${a.year}`
+  }
+  const left = a.year === b.year ? `${a.day} ${month(a)}` : `${a.day} ${month(a)} ${a.year}`
+  return `${left} – ${b.day} ${month(b)} ${b.year}`
+}
+
+/** A BS date for a filename, "2082-05-01"; out of the verified table, the AD date marked as such. */
+export function bsFileDate(iso) {
+  const bs = bsOfIso(iso)
+  const p = n => String(n).padStart(2, '0')
+  return bs ? `${bs.year}-${p(bs.month)}-${p(bs.day)}` : `${iso}-AD`
+}
+
+/** The one line that states what the page, the print and every sheet cover: BS first, AD in brackets. */
+export function scopeLineOf(fromIso, toIso) {
+  return `Paid bills closed ${formatAdAsBs(fromIso)} to ${formatAdAsBs(toIso)} (AD ${fromIso} to ${toIso}) · choice prices ex-VAT, before bill discounts · combos ex-VAT, never discounted · credit notes not netted`
+}
+
+/**
+ * Number formats on a letterheaded sheet. The headings row is the first whose first cell is the
+ * first column name (the letterhead lines above it are prose in column A); `formatOf(row, key, i)`
+ * names a format per cell, and only a numeric cell takes one.
+ */
+function formatCells(XLSX, ws, rows, formatOf) {
+  if (!rows.length || !ws['!ref']) return
+  const keys = Object.keys(rows[0])
+  const range = XLSX.utils.decode_range(ws['!ref'])
+  let head = -1
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    const c = ws[XLSX.utils.encode_cell({ r, c: 0 })]
+    if (c && c.v === keys[0]) { head = r; break }
+  }
+  if (head < 0) return
+  rows.forEach((row, i) => keys.forEach((k, c) => {
+    const z = formatOf(row, k, i)
+    const cell = ws[XLSX.utils.encode_cell({ r: head + 1 + i, c })]
+    if (z && cell && cell.t === 'n') cell.z = z
+  }))
+}
+
+// Distinct column names for the weekly sheet: two dishes sharing a name would otherwise share a column.
+function distinctNames(names) {
+  const seen = new Map()
+  return names.map(n => {
+    const k = (seen.get(n) || 0) + 1
+    seen.set(n, k)
+    return k === 1 ? n : `${n} (${k})`
+  })
+}
 
 // "vs the period before" under a tile (S800): the shared verdict, its arrow the direction and its
 // colour whether that direction is good. Nothing to compare against says so rather than a 100% rise.
-function VsBefore({ now, then, label, format, opts }) {
+// A SHARE moves in percentage points (S863), the unit the weekly trend speaks in; money in percent.
+function VsBefore({ now, then, label, format, opts, points = false }) {
   const cmp = compareFigures(now, then, opts)
   if (!cmp) return <div className="stat-sub">Nothing in {label} to compare</div>
   const color = cmp.good == null ? 'var(--theme-text3)' : cmp.good ? 'var(--theme-green-text)' : 'var(--theme-red-text)'
+  const gap = points
+    ? `${(Math.abs(now - then) * 100).toFixed(1)} points`
+    : `${cmp.gapPct < 1 ? cmp.gapPct.toFixed(1) : Math.round(cmp.gapPct)}%`
   return (
     <div className="stat-sub">
-      <span style={{ color, fontWeight: 600 }}>{cmp.glyph} {cmp.gapPct < 1 ? cmp.gapPct.toFixed(1) : Math.round(cmp.gapPct)}%</span>
+      <span style={{ color, fontWeight: 600 }}>{cmp.glyph} {gap}</span>
       {' '}vs {label} ({format(then)})
     </div>
   )
@@ -156,6 +305,44 @@ function DishList({ dishes }) {
   )
 }
 
+/** The legend swatch for one trend line: its colour AND its dash pattern. SVG, so hex is allowed. */
+function LineSwatch({ i }) {
+  return (
+    <svg width="18" height="6" aria-hidden="true" focusable="false" style={{ verticalAlign: 'middle' }}>
+      <line x1="0" y1="3" x2="18" y2="3" stroke={CHART_COLORS[i % CHART_COLORS.length]} strokeWidth="2"
+        strokeDasharray={LINE_DASHES[i % LINE_DASHES.length] || undefined} />
+    </svg>
+  )
+}
+
+/** The weekly shares as a table: the chart's text alternative, shown in its expanded view (S863). */
+function WeeklyTable({ weekly }) {
+  return (
+    <div className="table-wrap" style={{ marginTop: 16 }}>
+      <table className="data-table">
+        <thead><tr>
+          <th scope="col">Week ending</th>
+          {weekly.dishes.map(d => <th key={d.recipe_id} scope="col" style={{ textAlign: 'right' }}>{d.name}</th>)}
+        </tr></thead>
+        <tbody>
+          {weekly.rows.map((r, k) => (
+            <tr key={weekly.weekEnds[k]}>
+              <td><span style={NOWRAP}>{formatAdAsBs(weekly.weekEnds[k])}</span></td>
+              {weekly.dishes.map(d => (
+                <td key={d.recipe_id} style={FIG}>
+                  {r[d.recipe_id] == null
+                    ? <span style={{ color: 'var(--theme-text3)' }}>too few plates</span>
+                    : `${r[d.recipe_id]}%`}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export default function CustomizationReport() {
   const { isAdmin, isOwner, profile, clientId, clientModules } = useAuth()
   const { scopedFrom } = useScopedDb()
@@ -172,20 +359,35 @@ export default function CustomizationReport() {
   const [sorts, setSorts] = useState(DEFAULT_SORT)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
-  const [data, setData] = useState(null)       // { report, costed }
-  const [costError, setCostError] = useState(null)
+  const [data, setData] = useState(null)       // { report, costed, prevReport, weekly, combos }
+  const [costError, setCostError] = useState(null) // { text, detail } for ActionError
+  const [exportAsked, setExportAsked] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState(null)
   const rangeReq = useLatestRequest()
 
+  // S863: a backwards range is refused before any read, so it never reaches the empty state
+  // ("attach option groups") that a range with no bills earns.
+  const backwardsMsg = rangeProblem(fromIso, toIso)
+  const backwards = !!backwardsMsg
   // The equal-length range just before the chosen one (S800), for "vs the period before".
   const rangeDays = Math.max(1, Math.round((isoMs(toIso) - isoMs(fromIso)) / 86400000) + 1)
   const prevFromIso = shiftIso(fromIso, -rangeDays)
   const load = useCallback(async () => {
     if (!clientId) return
+    // Claimed even when refused, so a load still in flight for the last good range cannot land
+    // its figures under a backwards one.
     const key = rangeReq.begin(`${clientId}:${fromIso}:${toIso}`)
+    if (backwards) {
+      setLoading(false); setLoadError(null); setCostError(null); setData(null)
+      return
+    }
     setLoading(true); setLoadError(null); setCostError(null)
     // S862 REPORTS-STOCK-5: every read is bounded, as on Sales Report (S842). A hung read answers
-    // `{ error }` and fails the page through ReportLoadError like a refused one, with Retry. The limit
-    // covers the chosen range AND the one before it, which the bill read spans.
+    // `{ error }` and fails the page through ReportLoadError like a refused one. Since S863 that card
+    // carries Try again (`onRetry`), and the range controls stay on screen in the header beside it,
+    // so the reader can retry or shorten the range without a reload. The limit covers the chosen
+    // range AND the one before it, which the bill read spans.
     const readMs = rangeReadMs(prevFromIso, toIso)
     const LOAD_LABEL = 'Loading the Customization Report'
     try {
@@ -276,7 +478,8 @@ export default function CustomizationReport() {
           costed = withOptionCosts(report.options, toItems, rateByItem)
         } catch (e) {
           if (!rangeReq.isCurrent(key)) return
-          setCostError(e)
+          // Converted here, at the call site: the consequence is ours, the detail line is the error's.
+          setCostError({ text: COST_ERROR_TEXT, detail: asActionError(e).detail })
         }
       }
       if (!rangeReq.isCurrent(key)) return
@@ -288,15 +491,17 @@ export default function CustomizationReport() {
     } finally {
       if (rangeReq.isCurrent(key)) setLoading(false)
     }
-  }, [clientId, fromIso, toIso, prevFromIso, rangeDays, scopedFrom, rangeReq, imsOn])
+  }, [clientId, fromIso, toIso, prevFromIso, rangeDays, backwards, scopedFrom, rangeReq, imsOn])
 
   useEffect(() => { load() }, [load])
 
   const report = data?.report
-  const scopeLine = `Paid bills closed ${fromIso} (B.S. ${bsSlash(fromIso)}) to ${toIso} (B.S. ${bsSlash(toIso)}) · choice prices ex-VAT, before bill discounts · combos ex-VAT, never discounted · credit notes not netted`
+  const scopeLine = scopeLineOf(fromIso, toIso)
   const marginRows = useMemo(() => (data?.costed || []).filter(o => !o.is_removal), [data])
   const top = report ? mostAddedOf(report.options) : null
   const onlySizes = !!report && !top && report.options.some(o => !o.is_removal && o.group_kind === 'size')
+  const visibleTabs = TABS.filter(t => t.key !== 'margin' || imsOn)
+  const tabLabel = (TABS.find(t => t.key === tab) || TABS[0]).label
 
   const sort = sorts[tab] || DEFAULT_SORT[tab]
   const toggleSort = (key, numeric) => setSorts(s => {
@@ -316,13 +521,27 @@ export default function CustomizationReport() {
     dish: r => r.dish, option_name: r => r.option_name, picks: r => r.picks,
     share: r => (r.dishPlates ? r.picks / r.dishPlates : null),
   }, byName('dish')) : [], [report, sorts.removals])
+  // Sorted on the figures as SHOWN (to the paisa), so the order agrees with what the reader sees.
   const marginSorted = useMemo(() => sortRows(marginRows, sorts.margin, {
-    option_name: o => o.option_name, chargedPerPick: o => o.chargedPerPick, costPerPick: o => o.costPerPick,
-    margin: o => (o.costPerPick == null ? null : o.chargedPerPick - o.costPerPick), picks: o => o.picks,
+    option_name: o => o.option_name, chargedPerPick: o => perPlateFigures(o).charged, costPerPick: o => perPlateFigures(o).cost,
+    margin: o => perPlateFigures(o).margin, picks: o => o.picks,
   }, byName('option_name')), [marginRows, sorts.margin])
   const comboRows = useMemo(() => sortRows(data?.combos || [], sorts.combos, {
     name: c => c.name, sold: c => c.sold, revenue: c => c.revenue, perCombo: c => c.perCombo,
   }, byName('name')), [data, sorts.combos])
+
+  // A precondition on Export is `aria-disabled` plus a press that says what is missing (S776): the
+  // reason used to sit only in a Tip on a disabled button, which a touch screen cannot open. Never
+  // a workbook while loading, after a failed read, or with the letterhead name unread (S845).
+  const exportBlock = loading ? 'The report is still loading. Export works once it has finished.'
+    : loadError ? 'The report could not be read, so there is nothing to export. Choose Try again first.'
+    : backwards ? 'The To date is before the From date, so there is nothing to export.'
+    : !report ? 'There is nothing to export yet.'
+    : biz.error ? 'The outlet name could not be read, so the workbook letterhead would be blank. Reload the page, then export.'
+    : !biz.ready ? 'The outlet name is still loading. Try again in a moment.'
+    : null
+  // The notice answers a press and lasts only while the reason does.
+  useEffect(() => { if (!exportBlock) setExportAsked(false) }, [exportBlock])
 
   // S835, D42: no IMS manager clause. An Inventory login cannot read till bills (no_ims_staff), so a
   // manager let in here got an empty read and a confident "No choices were picked". The nav item
@@ -334,110 +553,195 @@ export default function CustomizationReport() {
     if (!report) return
     const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
-    const add = (name, title, rows) => XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, { title, biz, scopeLine, rows }), name)
+    const add = (name, title, rows, { notes = [], formatOf = null } = {}) => {
+      const ws = sheetWithLetterhead(XLSX, { title, biz, scopeLine, rows, notes })
+      if (formatOf) formatCells(XLSX, ws, rows, formatOf)
+      XLSX.utils.book_append_sheet(wb, ws, name)
+    }
+    const prev = data.prevReport
+    const before = `The ${rangeDays} days before`
+    // The KPI tiles, so the workbook reconciles them. Change is in the figure's own unit (the share
+    // in percentage points), Change (%) against the period before where that is not 0.
+    const relChange = (now, then) => (then != null && then > 0 && now != null ? (now - then) / then : '')
+    const summaryKinds = []
+    const summaryRow = (kind, figure, now, then, change, rel) => {
+      summaryKinds.push(kind)
+      return { Figure: figure, 'This range': now ?? '', [before]: then ?? '', Change: change ?? '', 'Change (%)': rel ?? '' }
+    }
+    const diff = (now, then) => (now != null && then != null ? now - then : '')
+    const removed = report.removals[0]
+    const summary = [
+      summaryRow('count', 'Plates of customizable dishes', report.customizablePlates, prev?.customizablePlates,
+        diff(report.customizablePlates, prev?.customizablePlates), relChange(report.customizablePlates, prev?.customizablePlates)),
+      summaryRow('share', 'With a choice picked (share of those plates)', report.customizedShare, prev?.customizedShare,
+        report.customizedShare != null && prev?.customizedShare != null ? Math.round((report.customizedShare - prev.customizedShare) * 1000) / 10 : '', ''),
+      summaryRow('count', 'Plates with a choice picked', report.customizedPlates, prev?.customizedPlates,
+        diff(report.customizedPlates, prev?.customizedPlates), relChange(report.customizedPlates, prev?.customizedPlates)),
+      summaryRow('money', 'Extras earned (NPR, ex-VAT)', round2(report.extrasEarned), prev ? round2(prev.extrasEarned) : null,
+        prev ? round2(report.extrasEarned - prev.extrasEarned) : '', relChange(report.extrasEarned, prev?.extrasEarned)),
+      summaryRow('money', 'Size adjustments (NPR, ex-VAT)', round2(report.sizeAdjustments), prev ? round2(prev.sizeAdjustments) : null,
+        prev ? round2(report.sizeAdjustments - prev.sizeAdjustments) : '', ''),
+      summaryRow('money', 'Cheaper choices, not a size (NPR, ex-VAT)', round2(report.cheaperChoices), prev ? round2(prev.cheaperChoices) : null,
+        prev ? round2(report.cheaperChoices - prev.cheaperChoices) : '', ''),
+      summaryRow('text', 'Most added choice', top ? `${top.option_name} (${top.picks} plates)` : (onlySizes ? 'Only sizes were picked' : 'None'), '', '', ''),
+      summaryRow('text', 'Most removed ("No …" request)', removed ? `${removed.option_name} (${removed.picks} plates)` : 'None', '', '', ''),
+    ]
+    add('Summary', 'Customization — Summary', summary, {
+      notes: [`${before} is the equal range just before this one, as on the tiles. A share moves in percentage points.`],
+      formatOf: (row, k, i) => {
+        const kind = summaryKinds[i]
+        if (k === 'Change (%)') return PCT_CHANGE_Z
+        if (k === 'Change') return kind === 'share' ? POINTS_Z : kind === 'money' ? MONEY_CHANGE_Z : COUNT_CHANGE_Z
+        if (k === 'This range' || k === before) return kind === 'share' ? PCT_Z : kind === 'money' ? MONEY_Z : COUNT_Z
+        return null
+      },
+    })
     add('Popular choices', 'Customization — Popular choices', popularRows.map(o => ({
       Choice: o.option_name, Group: o.group_name, 'Times picked (plates)': o.picks,
-      'Extra charged (NPR, ex-VAT)': Math.round(o.charged), 'Picked on': o.dishes.join(', '),
-    })))
+      // Blank, not 0, where the screen shows "—": a "No …" request is never charged.
+      'Extra charged (NPR, ex-VAT)': o.is_removal ? '' : round2(o.charged), 'Picked on': o.dishes.join(', '),
+    })), { formatOf: (row, k) => (k.startsWith('Extra charged') ? MONEY_Z : null) })
     add('How often', 'Customization — How often customized', dishRows.map(d => ({
-      Dish: d.name, 'Plates sold': d.plates, 'Plates customized': d.customizedPlates, 'Share customized': pct(d.share),
-    })))
+      Dish: d.name, 'Plates sold': d.plates, 'Plates customized': d.customizedPlates, 'Share customized': d.share ?? '',
+    })), { formatOf: (row, k) => (k === 'Share customized' ? PCT_Z : null) })
     add('No requests', 'Customization — "No …" requests', removalRows.map(r => ({
-      Dish: r.dish, Request: r.option_name, 'Plates': r.picks, 'Share of the dish': pct(r.dishPlates ? r.picks / r.dishPlates : null),
-    })))
+      Dish: r.dish, Request: r.option_name, 'Plates': r.picks, 'Share of the dish': r.dishPlates ? r.picks / r.dishPlates : '',
+    })), { formatOf: (row, k) => (k === 'Share of the dish' ? PCT_Z : null) })
     if (comboRows.length) {
       add('Combos', 'Customization — Combos', comboRows.map(c => ({
         Combo: c.name, 'Combos sold': c.sold, 'Of which comped': c.comped,
-        'Revenue (NPR, ex-VAT)': Math.round(c.revenue),
-        'Average per charged combo (NPR, ex-VAT)': c.perCombo == null ? '' : Math.round(c.perCombo),
-      })))
+        'Revenue (NPR, ex-VAT)': round2(c.revenue),
+        'Average per charged combo (NPR, ex-VAT)': c.perCombo == null ? '' : round2(c.perCombo),
+      })), { formatOf: (row, k) => (k.includes('NPR') ? MONEY_Z : null) })
       add('Combo picks', 'Customization — What guests picked in each combo', comboRows.flatMap(c => c.picks.flatMap(g => g.dishes.map(d => ({
-        Combo: c.name, Pick: g.name, Dish: d.name, 'Plates': d.plates, 'Share of the pick': pct(d.share),
-      })))))
+        Combo: c.name, Pick: g.name, Dish: d.name, 'Plates': d.plates, 'Share of the pick': d.share ?? '',
+      })))), { formatOf: (row, k) => (k === 'Share of the pick' ? PCT_Z : null) })
     }
-    if (marginSorted.length) {
-      add('Choice margin', 'Customization — Choice margin', marginSorted.map(o => ({
-        Choice: o.option_name, 'List price as billed (NPR, average per plate)': o.listPriceDelta == null ? '' : Math.round(o.listPriceDelta),
-        'Charged per plate (NPR)': Math.round(o.chargedPerPick),
-        'Cost per plate (NPR, today\'s rates)': o.costPerPick == null ? '' : Math.round(o.costPerPick),
-        'Plates the cost is averaged over': o.costPerPick == null ? '' : o.costedPicks,
-        'Margin per plate (NPR)': o.costPerPick == null ? '' : Math.round(o.chargedPerPick - o.costPerPick),
-        'Times picked': o.picks,
-      })))
+    if (imsOn) {
+      const marginZ = (row, k) => (k.includes('NPR') ? MONEY_Z : null)
+      if (costError) {
+        // Costing failed: the sheet stays, says why, and carries the charged figures it does have.
+        const chargedOnly = report.options.filter(o => !o.is_removal).map(o => ({
+          Choice: o.option_name, 'Charged per plate (NPR)': round2(o.chargedPerPick),
+          'Cost per plate (NPR, at the item rates of today)': '', 'Margin per plate (NPR)': '', 'Times picked': o.picks,
+        }))
+        add('Choice margin', 'Customization — Choice margin', chargedOnly, { notes: [COST_ERROR_SHEET_NOTE], formatOf: marginZ })
+      } else {
+        add('Choice margin', 'Customization — Choice margin', marginSorted.map(o => {
+          const f = perPlateFigures(o)
+          const basis = marginBasis(o)
+          return {
+            Choice: o.option_name,
+            'List price as billed (NPR, average per plate)': o.listPriceDelta == null ? '' : round2(o.listPriceDelta),
+            'Charged per plate (NPR)': f.charged,
+            'Cost per plate (NPR, at the item rates of today)': f.cost ?? '',
+            'Plates the cost is averaged over': f.cost == null ? '' : o.costedPicks,
+            'Margin per plate (NPR)': f.margin ?? '',
+            Note: f.margin == null ? 'No stock lines on this choice' : basis ? BASIS_NOTE[basis] : f.loss ? 'Loses money on every plate' : '',
+            'Times picked': o.picks,
+          }
+        }), {
+          notes: marginSorted.length ? [] : ['No choice with stock lines was picked in this range.'],
+          formatOf: marginZ,
+        })
+      }
     }
-    XLSX.writeFile(wb, `customization-report-${fromIso}-to-${toIso}.xlsx`)
+    if (data.weekly && data.weekly.dishes.length > 0) {
+      const { weekly } = data
+      const names = distinctNames(weekly.dishes.map(d => d.name))
+      add('Weekly', 'Customization — Share customized, week by week', weekly.rows.map((r, k) => {
+        const row = { 'Week ending (BS)': formatAdAsBs(weekly.weekEnds[k]), 'Week ending (AD)': weekly.weekEnds[k] }
+        weekly.dishes.forEach((d, i) => { row[names[i]] = r[d.recipe_id] == null ? '' : r[d.recipe_id] / 100 })
+        return row
+      }), {
+        notes: [`The top dishes by plates. A week with fewer than ${TREND_MIN_PLATES} plates of a dish is left blank.`],
+        formatOf: (row, k) => (k.startsWith('Week ending') ? null : PCT_Z),
+      })
+    }
+    XLSX.writeFile(wb, `customization-report-BS-${bsFileDate(fromIso)}-to-${bsFileDate(toIso)}.xlsx`)
   }
 
-  const exportDisabled = loading || !!loadError || !report || !biz.ready
-  const visibleTabs = TABS.filter(t => t.key !== 'margin' || imsOn)
+  async function onExport() {
+    if (exporting) return
+    if (exportBlock) { setExportAsked(true); return }
+    setExportError(null)
+    setExporting(true)
+    try {
+      await exportExcel()
+    } catch (e) {
+      // The xlsx chunk can fail to load (offline, or a deploy mid-session); say so rather than nothing.
+      setExportError({ text: 'The workbook could not be made. Check your connection and press Export Excel again.', detail: asActionError(e).detail })
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const marginCell = o => {
-    if (o.costPerPick == null) return <td style={{ textAlign: 'right' }}>—</td>
-    const margin = o.chargedPerPick - o.costPerPick
-    // S809 3o (REPORTS-12): free only when every plate was BILLED at a list price of 0. A choice
-    // charged all month and made free since keeps its loss in red.
-    const free = o.freeByDesign || (o.listPriceDelta == null && o.chargedPerPick === 0)
-    // S862 REPORTS-STOCK-6: only a SIZE below the dish is part of the dish cost by design. Any other
-    // choice priced below the dish keeps its margin verdict, red and ▼ when it loses money.
-    const sizeBelow = o.group_kind === 'size' && o.listPriceDelta != null && o.listPriceDelta < 0
-    if (free || sizeBelow) {
+    const f = perPlateFigures(o)
+    if (f.margin == null) return <td style={{ textAlign: 'right' }}>—</td>
+    const basis = marginBasis(o)
+    if (basis) {
       // Not an upsell that lost money: a choice priced at 0 by design (or a size priced below the
       // dish) costs what it costs inside the dish's own food cost. No red, no ▼.
-      const tip = free
-        ? 'Free choice — its cost is part of the dish\'s food cost, not a loss on an upsell.'
-        : 'A size priced below the dish — its cost is part of the dish\'s food cost, not a loss on an upsell.'
       return (
         <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
-          <Tip text={tip}>{signed(margin)}</Tip>
+          <Tip text={BASIS_TIP[basis]}><span style={NOWRAP}>{signed2(f.margin)}</span></Tip>
         </td>
       )
     }
-    const loss = margin < 0
     return (
-      <td style={{ textAlign: 'right', color: loss ? 'var(--theme-red-text)' : undefined }}>
-        {signed(margin)}{loss ? ' ▼' : ''}
+      <td style={{ ...FIG, color: f.loss ? 'var(--theme-red-text)' : undefined }}>
+        {signed2(f.margin)}{f.loss ? ' ▼' : ''}
       </td>
     )
   }
+
+  const lastWeekLabel = data?.weekly ? formatAdAsBs(data.weekly.weekEnds[data.weekly.weekEnds.length - 1]) : ''
 
   return (
     <ReportPage
       title="Customization Report"
       subtitle="Which choices guests pick, how often they customize, and what the choices earn."
+      scope={backwards ? null : <PeriodScope label={bsRangeLabel(fromIso, toIso)} title={`AD ${fromIso} to ${toIso}`} />}
+      // The range lives here, in the header's action group, because ReportPage never hides it: in
+      // `filters` it unmounted on every pick (focus fell to the page) and vanished after a failed read.
       actions={(
-        <Tip text={biz.error ? "The outlet's name could not be read, so the workbook's letterhead would be blank. Reload and try again." : 'Download every tab as a workbook, with the range and basis on each sheet.'}>
-          <button type="button" className="btn btn-ghost" onClick={exportExcel} disabled={exportDisabled}>Export Excel</button>
-        </Tip>
-      )}
-      loading={loading}
-      error={loadError}
-      empty={!!report && report.customizablePlates === 0 && (data?.combos || []).length === 0}
-      emptyText="No dish with choices and no combo was sold in this range. Attach option groups to dishes on Option Groups → Dishes, or set up a combo, then check back after some bills."
-      filters={(
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <RangePresets fromIso={fromIso} toIso={toIso} onPick={setRange} style={{ alignSelf: 'flex-end' }} />
+            <RangePresets fromIso={fromIso} toIso={toIso} onPick={setRange} />
             <div className="form-field" style={{ margin: 0 }}>
               <label htmlFor="cust-report-from">From</label>
               <BsCalendarPicker id="cust-report-from" value={fromIso} onChange={setFromIso} />
             </div>
             <div className="form-field" style={{ margin: 0 }}>
               <label htmlFor="cust-report-to">To</label>
-              <BsCalendarPicker id="cust-report-to" value={toIso} onChange={setToIso} />
+              <BsCalendarPicker id="cust-report-to" value={toIso} onChange={setToIso} invalid={backwardsMsg || ''} />
             </div>
-          </div>
-          <div className="tab-bar" role="tablist" aria-label="Report view"
-            onKeyDown={e => moveRovingFocus(e, '[role="tab"]')?.click()}>
-            {visibleTabs.map(t => (
-              <button key={t.key} type="button" role="tab" id={`cust-tab-${t.key}`}
-                aria-selected={tab === t.key} aria-controls={`cust-panel-${t.key}`}
-                tabIndex={rovingTabIndex(tab === t.key)}
-                className={`tab-btn${tab === t.key ? ' tab-btn--active' : ''}`} onClick={() => setTab(t.key)}>
-                {t.label}
+            <Tip text="Download every tab as a workbook, with the range and basis on each sheet.">
+              <button type="button" className="btn btn-ghost" onClick={onExport}
+                aria-disabled={exportBlock ? 'true' : undefined} aria-busy={exporting ? 'true' : undefined}>
+                Export Excel
               </button>
-            ))}
+            </Tip>
           </div>
+          <FieldError id="cust-report-to" message={backwardsMsg} />
+          <div role="status" aria-live="polite">
+            {exportAsked && exportBlock && <p className="page-footnote" style={{ marginTop: 0 }}>{exportBlock}</p>}
+          </div>
+          <ActionError error={exportError} />
         </div>
+      )}
+      loading={loading && !backwards}
+      error={backwards ? null : loadError}
+      onRetry={load}
+      empty={!backwards && !!report && report.customizablePlates === 0 && (data?.combos || []).length === 0}
+      emptyText="No dish with choices and no combo was sold in this range. Attach option groups to dishes on Option Groups → Dishes, or set up a combo, then check back after some bills."
+      filters={report && (
+        <>
+          {/* Print hides the tab buttons and the header controls, so the sheet names its own view. */}
+          <p className="print-only page-footnote" style={{ marginTop: 0 }}>Showing {tabLabel} · {scopeLine}.</p>
+          <Tabs idBase="cust" label="Report view" tabs={visibleTabs} active={tab} onChange={setTab} hasPanel className="no-print" />
+        </>
       )}
       stats={report && (
         <>
@@ -447,11 +751,11 @@ export default function CustomizationReport() {
             <div className="stat-value">{nprInt(report.customizablePlates)}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label"><Tip text="Of those plates, how many carried at least one choice — a pre-selected size counts, so a dish whose size is always chosen will read as 100%.">With a choice picked</Tip></div>
+            <div className="stat-label"><Tip text="Of those plates, how many carried at least one choice — a pre-selected size counts, so a dish whose size is always chosen will read as 100%. The change is in percentage points.">With a choice picked</Tip></div>
             <div className="stat-value">{pct(report.customizedShare)}</div>
             <div className="stat-sub">{nprInt(report.customizedPlates)} plates</div>
             <VsBefore now={report.customizedShare} then={data.prevReport?.customizedShare} label={`the ${rangeDays} days before`}
-              format={pct} opts={{ floor: 0.02 }} />
+              format={pct} opts={{ floor: 0.02 }} points />
           </div>
           <div className="stat-card">
             <div className="stat-label"><Tip text="What paid add-ons and larger sizes added to bills: every choice priced above the dish, ex-VAT and before bill discounts. Comped plates add nothing.">Extras earned</Tip></div>
@@ -464,14 +768,16 @@ export default function CustomizationReport() {
             <div className="stat-value">{negative(report.sizeAdjustments)}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label"><Tip text="The choice guests asked for most. Sizes are left out — a size is answered on every plate of a dish that has one, not added — and so are 'No …' requests.">Most added</Tip></div>
-            <div className="stat-value" style={{ fontSize: 18 }}>{top ? top.option_name : '—'}</div>
+            <div className="stat-label"><Tip text={'The choice guests asked for most. Sizes are left out (a size is answered on every plate of a dish that has one, not added), and so are "No …" requests.'}>Most added</Tip></div>
+            <div className="stat-value" style={{ fontSize: 18, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+              title={top ? top.option_name : undefined}>{top ? top.option_name : '—'}</div>
             {top && <div className="stat-sub">{nprInt(top.picks)} plates</div>}
             {onlySizes && <div className="stat-sub">Only sizes were picked</div>}
           </div>
           <div className="stat-card">
-            <div className="stat-label"><Tip text="The 'No …' request guests made most — a removal on the plate, which the kitchen has to remember. The Removals tab has it dish by dish.">Most removed</Tip></div>
-            <div className="stat-value" style={{ fontSize: 18 }}>{report.removals[0] ? report.removals[0].option_name : '—'}</div>
+            <div className="stat-label"><Tip text={`The "No …" request guests made most: a removal on the plate, which the kitchen has to remember. The ${REMOVALS_TAB_LABEL} tab has it dish by dish.`}>Most removed</Tip></div>
+            <div className="stat-value" style={{ fontSize: 18, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+              title={report.removals[0] ? report.removals[0].option_name : undefined}>{report.removals[0] ? report.removals[0].option_name : '—'}</div>
             {report.removals[0] && <div className="stat-sub">{nprInt(report.removals[0].picks)} plates</div>}
           </div>
         </div>
@@ -486,45 +792,52 @@ export default function CustomizationReport() {
           <div className="dash-row" style={{ marginTop: 16 }}>
             <ChartCard
               title="Share customized, week by week — top dishes"
+              headingLevel={2}
               legend={<span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>
-                {data.weekly.dishes.map((d, i) => <span key={d.recipe_id} style={{ marginRight: 10 }}><span style={{ color: CHART_COLORS[i % CHART_COLORS.length] }}>━</span> {d.name}</span>)}
+                {data.weekly.dishes.map((d, i) => <span key={d.recipe_id} style={{ marginRight: 10, whiteSpace: 'nowrap' }}><LineSwatch i={i} /> {d.name}</span>)}
               </span>}
               footer={<div style={{ fontSize: 12, color: 'var(--theme-text2)', marginTop: 8 }}>
                 {data.weekly.drops.length > 0
                   ? data.weekly.drops.map(d => (
-                    <div key={d.recipe_id} role="status"><span style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>▼ {d.name}</span> fell from {d.from}% to {d.to}% of plates customized last week — check the choice is still offered and the staff are asking.</div>
+                    <div key={d.recipe_id}><span style={{ color: 'var(--theme-amber-text)', fontWeight: 600 }}>▼ {d.name}</span> fell from {d.from}% to {d.to}% of plates customized in the week ending {lastWeekLabel}, {Math.round((d.from - d.to) * 10) / 10} points below the week before. Check the choice is still offered and the staff are asking.</div>
                   ))
-                  : <>No top dish fell by {TREND_DROP_POINTS} points or more last week.</>}
-                <div style={{ color: 'var(--theme-text3)', marginTop: 4 }}>Weeks end on the date shown. A week with fewer than {TREND_MIN_PLATES} plates of a dish leaves a gap rather than a figure.</div>
+                  : <>No top dish fell by {TREND_DROP_POINTS} points or more in the week ending {lastWeekLabel}.</>}
+                <div style={{ color: 'var(--theme-text3)', marginTop: 4 }}>Weeks end on the date shown. A week with fewer than {TREND_MIN_PLATES} plates of a dish leaves a gap rather than a figure. Expand the chart for the figures as a table.</div>
               </div>}
               renderChart={h => (
-                <ResponsiveContainer width="100%" height={h}>
-                  <LineChart data={data.weekly.rows.map((r, k) => ({ ...r, label: bsSlash(data.weekly.weekEnds[k]) }))} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={MUTED} strokeOpacity={0.2} vertical={false} />
-                    <XAxis dataKey="label" tick={{ fill: MUTED, fontSize: 11 }} />
-                    <YAxis domain={[0, 100]} tick={{ fill: MUTED, fontSize: 11 }} width={40} tickFormatter={v => `${v}%`} />
-                    <RTooltip
-                      contentStyle={{ ...TOOLTIP_CHROME, fontSize: 12, color: 'var(--theme-text1)' }}
-                      labelStyle={{ color: 'var(--theme-text1)' }} itemStyle={{ color: 'var(--theme-text1)' }}
-                      labelFormatter={l => `Week ending ${l}`}
-                      formatter={(v, name) => [v == null ? 'too few plates' : `${v}%`, name]}
-                    />
-                    {data.weekly.dishes.map((d, i) => (
-                      <Line key={d.recipe_id} dataKey={d.recipe_id} name={d.name} type="monotone" stroke={CHART_COLORS[i % CHART_COLORS.length]}
-                        strokeWidth={2} dot={{ r: 3 }} connectNulls={false} {...chartMotion()} />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
+                <>
+                  <ResponsiveContainer width="100%" height={h}>
+                    <LineChart data={data.weekly.rows.map((r, k) => ({ ...r, label: bsSlash(data.weekly.weekEnds[k]) }))} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={MUTED} strokeOpacity={0.2} vertical={false} />
+                      <XAxis dataKey="label" tick={{ fill: MUTED, fontSize: 11 }} />
+                      <YAxis domain={[0, 100]} tick={{ fill: MUTED, fontSize: 11 }} width={40} tickFormatter={v => `${v}%`} />
+                      <RTooltip
+                        contentStyle={{ ...TOOLTIP_CHROME, fontSize: 12, color: 'var(--theme-text1)' }}
+                        labelStyle={{ color: 'var(--theme-text1)' }} itemStyle={{ color: 'var(--theme-text1)' }}
+                        labelFormatter={l => `Week ending ${l}`}
+                        formatter={(v, name) => [v == null ? 'too few plates' : `${v}%`, name]}
+                      />
+                      {data.weekly.dishes.map((d, i) => (
+                        <Line key={d.recipe_id} dataKey={d.recipe_id} name={d.name} type="monotone" stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                          strokeDasharray={LINE_DASHES[i % LINE_DASHES.length] || undefined}
+                          strokeWidth={2} dot={{ r: 3 }} connectNulls={false} {...chartMotion()} />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                  {/* The expanded view carries the figures as a table: the chart's text alternative. */}
+                  {h > 200 && <WeeklyTable weekly={data.weekly} />}
+                </>
               )}
             />
           </div>
         )}
         </>
       )}
-      footnote={<p className="page-subtitle" style={{ margin: '12px 0 0' }}>{scopeLine}.</p>}
+      // On screen the scope reads here; in print the `.print-only` line above the table carries it.
+      footnote={report && <p className="page-footnote no-print">{scopeLine}.</p>}
     >
       {report && (
-        <div role="tabpanel" id={`cust-panel-${tab}`} aria-labelledby={`cust-tab-${tab}`}>
+        <TabPanel idBase="cust" active={tab}>
           {tab === 'popular' && (
             <div className="table-wrap">
               <table className="data-table">
@@ -538,10 +851,10 @@ export default function CustomizationReport() {
                 <tbody>
                   {popularRows.map(o => (
                     <tr key={o.key}>
-                      <td><span style={{ whiteSpace: 'nowrap' }}>{o.option_name}</span></td>
+                      <td>{o.option_name}</td>
                       <td>{o.group_name}</td>
-                      <td style={{ textAlign: 'right' }}>{nprInt(o.picks)}</td>
-                      <td style={{ textAlign: 'right' }}>{o.is_removal ? '—' : signed(o.charged)}</td>
+                      <td style={FIG}>{nprInt(o.picks)}</td>
+                      <td style={FIG}>{o.is_removal ? '—' : signed(o.charged)}</td>
                       <td><DishList dishes={o.dishes} /></td>
                     </tr>
                   ))}
@@ -563,10 +876,10 @@ export default function CustomizationReport() {
                 <tbody>
                   {dishRows.map(d => (
                     <tr key={d.recipe_id}>
-                      <td><span style={{ whiteSpace: 'nowrap' }}>{d.name}</span></td>
-                      <td style={{ textAlign: 'right' }}>{nprInt(d.plates)}</td>
-                      <td style={{ textAlign: 'right' }}>{nprInt(d.customizedPlates)}</td>
-                      <td style={{ textAlign: 'right' }}>{pct(d.share)}</td>
+                      <td>{d.name}</td>
+                      <td style={FIG}>{nprInt(d.plates)}</td>
+                      <td style={FIG}>{nprInt(d.customizedPlates)}</td>
+                      <td style={FIG}>{pct(d.share)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -589,10 +902,10 @@ export default function CustomizationReport() {
                     <tbody>
                       {removalRows.map(r => (
                         <tr key={`${r.recipe_id}|${r.option_name}`}>
-                          <td><span style={{ whiteSpace: 'nowrap' }}>{r.dish}</span></td>
+                          <td>{r.dish}</td>
                           <td>{r.option_name}</td>
-                          <td style={{ textAlign: 'right' }}>{nprInt(r.picks)}</td>
-                          <td style={{ textAlign: 'right' }}>{pct(r.dishPlates ? r.picks / r.dishPlates : null)}</td>
+                          <td style={FIG}>{nprInt(r.picks)}</td>
+                          <td style={FIG}>{pct(r.dishPlates ? r.picks / r.dishPlates : null)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -611,19 +924,19 @@ export default function CustomizationReport() {
                     <SortTh label="Combo" sortKey="name" sort={sort} onSort={toggleSort} />
                     <SortTh label="Sold" tip="Combos on paid bills in the range: each combo once, at its quantity. Comped combos are counted too." sortKey="sold" sort={sort} onSort={toggleSort} numeric />
                     <SortTh label="Revenue" tip="What its dishes were charged, ex-VAT. A bill discount never touches a combo, so this is after discounts too. Comped dishes add nothing." sortKey="revenue" sort={sort} onSort={toggleSort} numeric />
-                    <SortTh label="Per combo" tip="Revenue ÷ the combos that were charged. Above the combo's own price when guests pick dishes or choices that cost extra." sortKey="perCombo" sort={sort} onSort={toggleSort} numeric />
-                    <th><Tip text="Each pick's dishes by how many plates guests chose, and their share of that pick.">What guests picked</Tip></th>
+                    <SortTh label="Per combo" tip="Revenue ÷ the combos that were charged. Above the price of the combo itself when guests pick dishes or choices that cost extra." sortKey="perCombo" sort={sort} onSort={toggleSort} numeric />
+                    <th><Tip text="The dishes of each pick by how many plates guests chose, and their share of that pick.">What guests picked</Tip></th>
                   </tr></thead>
                   <tbody>
                     {comboRows.map(c => (
                       <tr key={c.combo_id || c.name}>
                         <td>{c.name}</td>
                         <td style={{ textAlign: 'right' }}>
-                          {nprInt(c.sold)}
-                          {c.comped > 0 && <div className="stat-sub" style={{ marginTop: 2 }}>{nprInt(c.comped)} comped</div>}
+                          <span style={NOWRAP}>{nprInt(c.sold)}</span>
+                          {c.comped > 0 && <span className="cell-sub">{nprInt(c.comped)} comped</span>}
                         </td>
-                        <td style={{ textAlign: 'right' }}>{npr(Math.round(c.revenue))}</td>
-                        <td style={{ textAlign: 'right' }}>{c.perCombo == null ? '—' : npr(Math.round(c.perCombo))}</td>
+                        <td style={FIG}>{npr(Math.round(c.revenue))}</td>
+                        <td style={FIG}>{c.perCombo == null ? '—' : npr(Math.round(c.perCombo))}</td>
                         <td>
                           {c.picks.map(g => (
                             <div key={g.group_id || g.name}>
@@ -642,59 +955,88 @@ export default function CustomizationReport() {
 
           {tab === 'margin' && imsOn && (
             costError ? (
-              <p role="alert" className="action-error">The stock lines or item rates could not be read, so choice costs are not shown. The other tabs are unaffected — reload to try again.</p>
+              <div>
+                <ActionError error={costError} />
+                <button type="button" className="btn btn-ghost" style={{ marginTop: 12 }} onClick={load}>Try again</button>
+              </div>
             ) : marginSorted.length === 0 ? (
               <p className="empty-state">No choice with stock lines was picked in this range. Add stock lines to a choice in Option Groups to see its cost here.</p>
             ) : (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead><tr>
-                    <SortTh label="Choice" sortKey="option_name" sort={sort} onSort={toggleSort} />
-                    <SortTh label="Charged / plate" tip="Average price this choice added per plate, ex-VAT, at the price each bill charged. A free 'first N' pick or a comped plate lowers it below the list price." sortKey="chargedPerPick" sort={sort} onSort={toggleSort} numeric />
-                    <SortTh label="Cost / plate" tip="Each plate's own stock lines for this choice as they were on its bill (a Large bowl's bigger portion included), valued at today's item rates and averaged. Plates billed before the choice had stock lines are left out." sortKey="costPerPick" sort={sort} onSort={toggleSort} numeric />
-                    <SortTh label="Margin / plate" tip="Charged minus cost. A choice that was free on every bill is shown in grey — its cost belongs to the dish, not to an upsell." sortKey="margin" sort={sort} onSort={toggleSort} numeric />
-                    <SortTh label="Times picked" sortKey="picks" sort={sort} onSort={toggleSort} numeric />
-                  </tr></thead>
-                  <tbody>
-                    {marginSorted.map(o => {
-                      // S809 3o (REPORTS-12): only when some plates WERE free picks or comped, against
-                      // the list price as billed. A price change since is not a free pick.
-                      const belowList = (o.freePicks > 0 || o.compedPicks > 0)
-                        && o.listPriceDelta != null && o.listPriceDelta > 0 && o.chargedPerPick < o.listPriceDelta - 0.005
-                      const whyLess = [
-                        o.freePicks > 0 ? `${nprInt(o.freePicks)} were inside the group's "first N free"` : null,
-                        o.compedPicks > 0 ? `${nprInt(o.compedPicks)} were comped` : null,
-                      ].filter(Boolean).join(' and ')
-                      return (
-                        <tr key={o.key}>
-                          <td><span style={{ whiteSpace: 'nowrap' }}>{o.option_name}</span></td>
-                          <td style={{ textAlign: 'right' }}>
-                            {signed(o.chargedPerPick)}
-                            {belowList && (
-                              <div className="stat-sub" style={{ marginTop: 2 }}>
-                                <Tip text={`Billed at a list price of ${signed(o.listPriceDelta)} a plate on average. Of ${nprInt(o.picks)} plates, ${whyLess} — those paid nothing for it.`}>{o.freePicks > 0 ? 'incl. free picks' : 'incl. comped plates'}</Tip>
-                              </div>
-                            )}
-                          </td>
-                          <td style={{ textAlign: 'right' }}>
-                            {o.costPerPick == null ? <Tip text="No stock lines on this choice.">—</Tip> : npr(Math.round(o.costPerPick))}
-                            {o.costPerPick != null && o.costedPicks < o.picks && (
-                              <div className="stat-sub" style={{ marginTop: 2 }}>
-                                <Tip text="The other plates were billed before this choice had stock lines, so they carry none and are left out of the average.">over {nprInt(o.costedPicks)} of {nprInt(o.picks)} plates</Tip>
-                              </div>
-                            )}
-                          </td>
-                          {marginCell(o)}
-                          <td style={{ textAlign: 'right' }}>{nprInt(o.picks)}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                {/* Below 600px this list shows and the table hides: Margin, the figure the tab
+                    exists for, fell past a 360px screen edge in the five-column table. */}
+                <ul className="phone-cards phone-cards--no-fab phone-only" aria-label="Choice margin">
+                  {marginSorted.map(o => {
+                    const f = perPlateFigures(o)
+                    const basis = f.margin == null ? null : marginBasis(o)
+                    const color = basis ? 'var(--theme-text2)' : f.loss ? 'var(--theme-red-text)' : undefined
+                    return (
+                      <li key={o.key} className="phone-card">
+                        <div className="phone-card__top">
+                          <span className="phone-card__title">{o.option_name}</span>
+                          <span className="phone-card__figure" style={{ color }}>
+                            {f.margin == null ? '—' : `${signed2(f.margin)}${f.loss && !basis ? ' ▼' : ''}`}
+                          </span>
+                        </div>
+                        <div className="phone-card__meta">
+                          Margin a plate · charged {signed2(f.charged)} · cost {f.cost == null ? 'no stock lines' : nprExact(f.cost)} · {nprInt(o.picks)} plates
+                        </div>
+                        {basis && <div className="phone-card__meta">{BASIS_NOTE[basis]}, not a loss on an upsell.</div>}
+                      </li>
+                    )
+                  })}
+                </ul>
+                <div className="table-wrap phone-hide">
+                  <table className="data-table">
+                    <thead><tr>
+                      <SortTh label="Choice" sortKey="option_name" sort={sort} onSort={toggleSort} />
+                      <SortTh label="Charged / plate" tip={'Average price this choice added per plate, ex-VAT, at the price each bill charged, to the paisa. A free "first N" pick or a comped plate lowers it below the list price.'} sortKey="chargedPerPick" sort={sort} onSort={toggleSort} numeric />
+                      <SortTh label="Cost / plate" tip="The stock lines of each plate for this choice as they were on its bill (the bigger portion of a Large bowl included), valued at the item rates of today and averaged, to the paisa. Plates billed before the choice had stock lines are left out." sortKey="costPerPick" sort={sort} onSort={toggleSort} numeric />
+                      <SortTh label="Margin / plate" tip="Charged minus cost, as shown. A choice that was free on every bill is shown in grey: its cost belongs to the dish, not to an upsell." sortKey="margin" sort={sort} onSort={toggleSort} numeric />
+                      <SortTh label="Times picked" sortKey="picks" sort={sort} onSort={toggleSort} numeric />
+                    </tr></thead>
+                    <tbody>
+                      {marginSorted.map(o => {
+                        const f = perPlateFigures(o)
+                        // S809 3o (REPORTS-12): only when some plates WERE free picks or comped, against
+                        // the list price as billed. A price change since is not a free pick.
+                        const belowList = (o.freePicks > 0 || o.compedPicks > 0)
+                          && o.listPriceDelta != null && o.listPriceDelta > 0 && o.chargedPerPick < o.listPriceDelta - 0.005
+                        const whyLess = [
+                          o.freePicks > 0 ? `${nprInt(o.freePicks)} were inside the group "first N free"` : null,
+                          o.compedPicks > 0 ? `${nprInt(o.compedPicks)} were comped` : null,
+                        ].filter(Boolean).join(' and ')
+                        return (
+                          <tr key={o.key}>
+                            <td>{o.option_name}</td>
+                            <td style={{ textAlign: 'right' }}>
+                              <span style={NOWRAP}>{signed2(f.charged)}</span>
+                              {belowList && (
+                                <span className="cell-sub">
+                                  <Tip text={`Billed at a list price of ${signed2(o.listPriceDelta)} a plate on average. Of ${nprInt(o.picks)} plates, ${whyLess}: those paid nothing for it.`}>{o.freePicks > 0 ? 'incl. free picks' : 'incl. comped plates'}</Tip>
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              {f.cost == null ? <Tip text="No stock lines on this choice.">—</Tip> : <span style={NOWRAP}>{nprExact(f.cost)}</span>}
+                              {f.cost != null && o.costedPicks < o.picks && (
+                                <span className="cell-sub">
+                                  <Tip text="The other plates were billed before this choice had stock lines, so they carry none and are left out of the average.">over {nprInt(o.costedPicks)} of {nprInt(o.picks)} plates</Tip>
+                                </span>
+                              )}
+                            </td>
+                            {marginCell(o)}
+                            <td style={FIG}>{nprInt(o.picks)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )
           )}
-        </div>
+        </TabPanel>
       )}
     </ReportPage>
   )

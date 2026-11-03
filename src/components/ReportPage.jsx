@@ -22,7 +22,7 @@ import ReportLoadError from './ReportLoadError'
  * Slots, in render order: `banners` (provisional/warning callouts — shown in every state EXCEPT
  * error, see below), `stats`, `note` (the page's own basis/caveat prose), `filters`, body,
  * `footnote`. `children` is the content body and is reached only when the page has loaded, has
- * not failed, and is not empty.
+ * not failed, and is not empty. `onRetry` (S863) gives the could-not-load card a Try again button.
  */
 export default function ReportPage({
   title,
@@ -42,6 +42,7 @@ export default function ReportPage({
   note = null,
   filters = null,
   footnote = null,
+  onRetry,
   children,
 }) {
   if (noPeriod) return <NoPeriodState what={noPeriodWhat} />
@@ -86,7 +87,7 @@ export default function ReportPage({
           {loadingText}
         </p>
       ) : error ? (
-        <ReportLoadError error={error} />
+        <ReportLoadError error={error} onRetry={onRetry} />
       ) : empty ? (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="empty-state" style={{ padding: 32 }}>

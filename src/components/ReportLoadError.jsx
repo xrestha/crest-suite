@@ -23,20 +23,29 @@ import { errorInfo, isTimeoutError } from '../shared/errorText'
 // A READ that timed out wrote nothing, so the table's timeout sentence ("it is not known whether
 // this went through", worded for a save) does not fit here (S852). Same detail line either way.
 const READ_TIMEOUT_TEXT = 'The server took too long to answer, so this report could not be read. Check your connection, then reload the page.'
+const READ_TIMEOUT_RETRY_TEXT = 'The server took too long to answer, so this report could not be read. Check your connection, then try again.'
 
-export default function ReportLoadError({ error }) {
+// `onRetry` (S863) adds a Try again button and words the hint for it. A page whose own controls
+// stay on screen beside the card (a range it can shorten) passes it, so recovery is not a reload
+// that throws the reader's choices away. Without it the card reads exactly as before.
+export default function ReportLoadError({ error, onRetry }) {
   const info = errorInfo(error, 'operator')
-  const text = isTimeoutError(error) ? READ_TIMEOUT_TEXT : info.text
+  const timedOut = isTimeoutError(error)
+  const text = timedOut ? (onRetry ? READ_TIMEOUT_RETRY_TEXT : READ_TIMEOUT_TEXT) : info.text
   const { detail } = info
   return (
     <div className="card report-error" role="alert">
       <div className="report-error-title">Could not load this report</div>
       <p className="report-error-body">{text}</p>
       <p className="report-error-hint">
-        Nothing here is a real figure — this is a failed read, not an empty period. Reload the
-        page, and if it keeps happening send the detail below to support.
+        {onRetry
+          ? 'Nothing here is a real figure — this is a failed read, not an empty period. Try again, and if it keeps happening send the detail below to support.'
+          : 'Nothing here is a real figure — this is a failed read, not an empty period. Reload the page, and if it keeps happening send the detail below to support.'}
       </p>
       {detail && <p className="action-error-detail">{detail}</p>}
+      {onRetry && (
+        <button type="button" className="btn btn-ghost" style={{ marginTop: 12 }} onClick={onRetry}>Try again</button>
+      )}
     </div>
   )
 }
