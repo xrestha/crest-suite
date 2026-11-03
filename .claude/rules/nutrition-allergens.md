@@ -1,0 +1,48 @@
+---
+paths:
+  - "src/utils/nutrition.js"
+  - "src/modules/ims/nutrition/**"
+  - "src/shared/constants/allergen*.js"
+  - "src/components/AllergenTicks.jsx"
+  - "src/data/nutritionSeed.js"
+  - "src/modules/pos/guestmenu/GuestMenu.jsx"
+  - "src/modules/pos/guestmenu/GuestComboSheet.jsx"
+---
+
+# Nutrition and allergens: one list, a checked flag, two copies of the walk
+
+Nutrition and allergens live on the ingredient (`items.nutrition` jsonb) and roll up through
+recipes and sub-recipes. The editor (`NutritionEditorModal`) opens from a recipe's ingredient row
+and from Item Master; Item Master's Check allergens list (`AllergenReviewModal`) confirms many at
+once. Decisions and verification: CHANGELOG S870, S871.
+
+- **An allergen is one of the 14 keys in `src/shared/constants/allergens.js`, never free text.**
+  The guest filter compares strings exactly, which is why "dairy" and "milk" once split it.
+  `allergen_keys()` in SQL is the second copy of the synonym list; `allergens.test.js` reads the
+  S870 migration's VALUES block and fails when they differ, so a new synonym goes in both.
+- **The stored shape is a comma STRING** of keys, then unmatched words (`"gluten, milk, kiwi"`). An
+  array would break a cached bundle from before S870, which calls `.trim()` on it.
+- **Triggers normalise every write** (`items_nutrition_normalise`, `pos_options_normalise_allergens`),
+  because old bundles, `push_master_data` and a restore still write free text. A write WITHOUT
+  `allergens_checked` (an old bundle) keeps the item's allergens, checked state and piece weight.
+- **`allergens_checked` means a person looked.** The form and a Check allergens confirm set it; a
+  bulk fill (`mergeNutritionFill`: auto-fill, the USDA lookup) never does. An unmatched word forces
+  it false, in the app and in the trigger. Never infer it from "a record exists".
+- **`not_food`** (packaging, cleaning supplies) is checked and left out of a recipe's nutrition
+  data count. **`grams_per_unit`** converts an item counted in pieces when its figures are per GM
+  or ML; without it the item counts as missing data (`needsPieceWeight`), never one gram a piece.
+- **The roll-up exists twice: `src/utils/nutrition.js` and `_nutrition_item_contribution` /
+  `_nutrition_rollup` in SQL**, which the guest menu uses so a recipe's formulation never leaves the
+  database. Change one, change the other. A dish is allergen-complete only when it reaches at least
+  one ingredient, every one is checked, and no sub-recipe is missing or loops. The JS walk keys
+  items on `recipe_ingredients.item_id`, because Recipes joins items without their id.
+- **The guest menu's allergen warning follows the PLAN** (`_guest_allergen_check_on`: Growth, Pro or
+  the `nutrition_facts` flag, like `planHasFeature`). The nutrient FIGURES still follow the flag
+  alone. An incomplete dish says "Allergen info incomplete, please ask staff" and drops out under
+  any allergen filter; a combo pick offers only dishes that pass (`comboDishAllowed`).
+- **Check allergens guesses from the NAME** (`allergenSuggest.js`): whole words and phrases, longest
+  first and using up their words. Never route a guess through the nutrition library's loose match
+  (OAT MILK matched Buffalo milk). A row marked Check the label is never confirmed on a guess,
+  alone or in Confirm all; packaging is suggested as Not food only when no allergen word matched.
+- Known gaps: a choice's allergens do not feed the dish filter; `push_master_data` copies HQ's
+  checked state over a branch's (IMS_TODO).

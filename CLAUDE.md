@@ -116,6 +116,7 @@ Each file loads on its own when you open a matching path. Read it first when pla
 | IMS figures: COGS, food-cost bands, on-hand/par | `.claude/rules/ims-figures.md` |
 | Item master, purchases, base-unit rates | `.claude/rules/item-master-rates.md` |
 | Recipes and sub-recipe mirror items | `.claude/rules/recipes-and-subrecipes.md` |
+| Nutrition, allergens, the guest allergen warning | `.claude/rules/nutrition-allergens.md` |
 | Vendors, payables, supplier reports | `.claude/rules/vendor-payables.md` |
 | Period close and locked periods | `.claude/rules/closed-periods.md` |
 | Report pages | `.claude/rules/report-pages.md` |

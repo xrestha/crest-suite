@@ -1140,6 +1140,18 @@ same ground is not re-walked; full detail in README S652/S653/S654.
   submit, Back closes a sheet, "Order again" restores the refused dishes. Full reasoning in the S767
   changelog entry.
 
+- [x] ~~The guest menu trusts allergens nobody checked~~ — **shipped S870–S871, 2026-11-03, decided by
+  Aashish in plain words.** Allergens were free text, so the filter missed "dairy" when a guest hid
+  "milk", and an ingredient nobody had looked at read as allergen-free. Owner decisions: (1) one list,
+  the UK/EU 14, for ingredients and choices; (2) an ingredient counts as checked once someone saves
+  its form, and existing records counted, except live USDA lookups; (3) on a Growth or Pro guest menu
+  (by plan, like the app, after the flag-only gate turned out to reach nobody) a dish with an
+  unchecked ingredient or no ingredients says "Allergen info incomplete, please ask staff" and hides
+  under any allergen filter; Starter menus unchanged, calories still behind the flag; (4) Crest
+  guesses allergens from each ingredient's name and a person confirms, with Not food for packaging.
+  Migrations `20261103120000`, `20261103130000`, `20261103140000`. Rules:
+  `.claude/rules/nutrition-allergens.md`.
+
 - [x] ~~An arrival nobody is told about~~ — **shipped S763, 2026-09-16, reported by Aashish from
   the IMS module.** A test guest order came in from the QR menu and nothing sounded or appeared.
   The code was correct: `loadPendingGuestOrders` lives inside `PosOrders.jsx` and polls only while

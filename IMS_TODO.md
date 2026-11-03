@@ -6,6 +6,14 @@ them sits the S793 load-time backlog (PERF-n), from measuring the module on a sl
 
 **When an item here ships, strike it in the same commit and move it to the CHANGELOG entry.**
 
+**S870–S871 (2026-11-03) allergens, left open on purpose** (rules: `.claude/rules/nutrition-allergens.md`):
+- A choice's allergens ("+ cheese") do not feed the guest menu's dish filter; only its own line shows them.
+- `push_master_data` copies HQ's `items.nutrition` whole, so HQ's checked state overwrites a branch's own check.
+- The Check allergens guess reads words exactly, so a misspelling goes unguessed ("ICE CREAN" gave tree nuts and
+  no milk). A person still confirms every row; add a spelling to `allergenSuggest.js` when one turns up.
+- Owner follow-up, not code: check BLOOM CAFE's and CASA's ingredients in Check allergens, enter piece weights on
+  the 11 piece-counted items, and tick Mustard on mustard oil ingredients filled before S870.
+
 **S855 (2026-10-21): every S853 "Build next" item below shipped in one release (crest-v470)**: PERF-2, PERF-3 and
 PERF-4, the stock-count device screen, Budget vs Actual's open-month line, unsaved dish photos, and the Owner Report
 supplier split (the aging half was already fixed in S849). PERF-5 stayed open.
