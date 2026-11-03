@@ -95,7 +95,7 @@ describe('ComboPickerModal', () => {
       dishGroupsOf={rid => (rid === 'r-momo-v' ? dishGroups : undefined)}
       catalog={{ optionsById: Object.fromEntries(dishGroups[0].options.map(o => [o.id, o])), groupsById: { 'grp-size': size } }}
       onConfirm={onConfirm} onClose={jest.fn()} />)
-    expect(screen.getByRole('button', { name: 'Choices for Veg Momo' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Change choices for Veg Momo' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Add to order' }))
     expect(onConfirm).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent('Choose 1 more from Size for Veg Momo.')
@@ -105,8 +105,8 @@ describe('ComboPickerModal', () => {
     // since the combo window behind it keeps its own Quantity group.
     // S863: Add takes the waiter to the Choices button of the dish that needs one, not to the
     // section's first chip (a selector list answers in document order).
-    expect(screen.getByRole('button', { name: 'Choices for Veg Momo' })).toHaveFocus()
-    fireEvent.click(screen.getByRole('button', { name: 'Choices for Veg Momo' }))
+    expect(screen.getByRole('button', { name: 'Change choices for Veg Momo' })).toHaveFocus()
+    fireEvent.click(screen.getByRole('button', { name: 'Change choices for Veg Momo' }))
     const inner = screen.getByRole('dialog', { name: /Veg Momo \(in Momo Combo\)/ })
     expect(within(inner).queryByRole('group', { name: 'Quantity' })).not.toBeInTheDocument()
     expect(within(inner).queryByRole('button', { name: /One more/ })).not.toBeInTheDocument()
@@ -390,6 +390,37 @@ describe('OptionPickerModal prices (S863, owner decision)', () => {
     fireEvent.click(same)
     expect(screen.getByRole('radio', { name: /Half/ })).toHaveAttribute('aria-checked', 'true')
     expect(screen.queryByRole('button', { name: /Same as last/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('OptionPickerModal full group (S867)', () => {
+  const extras = { id: 'grp-x', name: 'Extras', kind: 'addon', sort: 0, included_count: 0 }
+  const groups = [{
+    group: extras, attachment: { group_id: 'grp-x', sort: 0 }, rule: { min: 0, max: 2, included: 0 },
+    options: [
+      { id: 'o-egg', group_id: 'grp-x', name: 'Egg', price_delta: 30, sort: 0 },
+      { id: 'o-cheese', group_id: 'grp-x', name: 'Cheese', price_delta: 40, sort: 1 },
+      { id: 'o-ham', group_id: 'grp-x', name: 'Ham', price_delta: 50, sort: 2 },
+    ],
+  }]
+  const catalog = {
+    optionsById: Object.fromEntries(groups[0].options.map(o => [o.id, o])),
+    groupsById: { 'grp-x': extras },
+  }
+
+  test('a full chip stays in the Tab order and its press says why nothing was added', () => {
+    render(<OptionPickerModal recipe={{ id: 'r-momo-v', name: 'Veg Momo', selling_price: 200 }}
+      dishGroups={groups} catalog={catalog} initialIds={['o-egg', 'o-cheese']} onConfirm={jest.fn()} onClose={jest.fn()} />)
+    const ham = screen.getByRole('checkbox', { name: /Ham/ })
+    expect(ham).not.toBeDisabled()
+    expect(ham).toHaveAttribute('aria-disabled', 'true')
+    expect(ham).toHaveTextContent('Max 2')
+    fireEvent.click(ham)
+    expect(ham).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByRole('status')).toHaveTextContent('Up to 2 from Extras. Untick one to choose another.')
+    fireEvent.click(screen.getByRole('checkbox', { name: /Egg/ }))
+    expect(screen.queryByText(/Untick one to choose another/)).not.toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: /Ham/ })).not.toHaveAttribute('aria-disabled')
   })
 })
 

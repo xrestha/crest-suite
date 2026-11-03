@@ -134,7 +134,7 @@ export default function MenuPricing() {
     checking: customizationOn && !optionCatalog && !choicesReadFailed,
   })
   const belowZeroRefusal = (name, below) =>
-    `“${name}” — not saved. ${belowZeroText(below)}, and the till refuses a dish priced below zero. Raise the price, or change its choices in Option Groups first.`
+    `“${name}” — not saved. ${belowZeroText(below)}, and the till refuses a dish priced below zero. Raise the price, or change its choices in Choice Groups first.`
   // A failed catalog read is not "no choices" (S835): the link says only Choices until a read lands.
   const choicesLabel = r => (choiceNames[r.id]?.length ? choiceNames[r.id].join(' · ') : choicesReadFailed ? 'Choices' : 'Add choices')
   const choicesColor = r => (choiceNames[r.id]?.length ? 'var(--theme-accent-ink)' : 'var(--theme-text3)')
@@ -769,7 +769,7 @@ export default function MenuPricing() {
                       {customizationOn && (
                         <>
                           {' · '}
-                          <Tip text="The option groups (size, extras, spice…) this item offers, in order. Groups are built on Customization → Option Groups." width={260}>
+                          <Tip text="The choice groups (size, extras, spice…) this item offers, in order. Groups are built on Choices → Choice Groups." width={260}>
                             <button onClick={() => setCustomizeFor(r)} aria-label={`Choices for ${r.name}`} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: choicesColor(r), textDecoration: 'underline' }}>
                               {choicesLabel(r)}
                             </button>
@@ -1202,7 +1202,7 @@ export default function MenuPricing() {
                         {customizationOn && (
                           <>
                             {' · '}
-                            <Tip text="The option groups (size, extras, spice…) this dish offers, in order. Groups are built on Customization → Option Groups." width={260}>
+                            <Tip text="The choice groups (size, extras, spice…) this dish offers, in order. Groups are built on Choices → Choice Groups." width={260}>
                               <button className="no-print" onClick={() => setCustomizeFor(r)} aria-label={`Choices for ${r.name}`} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11, color: choicesColor(r), textDecoration: 'underline' }}>
                                 {choicesLabel(r)}
                               </button>

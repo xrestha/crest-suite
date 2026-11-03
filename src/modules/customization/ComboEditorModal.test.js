@@ -24,13 +24,14 @@ function renderEditor(initial, props = {}) {
 
 afterEach(() => jest.clearAllMocks())
 
-it('shows each pick\'s part of the price and saves the contract payload', async () => {
+it('shows the share of the price each part takes, and saves the contract payload', async () => {
   supabase.rpc.mockResolvedValue({ data: 'new-combo-id', error: null })
   const { onSaved } = renderEditor(prefillFromDishes(['veg', 'coke'], 300, recipeById))
   // Weighed 226 : 113 (each dish on its own, VAT included), so two thirds and one third of 300.
   expect(screen.getByText('NPR 200')).toBeInTheDocument()
   expect(screen.getByText('NPR 100')).toBeInTheDocument()
-  expect(screen.getByText(/comes to NPR 339/)).toBeInTheDocument()
+  // 226 + 113 = 339 on their own, against 300 for the combo.
+  expect(screen.getByText('A guest who takes the cheapest dish in every part saves NPR 39 against ordering them on their own.')).toBeInTheDocument()
   expect(screen.getByText(/Set meal/)).toBeInTheDocument()
   expect(screen.getByText(/not sold alone/)).toBeInTheDocument()
 
@@ -53,7 +54,7 @@ it('refuses to save an empty combo and says what is missing', () => {
   expect(supabase.rpc).not.toHaveBeenCalled()
   expect(screen.getByText(/Give the combo a name/)).toBeInTheDocument()
   expect(screen.getByText(/Type what the guest pays/)).toBeInTheDocument()
-  expect(screen.getByText(/Add at least one pick/)).toBeInTheDocument()
+  expect(screen.getByText(/Add at least one part/)).toBeInTheDocument()
   expect(screen.getByLabelText('Name')).toHaveFocus()
 })
 
@@ -136,10 +137,53 @@ it('Save stays pressable while it writes, and a second press sends nothing more'
   expect(supabase.rpc).toHaveBeenCalledTimes(1)
 })
 
-it('the Picks heading is named "Picks", with its Tip beside it rather than inside', () => {
+it('the Parts heading is named "Parts", with its Tip beside it rather than inside', () => {
   renderEditor(prefillFromDishes(['veg'], 200, recipeById))
-  expect(screen.getByRole('heading', { name: 'Picks' })).toBeInTheDocument()
-  expect(screen.getByText('About picks')).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Parts' })).toBeInTheDocument()
+  expect(screen.getByText('About parts')).toBeInTheDocument()
+})
+
+// S867 word list: a slot the guest fills is a part, never a pick.
+it('calls each slot a part: its label, its section and the add button', () => {
+  renderEditor(prefillFromDishes(['veg', 'coke'], 300, recipeById))
+  expect(screen.getByRole('textbox', { name: 'Part 1' })).toHaveValue('Momo')
+  expect(screen.getByRole('region', { name: 'Part 2' })).toHaveTextContent('Coke')
+  expect(screen.getByRole('button', { name: '+ Add a part' })).toBeInTheDocument()
+  expect(screen.queryByText(/\bPick \d|Add a pick|^Picks$/)).toBeNull()
+})
+
+// S867: the line under the price says whether the combo is a deal, to the paisa, against the cheapest
+// dish of every part ordered on its own (Veg Momo 226 + Coke 113 = 339, VAT included).
+describe('whether the combo is a deal', () => {
+  const at = price => prefillFromDishes(['veg', 'coke'], price, recipeById)
+
+  it('says what guests save when the combo costs less, with no warning mark', () => {
+    renderEditor(at(338.5))
+    expect(screen.getByText('A guest who takes the cheapest dish in every part saves NPR 0.50 against ordering them on their own.')).toBeInTheDocument()
+    expect(screen.queryByText(/△ A guest/)).toBeNull()
+  })
+
+  it('warns with the △ mark when the combo costs more', () => {
+    renderEditor(at(350))
+    expect(screen.getByText('△ A guest who takes the cheapest dish in every part pays NPR 11 more than ordering them on their own.')).toBeInTheDocument()
+  })
+
+  it('says so when the price is the same', () => {
+    renderEditor(at(339))
+    expect(screen.getByText('Same price as ordering the cheapest dish in every part on its own.')).toBeInTheDocument()
+    expect(screen.queryByText(/△ A guest/)).toBeNull()
+  })
+
+  it('follows the price as it is typed', () => {
+    renderEditor(at(300))
+    fireEvent.change(screen.getByLabelText(/Price the guest pays/), { target: { value: '339.01' } })
+    expect(screen.getByText(/pays NPR 0\.01 more/)).toBeInTheDocument()
+  })
+
+  it('says nothing while a part has no dish with a menu price', () => {
+    renderEditor(at(300), { dishes: dishes.map(d => (d.id === 'coke' ? { ...d, guestPrice: 0 } : d)) })
+    expect(screen.queryByText(/saves NPR|pays NPR|Same price/)).toBeNull()
+  })
 })
 
 // S863: ids were built from the category name with [a-z0-9] kept, so every Devanagari category came
@@ -152,4 +196,18 @@ it('names each category of the dish picker after itself, Devanagari names includ
   render(<ComboDishPicker pickName="Pick one" dishes={nepali} chosen={[]} onClose={() => {}} onDone={() => {}} />)
   expect(screen.getByRole('region', { name: 'मःम' })).toHaveTextContent('Buff Momo')
   expect(screen.getByRole('region', { name: 'पेय' })).toHaveTextContent('Lassi')
+})
+
+// S867: a dish name wraps rather than being cut off with a title a touch screen never shows.
+it('lets a long dish name wrap in the dish picker, and calls an unnamed slot this part', () => {
+  const long = 'Chicken Momo (Steamed, with Jhol Achar and Sesame)'
+  const list = [{ id: 'm1', name: long, category: 'Momo', guestPrice: 226, is_active: true, pos_enabled: false }]
+  render(<ComboDishPicker pickName="" dishes={list} chosen={[]} onClose={() => {}} onDone={() => {}} />)
+  const name = screen.getByText(long)
+  expect(name).not.toHaveAttribute('title')
+  expect(name.style.whiteSpace).not.toBe('nowrap')
+  expect(name.style.textOverflow).toBe('')
+  expect(screen.getByRole('dialog', { name: 'Dishes in “this part”' })).toBeInTheDocument()
+  expect(screen.getByText(/Tick every dish a guest may choose for this part/)).toBeInTheDocument()
+  expect(screen.getByText('not sold alone')).toBeInTheDocument()
 })

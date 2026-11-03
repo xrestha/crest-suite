@@ -1,7 +1,7 @@
 import {
   isComboDish, emptyCombo, emptyPick, newPickItem, assembleCombos, pickSummary, isSetMeal,
   editorFromCombo, prefillFromDishes, moveItem, setDefault, setPickDishes, validateCombo,
-  comboPayload, comboForShares, sameEditorState,
+  comboPayload, comboForShares, sameEditorState, comboDeal,
 } from './comboEditor'
 import { comboShares } from './comboPricing'
 
@@ -152,12 +152,12 @@ describe('validateCombo', () => {
   it('passes a complete combo', () => {
     expect(validateCombo(validState(), { recipeOf }).ok).toBe(true)
   })
-  it('names the combo name, price and missing picks', () => {
+  it('names the combo name, price and missing parts', () => {
     const v = validateCombo({ ...emptyCombo(), price: '0' }, { recipeOf })
     expect(v.ok).toBe(false)
     expect(v.name).toMatch(/name/)
     expect(v.price).toMatch(/more than 0/)
-    expect(v.picks).toMatch(/at least one pick/)
+    expect(v.picks).toMatch(/at least one part/)
     expect(validateCombo({ ...validState(), price: '' }, { recipeOf }).price).toMatch(/Type what the guest pays/)
     expect(validateCombo({ ...validState(), price: 'abc' }, { recipeOf }).price).toMatch(/more than 0/)
   })
@@ -166,7 +166,7 @@ describe('validateCombo', () => {
     expect(v.ok).toBe(false)
     expect(v.name).toMatch(/already a combo/)
   })
-  it('flags an unnamed pick, a repeated pick name and an empty pick, on that pick', () => {
+  it('flags an unnamed part, a repeated part name and an empty part, on that part', () => {
     const s = validState()
     s.picks.push({ ...emptyPick(), key: 'p3', name: 'pick a MOMO ' })
     s.picks.push({ ...emptyPick(), key: 'p4', name: '', items: [newPickItem('coke')] })
@@ -174,7 +174,9 @@ describe('validateCombo', () => {
     expect(v.ok).toBe(false)
     expect(v.pickName.p3).toMatch(/already called/)
     expect(v.pickDishes.p3).toMatch(/at least one dish/)
-    expect(v.pickName.p4).toMatch(/Name pick 4/)
+    expect(v.pickName.p4).toMatch(/Name part 4/)
+    expect(v.pickName.p4).not.toMatch(/pick/i)
+    expect(v.pickName.p3).toBe('Another part is already called “pick a MOMO”. Give each part its own name.')
   })
   it('flags a dish that left the menu, two defaults, and a negative extra charge', () => {
     const s = validState()
@@ -198,6 +200,44 @@ describe('comboForShares', () => {
   })
   it('reads an unparseable price as 0', () => {
     expect(comboForShares(validState({ price: 'x' })).guest_price).toBe(0)
+  })
+})
+
+// S867: the line under the price. Guest prices as the page builds them (selling price with VAT,
+// unrounded): Veg Momo 226, Chicken Momo 271.20, Coke 113.
+describe('comboDeal', () => {
+  const guestOf = id => (byId.get(id)?.selling_price || 0) * 1.13
+
+  it('says what guests save, against the cheapest dish of every part, to the paisa', () => {
+    const d = comboDeal(validState({ price: '338.5' }), guestOf)
+    expect(d).toMatchObject({ kind: 'saves', amount: 0.5 })
+    expect(d.text).toBe('A guest who takes the cheapest dish in every part saves NPR 0.50 against ordering them on their own.')
+  })
+  it('names how much more a guest pays when the combo costs more', () => {
+    const d = comboDeal(validState({ price: '350' }), guestOf)
+    expect(d).toMatchObject({ kind: 'costs_more', amount: 11 })
+    expect(d.text).toBe('△ A guest who takes the cheapest dish in every part pays NPR 11 more than ordering them on their own.')
+  })
+  it('says the price is the same when it matches to the paisa', () => {
+    expect(comboDeal(validState({ price: '339' }), guestOf)).toEqual({
+      kind: 'same', amount: 0, text: 'Same price as ordering the cheapest dish in every part on its own.',
+    })
+    expect(comboDeal(validState({ price: '339.01' }), guestOf).kind).toBe('costs_more')
+  })
+  it('adds the extra charge of the cheapest dish, which that guest also pays', () => {
+    const s = validState({ price: '330' })
+    s.picks[0].items[0].extra = '20' // Veg Momo, the cheapest momo, at +20
+    expect(comboDeal(s, guestOf)).toMatchObject({ kind: 'costs_more', amount: 11 })
+  })
+  it('weighs only priced dishes, and says nothing when a part has none or the price is not set', () => {
+    const s = validState({ price: '300' })
+    s.picks[1].items.push({ key: 'd', recipe_id: 'papad', extra: '', is_default: false })
+    expect(comboDeal(s, guestOf)).toMatchObject({ kind: 'saves', amount: 39 })
+    s.picks[1].items = [{ key: 'd', recipe_id: 'papad', extra: '', is_default: false }]
+    expect(comboDeal(s, guestOf)).toBeNull()
+    expect(comboDeal(validState({ price: '' }), guestOf)).toBeNull()
+    expect(comboDeal(validState({ price: '0' }), guestOf)).toBeNull()
+    expect(comboDeal(validState({ picks: [] }), guestOf)).toBeNull()
   })
 })
 

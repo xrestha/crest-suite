@@ -22,11 +22,12 @@ import ComboEditorModal from './ComboEditorModal'
 
 // Crest Customization release 2 (S839, docs/pos-combos.md) — Combos.
 //
-// A combo is sold at one price and is made of picks, each one dish from a short list. Each dish of a
-// sold combo is its own bill line carrying a share of the price, so it prints at its own station,
-// takes its own stock and counts as that dish in every report; the bill prints the combo as one line.
+// A combo is sold at one price and is made of picks ("parts" on screen since S867), each one dish
+// from a short list. Each dish of a sold combo is its own bill line carrying a share of the price, so
+// it prints at its own station, takes its own stock and counts as that dish in every report; the bill
+// prints the combo as one line.
 //
-// Who: the same set as Option Groups — admin, the Owner, a POS manager or an IMS manager, tested on
+// Who: the same set as Choice Groups — admin, the Owner, a POS manager or an IMS manager, tested on
 // the raw pos_role / ims_role columns as OptionGroups.jsx does. save_pos_combo refuses everyone else
 // (option_edit_rank), so the guard here only keeps a page from offering a save that will fail.
 //
@@ -40,6 +41,8 @@ import ComboEditorModal from './ComboEditorModal'
 
 const READ_TIMEOUT_MS = 20000
 const WRITE_TIMEOUT_MS = 20000
+
+const PAGE_SUBTITLE = 'Sell dishes together at one price — a set meal, or a deal where the guest picks one dish from each list.'
 
 export default function Combos() {
   const { isAdmin, isOwner, profile, clientId, clientModules } = useAuth()
@@ -134,6 +137,21 @@ export default function Combos() {
   // ── Guard, after every hook ──
   if (!canEdit) return <Navigate to="/dashboard" replace />
 
+  // Only a Crest admin reaches this with no client selected. The loader reads nothing then, so the
+  // page sat on "Loading…" under the off-for-this-client banner (S867): say what to do instead, and
+  // show nothing that is about one client.
+  if (!clientId) {
+    return (
+      <div className="page-container">
+        <div className="page-header">
+          <h1 className="page-title">Combos</h1>
+          <p className="page-subtitle">{PAGE_SUBTITLE}</p>
+        </div>
+        <div className="empty-state">No client is selected. Pick a client in the top bar to see its combos.</div>
+      </div>
+    )
+  }
+
   const flash = text => setNotice(text)
   const nameOf = id => recipeById.get(id)?.name
 
@@ -180,7 +198,7 @@ export default function Combos() {
       body: (
         <>
           <p style={{ margin: '0 0 8px' }}>
-            It leaves the till and the QR guest menu at once, with its {n} pick{n === 1 ? '' : 's'}. Bills already rung keep the combo and its dishes exactly as they were sold, and reports still count them.
+            It leaves the till and the QR guest menu at once, with its {n} part{n === 1 ? '' : 's'}. Bills already rung keep the combo and its dishes exactly as they were sold, and reports still count them.
           </p>
           <p style={{ margin: 0, color: 'var(--theme-text2)' }}>To stop selling it for now without losing it, use Hide instead.</p>
         </>
@@ -219,9 +237,7 @@ export default function Combos() {
       <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Combos</h1>
-          <p className="page-subtitle">
-            Sell dishes together at one price — a set meal, or a deal where the guest picks one dish from each list.
-          </p>
+          <p className="page-subtitle">{PAGE_SUBTITLE}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Fab label="+ New combo" onClick={openNew} show={!loading && !loadError} />
@@ -247,7 +263,7 @@ export default function Combos() {
         <div className="empty-state">
           <p style={{ margin: '0 0 8px' }}>No combos yet.</p>
           <p style={{ margin: 0, color: 'var(--theme-text2)' }}>
-            A combo sells dishes together at one price. Make a <strong>set meal</strong> (Thali Set: dal, rice, tarkari — every pick one dish) or a <strong>pick-your-own deal</strong> (Momo Combo, NPR 350: pick a momo, pick a drink, Chicken +50). Each dish still goes to its own kitchen, takes its own stock and counts as that dish in every report. Press <strong>+ New combo</strong> to make the first one.
+            A combo sells dishes together at one price. Make a <strong>set meal</strong> (Thali Set: dal, rice, tarkari — every part one dish) or a <strong>pick-your-own deal</strong> (Momo Combo, NPR 350: pick a momo, pick a drink, Chicken +50). Each dish still goes to its own kitchen, takes its own stock and counts as that dish in every report. Press <strong>+ New combo</strong> to make the first one.
           </p>
         </div>
       ) : (
@@ -260,7 +276,7 @@ export default function Combos() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <h2 id={`combo-${c.id}`} style={{ margin: 0, fontSize: 16, color: c.is_active ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{c.name}</h2>
                   {setMeal && (
-                    <Tip width={260} text="Every pick has one dish, so the till adds the whole combo in one tap." style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
+                    <Tip width={260} text="Every part has one dish, so the till adds the whole combo in one tap." style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
                       <span className="badge-gray">Set meal</span>
                     </Tip>
                   )}
@@ -282,7 +298,7 @@ export default function Combos() {
                   </div>
                 </div>
                 <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--theme-text2)' }}>
-                  {c.groups.length ? pickSummary(c.groups) : 'No picks'}
+                  {c.groups.length ? pickSummary(c.groups) : 'No parts'}
                 </p>
                 {c.description && <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-text3)' }}>{c.description}</p>}
                 {trouble && <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--theme-amber-text)' }}>{trouble}</p>}

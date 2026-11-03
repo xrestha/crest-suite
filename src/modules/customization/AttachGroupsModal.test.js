@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import AttachGroupsModal from './AttachGroupsModal'
 
 jest.mock('../../supabaseClient', () => ({ supabase: {} }))
@@ -111,4 +112,22 @@ it('S863: a second press while saving writes once', async () => {
   fireEvent.click(save)
   await waitFor(() => expect(onSaved).toHaveBeenCalledWith(2))
   expect(mockUpserts).toHaveLength(1)
+})
+
+it('S867: with no choice groups yet, the Choice Groups page is a link that also closes the dialog', async () => {
+  mockCatalog.mockResolvedValue({ error: null, groups: [], options: [], attachments: [], ingredients: [], buildYourOwn: [] })
+  const onClose = jest.fn()
+  render(<MemoryRouter><AttachGroupsModal recipe={momo} onClose={onClose} onSaved={() => {}} /></MemoryRouter>)
+  const link = await screen.findByRole('link', { name: 'Choice Groups' })
+  expect(link).toHaveAttribute('href', '/customization/groups')
+  expect(screen.getByText(/^No choice groups yet\. Create one on the/)).toHaveTextContent('No choice groups yet. Create one on the Choice Groups page first, for example “Size” or “Extras”.')
+  fireEvent.click(link)
+  expect(onClose).toHaveBeenCalled()
+})
+
+it('S867: a group with nothing in it says "No choices in this group yet"', async () => {
+  mockCatalog.mockResolvedValue({ error: null, groups: [extras], options: [], attachments: [], ingredients: [], buildYourOwn: [] })
+  render(<AttachGroupsModal recipe={momo} onClose={() => {}} onSaved={() => {}} />)
+  expect(await screen.findByText('No choices in this group yet')).toBeInTheDocument()
+  expect(screen.getByText(/^Tick the choice groups this dish offers/)).toBeInTheDocument()
 })

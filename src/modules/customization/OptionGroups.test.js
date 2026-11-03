@@ -5,10 +5,10 @@ jest.mock('../../supabaseClient', () => ({ supabase: {} }))
 
 let mockAuth = null
 jest.mock('../../context/AuthContext', () => ({ useAuth: () => mockAuth }))
-jest.mock('../../context/SettingsContext', () => {
-  const SETTINGS = { loading: false, settingsLoadError: null, settingsClientId: 'c1', settings: { is_vat_registered: true } }
-  return { useSettings: () => SETTINGS }
-})
+// One object per test, so the page sees a stable settings row until a test swaps it (S867).
+const SETTLED = { loading: false, settingsLoadError: null, settingsClientId: 'c1', settings: { is_vat_registered: true } }
+let mockSettings = SETTLED
+jest.mock('../../context/SettingsContext', () => ({ useSettings: () => mockSettings }))
 
 // Writes record what they were asked to do and wait on `mockHold`, so a test can look at the page
 // while a move is in flight.
@@ -32,8 +32,18 @@ jest.mock('../../shared/hooks/useScopedDb', () => {
       }
       return q
     },
-    scopedDelete: () => chain('x'),
-    scopedInsert: () => Promise.resolve({ data: null, error: null }),
+    scopedDelete: table => {
+      const q = {
+        eq: (_col, id) => { q.id = id; return q },
+        select: () => {
+          mockWrites.push({ table, deleted: q.id })
+          return Promise.resolve({ data: [{ id: q.id }], error: null })
+        },
+      }
+      return q
+    },
+    // The insert hands back the row it wrote, as scopedInsert's .select() does.
+    scopedInsert: (table, row) => Promise.resolve({ data: [{ id: 'g-new', ...row }], error: null }),
     scopedUpsert: () => Promise.resolve({ data: null, error: null }),
   }
   return { useScopedDb: () => db }
@@ -76,6 +86,7 @@ const momo = { id: 'd1', name: 'Veg Momo', category: 'Momo', selling_price: 200,
 
 beforeEach(() => {
   mockAuth = { isAdmin: false, isOwner: true, profile: {}, clientId: 'c1', clientModules: { ims: false, customization: true } }
+  mockSettings = SETTLED
   mockRecipes = [momo]
   mockHold = null
   mockWrites.length = 0
@@ -161,4 +172,132 @@ it('S863: the Dishes tab button for a dish with no choices is named for its visi
   render(<OptionGroups />)
   fireEvent.click(await screen.findByRole('tab', { name: /^Dishes/ }))
   expect(screen.getByRole('button', { name: 'Add choices for Veg Momo' })).toHaveTextContent('Add choices')
+})
+
+// ── S867 ──
+
+const groupOf = (id, name, kind, extra = {}) => ({
+  id, name, kind, min_select: kind === 'addon' ? 0 : 1, max_select: kind === 'addon' ? null : 1,
+  included_count: 0, is_active: true, sort: 0, size_scaling: 'none', ...extra,
+})
+
+it('S867: each card wears its next step as its one primary button, and a Size group goes on its dishes first', async () => {
+  mockCatalog.mockResolvedValueOnce({
+    error: null,
+    groups: [groupOf('gs', 'Size', 'size'), groupOf('g1', 'Extras', 'addon'), groupOf('gp', 'Spice', 'choice')],
+    // Extras has a choice and a dish; Size and Spice have neither.
+    options: [opt('o1', 'Extra cheese', 0)],
+    attachments: [{ id: 'a1', recipe_id: 'd1', group_id: 'g1', sort: 0 }],
+    ingredients: [],
+    buildYourOwn: [],
+  })
+  render(<OptionGroups />)
+  await screen.findByRole('heading', { name: 'Size' })
+
+  // Size, on no dish and with no sizes: its dishes come first.
+  const size = within(screen.getByRole('region', { name: 'Size' }))
+  expect(size.getByRole('button', { name: 'Put it on dishes' })).toHaveClass('btn-primary')
+  expect(size.getByRole('button', { name: '+ Choice' })).toHaveClass('btn-ghost')
+  expect(size.getByText('Not on any dish')).toHaveClass('badge-amber')
+
+  // Any other kind with nothing in it: its choices come first.
+  const spice = within(screen.getByRole('region', { name: 'Spice' }))
+  expect(spice.getByText('Preference')).toBeInTheDocument()
+  expect(spice.getByRole('button', { name: '+ Choice' })).toHaveClass('btn-primary')
+  expect(spice.getByRole('button', { name: 'Put it on dishes' })).toHaveClass('btn-ghost')
+
+  // A group with both has no step left, so no accent and no amber badge.
+  const extras = within(screen.getByRole('region', { name: 'Extras' }))
+  expect(extras.getByRole('button', { name: '+ Choice' })).toHaveClass('btn-ghost')
+  expect(extras.getByRole('button', { name: 'Put it on dishes' })).toHaveClass('btn-ghost')
+  expect(extras.queryByText('Not on any dish')).not.toBeInTheDocument()
+  expect(extras.getByText('On 1 dish')).toBeInTheDocument()
+
+  // The header add button is the shared Fab, and the card list keeps the phone clearance.
+  expect(screen.getByRole('button', { name: '+ New Group' })).toHaveClass('fab')
+  expect(screen.getByRole('region', { name: 'Extras' }).parentElement).toHaveClass('fab-clear') // eslint-disable-line testing-library/no-node-access
+})
+
+it('S867: a ticket name that only repeats the choice is not shown under it', async () => {
+  mockCatalog.mockResolvedValueOnce(catalogOf([
+    opt('o1', 'Regular', 0, { kitchen_name: ' regular ' }),
+    opt('o2', 'Large', 1, { kitchen_name: 'LG' }),
+  ]))
+  render(<OptionGroups />)
+  await screen.findByRole('button', { name: 'Move Large up' })
+  expect(screen.queryByText(/^Ticket:\s*regular$/i)).not.toBeInTheDocument()
+  expect(screen.getByText('Ticket: LG')).toBeInTheDocument()
+})
+
+it('S867: "first N free" is explained on the rule, not in a paragraph on the card', async () => {
+  mockCatalog.mockResolvedValueOnce({ ...catalogOf([opt('o1', 'Granola', 0)]), groups: [{ ...extras, max_select: 3, included_count: 2 }] })
+  render(<OptionGroups />)
+  const rule = await screen.findByText('Optional · up to 3 · first 2 free')
+  fireEvent.focus(rule.closest('.tip-trigger')) // eslint-disable-line testing-library/no-node-access
+  expect(screen.getByRole('tooltip')).toHaveTextContent(/^The first 2 choices a guest makes are free: the earliest in this list among what they picked, not the cheapest\./)
+  expect(screen.queryByText(/The first 2 picks/)).not.toBeInTheDocument()
+})
+
+it('S867: with no client picked, the page says so instead of loading for good, and shows neither banner', async () => {
+  mockAuth = { ...mockAuth, isAdmin: true, isOwner: false, clientId: null, clientModules: { ims: false, customization: false } }
+  mockSettings = { loading: false, settingsLoadError: null, settingsClientId: null, settings: {} }
+  render(<OptionGroups />)
+  expect(screen.getByRole('heading', { name: 'Choice Groups' })).toBeInTheDocument()
+  expect(screen.getByText('No client selected. Pick a client in the top-left switcher to see its choice groups.')).toBeInTheDocument()
+  expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
+  expect(screen.queryByText(/Crest Customization is off/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/cannot be saved right now/)).not.toBeInTheDocument()
+  expect(mockCatalog).not.toHaveBeenCalled()
+})
+
+it('S867: "Choices cannot be saved" waits for this client’s settings, and shows when that read failed', async () => {
+  mockCatalog.mockResolvedValue(catalogOf([opt('o1', 'First', 0)]))
+  // A client switch: the row on hand is still the previous client's, so the mode is not known yet.
+  mockSettings = { ...SETTLED, settingsClientId: 'c0' }
+  const { rerender } = render(<OptionGroups />)
+  await screen.findByRole('button', { name: 'Edit First' })
+  expect(screen.queryByText(/cannot be saved right now/)).not.toBeInTheDocument()
+
+  // This client's read came back as a failure: now it is a fact worth a banner.
+  mockSettings = { ...SETTLED, settingsLoadError: { message: 'boom' } }
+  rerender(<OptionGroups />)
+  expect(screen.getByText('Choices cannot be saved right now.')).toBeInTheDocument()
+})
+
+it('S867: a new Size group is told to go on its dishes first, and the one + New Group is the empty state’s', async () => {
+  mockCatalog.mockResolvedValue({ ...catalogOf([]), groups: [], attachments: [] })
+  render(<OptionGroups />)
+  await screen.findByText('No choice groups yet.')
+  expect(screen.getByText('Put a Size group on its dishes before you add its sizes, so each size takes its full menu price.')).toBeInTheDocument()
+  const adds = screen.getAllByRole('button', { name: '+ New Group' })
+  expect(adds).toHaveLength(1)
+  expect(adds[0]).toHaveClass('btn-primary')
+  expect(adds[0]).not.toHaveClass('fab')
+
+  fireEvent.click(adds[0])
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Portion' } })
+  fireEvent.click(screen.getByRole('radio', { name: /^Size/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Create group' }))
+  expect(await screen.findByText('“Portion” was created. Put it on its dishes first, so each size takes its full menu price.')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Put it on dishes →' }))
+  expect(await screen.findByRole('dialog', { name: 'Offer “Portion” on…' })).toBeInTheDocument()
+})
+
+it('S867: a new group of any other kind is told to add its choices', async () => {
+  mockCatalog.mockResolvedValue({ ...catalogOf([]), groups: [], attachments: [] })
+  render(<OptionGroups />)
+  fireEvent.click(await screen.findByRole('button', { name: '+ New Group' }))
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Extras' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Create group' }))
+  expect(await screen.findByText('“Extras” was created. Now add its choices with + Choice.')).toBeInTheDocument()
+})
+
+it('S867: deleting a choice says it was deleted', async () => {
+  mockCatalog.mockResolvedValue(catalogOf([opt('o1', 'Regular', 0)]))
+  render(<OptionGroups />)
+  fireEvent.click(await screen.findByRole('button', { name: 'More for Regular' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Delete…' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Delete choice' }))
+  expect(await screen.findByText('“Regular” was deleted.')).toBeInTheDocument()
+  expect(mockWrites).toContainEqual({ table: 'pos_options', deleted: 'o1' })
 })

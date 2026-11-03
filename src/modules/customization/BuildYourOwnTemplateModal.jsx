@@ -94,7 +94,7 @@ export default function BuildYourOwnTemplateModal({ dishes, buildYourOwn = [], g
 
         <div className="form-field" style={{ margin: 0 }}>
           <label htmlFor="byo-prefix">
-            <Tip width={300} text="Group names must be different from each other, so each group is named after the dish. Change it now if you want shorter names on the Groups page; to rename a group later, use Edit group, because running the template again adds new groups rather than renaming these. Guests see the name too, so keep it readable.">Name the groups after</Tip>
+            <Tip width={300} text="Group names must be different from each other, so each group is named after the dish. Change it now if you want shorter names on the Choice Groups page; to rename a group later, use Edit group, because running the template again adds new groups rather than renaming these. Guests see the name too, so keep it readable.">Name the groups after</Tip>
           </label>
           <input id="byo-prefix" value={prefix} onChange={ev => setPrefix(ev.target.value)} maxLength={60}
             placeholder={dish?.name || 'The dish name'} {...fieldAria('byo-prefix', errors.prefix)} />

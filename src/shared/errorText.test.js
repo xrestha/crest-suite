@@ -1037,7 +1037,7 @@ describe('S862: removal hints and the below-zero choice save', () => {
 
   it('a below-zero save is a sentence on either audience, never the fallback', () => {
     expect(errorText(below, 'staff')).toMatch(/less than nothing/)
-    expect(errorText(below, 'staff')).toMatch(/Option Groups/)
+    expect(errorText(below, 'staff')).toMatch(/Choice Groups/)
     expect(errorText(below, 'operator')).toMatch(/less than nothing/)
     expect(errorText(below, 'staff')).not.toMatch(/isn.t one we recognise/)
   })

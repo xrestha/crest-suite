@@ -53,7 +53,7 @@ it('SETUP-1: a save that does not touch the price leaves price_delta out', async
   expect(screen.getByLabelText(/Extra charge/)).toHaveValue(68)
   fireEvent.click(screen.getByRole('button', { name: /More details/ }))
   fireEvent.click(screen.getByLabelText(/Pre-selected/))
-  fireEvent.click(screen.getByRole('button', { name: 'Save option' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save choice' }))
   await waitFor(() => expect(onSaved).toHaveBeenCalled())
   const [write] = mockWrites
   expect(write.row.is_default).toBe(true)
@@ -72,7 +72,7 @@ it('SETUP-1: a typed full price is measured from the dish price to the paisa', a
   const box = screen.getByLabelText(/Price of this size/)
   expect(box).toHaveValue(316)
   fireEvent.change(box, { target: { value: '320' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Save option' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save choice' }))
   await waitFor(() => expect(onSaved).toHaveBeenCalled())
   // (320 − 271.20) / 1.13, where the rupee base gave (320 − 271) / 1.13 = 43.36.
   expect(mockWrites[0].row.price_delta).toBe(43.19)
@@ -82,7 +82,7 @@ it('SETUP-5: an emptied full-price box is a field error, not a free size', () =>
   renderOption({ group: cupSize, option: null, dishes: [latte, cappuccino], catalog: cupCatalog })
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Small' } })
   fireEvent.change(screen.getByLabelText(/Price of this size/), { target: { value: '' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Add option' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Add choice' }))
   expect(screen.getByText('Type what this size costs.')).toBeInTheDocument()
   expect(mockWrites).toHaveLength(0)
 })
@@ -95,7 +95,7 @@ it('SETUP-3: unticking Shown asks first when it leaves a dish with nothing to pi
   const { onSaved } = renderOption({ group: sauce, option: chilli, catalog: sauceCatalog })
   fireEvent.click(screen.getByRole('button', { name: /More details/ }))
   fireEvent.click(screen.getByLabelText(/Shown on the till/))
-  fireEvent.click(screen.getByRole('button', { name: 'Save option' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save choice' }))
   expect(await screen.findByText('Nothing would be left to pick in “Sauce”, so Latte would be ordered without it.')).toBeInTheDocument()
   expect(mockWrites).toHaveLength(0)
   fireEvent.click(screen.getByRole('button', { name: 'Save and hide it' }))
@@ -118,7 +118,7 @@ it('SETUP-7: a stock line on a hidden item shows that item, labelled, with its u
 it('SETUP-10: a stock line changed on another device is reported, not said to be saved', async () => {
   mockAnswer.pos_option_ingredients = { data: [], error: null }
   const { onSaved } = renderOption({ group: extras, option: extraShot, catalog: extrasCatalog, ingredients: butterLine, itemChoices: choices, imsEnabled: true })
-  fireEvent.click(screen.getByRole('button', { name: 'Save option' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save choice' }))
   await waitFor(() => expect(onSaved).toHaveBeenCalled())
   const [, opts] = onSaved.mock.calls[0]
   expect(opts.keepOpen).toBe(true)
@@ -129,7 +129,7 @@ it('SETUP-10: a stock line changed on another device is reported, not said to be
 // aria-busy, and turns a second press away itself.
 it('Save stays pressable while it writes, and a second press sends nothing more', async () => {
   const { onSaved } = renderOption({ group: extras, option: extraShot, catalog: extrasCatalog })
-  const save = screen.getByRole('button', { name: 'Save option' })
+  const save = screen.getByRole('button', { name: 'Save choice' })
   fireEvent.click(save)
   expect(save).toHaveAttribute('aria-busy', 'true')
   expect(save).not.toBeDisabled()
@@ -141,7 +141,7 @@ it('Save stays pressable while it writes, and a second press sends nothing more'
 
 it('while the VAT basis is unknown, Save is aria-disabled and its press goes to the note that says why', () => {
   renderOption({ group: extras, option: extraShot, catalog: extrasCatalog, vatUnknown: true })
-  const save = screen.getByRole('button', { name: 'Save option' })
+  const save = screen.getByRole('button', { name: 'Save choice' })
   expect(save).not.toBeDisabled()
   expect(save).toHaveAttribute('aria-disabled', 'true')
   expect(save).toHaveAccessibleDescription(/Nothing can be saved here yet/)
@@ -172,7 +172,7 @@ it('a stock line names its picker, and an item and an amount that are wrong each
   renderOption({ group: extras, option: extraShot, catalog: extrasCatalog, itemChoices: choices, imsEnabled: true })
   fireEvent.click(screen.getByRole('button', { name: /Stock per plate/ }))
   fireEvent.click(screen.getByRole('button', { name: '+ Add ingredient line' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Save option' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save choice' }))
   expect(mockWrites).toHaveLength(0)
 
   const picker = screen.getByRole('button', { name: /^Line 1: ingredient: / })
@@ -185,7 +185,7 @@ it('a stock line names its picker, and an item and an amount that are wrong each
 it('an amount alone is flagged on the amount box, not on the item picker', () => {
   renderOption({ group: extras, option: extraShot, catalog: extrasCatalog, ingredients: [{ ...butterLine[0], item_id: 'cheese' }], itemChoices: choices, imsEnabled: true })
   fireEvent.change(screen.getByLabelText(/^Line 1: amount/), { target: { value: '0' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Save option' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save choice' }))
   expect(screen.getByRole('button', { name: /^Line 1: ingredient: CHEESE/ })).not.toHaveAttribute('aria-describedby')
   expect(screen.getByLabelText(/^Line 1: amount/)).toHaveAccessibleDescription('Enter an amount above zero.')
   expect(screen.queryByText('Choose an item.')).toBeNull()
@@ -218,5 +218,69 @@ describe('a size result below zero', () => {
     fireEvent.change(screen.getByLabelText(/Price difference from the dish/), { target: { value: '-90.43' } })
     expect(screen.getByText(/Kids Momo: NPR 90 → a few paisa below NPR 0/)).toBeInTheDocument()
     expect(screen.queryByText(/−NPR 0|NPR −0/)).toBeNull()
+  })
+})
+
+// S867: before a Size group is on a dish its box is a difference from the dish, and an owner
+// copying "Full 400" off the menu stored +400. The label and an amber line say which number it wants.
+describe('a Size choice in a group on no dish yet', () => {
+  const noDishCatalog = { groups: [cupSize], options: [], attachments: [] }
+
+  it('asks for the difference, not the menu price, with a worked example tied to the box', async () => {
+    const { onSaved } = renderOption({ group: cupSize, option: null, dishes: [], catalog: noDishCatalog })
+    expect(screen.getByRole('dialog', { name: 'New choice in Cup size' })).toBeInTheDocument()
+    const box = screen.getByLabelText('Price difference from the dish (incl. VAT), not the menu price')
+    const hint = screen.getByText(/^△ This group is on no dish yet, so this box is the difference, not the menu price/)
+    expect(hint).toHaveTextContent('for Full at NPR 400 on a NPR 250 dish, type 150. Put the group on its dishes first to type the full menu price of each size instead.')
+    expect(box).toHaveAttribute('aria-describedby', 'opt-price-hint')
+    expect(box).toHaveAccessibleDescription(/This group is on no dish yet/)
+    expect(screen.queryByText(/Put this group on a dish to enter the full price/)).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Full' } })
+    fireEvent.change(box, { target: { value: '150' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add choice' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    // Stored as the difference, before VAT: 150 / 1.13.
+    expect(mockWrites[0].row.price_delta).toBe(132.74)
+  })
+
+  it('is not shown once the group is on a dish', () => {
+    renderOption({ group: cupSize, option: large, dishes: [latte, cappuccino], catalog: cupCatalog })
+    expect(screen.queryByText(/This group is on no dish yet/)).toBeNull()
+    expect(screen.getByLabelText(/Price of this size/)).not.toHaveAttribute('aria-describedby')
+  })
+})
+
+it('S867: the VAT line reads as a plain label, its explanation in the Tip', () => {
+  renderOption({ group: extras, option: extraShot, catalog: extrasCatalog })
+  expect(screen.getByRole('dialog', { name: 'Edit choice — Extra Shot' })).toBeInTheDocument()
+  expect(screen.getByText('Includes 13% VAT')).toBeInTheDocument()
+  expect(screen.queryByText(/how a no-VAT dish charges it/)).toBeNull()
+})
+
+// S867: only build-your-own dishes (and groups set to scale with the size) use a size's portion.
+describe('the Portion field', () => {
+  it('is hidden when nothing scales with the size, and the save sends no portion', async () => {
+    const { onSaved } = renderOption({ group: cupSize, option: large, dishes: [latte, cappuccino], catalog: cupCatalog })
+    expect(screen.queryByLabelText(/Portion/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Save choice' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(mockWrites[0].row).not.toHaveProperty('portion_factor')
+  })
+
+  it('shows when the client has a build-your-own dish', () => {
+    renderOption({ group: cupSize, option: large, dishes: [latte, cappuccino], catalog: { ...cupCatalog, buildYourOwn: ['latte'] } })
+    expect(screen.getByLabelText(/Portion/)).toBeInTheDocument()
+  })
+
+  it('shows when a group scales with the size', () => {
+    const toppings = { ...extras, size_scaling: 'stock' }
+    renderOption({ group: cupSize, option: large, dishes: [latte, cappuccino], catalog: { ...cupCatalog, groups: [cupSize, toppings] } })
+    expect(screen.getByLabelText(/Portion/)).toBeInTheDocument()
+  })
+
+  it('shows when this size already has a portion, so a saved value is never out of sight', () => {
+    renderOption({ group: cupSize, option: { ...large, portion_factor: 1.5 }, dishes: [latte, cappuccino], catalog: cupCatalog })
+    expect(screen.getByLabelText(/Portion/)).toHaveValue('1.5')
   })
 })

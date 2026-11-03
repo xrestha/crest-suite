@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
 import Modal from '../../components/Modal'
 import ActionError from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
@@ -94,6 +94,12 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
   const twoSizes = useMemo(
     () => otherSizesText(group, dishes.filter(d => picked.has(d.id)), catalog.attachments, catalog.groups),
     [group, dishes, picked, catalog],
+  )
+  // S867: a Size group's shown sizes, for the price line under each ticked dish. The catalog reads
+  // them in the till's own order (sort, name, id), and a hidden size is not offered, so it is left out.
+  const sizes = useMemo(
+    () => (group.kind === 'size' ? catalog.options.filter(o => o.group_id === group.id && o.is_active) : []),
+    [group, catalog.options],
   )
 
   const toggle = id => { setEmptyPress(false); setPicked(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n }) }
@@ -206,17 +212,39 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
                 <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--theme-text3)' }}>{on} of {list.length}</span>
               </label>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(220px, 100%), 1fr))', gap: 4, paddingLeft: 24 }}>
-                {list.map(d => (
-                  <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, minHeight: 32, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={picked.has(d.id)} onChange={() => toggle(d.id)} />
-                    {/* The name wraps (S863): cut off at one line, "Chicken Momo (Steam…" and "(Fried…" read the same. */}
-                    <span style={{ flex: 1, minWidth: 0, overflowWrap: 'break-word' }}>{d.name}</span>
-                    <span style={{ fontSize: 11, color: 'var(--theme-text3)', textAlign: 'right' }}>
-                      {d.inclPrice > 0 && <span style={{ whiteSpace: 'nowrap' }}>{npr(d.inclPrice)}</span>}
-                      {!d.pos_enabled && <span style={{ whiteSpace: 'nowrap' }}>{d.inclPrice > 0 ? ' · ' : ''}not on POS</span>}
-                    </span>
-                  </label>
-                ))}
+                {list.map(d => {
+                  const prices = picked.has(d.id) ? sizePrices(d, sizes) : null
+                  const pricesId = `atd-sizes-${d.id}`
+                  return (
+                    <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, minHeight: 32, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={picked.has(d.id)} onChange={() => toggle(d.id)}
+                        aria-describedby={prices ? pricesId : undefined} />
+                      {/* The name wraps (S863): cut off at one line, "Chicken Momo (Steam…" and "(Fried…" read the same. */}
+                      <span style={{ flex: 1, minWidth: 0, overflowWrap: 'break-word' }}>
+                        {d.name}
+                        {/* S867: what each size will ring on this dish, so a full menu price typed as a
+                            difference (Full doubled) shows before Save. Kept out of the checkbox name
+                            (aria-hidden) and read as its description instead; it wraps between sizes. */}
+                        {prices && (
+                          <span id={pricesId} aria-hidden="true" style={{ display: 'block', fontSize: 12, color: 'var(--theme-text2)' }}>
+                            {prices.map((s, i) => (
+                              <Fragment key={s.id}>
+                                {i > 0 && ' · '}{s.name}{' '}
+                                <span style={{ whiteSpace: 'nowrap', color: s.incl < -0.0001 ? 'var(--theme-red-text)' : undefined }}>
+                                  {s.incl < -0.0001 ? belowZeroAmount(s.incl) : npr(Math.max(0, s.incl))}
+                                </span>
+                              </Fragment>
+                            ))}
+                          </span>
+                        )}
+                      </span>
+                      <span style={{ fontSize: 11, color: 'var(--theme-text3)', textAlign: 'right' }}>
+                        {d.inclPrice > 0 && <span style={{ whiteSpace: 'nowrap' }}>{npr(d.inclPrice)}</span>}
+                        {!d.pos_enabled && <span style={{ whiteSpace: 'nowrap' }}>{d.inclPrice > 0 ? ' · ' : ''}not on POS</span>}
+                      </span>
+                    </label>
+                  )
+                })}
               </div>
             </section>
           )
@@ -224,7 +252,7 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
       </div>
       {belowZero.length > 0 && (
         <p role="alert" className="field-error" style={{ margin: '12px 0 0' }}>
-          {belowZeroText(belowZero)}, and the till refuses a dish priced below zero. Untick {belowZero.length === 1 ? 'it' : 'them'}, or change the option’s price first.
+          {belowZeroText(belowZero)}, and the till refuses a dish priced below zero. Untick {belowZero.length === 1 ? 'it' : 'them'}, or change the prices in this group first.
         </p>
       )}
       {droppedBelow.length > 0 && (
@@ -252,6 +280,16 @@ export default function AttachToDishesModal({ group, dishes, attachments, catalo
       </div>
     </Modal>
   )
+}
+
+// S867: each size's price on one dish as the guest pays it, or null for a dish with no price yet
+// (its sizes would read as the differences alone). The dish price plus the size's difference, both
+// at the dish's own VAT rate: the ratio dishesBelowZero turns its lowest price into a guest price with.
+function sizePrices(dish, sizes) {
+  const sp = Number(dish.selling_price) || 0
+  if (!sizes.length || !(sp > 0) || !(dish.inclPrice > 0)) return null
+  const rate = dish.inclPrice / sp
+  return sizes.map(o => ({ id: o.id, name: o.name, incl: (sp + (Number(o.price_delta) || 0)) * rate }))
 }
 
 // "Veg Momo can reach NPR −20", "… and Kids Momo can reach NPR −5", then "and 3 more".

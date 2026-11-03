@@ -2,6 +2,10 @@
  * The Customization Report (S863): the range controls stay mounted while the report loads and
  * after a failed read, a backwards range is refused before any read, and the per-plate margin is
  * shown to the paisa with the loss decided on the figure as shown.
+ *
+ * S867: a count of one plate says "plate", the trend names its days in BS, the phone layout (two
+ * tiles across, the custom dates and Export behind one toggle, Popular without a Group column),
+ * and a plain state when no client is chosen.
  */
 /* Node access is deliberate: a BsCalendarPicker trigger is named by the date it shows, so the two
    pickers are found by their field ids, and node identity is what proves they never remounted. */
@@ -49,7 +53,7 @@ jest.mock('../pos/reports/reportRange', () => {
 })
 
 // eslint-disable-next-line import/first
-import CustomizationReport, { perPlateFigures, signed2, rangeProblem, scopeLineOf, bsRangeLabel, bsFileDate, marginBasis } from './CustomizationReport'
+import CustomizationReport, { perPlateFigures, signed2, rangeProblem, scopeLineOf, bsRangeLabel, bsFileDate, marginBasis, platesText, weekTick } from './CustomizationReport'
 // eslint-disable-next-line import/first
 import { bsToAd, formatAd } from '../../utils/bsCalendar'
 
@@ -64,7 +68,19 @@ beforeEach(() => {
   Object.keys(mockRates).forEach(k => delete mockRates[k])
   mockRange = { from: '2025-09-01', to: '2025-09-10' }
   mockAuth.clientModules = { ims: false }
+  mockAuth.clientId = 'c1'
 })
+
+// One bill of one plate: Momo with an Extra cheese and a "No onion".
+function answerOnePlate() {
+  mockAnswers.pos_orders = { data: [{ id: 'o1', closed_at: '2025-09-05T06:00:00Z' }], error: null }
+  mockAnswers.pos_order_items = { data: [{ id: 'l1', order_id: 'o1', recipe_id: 'r1', name: 'Momo', qty: 1, comped: false, selection_key: 'op1+op2' }], error: null }
+  const snap = (id, group, name, price, removal) => ({
+    id: `s-${id}`, order_item_id: 'l1', option_id: id, group_name: group, group_kind: 'addon', option_name: name,
+    is_removal: removal, price_delta: price, list_price_delta: price, included: false, ingredient_deltas: null,
+  })
+  mockAnswers.pos_order_item_options = { data: [snap('op1', 'Extras', 'Cheese', 50, false), snap('op2', 'Remove', 'No onion', 0, true)], error: null }
+}
 
 describe('the range controls', () => {
   test('stay mounted while the report loads and after a failed read, and Try again reads again', async () => {
@@ -89,7 +105,7 @@ describe('the range controls', () => {
     const before = mockReads.pos_orders
     mockAnswers.pos_orders = { data: [], error: null }
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
-    expect(await screen.findByText(/No dish with choices and no combo was sold in this range/)).toBeTruthy()
+    expect(await screen.findByText(/No dish with choices and no combo was sold in this range\. Attach choice groups to dishes on Choice Groups → Dishes/)).toBeTruthy()
     expect(mockReads.pos_orders).toBe(before + 1)
     expect(fromPicker()).toBe(from)
   })
@@ -104,6 +120,26 @@ describe('the range controls', () => {
     expect(screen.queryByText('Building report…')).toBeNull()
     expect(screen.queryByText(/No dish with choices/)).toBeNull()
     expect(screen.queryByText('Could not load this report')).toBeNull()
+  })
+
+  test('on a phone the custom dates and Export fold behind one toggle, and nothing unmounts', async () => {
+    renderPage()
+    const toggle = screen.getByRole('button', { name: 'Dates and export' })
+    const fold = document.getElementById(toggle.getAttribute('aria-controls'))
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(fold.className).toBe('phone-fold')
+    expect(fold.contains(fromPicker())).toBe(true)
+    expect(fold.contains(toPicker())).toBe(true)
+    expect(within(fold).getByRole('button', { name: 'Export Excel' })).toBeTruthy()
+    // The presets are what the page is for, so they stay outside the fold.
+    expect(fold.contains(screen.getByRole('group', { name: 'Date range' }))).toBe(false)
+    const from = fromPicker()
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(toggle.textContent).toBe('Hide dates and export')
+    expect(fold.className).toBe('phone-fold phone-fold--open')
+    expect(fromPicker()).toBe(from)
+    expect(await screen.findByText(/No dish with choices and no combo was sold/)).toBeTruthy()
   })
 
   test('Export says why it cannot run, instead of sitting disabled', async () => {
@@ -173,6 +209,50 @@ describe('per-plate margin', () => {
   })
 })
 
+describe('with no client chosen (the Crest admin view)', () => {
+  test('says to pick a client instead of loading for ever, reads nothing, and offers no range or export', async () => {
+    mockAuth.clientId = null
+    renderPage()
+    expect(await screen.findByText('No client selected. Pick a client in the top-left switcher to see its Customization Report.')).toBeTruthy()
+    expect(screen.queryByText('Building report…')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Export Excel' })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Date range' })).toBeNull()
+    expect(screen.queryByRole('tab')).toBeNull()
+    expect(mockReads.pos_orders).toBeUndefined()
+  })
+})
+
+describe('counts and the phone layout', () => {
+  test('a count of plates agrees with its noun', () => {
+    expect(platesText(1)).toBe('1 plate')
+    expect(platesText(0)).toBe('0 plates')
+    expect(platesText(2)).toBe('2 plates')
+    expect(platesText(1240)).toBe('1,240 plates')
+  })
+
+  test('one plate reads "1 plate" on every tile, two across on a phone', async () => {
+    answerOnePlate()
+    renderPage()
+    await screen.findByRole('table')
+    // With a choice picked, Most added (Cheese) and Most removed (No onion): one plate each.
+    expect(screen.getAllByText('1 plate')).toHaveLength(3)
+    expect(screen.queryByText(/\b1 plates\b/)).toBeNull()
+    expect(document.querySelector('.stat-grid').className).toBe('stat-grid stat-grid--pair')
+  })
+
+  test('Popular fits a phone: the group rides under the name, its column hides, long headings may wrap', async () => {
+    answerOnePlate()
+    renderPage()
+    const table = await screen.findByRole('table')
+    expect(within(table).getByRole('columnheader', { name: /Group/ }).className).toBe('phone-hide')
+    const [sub, cell] = within(table).getAllByText('Extras')
+    expect(sub.closest('.phone-only')).toBeTruthy()
+    expect(cell.className).toBe('phone-hide')
+    expect(within(table).getByRole('columnheader', { name: /Times picked/ }).style.whiteSpace).toBe('normal')
+    expect(within(table).getByRole('columnheader', { name: 'Picked on' }).style.whiteSpace).toBe('normal')
+  })
+})
+
 describe('the scope is BS first', () => {
   const ad = (y, m, d) => formatAd(bsToAd(y, m, d))
   test('the chip, the scope line and the filename name BS dates', () => {
@@ -182,6 +262,12 @@ describe('the scope is BS first', () => {
     expect(bsRangeLabel(ad(2082, 5, 5), ad(2082, 6, 20))).toBe('5 Bhadra – 20 Ashwin 2082')
     expect(scopeLineOf(from, to)).toMatch(new RegExp(`^Paid bills closed 1 Bhadra 2082 to 31 Bhadra 2082 \\(AD ${from} to ${to}\\)`))
     expect(bsFileDate(from)).toBe('2082-05-01')
+  })
+
+  test('the trend names a week-ending day in BS, not as a slash date', () => {
+    expect(weekTick(ad(2083, 7, 17))).toBe('17th Kartik')
+    expect(weekTick(ad(2082, 5, 1))).toBe('1st Bhadra')
+    expect(weekTick('1900-01-01')).toBe('1900-01-01 (AD)')
   })
 
   test('rangeProblem refuses only a backwards range', () => {

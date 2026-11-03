@@ -84,6 +84,9 @@ export default function OptionPickerModal({
   const [startQty] = useState(() => Math.max(1, Number(initialQty) || 1))
   const [qty, setQty] = useState(startQty)
   const [tried, setTried] = useState(false)
+  // S867: the group whose full chip was just pressed. A full chip stays pressable (aria-disabled),
+  // so the press can say why nothing happened; `disabled` took it out of the Tab order unannounced.
+  const [fullPressed, setFullPressed] = useState(null)
   const fieldsetRefs = useRef({})
 
   const attachByGroup = useMemo(
@@ -202,7 +205,7 @@ export default function OptionPickerModal({
                 </span>
                 {rule.included > 0 && (
                   <span style={{ fontSize: 12, color: usedFree >= 1 ? 'var(--theme-text2)' : 'var(--theme-text3)' }}>
-                    {usedFree} of {rule.included} free picks used
+                    {usedFree} of {rule.included} free choices used
                   </span>
                 )}
               </div>
@@ -238,9 +241,13 @@ export default function OptionPickerModal({
                       className="choice-chip"
                       role={isRadio ? 'radio' : 'checkbox'}
                       aria-checked={on}
-                      disabled={full}
+                      aria-disabled={full || undefined}
                       tabIndex={isRadio ? rovingTabIndex(on || (!anyChecked && i === 0)) : 0}
-                      onClick={() => toggle(group, rule, o.id)}
+                      onClick={() => {
+                        if (full) { setFullPressed(group.id); return }
+                        if (fullPressed === group.id) setFullPressed(null)
+                        toggle(group, rule, o.id)
+                      }}
                     >
                       <span className="choice-chip__name">
                         {showNo && <span className="badge badge-gray" style={{ marginRight: 5, verticalAlign: 'middle' }}>No</span>}
@@ -255,6 +262,11 @@ export default function OptionPickerModal({
                   )
                 })}
               </div>
+              {fullPressed === group.id && !short && realCount >= (rule.max ?? Infinity) && (
+                <p role="status" style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
+                  Up to {rule.max} from {group.name}. Untick one to choose another.
+                </p>
+              )}
               {short && (
                 <p role="alert" className="field-error" style={{ margin: '6px 0 0' }}>
                   {rule.min > count ? `Choose ${rule.min - count} more from ${group.name}.` : `Too many picked in ${group.name}.`}

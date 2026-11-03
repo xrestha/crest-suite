@@ -73,7 +73,7 @@ export function optionLossText(o, catalog, nameOf = () => 'a dish') {
   const short = groupShortfalls(group, after, attachments).filter(x => !before.has(x.recipe_id))
   const left = after.filter(x => x.group_id === group.id && x.is_active).length
   if (short.length) {
-    return `${andList(short.map(x => `${nameOf(x.recipe_id)} must pick ${x.need}`))} from “${group.name}”, which would have ${left} left to pick. ${short.length === 1 ? 'It' : 'They'} can’t be ordered on the till or the QR menu until you show an option again or lower the rule.`
+    return `${andList(short.map(x => `${nameOf(x.recipe_id)} must pick ${x.need}`))} from “${group.name}”, which would have ${left} left to pick. ${short.length === 1 ? 'It' : 'They'} can’t be ordered on the till or the QR menu until you show a choice again or lower the rule.`
   }
   const on = attachments.filter(a => a.group_id === group.id)
   if (left === 0 && on.length) {
@@ -133,13 +133,13 @@ export function groupEditEffects(group, next, catalog, dishes) {
 /** Edit group refused for a dish this change takes below zero. */
 export function groupEditRefusal(name, found, { showing = false } = {}) {
   if (showing) return stillHiddenText(name, found)
-  return `With this change, ${belowZeroText(found)}, and the till refuses a dish priced below zero. Nothing was saved. Change the option prices first, or keep the rule as it was.`
+  return `With this change, ${belowZeroText(found)}, and the till refuses a dish priced below zero. Nothing was saved. Change the choice prices first, or keep the rule as it was.`
 }
 
-/** "Kids Momo must pick 2 from “Toppings”, which offers only 1 option. It cannot be ordered …" */
+/** "Kids Momo must pick 2 from “Toppings”, which offers only 1 choice. It cannot be ordered …" */
 export function shortfallText(groupName, short, nameOf = () => 'a dish') {
   const offered = short[0]?.offered ?? 0
-  return `${andList(short.map(x => `${nameOf(x.recipe_id)} must pick ${x.need}`))} from “${groupName}”, which offers only ${offered} option${offered === 1 ? '' : 's'}. ${short.length === 1 ? 'It' : 'They'} cannot be ordered on the till or the QR menu until the group has more options or a lower rule.`
+  return `${andList(short.map(x => `${nameOf(x.recipe_id)} must pick ${x.need}`))} from “${groupName}”, which offers only ${offered} choice${offered === 1 ? '' : 's'}. ${short.length === 1 ? 'It' : 'They'} cannot be ordered on the till or the QR menu until the group has more choices or a lower rule.`
 }
 
 // ── Two Size groups on one dish (SETUP-8) ────────────────────────────────────────────────────────

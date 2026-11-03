@@ -118,7 +118,7 @@ export default function OptionModal({
 
   function validate() {
     const e = {}
-    if (!form.name.trim()) e.name = 'Give the option a name, e.g. “Extra cheese”.'
+    if (!form.name.trim()) e.name = 'Give the choice a name, e.g. “Extra cheese”.'
     // S862 SETUP-5: an emptied full-price box read as "this size costs nothing".
     if (fullPriceMode && String(form.price).trim() === '') e.price = 'Type what this size costs.'
     else if (!form.is_removal && form.price !== '' && !Number.isFinite(Number(form.price))) e.price = 'Enter a number.'
@@ -135,7 +135,7 @@ export default function OptionModal({
       if (found.length) {
         const these = found.length === 1 ? 'that dish' : 'those dishes'
         if (form.is_removal) {
-          e.removal = `${belowZeroText(found)}, and the till refuses a dish priced below zero. A “No …” choice lets a guest skip this group’s paid options — change the prices first, or take this group off ${these}.`
+          e.removal = `${belowZeroText(found)}, and the till refuses a dish priced below zero. A “No …” choice lets a guest skip this group’s paid choices — change the prices first, or take this group off ${these}.`
         } else {
           e.price = `${belowZeroText(found)}, and the till refuses a dish priced below zero. Raise the price, or take this group off ${these} first.`
         }
@@ -162,7 +162,7 @@ export default function OptionModal({
       ...(option || {}),
       id: option?.id || NEW_OPTION_ID,
       group_id: group.id,
-      name: form.name.trim() || 'this option',
+      name: form.name.trim() || 'this choice',
       price_delta: savedDelta,
       is_removal: isSize ? false : form.is_removal,
       is_active: form.is_active,
@@ -231,17 +231,17 @@ export default function OptionModal({
     let saved
     if (option) {
       const { data, error } = await settleWithin(scopedUpdate('pos_options', row).eq('id', option.id).select(OPTION_COLS),
-        CUSTOMIZATION_WRITE_MS, 'Saving the option')
+        CUSTOMIZATION_WRITE_MS, 'Saving the choice')
       if (error) { setSaving(false); setActionError(writeFailure(error)); return }
       if (!data?.length) {
         setSaving(false)
-        setActionError('This option no longer exists — it may have been deleted on another device. Close this and reload the page.')
+        setActionError('This choice no longer exists — it may have been deleted on another device. Close this and reload the page.')
         return
       }
       saved = data[0]
     } else {
       const { data, error } = await settleWithin(scopedInsert('pos_options', { ...row, group_id: group.id, sort: nextSortOf(group) }, { single: true }),
-        CUSTOMIZATION_WRITE_MS, 'Saving the option')
+        CUSTOMIZATION_WRITE_MS, 'Saving the choice')
       if (error) { setSaving(false); setActionError(writeFailure(error)); return }
       saved = data
     }
@@ -310,14 +310,31 @@ export default function OptionModal({
     return stale ? STALE_LINES : null
   }
 
+  // S867: a size in a group on no dish yet is a difference from the dish, but the box read like the
+  // menu price, so an owner copying "Full 400" off the menu stored +400 and Full rang at dish + 400.
+  // The label and an amber line under the box say which number it wants, with a worked example.
+  const unattachedSize = isSize && attachedDishes.length === 0
   const priceLabel = fullPriceMode
     ? `Price of this size${vat > 0 ? ' (incl. VAT)' : ''}`
-    : isSize
-      ? `Price difference from the dish${vat > 0 ? ' (incl. VAT)' : ''}`
-      : `Extra charge${vat > 0 ? ' (incl. VAT)' : ''}`
+    : unattachedSize
+      ? `Price difference from the dish${vat > 0 ? ' (incl. VAT)' : ''}, not the menu price`
+      : isSize
+        ? `Price difference from the dish${vat > 0 ? ' (incl. VAT)' : ''}`
+        : `Extra charge${vat > 0 ? ' (incl. VAT)' : ''}`
+  const priceAria = fieldAria('opt-price', errors.price)
+  const priceDescribedBy = [priceAria['aria-describedby'], unattachedSize ? 'opt-price-hint' : null].filter(Boolean).join(' ') || undefined
+
+  // S867: Portion only where a size scales something: a build-your-own dish, or a group set to scale
+  // with the size. It stays when this size already has a portion, so a saved value is never out of
+  // sight. A hidden box keeps the value it opened with, so the save sends what an untouched one does.
+  const showPortion = isSize && (
+    (catalog?.buildYourOwn?.length || 0) > 0
+    || (catalog?.groups || []).some(g => g.size_scaling && g.size_scaling !== 'none')
+    || (option?.portion_factor != null && Number(option.portion_factor) !== 1)
+  )
 
   return (
-    <Modal onClose={onClose} title={option ? `Edit option — ${option.name}` : `New option in ${group.name}`} maxWidth={620}
+    <Modal onClose={onClose} title={option ? `Edit choice — ${option.name}` : `New choice in ${group.name}`} maxWidth={620}
       panelStyle={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
       <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16, paddingRight: 2 }}>
         <div className="form-field" style={{ margin: 0 }}>
@@ -359,31 +376,37 @@ export default function OptionModal({
             <label htmlFor="opt-price">
               <Tip width={300} text={fullPriceMode
                 ? 'Type the full menu price of this size. Every dish this group is on currently costs the same, so the difference is worked out for you. The size keeps that difference: when the dish’s price changes on Menu Pricing, this size moves by the same amount.'
-                : isSize
-                  ? 'This group is on dishes with different prices, so enter how much this size adds or takes off (negative for a smaller portion). The result for each dish is shown below, and it follows the dish when the dish’s price changes.'
-                  : 'How much this option adds to the dish. Leave blank or 0 if it is free.'}>
+                : unattachedSize
+                  ? 'This group is on no dish yet, so type how much this size adds to the dish price, or takes off it (negative for a smaller portion). Example: for Full at NPR 400 on a NPR 250 dish, type 150. Put the group on its dishes first: when they all cost the same, this box takes the full menu price of each size and works out the difference for you.'
+                  : isSize
+                    ? 'This group is on dishes with different prices, so enter how much this size adds or takes off (negative for a smaller portion). The result for each dish is shown below, and it follows the dish when the dish’s price changes.'
+                    : 'How much this choice adds to the dish. Leave blank or 0 if it is free.'}>
                 {priceLabel}
               </Tip>
             </label>
             <input id="opt-price" type="number" step="any" value={form.price} placeholder={fullPriceMode ? String(Math.round(basePrice)) : '0'}
-              onChange={e => set({ price: e.target.value })} {...fieldAria('opt-price', errors.price)} style={{ maxWidth: 220 }} />
+              onChange={e => set({ price: e.target.value })} {...priceAria} aria-describedby={priceDescribedBy} style={{ maxWidth: 220 }} />
             <FieldError id="opt-price" message={errors.price} />
-            <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
-              {fullPriceMode
-                ? <>Dish price {npr(basePrice)} → this size {resultText(basePrice + deltaIncl)} ({signedPrice(deltaIncl) || 'same price'}).</>
-                : isSize && attachedDishes.length > 0
-                  ? <>
-                      {attachedDishes.slice(0, 6).map(d => `${d.name}: ${npr(d.inclPrice)} → ${resultText(d.inclPrice + deltaIncl)}`).join(' · ')}
-                      {attachedDishes.length > 6 && (
-                        <Tip width={300} text={attachedDishes.slice(6).map(d => `${d.name}: ${npr(d.inclPrice)} → ${resultText(d.inclPrice + deltaIncl)}`).join(' · ')}>
-                          <span> · +{attachedDishes.length - 6} more</span>
-                        </Tip>
-                      )}
-                    </>
+            {unattachedSize ? (
+              <p id="opt-price-hint" style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+                △ This group is on no dish yet, so this box is the difference, not the menu price: for Full at NPR 400 on a NPR 250 dish, type 150. Put the group on its dishes first to type the full menu price of each size instead.
+              </p>
+            ) : (
+              <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>
+                {fullPriceMode
+                  ? <>Dish price {npr(basePrice)} → this size {resultText(basePrice + deltaIncl)} ({signedPrice(deltaIncl) || 'same price'}).</>
                   : isSize
-                    ? 'Put this group on a dish to enter the full price of each size instead.'
-                    : deltaIncl ? `Guests see ${signedPrice(deltaIncl)} beside this option.` : 'Guests see no price — it is free.'}
-            </p>
+                    ? <>
+                        {attachedDishes.slice(0, 6).map(d => `${d.name}: ${npr(d.inclPrice)} → ${resultText(d.inclPrice + deltaIncl)}`).join(' · ')}
+                        {attachedDishes.length > 6 && (
+                          <Tip width={300} text={attachedDishes.slice(6).map(d => `${d.name}: ${npr(d.inclPrice)} → ${resultText(d.inclPrice + deltaIncl)}`).join(' · ')}>
+                            <span> · +{attachedDishes.length - 6} more</span>
+                          </Tip>
+                        )}
+                      </>
+                    : deltaIncl ? `Guests see ${signedPrice(deltaIncl)} beside this choice.` : 'Guests see no price — it is free.'}
+              </p>
+            )}
             {option && (
               <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--theme-text3)' }}>
                 A new price applies to the next dish ordered. Dishes already on a table keep the price they were ordered at.
@@ -391,15 +414,16 @@ export default function OptionModal({
             )}
             {vat > 0 && (
               <Tip width={300} text={`Saved as ${npr(savedDelta)} before VAT, so the guest pays this on a 13% dish. A dish sold without VAT charges the before-VAT amount instead.`}>
+                {/* S867: a plain label; how a no-VAT dish charges it stays in the Tip. */}
                 <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--theme-text3)' }}>
-                  Includes VAT · how a no-VAT dish charges it
+                  Includes {Math.round(vat * 100)}% VAT
                 </p>
               </Tip>
             )}
           </div>
         )}
 
-        {isSize && (
+        {showPortion && (
           <div className="form-field" style={{ margin: 0 }}>
             <label htmlFor="opt-portion">
               <Tip width={320} text="How big this size is against a regular plate. Small 0.75, Medium 1, Large 1.5. Groups on the dish that scale with size (toppings, a base) use this to work out stock and, if chosen, price — chicken popcorn on a Large bowl uses 1.5× the chicken. Leave blank for a regular plate.">Portion</Tip>
@@ -429,7 +453,7 @@ export default function OptionModal({
         <div id="opt-details" style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12, paddingLeft: 12, borderLeft: '1px solid var(--theme-border)' }}>
         <div className="form-field" style={{ margin: 0 }}>
           <label htmlFor="opt-kitchen">
-            <Tip width={240} text="Optional shorter wording for the kitchen ticket — e.g. “XTRA CHZ”. Leave blank to print the option name.">Kitchen ticket name</Tip>
+            <Tip width={240} text="Optional shorter wording for the kitchen ticket — e.g. “XTRA CHZ”. Leave blank to print the choice name.">Kitchen ticket name</Tip>
           </label>
           <input id="opt-kitchen" value={form.kitchen_name} onChange={e => set({ kitchen_name: e.target.value })} placeholder="Same as the name" />
         </div>
@@ -437,7 +461,7 @@ export default function OptionModal({
           {!form.is_removal && (
             <div className="form-field" style={{ margin: 0 }}>
               <label htmlFor="opt-diet">
-                <Tip width={260} text="What this option adds to the plate. Choose Non-veg for “Add chicken” so the guest menu stops showing a veg dish as veg once it is picked.">Veg / Egg / Non-veg</Tip>
+                <Tip width={260} text="What this choice adds to the plate. Choose Non-veg for “Add chicken” so the guest menu stops showing a veg dish as veg once it is picked.">Veg / Egg / Non-veg</Tip>
               </label>
               <select id="opt-diet" className="form-select" value={form.diet} onChange={e => set({ diet: e.target.value })}>
                 <option value="">Not stated</option>
@@ -448,7 +472,7 @@ export default function OptionModal({
           {!form.is_removal && (
             <div className="form-field" style={{ margin: 0 }}>
               <label htmlFor="opt-allergens">
-                <Tip width={260} text="Comma-separated, the same tags as dishes use — e.g. dairy, gluten, nuts. Shown to guests beside the option.">Allergens</Tip>
+                <Tip width={260} text="Comma-separated, the same tags as dishes use — e.g. dairy, gluten, nuts. Shown to guests beside the choice.">Allergens</Tip>
               </label>
               <input id="opt-allergens" value={form.allergens} onChange={e => set({ allergens: e.target.value })} placeholder="e.g. dairy" />
             </div>
@@ -458,11 +482,11 @@ export default function OptionModal({
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
             <input type="checkbox" checked={form.is_default} onChange={e => set({ is_default: e.target.checked })} />
-            <Tip width={260} text="Pre-ticked when the picker opens, on every dish this group is on — e.g. “Full” in a size group or “Medium” spice. The guest can still change it.">Pre-selected</Tip>
+            <Tip width={260} text="Pre-ticked when the choice window opens, on every dish this group is on — e.g. “Full” in a size group or “Medium” spice. The guest can still change it.">Pre-selected</Tip>
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
             <input type="checkbox" checked={form.is_active} onChange={e => set({ is_active: e.target.checked })} />
-            <Tip width={260} text="Untick to hide it (e.g. out of stock) without deleting it — the same as Hide on the Groups page.">Shown on the till and guest menu</Tip>
+            <Tip width={260} text="Untick to hide it (e.g. out of stock) without deleting it — the same as Hide on the Choice Groups page.">Shown on the till and guest menu</Tip>
           </label>
         </div>
         </div>
@@ -487,7 +511,7 @@ export default function OptionModal({
             </p>
             {lines.length === 0 && (
               <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--theme-text2)' }}>
-                No ingredients — picking this option will not change stock or food cost.
+                No ingredients, so this choice will not change stock or food cost.
               </p>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -557,7 +581,7 @@ export default function OptionModal({
         <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
         <button type="button" className="btn btn-primary" onClick={save} aria-disabled={vatUnknown || undefined} aria-busy={saving || undefined}
           aria-describedby={vatUnknown ? 'opt-vat-unknown' : undefined}>
-          {saving ? 'Saving…' : option ? 'Save option' : 'Add option'}
+          {saving ? 'Saving…' : option ? 'Save choice' : 'Add choice'}
         </button>
       </div>
     </Modal>

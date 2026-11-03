@@ -55,13 +55,13 @@ function choiceAccessOf({ customizationLive, isAdmin, canEditChoices }) {
 function nextStep(hasRecipes, hasChoices, access) {
   if (!hasChoices) return 'Remove it from those recipes first.'
   const fromBoth = hasRecipes
-    ? 'Remove it from those recipes, and from those choices in Option Groups, first.'
-    : 'Remove it from those choices in Option Groups first.'
+    ? 'Remove it from those recipes, and from those choices in Choice Groups, first.'
+    : 'Remove it from those choices in Choice Groups first.'
   switch (access) {
     case 'off':
       return `${hasRecipes ? 'Remove it from those recipes first. ' : ''}Crest Customization is switched off at this outlet, so those choices can't be changed here — ask Crest support to remove it from them, then try again.`
     case 'rank':
-      return `${hasRecipes ? 'Remove it from those recipes first, and ask' : 'Ask'} the Owner or a manager to remove it from those choices in Option Groups.`
+      return `${hasRecipes ? 'Remove it from those recipes first, and ask' : 'Ask'} the Owner or a manager to remove it from those choices in Choice Groups.`
     case 'operator':
       return `${fromBoth} Crest Customization is switched off at this outlet, but as Crest support you can still edit its choices.`
     default:
@@ -102,8 +102,8 @@ export function subRecipeInUseText({ action, name, recipeNames = [], choiceNames
       ? `an ingredient in ${recipes} and a stock line on these choices: ${choices}`
       : `a stock line on these choices: ${choices}`
     const lost = hasRecipes
-      ? 'they would keep consuming it while it disappeared from the recipes\' ingredient pickers and from Option Groups'
-      : 'those choices would keep taking it off stock while it disappeared from Option Groups'
+      ? 'they would keep consuming it while it disappeared from the recipes\' ingredient pickers and from Choice Groups'
+      : 'those choices would keep taking it off stock while it disappeared from Choice Groups'
     return `"${name}" is ${held}, so it can't stop being a Sub-Recipe — ${lost}. ${nextStep(hasRecipes, hasChoices, access)}`
   }
 

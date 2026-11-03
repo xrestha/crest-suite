@@ -125,16 +125,16 @@ export async function loadOptionCatalog(scopedFrom, { withIngredients = false, r
   }
 }
 
-export const KIND_LABEL = { size: 'Size', addon: 'Add-ons', choice: 'Choice' }
+export const KIND_LABEL = { size: 'Size', addon: 'Add-ons', choice: 'Preference' }
 
 export const KIND_HELP = {
   size: 'Half / Full, Small / Large. The guest picks exactly one, and each size can change the price.',
   addon: 'Extra cheese, add egg, no onion. The guest can pick several; each can add to the price.',
-  choice: 'Spice level, how it is cooked, which sauce. A pick from a list, usually free.',
+  choice: 'Spice level, how it is cooked, which sauce. The guest picks one from a list, usually free.',
 }
 
 export const SIZE_SCALING_HELP = {
-  none: 'A pick costs and uses the same at every size. Right for a spice level or a free sauce.',
+  none: 'A choice costs and uses the same at every size. Right for a spice level or a free sauce.',
   stock: 'A bigger size uses more of it, at the same price. Right for a free base: a Large bowl gets more acai puree.',
   stock_and_price: 'A bigger size uses more of it and charges more for it. Right for paid toppings: chicken popcorn on a Large bowl.',
 }

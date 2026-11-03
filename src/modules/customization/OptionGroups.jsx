@@ -8,6 +8,7 @@ import { fetchAllRows } from '../../shared/fetchAllRows'
 import { firstError } from '../../shared/queryError'
 import { npr } from '../../shared/nepalMoney'
 import Tip from '../../components/Tip'
+import Fab from '../../components/Fab'
 import Tabs, { TabPanel } from '../../components/Tabs'
 import RowMenu from '../../components/RowMenu'
 import ReportLoadError from '../../components/ReportLoadError'
@@ -48,6 +49,13 @@ import BuildYourOwnTemplateModal from './BuildYourOwnTemplateModal'
 // Toppings for one dish in one transaction; the Dishes tab marks a dish build-your-own (or clears
 // it), badges it, and warns when a marked dish offers nothing to build. The mark is read from the
 // catalog loader, which tolerates a database the S760 migration has not reached.
+//
+// S867 (critique): the words on screen follow the owner's list. What a guest taps is a CHOICE, a set
+// of them is a CHOICE GROUP (this page is Choice Groups), and the kind stored as 'choice' reads
+// Preference. Code names, tables and the stored kind stay as they were. Each card's one accent is its
+// next step (nextStepOf), and a Size group's next step is its dishes BEFORE its sizes: a size's price
+// box asks for the full menu price only once the group is on a dish, so an owner who added sizes
+// first and typed "Full 250" stored +250.
 
 const vatOf = r => (r.vat_rate === null || r.vat_rate === undefined) ? 0.13 : Number(r.vat_rate)
 
@@ -69,6 +77,20 @@ const missingIngredients = (g, o) => !o.is_removal && Math.abs(Number(o.price_de
 // The data attribute an arrow carries, so focus can find it again after the list reloads.
 const moveKey = (table, id, dir) => `${table}:${id}:${dir}`
 
+// S867: the one step a group is waiting on, worn as its card's only primary button: 'attach' (Put
+// it on dishes), 'option' (+ Choice) or null when it has both. A Size group goes on its dishes
+// first, so each size it is given is priced as the full menu price; every other kind gets its
+// choices first, since a group with nothing in it offers a dish nothing. With no dish on the
+// client at all, 'attach' still points at the button, whose press says to make a dish first.
+function nextStepOf(g, onDishes) {
+  const hasChoices = (g.options || []).length > 0
+  if (g.kind === 'size') return !onDishes ? 'attach' : !hasChoices ? 'option' : null
+  return !hasChoices ? 'option' : !onDishes ? 'attach' : null
+}
+
+// S867: a ticket name that only repeats the choice ("Ticket: Regular" under "Regular") says nothing.
+const sameName = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase()
+
 export default function OptionGroups() {
   const { isAdmin, isOwner, profile, clientId, clientModules } = useAuth()
   const settingsCtx = useSettings()
@@ -85,6 +107,12 @@ export default function OptionGroups() {
   const vatMode = vatModeOf(settingsCtx, clientId)
   const vatReg = vatMode !== 'pan'
   const entryVat = vatReg ? STANDARD_VAT : 0
+  // S867: the settings row on hand is THIS client's, read to an end. `loading` covers only the first
+  // load, so on a client switch it was already false while the previous client's row was still on
+  // screen, and "cannot be saved" flashed until the new row landed. The provider sets
+  // `settingsClientId` with the row (or the failure) of the load that won, so with it matching, an
+  // unknown mode is a real failed read and not one still on its way.
+  const settingsSettled = !!clientId && !settingsCtx.loading && settingsCtx.settingsClientId === clientId
 
   const [tab, setTab] = useState('groups')
   const [loading, setLoading] = useState(true)
@@ -134,7 +162,7 @@ export default function OptionGroups() {
           ? fetchAllRows(() => scopedFrom('items', 'id, name, uom, is_active').eq('is_sub_recipe', false)
             .order('name').order('id'))
           : Promise.resolve({ data: [], error: null }),
-      ]), CUSTOMIZATION_READ_MS, 'Loading option groups')
+      ]), CUSTOMIZATION_READ_MS, 'Loading choice groups')
     } catch (err) {
       // A hang used to leave Loading… on screen for good, with nothing to press (S852).
       if (seq !== loadSeq.current) return
@@ -224,6 +252,27 @@ export default function OptionGroups() {
   // ── Guard, after every hook ──
   const canEdit = isAdmin || isOwner || profile?.pos_role === 'manager' || profile?.ims_role === 'manager'
   if (!canEdit) return <Navigate to="/dashboard" replace />
+
+  const heading = (
+    <div>
+      <h1 className="page-title">Choice Groups</h1>
+      <p className="page-subtitle">
+        Build the choices guests can make — sizes, add-ons, “No …” requests and spice — then put each group on the dishes that offer it.
+      </p>
+    </div>
+  )
+
+  // S867: the Crest admin view with no client picked. `load` has nothing to read then, so the page
+  // sat on Loading… for good under "Crest Customization is off for this client". This return
+  // renders no dialog and no banner; everything else lives in the one below.
+  if (!clientId) {
+    return (
+      <div className="page-container">
+        <div className="page-header">{heading}</div>
+        <div className="empty-state">No client selected. Pick a client in the top-left switcher to see its choice groups.</div>
+      </div>
+    )
+  }
 
   const flash = (text, action = null) => setNotice({ text, action })
   const switchTab = k => { setTab(k); setNotice(null); setPageError(null) }
@@ -332,8 +381,8 @@ export default function OptionGroups() {
         <>
           <p style={{ margin: '0 0 8px' }}>
             {n > 0
-              ? <>It is on <strong>{n} dish{n === 1 ? '' : 'es'}</strong>. Those dishes will stop offering it, and its {g.options.length} option{g.options.length === 1 ? '' : 's'} and their stock lines are deleted with it.</>
-              : <>Its {g.options.length} option{g.options.length === 1 ? '' : 's'} and their stock lines are deleted with it.</>}
+              ? <>It is on <strong>{n} dish{n === 1 ? '' : 'es'}</strong>. Those dishes will stop offering it, and its {g.options.length} choice{g.options.length === 1 ? '' : 's'} and their stock lines are deleted with it.</>
+              : <>Its {g.options.length} choice{g.options.length === 1 ? '' : 's'} and their stock lines are deleted with it.</>}
           </p>
           <p style={{ margin: 0, color: 'var(--theme-text2)' }}>Bills already rung keep what was chosen. To stop offering it without losing it, use Hide instead.</p>
         </>
@@ -356,9 +405,9 @@ export default function OptionGroups() {
 
   async function setOptionActive(o, active) {
     setPageError(null)
-    const { data, error } = await bounded(scopedUpdate('pos_options', { is_active: active }).eq('id', o.id).select('id'), 'Saving the option')
+    const { data, error } = await bounded(scopedUpdate('pos_options', { is_active: active }).eq('id', o.id).select('id'), 'Saving the choice')
     if (error) { setPageError(pageFailure(error)); return }
-    if (!data?.length) { setPageError('That option no longer exists — reload the page.'); return }
+    if (!data?.length) { setPageError('That choice no longer exists — reload the page.'); return }
     await load({ quiet: true })
   }
 
@@ -386,7 +435,7 @@ export default function OptionGroups() {
     ask({
       title: `Delete “${o.name}”?`,
       danger: true,
-      confirmLabel: 'Delete option',
+      confirmLabel: 'Delete choice',
       busyLabel: 'Deleting…',
       body: (
         <>
@@ -396,9 +445,11 @@ export default function OptionGroups() {
       ),
       run: async () => {
         setPageError(null)
-        const { data, error } = await bounded(scopedDelete('pos_options').eq('id', o.id).select('id'), 'Deleting the option')
+        const { data, error } = await bounded(scopedDelete('pos_options').eq('id', o.id).select('id'), 'Deleting the choice')
         if (error) { setPageError(pageFailure(error)); return }
-        if (!data?.length) { setPageError('That option was already gone — reload the page.'); return }
+        if (!data?.length) { setPageError('That choice was already gone — reload the page.'); return }
+        // S867: said, as a group delete is, rather than the row just vanishing.
+        flash(`“${o.name}” was deleted.`)
         await load({ quiet: true })
       },
     })
@@ -443,12 +494,7 @@ export default function OptionGroups() {
   return (
     <div className="page-container">
       <div className="page-header page-header--split">
-        <div>
-          <h1 className="page-title">Option Groups</h1>
-          <p className="page-subtitle">
-            Build the choices guests can make — sizes, add-ons, “No …” requests and spice — then put each group on the dishes that offer it.
-          </p>
-        </div>
+        {heading}
         {tab === 'groups' && !loading && !loadError && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Tip width={300} text="For a dish guests build in steps, like an acai bowl, pizza or salad. Creates Size, Base, Sauces and Toppings groups on that dish in one go.">
@@ -457,7 +503,10 @@ export default function OptionGroups() {
                 Build-your-own template
               </button>
             </Tip>
-            <button className="btn btn-primary" onClick={() => setGroupModal({})}>+ New Group</button>
+            {/* S867: the shared Fab, last in the group. With no group yet the empty state's own
+                + New Group is the page's one accent, so this one waits for the first group. */}
+            <Fab label="+ New Group" onClick={() => setGroupModal({})}
+              show={tab === 'groups' && !loading && !loadError && groupRows.length > 0} />
           </div>
         )}
       </div>
@@ -469,15 +518,15 @@ export default function OptionGroups() {
         </div>
       )}
 
-      {vatMode == null && !settingsCtx.loading && (
+      {settingsSettled && vatMode == null && (
         <div role="status" className="amber-banner">
-          <strong>Options cannot be saved right now.</strong>{' '}
+          <strong>Choices cannot be saved right now.</strong>{' '}
           {VAT_MODE_UNKNOWN_TEXT}
         </div>
       )}
 
       {/* The count is its own phrase in the tab name ("Groups, 5"), not run into it ("Groups5"). */}
-      <Tabs idBase="og" label="Option Groups views" hasPanel active={tab} onChange={switchTab}
+      <Tabs idBase="og" label="Choice Groups views" hasPanel active={tab} onChange={switchTab}
         tabs={TABS.map(([k, label]) => ({
           key: k,
           label: (
@@ -517,36 +566,56 @@ export default function OptionGroups() {
         <ReportLoadError error={loadError} onRetry={() => load()} />
       ) : tab === 'groups' ? (
         groupRows.length === 0 ? (
+          // S867: the empty state carries its own + New Group, the page's one accent while there is
+          // no group (the header's waits for the first one), and says the Size order up front.
           <div className="empty-state">
-            <p style={{ margin: '0 0 8px' }}>No option groups yet.</p>
-            <p style={{ margin: 0, color: 'var(--theme-text2)' }}>
-              Start with the choices your menu already has — for example <strong>Size</strong> (Half / Full), <strong>Extras</strong> (Extra cheese, Add egg, and a “No onion” marked as taking something off) and <strong>Spice</strong> (Mild / Medium / Hot). Then put each group on the dishes that offer it.
+            <p style={{ margin: '0 0 8px' }}>No choice groups yet.</p>
+            <p style={{ margin: '0 0 8px', color: 'var(--theme-text2)' }}>
+              Start with the choices your menu already has — for example <strong>Size</strong> (Half / Full), <strong>Extras</strong> (Extra cheese, Add egg, and a “No onion” marked as taking something off) and <strong>Spice</strong> (Mild / Medium / Hot).
             </p>
+            <p style={{ margin: '0 0 12px', color: 'var(--theme-text2)' }}>
+              Put a Size group on its dishes before you add its sizes, so each size takes its full menu price.
+            </p>
+            <button type="button" className="btn btn-primary" onClick={() => setGroupModal({})}>+ New Group</button>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="fab-clear" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {groupRows.map((g, gi) => {
               const onDishes = attachCountByGroup[g.id] || 0
               const freeN = g.kind === 'addon' ? (g.included_count || 0) : 0
               // S809 4h (CUSTOMIZATION-8): dishes this group now makes unorderable, whatever caused it.
               const shortfalls = groupShortfalls(g, catalog.options, catalog.attachments)
+              // S867: the card's one primary button is the step this group is waiting on.
+              const next = nextStepOf(g, onDishes)
+              const rule = <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{ruleText({ min: g.min_select, max: g.max_select, included: g.included_count })}</span>
               return (
                 <section key={g.id} className="card" aria-labelledby={`grp-${g.id}`} style={{ margin: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
                     <h2 id={`grp-${g.id}`} style={{ margin: 0, fontSize: 16, color: g.is_active ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{g.name}</h2>
                     <span className="badge-gray">{KIND_LABEL[g.kind]}</span>
                     {!g.is_active && <span className="badge-gray">Hidden</span>}
-                    <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{ruleText({ min: g.min_select, max: g.max_select, included: g.included_count })}</span>
-                    <Tip width={260} text={onDishes ? `Offered on: ${dishesForGroup(g.id).map(d => d.name).join(', ')}` : 'Not on any dish yet, so nothing offers it. Use “Put it on dishes”.'}>
-                      <span style={{ fontSize: 12, color: onDishes ? 'var(--theme-text2)' : 'var(--theme-amber-text)' }}>
-                        {onDishes ? `On ${onDishes} dish${onDishes === 1 ? '' : 'es'}` : 'Not on any dish'}
-                      </span>
-                    </Tip>
+                    {!onDishes && (
+                      <Tip width={260} text="Not on any dish yet, so nothing offers it. Use “Put it on dishes”."
+                        style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
+                        <span className="badge-amber">Not on any dish</span>
+                      </Tip>
+                    )}
+                    {/* S867: "first N free" is explained on the rule itself, not in a paragraph on every card. */}
+                    {freeN > 0 ? (
+                      <Tip width={300} text={`The first ${freeN} choice${freeN === 1 ? '' : 's'} a guest makes ${freeN === 1 ? 'is' : 'are'} free: the earliest in this list among what they picked, not the cheapest. Use ↑ (Move up) to put the ones you are happy to give away at the top. A “No …” choice never counts, and takes no place under the maximum.`}>
+                        {rule}
+                      </Tip>
+                    ) : rule}
+                    {onDishes > 0 && (
+                      <Tip width={260} text={`Offered on: ${dishesForGroup(g.id).map(d => d.name).join(', ')}`}>
+                        <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>On {onDishes} dish{onDishes === 1 ? '' : 'es'}</span>
+                      </Tip>
+                    )}
                     {/* Every card has these two buttons, so each is described by its group's name (S863). */}
                     <div data-group-actions={g.id} style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                      <button type="button" className="btn btn-primary btn-sm" aria-describedby={`grp-${g.id}`}
-                        onClick={() => setOptionModal({ groupId: g.id })}>+ Option</button>
-                      <button type="button" className={`btn btn-sm ${onDishes ? 'btn-ghost' : 'btn-primary'}`} aria-describedby={`grp-${g.id}`}
+                      <button type="button" className={`btn btn-sm ${next === 'option' ? 'btn-primary' : 'btn-ghost'}`} aria-describedby={`grp-${g.id}`}
+                        onClick={() => setOptionModal({ groupId: g.id })}>+ Choice</button>
+                      <button type="button" className={`btn btn-sm ${next === 'attach' ? 'btn-primary' : 'btn-ghost'}`} aria-describedby={`grp-${g.id}`}
                         aria-disabled={dishes.length === 0 || undefined}
                         onClick={() => (dishes.length === 0 ? explain(`${NO_DISH_YET}, then put “${g.name}” on it.`) : setAttachGroup(g))}>
                         Put it on dishes
@@ -563,27 +632,21 @@ export default function OptionGroups() {
                     </div>
                   </div>
 
-                  {freeN > 0 && g.options.length > 0 && (
-                    <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--theme-text2)' }}>
-                      The first {freeN} pick{freeN === 1 ? '' : 's'} a guest makes {freeN === 1 ? 'is' : 'are'} free — the <strong>earliest in this list</strong> among what they picked, not the cheapest. Put the options you are happy to give away first, with <em>Move up</em>. A “No …” option is never one of them and takes no place under the maximum.
-                    </p>
-                  )}
-
                   {shortfalls.length > 0 && (
                     <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--theme-red-text)' }}>
-                      {andList(shortfalls.map(x => `${dishById.get(x.recipe_id)?.name || 'A dish'} must pick ${x.need}`))} from this group and {shortfalls[0].offered === 1 ? 'only 1 option is' : `only ${shortfalls[0].offered} options are`} offered, so {shortfalls.length === 1 ? 'it' : 'they'} can’t be ordered on the till or the QR menu. Show an option again, or lower the rule.
+                      {andList(shortfalls.map(x => `${dishById.get(x.recipe_id)?.name || 'A dish'} must pick ${x.need}`))} from this group and {shortfalls[0].offered === 1 ? 'only 1 choice is' : `only ${shortfalls[0].offered} choices are`} offered, so {shortfalls.length === 1 ? 'it' : 'they'} can’t be ordered on the till or the QR menu. Show a choice again, or lower the rule.
                     </p>
                   )}
 
                   {g.options.length === 0 ? (
-                    <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>No options yet — add the first one with <strong>+ Option</strong>.</p>
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>No choices yet — add the first one with <strong>+ Choice</strong>.</p>
                   ) : (
                     <div className="table-wrap">
                       <table className="data-table">
                         <thead>
                           <tr>
                             <th style={{ width: 1 }}><span className="sr-only">Order</span></th>
-                            <th><Tip width={240} text="What guests and waiters tap, in the order they see it. The kitchen ticket name, if set, is shown under it.">Option</Tip></th>
+                            <th><Tip width={240} text="What guests and waiters tap, in the order they see it. A kitchen ticket name, if it differs, is shown under it.">Choice</Tip></th>
                             <th style={{ textAlign: 'right' }}>
                               <Tip width={260} text={g.kind === 'size'
                                 ? 'For a size group on dishes that all cost the same, the full price of that size. Otherwise, how much it adds or takes off.'
@@ -591,9 +654,9 @@ export default function OptionGroups() {
                             </th>
                             {/* On a phone these three fold away (S863), so Edit and ⋯ fit at 360px; the
                                 badges and a stock warning ride under the option name instead. */}
-                            <th className="phone-hide"><Tip width={240} text="Pre-selected options are ticked when the picker opens. A “No …” option prints as NO on the kitchen ticket. Hidden options are kept but not offered.">Shown as</Tip></th>
-                            <th className="phone-hide"><Tip width={220} text="What guests see beside the option on the QR menu.">Diet &amp; allergens</Tip></th>
-                            {imsOn && <th className="phone-hide"><Tip width={260} text="What picking this option does to stock and food cost, per plate.">Stock</Tip></th>}
+                            <th className="phone-hide"><Tip width={240} text="A pre-selected choice is already ticked when the guest or waiter opens the list. A “No …” choice prints as NO on the kitchen ticket. A hidden choice is kept but not offered.">Shown as</Tip></th>
+                            <th className="phone-hide"><Tip width={220} text="What guests see beside the choice on the QR menu.">Diet &amp; allergens</Tip></th>
+                            {imsOn && <th className="phone-hide"><Tip width={260} text="What picking this choice does to stock and food cost, per plate.">Stock</Tip></th>}
                             <th style={{ width: 1 }}><span className="sr-only">Actions</span></th>
                           </tr>
                         </thead>
@@ -611,7 +674,8 @@ export default function OptionGroups() {
                             return (
                             <tr key={o.id}>
                               <td style={{ whiteSpace: 'nowrap', padding: '4px 6px' }}>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                {/* S867: 8px apart, so a tablet tap meant for one arrow cannot land on the other and reorder a live menu. */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                   <button type="button" className="btn btn-ghost btn-icon" aria-label={upLabel} title={upLabel}
                                     data-move={moveKey('pos_options', o.id, -1)} aria-busy={upBusy || undefined}
                                     disabled={oi === 0 || (!!moving && !upBusy)} onClick={() => moveRow('pos_options', g.options, oi, -1)}>↑</button>
@@ -622,7 +686,7 @@ export default function OptionGroups() {
                               </td>
                               <td style={{ overflowWrap: 'break-word' }}>
                                 <span style={{ fontWeight: 500, color: o.is_active ? 'var(--theme-text1)' : 'var(--theme-text3)' }}>{o.name}</span>
-                                {o.kitchen_name && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>Ticket: {o.kitchen_name}</div>}
+                                {o.kitchen_name && !sameName(o.kitchen_name, o.name) && <div style={{ fontSize: 11, color: 'var(--theme-text3)' }}>Ticket: {o.kitchen_name}</div>}
                                 {(badges.length > 0 || stockWarn) && (
                                   <div className="phone-only" style={{ marginTop: 4 }}>
                                     {badges.length > 0 && <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>{badges}</div>}
@@ -645,7 +709,7 @@ export default function OptionGroups() {
                                       ? <Tip width={260} text="This choice adds to the price but takes nothing off stock, so food cost reads low. For “Extra cheese”, add the cheese.">
                                           <span style={{ color: 'var(--theme-amber-text)' }}>△ No ingredients</span>
                                         </Tip>
-                                      : <Tip width={260} text="Picking this option does not change stock or food cost. That is fine for a free choice like spice level.">
+                                      : <Tip width={260} text="Picking this choice does not change stock or food cost. That is fine for a free one like spice level.">
                                           <span style={{ color: 'var(--theme-text3)' }}>No ingredients</span>
                                         </Tip>}
                                 </td>
@@ -693,7 +757,7 @@ export default function OptionGroups() {
                     <th>Dish</th>
                     {/* The menu price folds away on a phone (S863): the choices are what this tab is for. */}
                     <th className="phone-hide" style={{ textAlign: 'right' }}><Tip width={200} text={vatReg ? 'Menu price including VAT.' : 'Menu price.'}>Price</Tip></th>
-                    <th><Tip width={240} text="The option groups this dish offers, in the order the picker shows them.">Choices</Tip></th>
+                    <th><Tip width={240} text="The choice groups this dish offers, in the order the till and the QR menu show them.">Choices</Tip></th>
                     <th style={{ width: 1 }}><span className="sr-only">Actions</span></th>
                   </tr>
                 </thead>
@@ -728,7 +792,7 @@ export default function OptionGroups() {
                             <button type="button" className="btn btn-ghost btn-sm" style={{ whiteSpace: 'nowrap' }}
                               aria-disabled={catalog.groups.length === 0 || undefined}
                               onClick={() => (catalog.groups.length === 0
-                                ? explain(`Make an option group first on the Groups tab, then add it to ${d.name}.`)
+                                ? explain(`Make a choice group first on the Groups tab, then add it to ${d.name}.`)
                                 : setAttachFor(d))}
                               aria-label={attached.length ? `Choices for ${d.name}` : `Add choices for ${d.name}`}>
                               {attached.length ? 'Choices…' : 'Add choices'}
@@ -762,7 +826,12 @@ export default function OptionGroups() {
           onClose={() => setGroupModal(null)}
           onSaved={saved => {
             setGroupModal(null)
-            flash(groupModal.group ? `“${saved?.name}” was saved.` : `“${saved?.name}” was created — now add its options with + Option.`)
+            // S867: a new group is told its next step, the one its card now wears as primary. The
+            // insert hands back the whole row, which is all AttachToDishesModal reads of a group.
+            if (groupModal.group) flash(`“${saved?.name}” was saved.`)
+            else if (saved?.kind !== 'size') flash(`“${saved?.name}” was created. Now add its choices with + Choice.`)
+            else if (saved?.id && dishes.length > 0) flash(`“${saved.name}” was created. Put it on its dishes first, so each size takes its full menu price.`, attachAction(saved))
+            else flash(`“${saved?.name}” was created. ${NO_DISH_YET}, then put “${saved?.name}” on it before you add the sizes.`)
             load({ quiet: true })
           }}
         />
@@ -821,7 +890,7 @@ export default function OptionGroups() {
           onSaved={({ dish }) => {
             setTemplateOpen(false)
             load({ quiet: true })
-            flash(`${dish?.name || 'The dish'} now has Size, Base, Sauces and Toppings. Add the bases, sauces and toppings with + Option, then set the prices.`)
+            flash(`${dish?.name || 'The dish'} now has Size, Base, Sauces and Toppings. Add the bases, sauces and toppings with + Choice, then set the prices.`)
           }}
         />
       )}

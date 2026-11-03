@@ -8,6 +8,7 @@ import { useBizInfo } from '../../shared/hooks/useBizInfo'
 import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { firstError } from '../../shared/queryError'
 import { npr, nprExact, nprInt } from '../../shared/nepalMoney'
+import { plural } from '../../shared/plural'
 import { sheetWithLetterhead } from '../../shared/excelLetterhead'
 import ReportPage from '../../components/ReportPage'
 import PeriodScope from '../../components/PeriodScope'
@@ -19,8 +20,8 @@ import BsCalendarPicker from '../../components/BsCalendarPicker'
 import RangePresets from '../pos/reports/RangePresets'
 import { settleAll, rangeReadMs } from '../pos/reports/reportTimeout'
 import { withTimeout } from '../../utils/withTimeout'
-import { adToBsSafe, BS_MONTHS, daysInBsMonth, formatAdAsBs } from '../../utils/bsCalendar'
-import { nepalDayStartTs, nepalDayEndTs, bsSlash, bsMonthRangeIso } from '../pos/reports/reportRange'
+import { adToBsSafe, BS_MONTHS, daysInBsMonth, formatAdAsBs, formatBsDay } from '../../utils/bsCalendar'
+import { nepalDayStartTs, nepalDayEndTs, bsMonthRangeIso } from '../pos/reports/reportRange'
 import { deltaItems } from '../../utils/orderLineIngredients'
 import { posDeltaCosting } from '../pos/orders/posRecipeBook'
 import { loadOptionCatalog, isMissingColumn } from './customizationData'
@@ -47,13 +48,19 @@ import { CHART_COLORS } from '../../shared/chartColors'
 // added); the Margin tab stops painting a free-by-design choice as a loss; every table sorts.
 //
 // S839, combos (docs/pos-combos.md): a Combos tab — per combo, how many sold, what they brought in
-// (ex-VAT; a bill discount never touches a combo) and each pick's dish mix (buildComboReport).
+// (ex-VAT; a bill discount never touches a combo) and each part's dish mix (buildComboReport).
 //
 // S863 audit fixes: the range controls live in the header's action group, which ReportPage never
 // hides, so a pick no longer unmounts them (focus fell to <body>) and a failed read keeps them on
 // screen beside a Try again. A backwards range is refused before any read. Per-plate figures are
 // to the paisa and Margin is Charged minus Cost as shown. The workbook gains Summary and Weekly
 // sheets and keeps a Choice margin sheet when costing failed.
+//
+// S867 critique fixes: the owner's word list on screen and in the workbook (a guest taps a choice,
+// a set of them is a choice group, a combo slot is a part); a count of plates agrees with its noun;
+// the trend names its week-ending days in BS; on a phone the KPI strip goes two across, the custom
+// dates and Export fold behind one toggle, and every table fits; with no client chosen the page
+// says so instead of "Building report…" for ever.
 
 const TABS = [
   { key: 'popular',  label: 'Popular choices' },
@@ -87,6 +94,10 @@ const MUTED = '#6b7280' // chart-tick, for Recharts SVG props only
 const LINE_DASHES = ['', '6 3', '2 3', '8 3 2 3', '1 4']
 const NOWRAP = { whiteSpace: 'nowrap' }
 const FIG = { textAlign: 'right', whiteSpace: 'nowrap' }
+// A heading that may break between its words when its table is squeezed (S867). Every `th` is
+// nowrap, so on a 390px phone the two-word labels set the column widths and the Popular table
+// stood 403px wide in 348px of room. A wide screen still shows them on one line.
+const WRAP_TH = { whiteSpace: 'normal' }
 
 // Excel number formats. The workbook carries numbers, never formatted strings, so a reader can sum
 // and re-check them (S863).
@@ -98,6 +109,7 @@ const PCT_Z = '0.0%'
 const PCT_CHANGE_Z = '+0.0%;-0.0%;0.0%'
 const POINTS_Z = '+0.0" points";-0.0" points";0.0" points"'
 
+const NO_CLIENT_TEXT = 'No client selected. Pick a client in the top-left switcher to see its Customization Report.'
 const COST_ERROR_TEXT = 'The stock lines or item rates could not be read, so choice costs are not shown. The other tabs are not affected.'
 const COST_ERROR_SHEET_NOTE = 'The stock lines or item rates could not be read, so no cost or margin is in this sheet. The charged figures are complete.'
 const BASIS_TIP = {
@@ -113,6 +125,9 @@ const BASIS_NOTE = {
 
 /** A figure to the paisa, as the per-plate columns and the workbook carry it. */
 export const round2 = n => Math.round((Number(n) || 0) * 100) / 100
+
+/** "1 plate", "12 plates", "1,240 plates": every count of plates the page prints (S867). */
+export const platesText = n => plural(nprInt(n), 'plate')
 
 /** "+NPR 47.50", "−NPR 0.30", or "NPR 0.00": a per-plate figure to the paisa, signed. */
 export function signed2(n) {
@@ -157,6 +172,16 @@ function bsOfIso(iso) {
   const [y, m, d] = String(iso || '').split('-').map(Number)
   if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null
   return adToBsSafe(new Date(y, m - 1, d))
+}
+
+/**
+ * A week-ending tick on the trend: "17th Kartik", a day named inside the range the chip already
+ * states (S867). The axis read "10/07/2083" under a footer naming "17 Kartik 2083". The tooltip
+ * carries the full date; out of the verified table, the AD date marked as such.
+ */
+export function weekTick(iso) {
+  const bs = bsOfIso(iso)
+  return bs ? formatBsDay(bs.day, bs.month) : formatAdAsBs(iso)
 }
 
 /** The chip's BS label: "Bhadra 2082" for a whole month, else "5 Bhadra – 20 Ashwin 2082". */
@@ -268,18 +293,21 @@ const byName = key => (a, b) => String(a[key]).localeCompare(String(b[key]))
  * descending on its first click (the reason to sort by a figure is to find the top of it), a name
  * column ascending.
  */
-function SortTh({ label, tip, sortKey, sort, onSort, numeric = false }) {
+function SortTh({ label, tip, sortKey, sort, onSort, numeric = false, wrap = false, className }) {
   const active = sort.key === sortKey
   const arrow = active ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'
+  // `wrap` (S867): the label may take two lines on a phone. The button keeps the column's alignment
+  // for those lines; a button centres its text by default.
   const button = (
     <button type="button" className={`th-sort${active ? ' th-sort--active' : ''}`}
+      style={wrap ? { textAlign: 'inherit' } : undefined}
       onClick={() => onSort(sortKey, numeric)}
       aria-label={`Sort by ${label}${active ? (sort.dir === 'asc' ? ', ascending' : ', descending') : ''}`}>
       {label}<span className="th-sort-arrow" aria-hidden="true">{arrow}</span>
     </button>
   )
   return (
-    <th style={{ textAlign: numeric ? 'right' : 'left' }}
+    <th className={className} style={{ textAlign: numeric ? 'right' : 'left', ...(wrap ? WRAP_TH : null) }}
       aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
       {tip ? <Tip text={tip}>{button}</Tip> : button}
     </th>
@@ -321,18 +349,19 @@ function WeeklyTable({ weekly }) {
     <div className="table-wrap" style={{ marginTop: 16 }}>
       <table className="data-table">
         <thead><tr>
-          <th scope="col">Week ending</th>
-          {weekly.dishes.map(d => <th key={d.recipe_id} scope="col" style={{ textAlign: 'right' }}>{d.name}</th>)}
+          <th scope="col" style={WRAP_TH}>Week ending</th>
+          {/* A dish name wraps (S867): five of them on one nowrap line ran the table past the dialog. */}
+          {weekly.dishes.map(d => <th key={d.recipe_id} scope="col" style={{ textAlign: 'right', ...WRAP_TH }}>{d.name}</th>)}
         </tr></thead>
         <tbody>
           {weekly.rows.map((r, k) => (
             <tr key={weekly.weekEnds[k]}>
               <td><span style={NOWRAP}>{formatAdAsBs(weekly.weekEnds[k])}</span></td>
               {weekly.dishes.map(d => (
-                <td key={d.recipe_id} style={FIG}>
+                <td key={d.recipe_id} style={{ textAlign: 'right' }}>
                   {r[d.recipe_id] == null
                     ? <span style={{ color: 'var(--theme-text3)' }}>too few plates</span>
-                    : `${r[d.recipe_id]}%`}
+                    : <span style={NOWRAP}>{r[d.recipe_id]}%</span>}
                 </td>
               ))}
             </tr>
@@ -364,17 +393,28 @@ export default function CustomizationReport() {
   const [exportAsked, setExportAsked] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState(null)
+  // On a phone the custom dates and Export fold behind one toggle (S867, `.phone-fold`).
+  const [moreOpen, setMoreOpen] = useState(false)
   const rangeReq = useLatestRequest()
+  // S867: the Crest admin view with no client picked. The loader returned before any read and left
+  // `loading` true, so the page said "Building report…" for ever.
+  const noClient = !clientId
 
   // S863: a backwards range is refused before any read, so it never reaches the empty state
-  // ("attach option groups") that a range with no bills earns.
+  // ("attach choice groups") that a range with no bills earns.
   const backwardsMsg = rangeProblem(fromIso, toIso)
   const backwards = !!backwardsMsg
   // The equal-length range just before the chosen one (S800), for "vs the period before".
   const rangeDays = Math.max(1, Math.round((isoMs(toIso) - isoMs(fromIso)) / 86400000) + 1)
   const prevFromIso = shiftIso(fromIso, -rangeDays)
   const load = useCallback(async () => {
-    if (!clientId) return
+    if (!clientId) {
+      // Nothing to read, so nothing is loading. Claimed, so a load still in flight for the client
+      // just left cannot land its figures under the no-client state.
+      rangeReq.begin('no-client')
+      setLoading(false); setLoadError(null); setCostError(null); setData(null)
+      return
+    }
     // Claimed even when refused, so a load still in flight for the last good range cannot land
     // its figures under a backwards one.
     const key = rangeReq.begin(`${clientId}:${fromIso}:${toIso}`)
@@ -495,7 +535,8 @@ export default function CustomizationReport() {
 
   useEffect(() => { load() }, [load])
 
-  const report = data?.report
+  // No client, no report: a figure left from the client just switched away from is not shown.
+  const report = noClient ? null : data?.report
   const scopeLine = scopeLineOf(fromIso, toIso)
   const marginRows = useMemo(() => (data?.costed || []).filter(o => !o.is_removal), [data])
   const top = report ? mostAddedOf(report.options) : null
@@ -583,8 +624,8 @@ export default function CustomizationReport() {
         prev ? round2(report.sizeAdjustments - prev.sizeAdjustments) : '', ''),
       summaryRow('money', 'Cheaper choices, not a size (NPR, ex-VAT)', round2(report.cheaperChoices), prev ? round2(prev.cheaperChoices) : null,
         prev ? round2(report.cheaperChoices - prev.cheaperChoices) : '', ''),
-      summaryRow('text', 'Most added choice', top ? `${top.option_name} (${top.picks} plates)` : (onlySizes ? 'Only sizes were picked' : 'None'), '', '', ''),
-      summaryRow('text', 'Most removed ("No …" request)', removed ? `${removed.option_name} (${removed.picks} plates)` : 'None', '', '', ''),
+      summaryRow('text', 'Most added choice', top ? `${top.option_name} (${platesText(top.picks)})` : (onlySizes ? 'Only sizes were picked' : 'None'), '', '', ''),
+      summaryRow('text', 'Most removed ("No …" request)', removed ? `${removed.option_name} (${platesText(removed.picks)})` : 'None', '', '', ''),
     ]
     add('Summary', 'Customization — Summary', summary, {
       notes: [`${before} is the equal range just before this one, as on the tiles. A share moves in percentage points.`],
@@ -613,9 +654,10 @@ export default function CustomizationReport() {
         'Revenue (NPR, ex-VAT)': round2(c.revenue),
         'Average per charged combo (NPR, ex-VAT)': c.perCombo == null ? '' : round2(c.perCombo),
       })), { formatOf: (row, k) => (k.includes('NPR') ? MONEY_Z : null) })
-      add('Combo picks', 'Customization — What guests picked in each combo', comboRows.flatMap(c => c.picks.flatMap(g => g.dishes.map(d => ({
-        Combo: c.name, Pick: g.name, Dish: d.name, 'Plates': d.plates, 'Share of the pick': d.share ?? '',
-      })))), { formatOf: (row, k) => (k === 'Share of the pick' ? PCT_Z : null) })
+      // A combo's slot is a part (S867), in the sheet as on screen.
+      add('Combo parts', 'Customization — What guests picked in each combo', comboRows.flatMap(c => c.picks.flatMap(g => g.dishes.map(d => ({
+        Combo: c.name, Part: g.name, Dish: d.name, 'Plates': d.plates, 'Share of the part': d.share ?? '',
+      })))), { formatOf: (row, k) => (k === 'Share of the part' ? PCT_Z : null) })
     }
     if (imsOn) {
       const marginZ = (row, k) => (k.includes('NPR') ? MONEY_Z : null)
@@ -702,27 +744,37 @@ export default function CustomizationReport() {
     <ReportPage
       title="Customization Report"
       subtitle="Which choices guests pick, how often they customize, and what the choices earn."
-      scope={backwards ? null : <PeriodScope label={bsRangeLabel(fromIso, toIso)} title={`AD ${fromIso} to ${toIso}`} />}
+      // No client, no range to state and nothing to export (S867).
+      scope={noClient || backwards ? null : <PeriodScope label={bsRangeLabel(fromIso, toIso)} title={`AD ${fromIso} to ${toIso}`} />}
       // The range lives here, in the header's action group, because ReportPage never hides it: in
       // `filters` it unmounted on every pick (focus fell to the page) and vanished after a failed read.
-      actions={(
+      actions={noClient ? null : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <RangePresets fromIso={fromIso} toIso={toIso} onPick={setRange} />
-            <div className="form-field" style={{ margin: 0 }}>
-              <label htmlFor="cust-report-from">From</label>
-              <BsCalendarPicker id="cust-report-from" value={fromIso} onChange={setFromIso} />
+            {/* S867: on a phone the presets stay in view and the custom dates and Export fold behind
+                one toggle (S805's `.phone-fold`): the header stood 290px tall at 390px wide. The fold
+                is CSS alone, so the pickers never unmount and a focused one keeps its focus. */}
+            <button type="button" className="btn btn-ghost btn-sm phone-only" aria-expanded={moreOpen}
+              aria-controls="cust-report-more" onClick={() => setMoreOpen(v => !v)}>
+              {moreOpen ? 'Hide dates and export' : 'Dates and export'}
+            </button>
+            <div id="cust-report-more" className={`phone-fold${moreOpen ? ' phone-fold--open' : ''}`} style={{ display: 'contents' }}>
+              <div className="form-field" style={{ margin: 0 }}>
+                <label htmlFor="cust-report-from">From</label>
+                <BsCalendarPicker id="cust-report-from" value={fromIso} onChange={setFromIso} />
+              </div>
+              <div className="form-field" style={{ margin: 0 }}>
+                <label htmlFor="cust-report-to">To</label>
+                <BsCalendarPicker id="cust-report-to" value={toIso} onChange={setToIso} invalid={backwardsMsg || ''} />
+              </div>
+              <Tip text="Download every tab as a workbook, with the range and basis on each sheet.">
+                <button type="button" className="btn btn-ghost" onClick={onExport}
+                  aria-disabled={exportBlock ? 'true' : undefined} aria-busy={exporting ? 'true' : undefined}>
+                  Export Excel
+                </button>
+              </Tip>
             </div>
-            <div className="form-field" style={{ margin: 0 }}>
-              <label htmlFor="cust-report-to">To</label>
-              <BsCalendarPicker id="cust-report-to" value={toIso} onChange={setToIso} invalid={backwardsMsg || ''} />
-            </div>
-            <Tip text="Download every tab as a workbook, with the range and basis on each sheet.">
-              <button type="button" className="btn btn-ghost" onClick={onExport}
-                aria-disabled={exportBlock ? 'true' : undefined} aria-busy={exporting ? 'true' : undefined}>
-                Export Excel
-              </button>
-            </Tip>
           </div>
           <FieldError id="cust-report-to" message={backwardsMsg} />
           <div role="status" aria-live="polite">
@@ -731,11 +783,11 @@ export default function CustomizationReport() {
           <ActionError error={exportError} />
         </div>
       )}
-      loading={loading && !backwards}
-      error={backwards ? null : loadError}
+      loading={!noClient && loading && !backwards}
+      error={noClient || backwards ? null : loadError}
       onRetry={load}
-      empty={!backwards && !!report && report.customizablePlates === 0 && (data?.combos || []).length === 0}
-      emptyText="No dish with choices and no combo was sold in this range. Attach option groups to dishes on Option Groups → Dishes, or set up a combo, then check back after some bills."
+      empty={noClient || (!backwards && !!report && report.customizablePlates === 0 && (data?.combos || []).length === 0)}
+      emptyText={noClient ? NO_CLIENT_TEXT : 'No dish with choices and no combo was sold in this range. Attach choice groups to dishes on Choice Groups → Dishes, or set up a combo, then check back after some bills.'}
       filters={report && (
         <>
           {/* Print hides the tab buttons and the header controls, so the sheet names its own view. */}
@@ -745,7 +797,9 @@ export default function CustomizationReport() {
       )}
       stats={report && (
         <>
-        <div className="stat-grid">
+        {/* `--pair` (S867): two tiles across under 480px. The six stacked one per row to 590px and the
+            tabs started 1361px down a phone. */}
+        <div className="stat-grid stat-grid--pair">
           <div className="stat-card">
             <div className="stat-label"><Tip text="Plates of dishes that have choices, on paid bills in the range. A line of 3 is three plates.">Plates of customizable dishes</Tip></div>
             <div className="stat-value">{nprInt(report.customizablePlates)}</div>
@@ -753,7 +807,7 @@ export default function CustomizationReport() {
           <div className="stat-card">
             <div className="stat-label"><Tip text="Of those plates, how many carried at least one choice — a pre-selected size counts, so a dish whose size is always chosen will read as 100%. The change is in percentage points.">With a choice picked</Tip></div>
             <div className="stat-value">{pct(report.customizedShare)}</div>
-            <div className="stat-sub">{nprInt(report.customizedPlates)} plates</div>
+            <div className="stat-sub">{platesText(report.customizedPlates)}</div>
             <VsBefore now={report.customizedShare} then={data.prevReport?.customizedShare} label={`the ${rangeDays} days before`}
               format={pct} opts={{ floor: 0.02 }} points />
           </div>
@@ -771,14 +825,14 @@ export default function CustomizationReport() {
             <div className="stat-label"><Tip text={'The choice guests asked for most. Sizes are left out (a size is answered on every plate of a dish that has one, not added), and so are "No …" requests.'}>Most added</Tip></div>
             <div className="stat-value" style={{ fontSize: 18, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
               title={top ? top.option_name : undefined}>{top ? top.option_name : '—'}</div>
-            {top && <div className="stat-sub">{nprInt(top.picks)} plates</div>}
+            {top && <div className="stat-sub">{platesText(top.picks)}</div>}
             {onlySizes && <div className="stat-sub">Only sizes were picked</div>}
           </div>
           <div className="stat-card">
             <div className="stat-label"><Tip text={`The "No …" request guests made most: a removal on the plate, which the kitchen has to remember. The ${REMOVALS_TAB_LABEL} tab has it dish by dish.`}>Most removed</Tip></div>
             <div className="stat-value" style={{ fontSize: 18, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
               title={report.removals[0] ? report.removals[0].option_name : undefined}>{report.removals[0] ? report.removals[0].option_name : '—'}</div>
-            {report.removals[0] && <div className="stat-sub">{nprInt(report.removals[0].picks)} plates</div>}
+            {report.removals[0] && <div className="stat-sub">{platesText(report.removals[0].picks)}</div>}
           </div>
         </div>
         {/* S862 REPORTS-STOCK-6 (owner decision CU6 a): a choice that is not a size, priced below the
@@ -807,14 +861,15 @@ export default function CustomizationReport() {
               renderChart={h => (
                 <>
                   <ResponsiveContainer width="100%" height={h}>
-                    <LineChart data={data.weekly.rows.map((r, k) => ({ ...r, label: bsSlash(data.weekly.weekEnds[k]) }))} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                    {/* The week's AD date is the category; the tick names it in BS, the tooltip in full (S867). */}
+                    <LineChart data={data.weekly.rows.map((r, k) => ({ ...r, weekEnd: data.weekly.weekEnds[k] }))} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke={MUTED} strokeOpacity={0.2} vertical={false} />
-                      <XAxis dataKey="label" tick={{ fill: MUTED, fontSize: 11 }} />
+                      <XAxis dataKey="weekEnd" tick={{ fill: MUTED, fontSize: 11 }} tickFormatter={weekTick} />
                       <YAxis domain={[0, 100]} tick={{ fill: MUTED, fontSize: 11 }} width={40} tickFormatter={v => `${v}%`} />
                       <RTooltip
                         contentStyle={{ ...TOOLTIP_CHROME, fontSize: 12, color: 'var(--theme-text1)' }}
                         labelStyle={{ color: 'var(--theme-text1)' }} itemStyle={{ color: 'var(--theme-text1)' }}
-                        labelFormatter={l => `Week ending ${l}`}
+                        labelFormatter={iso => `Week ending ${formatAdAsBs(iso)}`}
                         formatter={(v, name) => [v == null ? 'too few plates' : `${v}%`, name]}
                       />
                       {data.weekly.dishes.map((d, i) => (
@@ -839,20 +894,25 @@ export default function CustomizationReport() {
       {report && (
         <TabPanel idBase="cust" active={tab}>
           {tab === 'popular' && (
+            // S867: on a phone the Group column hides and the group rides under the choice's name, and
+            // the two-word headings may wrap, so the table fits 348px without a sideways scroll.
             <div className="table-wrap">
               <table className="data-table">
                 <thead><tr>
                   <SortTh label="Choice" sortKey="option_name" sort={sort} onSort={toggleSort} />
-                  <SortTh label="Group" sortKey="group_name" sort={sort} onSort={toggleSort} />
-                  <SortTh label="Times picked" tip="Plates this choice was on." sortKey="picks" sort={sort} onSort={toggleSort} numeric />
+                  <SortTh label="Group" sortKey="group_name" sort={sort} onSort={toggleSort} className="phone-hide" />
+                  <SortTh label="Times picked" tip="Plates this choice was on." sortKey="picks" sort={sort} onSort={toggleSort} numeric wrap />
                   <SortTh label="Charged" tip="Price the choice added × paid plates, ex-VAT, before bill discounts." sortKey="charged" sort={sort} onSort={toggleSort} numeric />
-                  <th>Picked on</th>
+                  <th style={WRAP_TH}>Picked on</th>
                 </tr></thead>
                 <tbody>
                   {popularRows.map(o => (
                     <tr key={o.key}>
-                      <td>{o.option_name}</td>
-                      <td>{o.group_name}</td>
+                      <td>
+                        {o.option_name}
+                        <span className="phone-only"><span className="cell-sub">{o.group_name}</span></span>
+                      </td>
+                      <td className="phone-hide">{o.group_name}</td>
                       <td style={FIG}>{nprInt(o.picks)}</td>
                       <td style={FIG}>{o.is_removal ? '—' : signed(o.charged)}</td>
                       <td><DishList dishes={o.dishes} /></td>
@@ -869,9 +929,9 @@ export default function CustomizationReport() {
               <table className="data-table">
                 <thead><tr>
                   <SortTh label="Dish" sortKey="name" sort={sort} onSort={toggleSort} />
-                  <SortTh label="Plates sold" sortKey="plates" sort={sort} onSort={toggleSort} numeric />
+                  <SortTh label="Plates sold" sortKey="plates" sort={sort} onSort={toggleSort} numeric wrap />
                   <SortTh label="Customized" sortKey="customizedPlates" sort={sort} onSort={toggleSort} numeric />
-                  <SortTh label="Share" tip="Plates with at least one choice ÷ plates sold. A dish nobody customizes may not need its groups; one everybody customizes may want a new default." sortKey="share" sort={sort} onSort={toggleSort} numeric />
+                  <SortTh label="Share" tip="Plates with at least one choice ÷ plates sold. A dish nobody customizes may not need its choice groups; one everybody customizes may want a new default." sortKey="share" sort={sort} onSort={toggleSort} numeric />
                 </tr></thead>
                 <tbody>
                   {dishRows.map(d => (
@@ -897,7 +957,7 @@ export default function CustomizationReport() {
                       <SortTh label="Dish" sortKey="dish" sort={sort} onSort={toggleSort} />
                       <SortTh label="Request" sortKey="option_name" sort={sort} onSort={toggleSort} />
                       <SortTh label="Plates" sortKey="picks" sort={sort} onSort={toggleSort} numeric />
-                      <SortTh label="Share of the dish" tip="Plates with this request ÷ all plates of the dish. A request on most plates may mean the recipe should change." sortKey="share" sort={sort} onSort={toggleSort} numeric />
+                      <SortTh label="Share of the dish" tip="Plates with this request ÷ all plates of the dish. A request on most plates may mean the recipe should change." sortKey="share" sort={sort} onSort={toggleSort} numeric wrap />
                     </tr></thead>
                     <tbody>
                       {removalRows.map(r => (
@@ -919,13 +979,15 @@ export default function CustomizationReport() {
               <p className="empty-state">No combo was sold in this range.</p>
             ) : (
               <div className="table-wrap">
+                {/* S867: on a phone Per combo hides (Revenue ÷ the charged combos, both shown) and the
+                    dish mix wraps between its dishes, never inside a count and its share. */}
                 <table className="data-table">
                   <thead><tr>
                     <SortTh label="Combo" sortKey="name" sort={sort} onSort={toggleSort} />
                     <SortTh label="Sold" tip="Combos on paid bills in the range: each combo once, at its quantity. Comped combos are counted too." sortKey="sold" sort={sort} onSort={toggleSort} numeric />
                     <SortTh label="Revenue" tip="What its dishes were charged, ex-VAT. A bill discount never touches a combo, so this is after discounts too. Comped dishes add nothing." sortKey="revenue" sort={sort} onSort={toggleSort} numeric />
-                    <SortTh label="Per combo" tip="Revenue ÷ the combos that were charged. Above the price of the combo itself when guests pick dishes or choices that cost extra." sortKey="perCombo" sort={sort} onSort={toggleSort} numeric />
-                    <th><Tip text="The dishes of each pick by how many plates guests chose, and their share of that pick.">What guests picked</Tip></th>
+                    <SortTh label="Per combo" tip="Revenue ÷ the combos that were charged. Above the price of the combo itself when guests pick dishes or choices that cost extra." sortKey="perCombo" sort={sort} onSort={toggleSort} numeric className="phone-hide" />
+                    <th style={WRAP_TH}><Tip text="Each part of the combo, its dishes by how many plates guests chose, and each dish as a share of that part.">What guests picked</Tip></th>
                   </tr></thead>
                   <tbody>
                     {comboRows.map(c => (
@@ -936,12 +998,16 @@ export default function CustomizationReport() {
                           {c.comped > 0 && <span className="cell-sub">{nprInt(c.comped)} comped</span>}
                         </td>
                         <td style={FIG}>{npr(Math.round(c.revenue))}</td>
-                        <td style={FIG}>{c.perCombo == null ? '—' : npr(Math.round(c.perCombo))}</td>
+                        <td style={FIG} className="phone-hide">{c.perCombo == null ? '—' : npr(Math.round(c.perCombo))}</td>
                         <td>
                           {c.picks.map(g => (
                             <div key={g.group_id || g.name}>
                               <span style={{ color: 'var(--theme-text2)' }}>{g.name}:</span>{' '}
-                              {g.dishes.map(d => `${d.name} ${nprInt(d.plates)} (${pct(d.share)})`).join(' · ')}
+                              {g.dishes.map((d, i) => (
+                                <span key={d.recipe_id || d.name}>
+                                  {i > 0 && ' · '}{d.name} <span style={NOWRAP}>{nprInt(d.plates)} ({pct(d.share)})</span>
+                                </span>
+                              ))}
                             </div>
                           ))}
                         </td>
@@ -960,7 +1026,7 @@ export default function CustomizationReport() {
                 <button type="button" className="btn btn-ghost" style={{ marginTop: 12 }} onClick={load}>Try again</button>
               </div>
             ) : marginSorted.length === 0 ? (
-              <p className="empty-state">No choice with stock lines was picked in this range. Add stock lines to a choice in Option Groups to see its cost here.</p>
+              <p className="empty-state">No choice with stock lines was picked in this range. Add stock lines to a choice in Choice Groups to see its cost here.</p>
             ) : (
               <>
                 {/* Below 600px this list shows and the table hides: Margin, the figure the tab
@@ -979,7 +1045,7 @@ export default function CustomizationReport() {
                           </span>
                         </div>
                         <div className="phone-card__meta">
-                          Margin a plate · charged {signed2(f.charged)} · cost {f.cost == null ? 'no stock lines' : nprExact(f.cost)} · {nprInt(o.picks)} plates
+                          Margin a plate · charged {signed2(f.charged)} · cost {f.cost == null ? 'no stock lines' : nprExact(f.cost)} · {platesText(o.picks)}
                         </div>
                         {basis && <div className="phone-card__meta">{BASIS_NOTE[basis]}, not a loss on an upsell.</div>}
                       </li>
@@ -990,7 +1056,7 @@ export default function CustomizationReport() {
                   <table className="data-table">
                     <thead><tr>
                       <SortTh label="Choice" sortKey="option_name" sort={sort} onSort={toggleSort} />
-                      <SortTh label="Charged / plate" tip={'Average price this choice added per plate, ex-VAT, at the price each bill charged, to the paisa. A free "first N" pick or a comped plate lowers it below the list price.'} sortKey="chargedPerPick" sort={sort} onSort={toggleSort} numeric />
+                      <SortTh label="Charged / plate" tip={'Average price this choice added per plate, ex-VAT, at the price each bill charged, to the paisa. A plate inside its group "first N free", or a comped plate, lowers it below the list price.'} sortKey="chargedPerPick" sort={sort} onSort={toggleSort} numeric />
                       <SortTh label="Cost / plate" tip="The stock lines of each plate for this choice as they were on its bill (the bigger portion of a Large bowl included), valued at the item rates of today and averaged, to the paisa. Plates billed before the choice had stock lines are left out." sortKey="costPerPick" sort={sort} onSort={toggleSort} numeric />
                       <SortTh label="Margin / plate" tip="Charged minus cost, as shown. A choice that was free on every bill is shown in grey: its cost belongs to the dish, not to an upsell." sortKey="margin" sort={sort} onSort={toggleSort} numeric />
                       <SortTh label="Times picked" sortKey="picks" sort={sort} onSort={toggleSort} numeric />
@@ -1002,9 +1068,10 @@ export default function CustomizationReport() {
                         // the list price as billed. A price change since is not a free pick.
                         const belowList = (o.freePicks > 0 || o.compedPicks > 0)
                           && o.listPriceDelta != null && o.listPriceDelta > 0 && o.chargedPerPick < o.listPriceDelta - 0.005
+                        const were = n => (n === 1 ? 'was' : 'were')
                         const whyLess = [
-                          o.freePicks > 0 ? `${nprInt(o.freePicks)} were inside the group "first N free"` : null,
-                          o.compedPicks > 0 ? `${nprInt(o.compedPicks)} were comped` : null,
+                          o.freePicks > 0 ? `${nprInt(o.freePicks)} ${were(o.freePicks)} inside the group "first N free"` : null,
+                          o.compedPicks > 0 ? `${nprInt(o.compedPicks)} ${were(o.compedPicks)} comped` : null,
                         ].filter(Boolean).join(' and ')
                         return (
                           <tr key={o.key}>
@@ -1013,7 +1080,7 @@ export default function CustomizationReport() {
                               <span style={NOWRAP}>{signed2(f.charged)}</span>
                               {belowList && (
                                 <span className="cell-sub">
-                                  <Tip text={`Billed at a list price of ${signed2(o.listPriceDelta)} a plate on average. Of ${nprInt(o.picks)} plates, ${whyLess}: those paid nothing for it.`}>{o.freePicks > 0 ? 'incl. free picks' : 'incl. comped plates'}</Tip>
+                                  <Tip text={`Billed at a list price of ${signed2(o.listPriceDelta)} a plate on average. Of ${platesText(o.picks)}, ${whyLess}: ${o.freePicks + o.compedPicks === 1 ? 'that plate' : 'those'} paid nothing for it.`}>{o.freePicks > 0 ? 'incl. free choices' : 'incl. comped plates'}</Tip>
                                 </span>
                               )}
                             </td>
@@ -1021,7 +1088,7 @@ export default function CustomizationReport() {
                               {f.cost == null ? <Tip text="No stock lines on this choice.">—</Tip> : <span style={NOWRAP}>{nprExact(f.cost)}</span>}
                               {f.cost != null && o.costedPicks < o.picks && (
                                 <span className="cell-sub">
-                                  <Tip text="The other plates were billed before this choice had stock lines, so they carry none and are left out of the average.">over {nprInt(o.costedPicks)} of {nprInt(o.picks)} plates</Tip>
+                                  <Tip text="The other plates were billed before this choice had stock lines, so they carry none and are left out of the average.">over {nprInt(o.costedPicks)} of {platesText(o.picks)}</Tip>
                                 </span>
                               )}
                             </td>

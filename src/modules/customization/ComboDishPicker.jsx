@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react'
 import Modal from '../../components/Modal'
 import { npr } from '../../shared/nepalMoney'
 
-// Choose the dishes one pick of a combo offers (S839). The layout is AttachToDishesModal's: a search
-// box, every dish under its category, a tick per dish. It writes nothing: Done hands the ticked ids
-// back to the combo editor, which keeps each staying dish's extra charge and default.
+// Choose the dishes one pick of a combo offers (S839; a "part" on screen since S867). The layout is
+// AttachToDishesModal's: a search box, every dish under its category, a tick per dish. It writes
+// nothing: Done hands the ticked ids back to the combo editor, which keeps each staying dish's extra
+// charge and default.
 //
 // `dishes` are the outlet's active non-Sub-Recipe dishes, each with `guestPrice` (what a guest pays
 // for it alone). A dish not On POS can still be ticked: it is then sold only inside combos.
@@ -44,10 +45,10 @@ export default function ComboDishPicker({ pickName, dishes, chosen, onClose, onD
   const changed = picked.size !== chosen.length || chosen.some(id => !picked.has(id))
 
   return (
-    <Modal onClose={onClose} title={`Dishes in “${pickName || 'this pick'}”`} maxWidth={620} zIndex={110}
+    <Modal onClose={onClose} title={`Dishes in “${pickName || 'this part'}”`} maxWidth={620} zIndex={110}
       panelStyle={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }} dirty={changed}>
       <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-text2)' }}>
-        Tick every dish a guest may choose for this pick. Tick just one to include it automatically.
+        Tick every dish a guest may choose for this part. Tick just one to include it automatically.
       </p>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
         <input className="form-input form-input--auto" style={{ width: 240, maxWidth: '100%' }} placeholder="Search dishes…"
@@ -80,9 +81,12 @@ export default function ComboDishPicker({ pickName, dishes, chosen, onClose, onD
                 {list.map(d => (
                   <label key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, minHeight: 32, cursor: 'pointer' }}>
                     <input type="checkbox" checked={picked.has(d.id)} onChange={() => toggle(d.id)} />
-                    <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={d.name}>{d.name}</span>
-                    <span style={{ fontSize: 11, color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>
-                      {d.guestPrice > 0 ? npr(d.guestPrice) : 'no menu price'}{d.pos_enabled === false ? ' · not sold alone' : ''}
+                    {/* The name wraps, as in AttachToDishesModal (S867). Cut off at one line with a title
+                        a touch screen never shows, "Chicken Momo (Steam…" and "(Fried…" read the same. */}
+                    <span style={{ flex: 1, minWidth: 0, overflowWrap: 'break-word' }}>{d.name}</span>
+                    <span style={{ fontSize: 11, color: 'var(--theme-text3)', textAlign: 'right' }}>
+                      <span style={{ whiteSpace: 'nowrap' }}>{d.guestPrice > 0 ? npr(d.guestPrice) : 'no menu price'}{d.pos_enabled === false ? ' ·' : ''}</span>
+                      {d.pos_enabled === false && <>{' '}<span style={{ whiteSpace: 'nowrap' }}>not sold alone</span></>}
                     </span>
                   </label>
                 ))}

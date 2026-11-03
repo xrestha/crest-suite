@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import Modal from '../../components/Modal'
 import Tip from '../../components/Tip'
 import ActionError from '../../components/ActionError'
@@ -140,7 +141,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
   function shortNote(g, rule) {
     const offered = (optionsByGroup[g.id] || []).length
     if (g.is_active === false || offered === 0 || !(rule.min > offered)) return null
-    return `${recipe.name} must pick ${rule.min} from “${g.name}”, which offers only ${offered} option${offered === 1 ? '' : 's'}, so it cannot be ordered on the till or the QR menu until the group has more options or the minimum is lowered.`
+    return `${recipe.name} must pick ${rule.min} from “${g.name}”, which offers only ${offered} choice${offered === 1 ? '' : 's'}, so it cannot be ordered on the till or the QR menu until the group has more choices or the minimum is lowered.`
   }
 
   // The order the picker and the guest sheet show the groups in. Chosen groups are listed by
@@ -248,7 +249,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
     <Modal onClose={onClose} title={`Choices — ${recipe.name}`} maxWidth={620}
       panelStyle={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
       <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-text2)' }}>
-        Tick the option groups this dish offers, in the order guests should see them. A dish with none ticked is ordered exactly as today — one tap, no choices.
+        Tick the choice groups this dish offers, in the order guests should see them. A dish with none ticked is ordered exactly as today — one tap, no choices.
       </p>
       <div style={{ overflowY: 'auto', flex: 1 }}>
         {loading ? (
@@ -256,7 +257,13 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
         ) : loadError ? (
           <ReportLoadError error={loadError} onRetry={retryLoad} />
         ) : visibleGroups.length === 0 ? (
-          <div className="empty-state">No option groups yet. Create one on the Option Groups page first — for example “Size” or “Extras”.</div>
+          // S867: the page is a link, since that is the next step (from Menu Pricing it was only named).
+          // It closes this dialog too, which matters when the dialog sits on that page already.
+          <div className="empty-state">
+            No choice groups yet. Create one on the{' '}
+            <Link to="/customization/groups" onClick={onClose} style={{ color: 'var(--theme-accent-ink)', textDecoration: 'underline' }}>Choice Groups</Link>
+            {' '}page first, for example “Size” or “Extras”.
+          </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {[...ordered, ...visibleGroups.filter(g => !draft[g.id]?.on)].map(g => {
@@ -293,7 +300,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
                     )}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '4px 0 0 26px' }}>
-                    {opts.length ? opts.map(o => o.name).join(' · ') : 'No options in this group yet'}
+                    {opts.length ? opts.map(o => o.name).join(' · ') : 'No choices in this group yet'}
                   </div>
                   {on && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, margin: '10px 0 0 26px', alignItems: 'flex-end' }}>
@@ -301,7 +308,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
                         <>
                           <div className="form-field" style={{ margin: 0 }}>
                             <label htmlFor={`att-min-${g.id}`}>
-                              <Tip width={240} text="Leave blank to use the group's own rule. Set it to require a pick on this dish only.">Must pick (this dish)</Tip>
+                              <Tip width={240} text="Leave blank to use the group's own rule. Set it to make a choice required on this dish only.">Must pick (this dish)</Tip>
                             </label>
                             <input id={`att-min-${g.id}`} type="number" min="0" step="1" value={d.min} placeholder={String(g.min_select ?? 0)}
                               aria-label={`Must pick (this dish) from ${g.name}`} {...minAria}
@@ -321,7 +328,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
                       {opts.length > 0 && (
                         <div className="form-field" style={{ margin: 0 }}>
                           <label htmlFor={`att-def-${g.id}`}>
-                            <Tip width={260} text="Pre-ticked when this dish is ordered. “Group default” uses whichever options are marked pre-selected in the group.">Pre-selected on this dish</Tip>
+                            <Tip width={260} text="Pre-ticked when this dish is ordered. “Group default” uses whichever choices are marked pre-selected in the group.">Pre-selected on this dish</Tip>
                           </label>
                           <select id={`att-def-${g.id}`} className="form-select" value={d.def} onChange={e => patch(g.id, { def: e.target.value })}
                             aria-label={`Pre-selected on this dish from ${g.name}`}>
@@ -344,7 +351,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
       </div>
       {belowZero.length > 0 && (
         <p role="alert" className="field-error" style={{ margin: '12px 0 0' }}>
-          {belowZeroText(belowZero)}, and the till refuses a dish priced below zero. Change what is ticked here, or change the prices in Option Groups first.
+          {belowZeroText(belowZero)}, and the till refuses a dish priced below zero. Change what is ticked here, or change the prices in Choice Groups first.
         </p>
       )}
       {twoSizes && (
@@ -352,7 +359,7 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
       )}
       {alreadyBelow.length > 0 && (
         <p role="status" style={{ margin: '12px 0 0', fontSize: 13, color: 'var(--theme-amber-text)' }}>
-          △ {recipe.name} can already reach {belowZeroAmount(alreadyBelow[0].incl)} with these choices, and the till refuses it at that price — fix its prices in Option Groups.
+          △ {recipe.name} can already reach {belowZeroAmount(alreadyBelow[0].incl)} with these choices, and the till refuses it at that price — fix its prices in Choice Groups.
         </p>
       )}
       <ActionError error={actionError || (earlyPress && loading ? STILL_LOADING : earlyPress && loadError ? NOT_LOADED : null)} />

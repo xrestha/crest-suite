@@ -217,7 +217,7 @@ describe("the phone's Back in a dish being built (S842)", () => {
 
   it('goes back one step, asks before the picks are lost, and leaves only on Leave', async () => {
     renderMenu()
-    fireEvent.click(await screen.findByRole('button', { name: 'Choose options and add Acai Bowl to your order' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick your choices and add Acai Bowl to your order' }))
     expect(screen.getByText('Step 1 of 3')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('radio', { name: /Small/ }))
     fireEvent.click(screen.getByRole('button', { name: /^Next/ }))
@@ -243,7 +243,7 @@ describe("the phone's Back in a dish being built (S842)", () => {
 
   it('with nothing picked, Back closes the sheet as before', async () => {
     renderMenu()
-    fireEvent.click(await screen.findByRole('button', { name: 'Choose options and add Acai Bowl to your order' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick your choices and add Acai Bowl to your order' }))
     expect(screen.getByRole('dialog', { name: 'Acai Bowl' })).toBeInTheDocument()
     phoneBack()
     expect(screen.queryByRole('dialog', { name: 'Acai Bowl' })).toBeNull()
@@ -251,7 +251,7 @@ describe("the phone's Back in a dish being built (S842)", () => {
 
   it('names the count in "Add another", as the button shows it', async () => {
     renderMenu()
-    fireEvent.click(await screen.findByRole('button', { name: 'Choose options and add Acai Bowl to your order' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick your choices and add Acai Bowl to your order' }))
     fireEvent.click(screen.getByRole('radio', { name: /Small/ }))
     fireEvent.click(screen.getByRole('button', { name: /^Next/ }))
     fireEvent.click(screen.getByRole('button', { name: /^Skip/ }))
@@ -403,7 +403,7 @@ describe('egg is its own mark, and is not vegetarian (S846)', () => {
     mockAnswers.get_guest_menu = { data: [{ ...BOWL, is_veg: false, is_egg: true }], error: null }
     mockAnswers.get_guest_menu_options = { data: BOWL_OPTIONS, error: null }
     renderMenu()
-    fireEvent.click(await screen.findByRole('button', { name: 'Choose options and add Acai Bowl to your order' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick your choices and add Acai Bowl to your order' }))
     const sheet = screen.getByRole('dialog', { name: 'Acai Bowl' })
     expect(within(sheet).getByText('Contains egg')).toBeInTheDocument()
   })

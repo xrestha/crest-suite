@@ -130,7 +130,7 @@ describe('groupEditEffects', () => {
     }
     const { short } = groupEditEffects(toppings, { min_select: 2 }, cat, [bowl])
     expect(short).toEqual([{ recipe_id: 'bowl', need: 2, offered: 1 }])
-    expect(shortfallText('Toppings', short, () => 'Test Bowl')).toBe('Test Bowl must pick 2 from “Toppings”, which offers only 1 option. It cannot be ordered on the till or the QR menu until the group has more options or a lower rule.')
+    expect(shortfallText('Toppings', short, () => 'Test Bowl')).toBe('Test Bowl must pick 2 from “Toppings”, which offers only 1 choice. It cannot be ordered on the till or the QR menu until the group has more choices or a lower rule.')
     // Already short before the change: not this save's doing.
     const already = { ...cat, groups: [{ ...toppings, min_select: 2 }] }
     expect(groupEditEffects({ ...toppings, min_select: 2 }, { min_select: 3 }, already, [bowl]).short).toEqual([])

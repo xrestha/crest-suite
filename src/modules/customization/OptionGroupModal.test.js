@@ -11,7 +11,10 @@ jest.mock('../../shared/hooks/useScopedDb', () => ({
       const q = { eq: () => q, select: () => Promise.resolve({ data: [{ id: 'g1', ...row }], error: null }) }
       return q
     },
-    scopedInsert: () => Promise.resolve({ data: null, error: null }),
+    scopedInsert: (table, row) => {
+      mockWrites.push({ table, row, insert: true })
+      return Promise.resolve({ data: [{ id: 'g-new', ...row }], error: null })
+    },
   }),
 }))
 
@@ -45,7 +48,7 @@ it('SETUP-3: a minimum above what the group offers asks first, then saves', asyn
   const { onSaved } = renderGroup({ ...toppings, options }, { groups: [toppings], options, attachments: [{ id: 'a1', recipe_id: 'bowl', group_id: 'g1', sort: 0 }] })
   fireEvent.change(screen.getByLabelText('How many the guest must choose'), { target: { value: '2' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save group' }))
-  expect(await screen.findByText(/Test Bowl must pick 2 from “Toppings”, which offers only 1 option\./)).toBeInTheDocument()
+  expect(await screen.findByText(/Test Bowl must pick 2 from “Toppings”, which offers only 1 choice\./)).toBeInTheDocument()
   expect(mockWrites).toHaveLength(0)
   fireEvent.click(screen.getByRole('button', { name: 'Save anyway' }))
   await waitFor(() => expect(onSaved).toHaveBeenCalled())
@@ -85,8 +88,46 @@ it('Save stays pressable while it writes, and a second press sends nothing more'
 const fieldOf = el => el.closest('.form-field') // eslint-disable-line testing-library/no-node-access
 
 it('the "What is it?" and size captions sit in a form field, styled as "Name" is', () => {
-  renderGroup(null, null, [])
+  // S867: the size caption shows only where a build-your-own dish exists.
+  renderGroup(null, { groups: [], options: [], attachments: [], buildYourOwn: ['bowl'] }, [])
   expect(fieldOf(screen.getByText('What is it?'))).not.toBeNull()
   expect(fieldOf(screen.getByText('When a bigger size is picked'))).not.toBeNull()
   expect(screen.getByRole('radiogroup', { name: 'What is it?' })).toBeInTheDocument()
+})
+
+// ── S867 ──
+
+const noByo = { groups: [], options: [], attachments: [], buildYourOwn: [] }
+
+it('S867: a new group on a client with no build-your-own dish hides the size chooser and saves no scaling', async () => {
+  const { onSaved } = renderGroup(null, noByo, [])
+  expect(screen.getByRole('dialog', { name: 'New choice group' })).toBeInTheDocument()
+  expect(screen.queryByText('When a bigger size is picked')).not.toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Extras' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Create group' }))
+  await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ id: 'g-new', name: 'Extras', kind: 'addon' })))
+  expect(mockWrites[0].row).not.toHaveProperty('size_scaling')
+})
+
+it('S867: a group that already scales keeps the chooser, so it can be set back', () => {
+  const toppings = { id: 'g1', name: 'Toppings', kind: 'addon', min_select: 0, max_select: null, included_count: 0, is_active: true, size_scaling: 'stock' }
+  renderGroup({ ...toppings, options: [] }, { ...noByo, groups: [toppings] }, [])
+  expect(screen.getByText('When a bigger size is picked')).toBeInTheDocument()
+  expect(screen.getByRole('radio', { name: 'Scale stock only' })).toHaveAttribute('aria-checked', 'true')
+})
+
+it('S867: the kind stored as choice reads Preference, and Size says to go on dishes first', () => {
+  renderGroup(null, noByo, [])
+  expect(screen.getByRole('radio', { name: /^Preference/ })).toBeInTheDocument()
+  expect(screen.queryByRole('radio', { name: /^Choice/ })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('radio', { name: /^Size/ }))
+  expect(screen.getByText(/Put the group on its dishes before you add the sizes, so each size takes its full menu price\./)).toBeInTheDocument()
+})
+
+it('S867: the buttons sit outside the scrolling body, so Create stays on a short screen', () => {
+  renderGroup(null, noByo, [])
+  const scroller = screen.getByLabelText('Name').closest('[style*="overflow-y"]') // eslint-disable-line testing-library/no-node-access
+  expect(scroller).not.toBeNull()
+  expect(scroller).not.toContainElement(screen.getByRole('button', { name: 'Create group' }))
+  expect(scroller).not.toContainElement(screen.getByRole('button', { name: 'Cancel' }))
 })

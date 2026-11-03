@@ -359,13 +359,13 @@ const rules = [
   },
   {
     test: e => hasCode(e, 'option_edit_rank'),
-    staff: 'Only the Owner or a manager can change customization options and combos. Nothing was changed.',
-    operator: 'Only the Owner, a POS manager or an IMS manager can change customization options and combos, and this login is none of those — nothing was changed.',
+    staff: 'Only the Owner or a manager can change customization choices and combos. Nothing was changed.',
+    operator: 'Only the Owner, a POS manager or an IMS manager can change customization choices and combos, and this login is none of those — nothing was changed.',
   },
   {
     test: e => hasCode(e, 'customization_off'),
     staff: 'Crest Customization is not switched on for this outlet. Nothing was changed.',
-    operator: 'Crest Customization is not switched on for this outlet (or its POS is off), so options and combos cannot be changed — nothing was changed. Ask Crest to switch it on.',
+    operator: 'Crest Customization is not switched on for this outlet (or its POS is off), so choices and combos cannot be changed — nothing was changed. Ask Crest to switch it on.',
   },
   {
     test: e => hasCode(e, 'option_ingredient_foreign'),
@@ -385,29 +385,29 @@ const rules = [
   {
     test: e => hasCode(e, 'option_factor_not_size'),
     staff: 'That portion could not be saved. Nothing was changed.',
-    operator: 'A portion (Small 0.75, Large 1.5) can only be set on an option in a Size group, so this option was not saved. Nothing was changed.',
+    operator: 'A portion (Small 0.75, Large 1.5) can only be set on a choice in a Size group, so this choice was not saved. Nothing was changed.',
   },
   {
     test: e => hasCode(e, 'group_kind_has_factors'),
     staff: 'That group could not be changed. Nothing was changed.',
-    operator: 'This Size group still has sizes with a portion set, so it cannot become an Add-ons or Choice group yet. Nothing was changed — clear the Portion on each size first, then change the kind.',
+    operator: 'This Size group still has sizes with a portion set, so it cannot become an Add-ons or Preference group yet. Nothing was changed — clear the Portion on each size first, then change the kind.',
   },
   // S862 SETUP-4: the two S816 removal hints fell to the generic 23514 rule ("Check the dates and
   // amounts"), which names nothing on this dialog.
   {
     test: e => hasCode(e, 'group_kind_has_removals'),
     staff: 'That group could not be changed. Nothing was changed.',
-    operator: 'This group has a “No …” choice, and a size cannot be one, so the group was not turned into a Size group. Nothing was changed — delete the “No …” choice, or keep the group as Add-ons or Choice.',
+    operator: 'This group has a “No …” choice, and a size cannot be one, so the group was not turned into a Size group. Nothing was changed — delete the “No …” choice, or keep the group as Add-ons or Preference.',
   },
   {
     test: e => hasCode(e, 'option_removal_in_size'),
-    staff: 'That option could not be saved. Nothing was changed.',
-    operator: 'A “No …” choice cannot sit in a Size group, so this option was not saved. Nothing was changed — untick “No …”, or put the choice in an Add-ons or Choice group.',
+    staff: 'That choice could not be saved. Nothing was changed.',
+    operator: 'A “No …” choice cannot sit in a Size group, so this choice was not saved. Nothing was changed — untick “No …”, or put the choice in an Add-ons or Preference group.',
   },
   {
     test: e => hasCode(e, 'option_attach_foreign', 'option_default_foreign'),
-    staff: 'That option group could not be attached. Nothing was changed.',
-    operator: 'That group could not be attached to this dish — the dish or the default option belongs somewhere else. Nothing was changed; reload the page and try again.',
+    staff: 'That choice group could not be attached. Nothing was changed.',
+    operator: 'That group could not be attached to this dish — the dish or the default choice belongs somewhere else. Nothing was changed; reload the page and try again.',
   },
   {
     test: e => hasCode(e, 'customization_requires_pos'),
@@ -416,25 +416,25 @@ const rules = [
   },
   {
     test: e => hasCode(e, 'order_options_off'),
-    staff: 'Dishes cannot be ordered with options at this outlet. Nothing was saved — ask a manager.',
-    operator: 'Crest Customization is not switched on for this outlet (or its POS is off), so a dish with options could not be added and the order was not saved. Remove the options, or ask Crest to switch Customization on.',
+    staff: 'Dishes cannot be ordered with choices at this outlet. Nothing was saved — ask a manager.',
+    operator: 'Crest Customization is not switched on for this outlet (or its POS is off), so a dish with choices could not be added and the order was not saved. Remove the choices, or ask Crest to switch Customization on.',
   },
   {
     test: e => hasCode(e, 'option_not_on_menu'),
     staff: 'One of the choices on a dish is no longer offered. Nothing was saved — change the choices and save again.',
-    operator: 'An option chosen for a dish (named in the detail below) is hidden, deleted, or no longer attached to that dish, so the order was not saved. Change the choices and save again — or turn the option back on in Customization → Option Groups.',
+    operator: 'A choice picked for a dish (named in the detail below) is hidden, deleted, or no longer attached to that dish, so the order was not saved. Change the choices and save again — or turn the choice back on in Choices → Choice Groups.',
   },
   {
     test: e => hasCode(e, 'option_count'),
     staff: 'A dish on this order is missing a choice it must have (a size, a base…) or has too many. Nothing was saved — tap Change (or Choices) on that dish, pick, and save again.',
-    operator: 'The choices on a dish break its rule — too few picks (or none) in a group that must be chosen, or too many (named in the detail below) — so the order was not saved. Change the choices and save again.',
+    operator: 'The choices on a dish break its rule — too few choices (or none) in a group that must be chosen, or too many (named in the detail below) — so the order was not saved. Change the choices and save again.',
   },
   // S862 PRICING-3: the offline replay reached the FALLBACK for this one, in brackets on the
   // conflict line. The online save names the dish through choiceRefusalText instead.
   {
     test: e => hasCode(e, 'option_price_below_zero'),
-    staff: 'A dish on this order would cost less than nothing with the choices picked. Nothing was saved — pick other choices, or ask a manager to fix the price in Option Groups.',
-    operator: 'A dish on this order (named in the detail below) would cost less than nothing with the choices picked, so the order was not saved. Pick other choices, or raise the choice price in Customization → Option Groups.',
+    staff: 'A dish on this order would cost less than nothing with the choices picked. Nothing was saved — pick other choices, or ask a manager to fix the price in Choice Groups.',
+    operator: 'A dish on this order (named in the detail below) would cost less than nothing with the choices picked, so the order was not saved. Pick other choices, or raise the choice price in Choices → Choice Groups.',
   },
   // ── Combos (S839, docs/pos-combos.md) ────────────────────────────────────────────────────────
   {
@@ -2257,13 +2257,13 @@ const rules = [
   // Crest Customization's own name indexes (S758) — say WHICH name clashed, not just "exists".
   {
     test: e => /pos_option_groups_client_name_key/i.test(e.message || ''),
-    staff: 'An option group with that name already exists.',
-    operator: 'An option group with that name already exists for this outlet — nothing was saved. Use the existing group, or give this one a different name.',
+    staff: 'A choice group with that name already exists.',
+    operator: 'A choice group with that name already exists for this outlet — nothing was saved. Use the existing group, or give this one a different name.',
   },
   {
     test: e => /pos_options_group_name_key/i.test(e.message || ''),
-    staff: 'That group already has an option with that name.',
-    operator: 'This group already has an option with that name — nothing was saved. Edit the existing option, or give this one a different name.',
+    staff: 'That group already has a choice with that name.',
+    operator: 'This group already has a choice with that name — nothing was saved. Edit the existing choice, or give this one a different name.',
   },
   {
     test: e => /pos_recipe_option_groups_recipe_group_key/i.test(e.message || ''),

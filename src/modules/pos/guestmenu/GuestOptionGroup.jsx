@@ -60,7 +60,7 @@ export default function GuestOptionGroup({ group, rule, options, label, labelId,
       </div>
       {rule.included > 0 && (
         <p className={`gm-group-free${usedFree > 0 ? ' is-used' : ''}`}>
-          {usedFree} of {rule.included} free {rule.included === 1 ? 'pick' : 'picks'} used{pricedLeft ? ' · then each adds its price' : ''}
+          {usedFree} of {rule.included} free {rule.included === 1 ? 'choice' : 'choices'} used{pricedLeft ? ' · then each adds its price' : ''}
         </p>
       )}
       <div className="gm-options">

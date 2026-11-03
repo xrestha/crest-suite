@@ -380,6 +380,12 @@ describe('buildComboReport', () => {
     expect(row.picks[1].dishes).toEqual([{ recipe_id: 'r-coke', name: 'Coke', plates: 5, share: 1 }])
   })
 
+  // S867, the owner's word list: a combo's slot is a part wherever a person reads it.
+  test('a part sold with no name is called Part', () => {
+    const [c] = buildComboReport({ lines: [comboDish('n1', 'o1', CL1, G_MOMO, null, 0, 'r-veg', 'Veg Momo', 1, 200)] })
+    expect(c.picks[0].name).toBe('Part')
+  })
+
   test('nothing sold is no rows, and every combo comped has no average', () => {
     expect(buildComboReport({ lines: [] })).toEqual([])
     const allComped = buildComboReport({ lines: comboLines.slice(0, 2).map(l => ({ ...l, comped: true })) })[0]
@@ -426,6 +432,15 @@ describe('the Customization Report page', () => {
     expect(src).toMatch(/try \{ const \{ explosion, rateOf \} = await withTimeout\(posDeltaCosting\(supabase, clientId, deltaSets\), readMs, /)
     // S863: converted at the call site, for ActionError's detail line (the consequence is the page's own).
     expect(src).toMatch(/setCostError\(\{ text: COST_ERROR_TEXT, detail: asActionError\(e\)\.detail \}\)/)
+  })
+  // S867, the owner's word list: a set of choices is a choice group, and a combo slot is a part, on
+  // screen and in the workbook. Code names (pos_recipe_option_groups, option_name) are untouched.
+  test('the page and its workbook say choice group and part', () => {
+    expect(src).not.toMatch(/option groups?/i)
+    expect(src).toMatch(/Attach choice groups to dishes on Choice Groups → Dishes/)
+    expect(src).not.toMatch(/Combo picks|Share of the pick|Pick: g\.name|'incl\. free picks'/)
+    expect(src).toMatch(/add\('Combo parts', /)
+    expect(src).toMatch(/Part: g\.name, Dish: d\.name, 'Plates': d\.plates, 'Share of the part': /)
   })
   // S862 REPORTS-STOCK-6: only a size below the dish is greyed as part of the dish cost.
   test('a choice below the dish is greyed as a size only when it is a size', () => {

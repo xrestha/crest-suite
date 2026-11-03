@@ -59,7 +59,7 @@ export default function BuildCostDetail({ range, settings, vatNote = true }) {
                 <Tip text={`All figures in NPR${vatNote ? '; prices are before VAT' : ''}.`}>Size</Tip>
               </th>
               <th colSpan={3} scope="colgroup" style={{ textAlign: 'center' }}>
-                <Tip width={280} text="The lowest price a guest can order this size at: in every required group, the cheapest pick, and nothing optional.">Cheapest build</Tip>
+                <Tip width={280} text="The lowest price a guest can order this size at: in every required group, the cheapest choice, and nothing optional.">Cheapest build</Tip>
               </th>
               <th colSpan={3} scope="colgroup" style={{ textAlign: 'center' }}>
                 <Tip width={300} text={`What guests usually build, priced at this size: ${range.typicalSource}. Toppings and bases set to scale with the size cost more on a bigger plate.`}>Typical build</Tip>

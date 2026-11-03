@@ -74,9 +74,9 @@ describe('choiceRefusalText', () => {
 
   test('option_count names the dish and the group', () => {
     const err = { hint: 'option_count', message: 'option_count: the choices do not fit what the dish allows (Acai Bowl: Size) — change the choices and save again' }
-    expect(choiceRefusalText(err)).toBe('Acai Bowl (Size) has too few or too many choices picked, so nothing on this order was saved. Tap Change (or Choices) on that dish, fix the picks, then save again.')
+    expect(choiceRefusalText(err)).toBe('Acai Bowl (Size) has too few or too many choices picked, so nothing on this order was saved. Tap Change (or Choices) on that dish, fix the choices, then save again.')
     const two = { hint: 'option_count', message: 'option_count: the choices do not fit what the dish allows (Acai Bowl: Size; Momo (Steam): Spice) — change the choices and save again' }
-    expect(choiceRefusalText(two)).toBe('Acai Bowl (Size) and Momo (Steam) (Spice) have too few or too many choices picked, so nothing on this order was saved. Tap Change (or Choices) on each of those dishes, fix the picks, then save again.')
+    expect(choiceRefusalText(two)).toBe('Acai Bowl (Size) and Momo (Steam) (Spice) have too few or too many choices picked, so nothing on this order was saved. Tap Change (or Choices) on each of those dishes, fix the choices, then save again.')
   })
 
   test('the code in the message alone is enough (a wrapper that dropped the hint)', () => {
@@ -86,7 +86,7 @@ describe('choiceRefusalText', () => {
 
   test('option_price_below_zero names the dish (S809 4h)', () => {
     const err = { hint: 'option_price_below_zero', message: 'option_price_below_zero: Kids Momo would cost less than nothing with the choices picked — change the choices, or ask a manager to fix the price in Option Groups' }
-    expect(choiceRefusalText(err)).toBe('Kids Momo would cost less than nothing with the choices picked, so nothing on this order was saved. Tap Change on it to pick other choices, or ask a manager to fix the price in Option Groups.')
+    expect(choiceRefusalText(err)).toBe('Kids Momo would cost less than nothing with the choices picked, so nothing on this order was saved. Tap Change on it to pick other choices, or ask a manager to fix the price in Choice Groups.')
     const two = { ...err, message: 'option_price_below_zero: Kids Momo, Mini Thali would cost less than nothing with the choices picked — change the choices, or ask a manager to fix the price in Option Groups' }
     expect(choiceRefusalText(two)).toMatch(/^Kids Momo and Mini Thali would cost .* Tap Change on each of them/)
   })
@@ -111,21 +111,21 @@ describe('a dish already made whose choice the menu no longer offers', () => {
   test('a hidden choice: turn it back on to bill it as made, or take the dish off', () => {
     const t = lineChoiceTrouble(latte, groups, catalog, { sent: true })
     expect(t).toMatchObject({ gone: ['o-oat'], sent: true })
-    expect(t.text).toBe('Oat Milk is hidden in Option Groups. Turn it back on to bill this dish as made, or take the dish off.')
+    expect(t.text).toBe('Oat Milk is hidden in Choice Groups. Turn it back on to bill this dish as made, or take the dish off.')
     expect(lineChoiceTrouble(latte, groups, catalog, { sent: true, dish: 'Cafe Latte' }).text)
-      .toBe('Oat Milk is hidden in Option Groups. Turn it back on to bill Cafe Latte as made, or take the dish off.')
+      .toBe('Oat Milk is hidden in Choice Groups. Turn it back on to bill Cafe Latte as made, or take the dish off.')
   })
 
   test('a deleted choice cannot be turned back on, so only taking it off is offered', () => {
     const line = { ...latte, options: [{ option_id: 'o-oat', option_name: 'Oat Milk' }] }
     expect(lineChoiceTrouble(line, groups, {}, { sent: true }).text)
-      .toBe('This dish was made with Oat Milk, and Option Groups no longer has it, so it cannot be billed as made. Take the dish off.')
+      .toBe('This dish was made with Oat Milk, and Choice Groups no longer has it, so it cannot be billed as made. Take the dish off.')
   })
 
   test('a group re-ruled since the dish was made', () => {
     const plainMade = { name: 'Cafe Latte', sent_to_kot: true, sent_qty: 1 }
     expect(lineChoiceTrouble(plainMade, groups, catalog, { sent: true }).text)
-      .toBe('Cup size was changed in Option Groups after this dish was made, so it cannot be billed as made. Ask a manager to change Cup size back, or take the dish off.')
+      .toBe('Cup size was changed in Choice Groups after this dish was made, so it cannot be billed as made. Ask a manager to change Cup size back, or take the dish off.')
   })
 
   test('an unsent line keeps its Change sentence, and a fine sent line has nothing to say', () => {
@@ -136,10 +136,10 @@ describe('a dish already made whose choice the menu no longer offers', () => {
   test('the refusal sentence gives the same way out for the dish already made', () => {
     const err = { hint: 'option_not_on_menu', message: 'option_not_on_menu: an option chosen for Cafe Latte is no longer offered on it — change the choices and save again' }
     const sentWayOut = dish => (dish === 'Cafe Latte' ? lineChoiceTrouble(latte, groups, catalog, { sent: true, dish }).text : null)
-    expect(choiceRefusalText(err, { sentWayOut })).toBe('A choice on Cafe Latte is no longer offered, so nothing on this order was saved. Oat Milk is hidden in Option Groups. Turn it back on to bill Cafe Latte as made, or take the dish off. Then save again.')
+    expect(choiceRefusalText(err, { sentWayOut })).toBe('A choice on Cafe Latte is no longer offered, so nothing on this order was saved. Oat Milk is hidden in Choice Groups. Turn it back on to bill Cafe Latte as made, or take the dish off. Then save again.')
     // Another dish named beside it, not yet sent, keeps its Change.
     const two = { ...err, message: 'option_not_on_menu: an option chosen for Acai Bowl, Cafe Latte is no longer offered on it — change the choices and save again' }
-    expect(choiceRefusalText(two, { sentWayOut })).toBe('Choices on Acai Bowl and Cafe Latte are no longer offered, so nothing on this order was saved. Oat Milk is hidden in Option Groups. Turn it back on to bill Cafe Latte as made, or take the dish off. Tap Change on Acai Bowl to take its choice off. Then save again.')
+    expect(choiceRefusalText(two, { sentWayOut })).toBe('Choices on Acai Bowl and Cafe Latte are no longer offered, so nothing on this order was saved. Oat Milk is hidden in Choice Groups. Turn it back on to bill Cafe Latte as made, or take the dish off. Tap Change on Acai Bowl to take its choice off. Then save again.')
     // No dish made: the sentence is as before.
     expect(choiceRefusalText(err, { sentWayOut: () => null })).toMatch(/Tap Change on Cafe Latte to take it off, then save again\.$/)
   })
@@ -147,7 +147,7 @@ describe('a dish already made whose choice the menu no longer offers', () => {
   test('a count refused on a dish already made', () => {
     const err = { hint: 'option_count', message: 'option_count: the choices do not fit what the dish allows (Cafe Latte: Cup size) — change the choices and save again' }
     const sentWayOut = dish => (dish === 'Cafe Latte' ? sentDishWayOut(dish) : null)
-    expect(choiceRefusalText(err, { sentWayOut })).toBe('Cafe Latte (Cup size) has too few or too many choices picked, so nothing on this order was saved. Cafe Latte was already made, so its choices cannot be changed here. Ask a manager to turn its choice back on in Option Groups to bill it as made, or take the dish off. Then save again.')
+    expect(choiceRefusalText(err, { sentWayOut })).toBe('Cafe Latte (Cup size) has too few or too many choices picked, so nothing on this order was saved. Cafe Latte was already made, so its choices cannot be changed here. Ask a manager to turn its choice back on in Choice Groups to bill it as made, or take the dish off. Then save again.')
   })
 })
 

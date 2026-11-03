@@ -217,15 +217,15 @@ const POS_GROUPS = [
   ]},
 ]
 // Crest Customization (S758) — its own panel, an add-on that exists only on a client with POS.
-// Option Groups opens for the menu-price set (menuPricingAccess), the same people who may change a
+// Choice Groups (Option Groups until S867) opens for the menu-price set (menuPricingAccess), the same people who may change a
 // dish's price, which is exactly who the database lets write these tables. The Customization
 // Report is for managers and the Owner (owner decision), but a POS manager only (S835, D42): an
 // Inventory login cannot read till bills, so an IMS manager there saw "No choices were picked".
 // minPosRole is the page's own guard (CustomizationReport.jsx); admin and the Owner resolve to manager.
 const CUSTOMIZATION_GROUPS = [
   { key: 'cust-setup', label: null, items: [
-    { to: '/customization/groups', label: 'Option Groups', icon: ListPlus, menuPricingAccess: true },
-    // Combos (S839) open for the same set as Option Groups: save_pos_combo refuses everyone else.
+    { to: '/customization/groups', label: 'Choice Groups', icon: ListPlus, menuPricingAccess: true },
+    // Combos (S839) open for the same set as Choice Groups: save_pos_combo refuses everyone else.
     { to: '/customization/combos', label: 'Combos', icon: Layers, menuPricingAccess: true },
     { to: '/customization/report', label: 'Customization Report', icon: ListChecks, minPosRole: 'manager' },
   ]},
@@ -1213,7 +1213,7 @@ export default function Layout() {
     ims: () => firstReachable([homeIsOverview ? IMS_DASHBOARD : dashNavItem, ...IMS_GROUPS.flatMap(g => g.items)]),
     hr: () => firstReachable([HR_DASHBOARD, ...HR_GROUPS.flatMap(g => g.items)]),
     pos: () => firstReachable([POS_DASHBOARD, ...POS_GROUPS.flatMap(g => g.items)]),
-    // The report first, then the setup pages in nav order, so Option Groups stays the home of a login
+    // The report first, then the setup pages in nav order, so Choice Groups stays the home of a login
     // that cannot read the report (an IMS manager) now that Combos sits between the two.
     customization: () => {
       const items = CUSTOMIZATION_GROUPS.flatMap(g => g.items)
@@ -1380,7 +1380,7 @@ export default function Layout() {
         ].filter(Boolean).join(' · ')}`
         : 'Crest POS',
     },
-    customizationVisible && { key: 'customization', label: 'Custom', icon: Blend, tip: 'Crest Customization', dot: null },
+    customizationVisible && { key: 'customization', label: 'Choices', icon: Blend, tip: 'Crest Customization', dot: null },
     // Crest Suite is a top-row tab only for a client that HAS it (S763, owner decision). It earned
     // the row for the same reason Custom did — separately sold, its own gate axis
     // (`clients.suite_plan`), its own set of destinations — and because the group was being

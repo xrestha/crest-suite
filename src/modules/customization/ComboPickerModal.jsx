@@ -224,7 +224,7 @@ export default function ComboPickerModal({
                     const r = recipeOf(it.recipe_id)
                     const on = p?.recipe_id === it.recipe_id
                     const extra = signedPrice(it.extra_price)
-                    const meta = [extra || null, dishGroupsOf(it.recipe_id) ? 'Choices' : null].filter(Boolean)
+                    const meta = [extra || null, dishGroupsOf(it.recipe_id) ? 'Has choices' : null].filter(Boolean)
                     return (
                       <button key={it.id || it.recipe_id} type="button" className="choice-chip"
                         role="radio" aria-checked={on}
@@ -244,7 +244,7 @@ export default function ComboPickerModal({
                       {dishName}: {desc?.summary || 'no choices picked'}{choiceCharge ? ` · ${signedPrice(choiceCharge)}` : ''}
                     </span>
                     <button type="button" className="btn btn-ghost btn-sm till-hit--row" data-combo-choices
-                      aria-label={`Choices for ${dishName}`} onClick={() => setChoicesFor(g.id)}>Choices</button>
+                      aria-label={`Change choices for ${dishName}`} onClick={() => setChoicesFor(g.id)}>Change choices</button>
                   </div>
                 )}
                 {problem && <p role="alert" className="field-error" style={{ margin: '6px 0 0' }}>{problem}</p>}

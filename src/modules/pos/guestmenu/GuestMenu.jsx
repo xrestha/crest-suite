@@ -1729,7 +1729,7 @@ function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, q
         {orderingEnabled && dishGroups && (
           <button
             type="button" className="btn btn-ghost btn-sm gm-add"
-            aria-label={qty > 0 ? `Add another ${name}, ${qty} in your order` : `Choose options and add ${name} to your order`}
+            aria-label={qty > 0 ? `Add another ${name}, ${qty} in your order` : `Pick your choices and add ${name} to your order`}
             onClick={onChoose}
           >
             <Plus size={15} aria-hidden="true" />{qty > 0 ? `Add another (${qty})` : 'Add'}

@@ -8,6 +8,11 @@
 // `price` and `extra` are the strings in their boxes. A pick's `key` is its id once saved and a
 // local "new-N" before, so the price split can be previewed for a pick the database has not seen;
 // `id` is sent back for a saved pick so it keeps its id (the till's and the reports' combo_group_id).
+//
+// On screen a pick is a "part" since S867 (owner word list); the code keeps `picks` and the tables
+// keep pos_combo_groups, so only the text a person reads changed.
+
+import { nprPaisa } from '../../shared/nepalMoney'
 
 let seq = 0
 export const newKey = () => `new-${++seq}`
@@ -25,7 +30,7 @@ export function emptyCombo(nextSort = 0) {
   return { id: null, name: '', price: '', description: '', is_active: true, on_guest_menu: true, sort: nextSort, picks: [] }
 }
 
-/** A blank pick, appended by "+ Add a pick". */
+/** A blank pick (a "part" on screen since S867), appended by "+ Add a part". */
 export function emptyPick() {
   return { key: newKey(), id: null, name: '', items: [] }
 }
@@ -169,16 +174,16 @@ export function validateCombo(state, { recipeOf = () => null, otherNames = [] } 
   if (price == null) e.price = 'Type what the guest pays for the whole combo.'
   else if (!(price > 0)) e.price = 'The combo price must be more than 0.'
 
-  if (!state.picks.length) e.picks = 'Add at least one pick — for example “Pick a momo”, then the dishes a guest can choose from.'
+  if (!state.picks.length) e.picks = 'Add at least one part — for example “Momo”, then the dishes a guest can choose from.'
 
   const seenNames = new Set()
   state.picks.forEach((p, i) => {
     const pn = (p.name || '').trim()
-    if (!pn) e.pickName[p.key] = `Name pick ${i + 1} — guests see it, e.g. “Pick a drink”.`
-    else if (seenNames.has(norm(pn))) e.pickName[p.key] = `Another pick is already called “${pn}”. Give each pick its own name.`
+    if (!pn) e.pickName[p.key] = `Name part ${i + 1} — guests see it, e.g. “Drink”.`
+    else if (seenNames.has(norm(pn))) e.pickName[p.key] = `Another part is already called “${pn}”. Give each part its own name.`
     if (pn) seenNames.add(norm(pn))
 
-    const label = pn ? `“${pn}”` : `pick ${i + 1}`
+    const label = pn ? `“${pn}”` : `part ${i + 1}`
     if (!p.items.length) e.pickDishes[p.key] = `Add at least one dish to ${label}.`
     else {
       const gone = p.items.filter(it => !isComboDish(recipeOf(it.recipe_id)))
@@ -237,6 +242,44 @@ export function comboForShares(state) {
     guest_price: price > 0 ? price : 0,
     groups: state.picks.map((p, i) => ({ id: p.key, sort: i, items: p.items.map(it => ({ recipe_id: it.recipe_id })) })),
   }
+}
+
+const toPaisa = n => Math.round((Number(n) || 0) * 100)
+
+/**
+ * Whether the combo is a deal (S867): the combo price against the cheapest dish of every part ordered
+ * on its own, compared to the paisa. Both sides are what the guest pays — the price as typed and each
+ * dish's standalone guest price (`guestPriceOf`, VAT included on a VAT outlet, the price itself on a
+ * PAN one) — so they share the price box's VAT basis. Each dish is rounded to the paisa as
+ * pos_combo_shares weighs it. A guest who takes the cheapest dish also pays its extra charge, so that
+ * goes on the combo side; of two dishes at the same price, the one with the larger extra is taken.
+ * Null while the price is not above 0, or a part has no priced dish (the sum would understate it).
+ * @returns {{ kind: 'saves'|'costs_more'|'same', amount: number, text: string } | null}
+ */
+export function comboDeal(state, guestPriceOf) {
+  const price = parseMoney(state.price)
+  if (!(price > 0) || !state.picks.length) return null
+  let apart = 0
+  let extras = 0
+  for (const p of state.picks) {
+    let cheapest = null
+    p.items.forEach(it => {
+      const own = toPaisa(guestPriceOf(it.recipe_id))
+      if (own <= 0) return
+      const x = parseMoney(it.extra)
+      const extra = x > 0 ? toPaisa(x) : 0
+      if (!cheapest || own < cheapest.own || (own === cheapest.own && extra > cheapest.extra)) cheapest = { own, extra }
+    })
+    if (!cheapest) return null
+    apart += cheapest.own
+    extras += cheapest.extra
+  }
+  const diff = apart - (toPaisa(price) + extras)
+  const amount = Math.abs(diff) / 100
+  const money = `NPR ${nprPaisa(amount)}`
+  if (diff > 0) return { kind: 'saves', amount, text: `A guest who takes the cheapest dish in every part saves ${money} against ordering them on their own.` }
+  if (diff < 0) return { kind: 'costs_more', amount, text: `△ A guest who takes the cheapest dish in every part pays ${money} more than ordering them on their own.` }
+  return { kind: 'same', amount: 0, text: 'Same price as ordering the cheapest dish in every part on its own.' }
 }
 
 /** Two editor states that would save the same combo (the Modal's "typed in" guard). */

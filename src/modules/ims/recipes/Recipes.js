@@ -992,7 +992,7 @@ export default function Recipes() {
       // S862 SETUP-2 (D16): a new price that lets the dish be ordered below zero with its choices
       // (priceEffect, below the derived values) is refused before anything is written.
       if ('selling_price' in payload && priceEffect?.below.length) {
-        throw new SaveRefusal(`Nothing was saved. ${belowZeroText(priceEffect.below)}, and the till refuses a dish priced below zero. Raise the price, or change its choices in Option Groups first.`)
+        throw new SaveRefusal(`Nothing was saved. ${belowZeroText(priceEffect.below)}, and the till refuses a dish priced below zero. Raise the price, or change its choices in Choice Groups first.`)
       }
 
       // A 23505 on this table is the per-client recipe_code unique index — the only unique
@@ -2017,7 +2017,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                                 <Tip width={260} text="The choices and their stock could not be read, so this dish's cost was not worked out. The fixed-ingredient figure would read as a near-zero food cost, so it is not shown.">not checked</Tip>
                               ) : byoCost.loading && !byo ? '…'
                                 : !byo || byo.empty ? (
-                                  <Tip width={260} text="Build-your-own, but it offers no choices yet, so there is nothing to cost. Add them in Option Groups.">no choices yet</Tip>
+                                  <Tip width={260} text="Build-your-own, but it offers no choices yet, so there is nothing to cost. Add them in Choice Groups.">no choices yet</Tip>
                                 ) : (
                                   <Tip width={280} text="From the cheapest build of the smallest size to the typical build of the biggest. Open the row for each size.">{costRangeText(byo)}</Tip>
                                 )}

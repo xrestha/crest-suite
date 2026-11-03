@@ -10,13 +10,14 @@ import { npr, nprPaisa } from '../../shared/nepalMoney'
 import { comboShares } from './comboPricing'
 import {
   emptyPick, moveItem, setDefault, setPickDishes, validateCombo, comboPayload, comboForShares,
-  sameEditorState, isComboDish, isSetMeal,
+  sameEditorState, isComboDish, isSetMeal, comboDeal,
 } from './comboEditor'
 import ComboDishPicker from './ComboDishPicker'
 
 // Create or edit one combo (S839, docs/pos-combos.md). The combo is a price and a list of PICKS; a
 // pick is one dish from a short list, each dish with an optional extra charge. A pick with one dish
-// is included automatically, so a combo whose every pick has one dish is a set meal.
+// is included automatically, so a combo whose every pick has one dish is a set meal. On screen a
+// pick is a "part" since S867 (owner word list); the code and the payload keep their names.
 //
 // Nothing here prices a bill: save_pos_combo stores the combo whole and the server splits the price
 // over the dishes when one is sold. The split shown per pick is comboShares(), the browser twin of
@@ -58,14 +59,9 @@ export default function ComboEditorModal({
   const priceNum = Number(String(state.price).replace(/,/g, ''))
   const hasPrice = priceNum > 0
 
-  // What the cheapest dish of every pick costs ordered on its own — the comparison an owner prices
-  // a combo against. Only when every pick has a priced dish, or the sum would understate it.
-  const cheapestEach = state.picks.map(p => {
-    const prices = p.items.map(it => guestPriceOf(it.recipe_id)).filter(v => v > 0)
-    return prices.length ? Math.min(...prices) : null
-  })
-  const cheapestApart = cheapestEach.length && cheapestEach.every(v => v != null)
-    ? cheapestEach.reduce((a, b) => a + b, 0) : null
+  // Whether the combo is a deal against the cheapest dish of every pick ordered on its own, to the
+  // paisa (S867: it printed that sum in grey beside the price and left the owner to compare).
+  const deal = comboDeal(state, guestPriceOf)
 
   const set = patch => setState(s => ({ ...s, ...patch }))
   const setPick = (key, fn) => setState(s => ({ ...s, picks: s.picks.map(p => (p.key === key ? fn(p) : p)) }))
@@ -143,7 +139,7 @@ export default function ComboEditorModal({
       <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 18, paddingRight: 2 }}>
         {prefilled && (
           <p className="note-banner" style={{ margin: 0 }}>
-            <strong>Started from Combo Builder.</strong> One pick for each dish, at the suggested price. Add more dishes to a pick to let the guest choose, or save it as it is for a set meal.
+            <strong>Started from Combo Builder.</strong> One part for each dish, at the suggested price. Add more dishes to a part to let the guest choose, or save it as it is for a set meal.
           </p>
         )}
 
@@ -156,16 +152,16 @@ export default function ComboEditorModal({
           </div>
           <div className="form-field" style={{ margin: 0 }}>
             <label htmlFor="combo-price">
-              <Tip width={300} text={`The one price for the whole combo, as the guest pays it${vatReg ? ', VAT included' : ''}. It is shared out over the dishes on the bill (each pick shows its part below). A dish’s extra charge is added on top.`}>
+              <Tip width={300} text={`The one price for the whole combo, as the guest pays it${vatReg ? ', VAT included' : ''}. It is shared out over the dishes on the bill (each part shows its share below). A dish’s extra charge is added on top.`}>
                 {priceLabel}
               </Tip>
             </label>
             <input id="combo-price" type="number" step="any" min="0" inputMode="decimal" value={state.price}
               onChange={e => set({ price: e.target.value })} placeholder="e.g. 350" {...fieldAria('combo-price', err.price)} />
             <FieldError id="combo-price" message={err.price} />
-            {cheapestApart != null && hasPrice && (
-              <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
-                Ordered on their own, the cheapest dish of every pick comes to {npr(cheapestApart)}.
+            {deal && (
+              <span style={{ fontSize: 12, color: deal.kind === 'costs_more' ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>
+                {deal.text}
               </span>
             )}
           </div>
@@ -191,19 +187,19 @@ export default function ComboEditorModal({
         <div>
           {/* The Tip sits BESIDE the heading: inside the <h3> it joined the heading's name (S863). */}
           <div className="page-title-row" style={{ gap: 10, marginBottom: 6 }}>
-            <h3 style={{ margin: 0, fontSize: 15 }}>Picks</h3>
-            <Tip width={320} text="A pick is one dish the guest gets, chosen from the dishes you list in it. A pick with one dish is included automatically — that is how you build a set meal.">
-              <span aria-hidden="true">ⓘ</span><span className="sr-only">About picks</span>
+            <h3 style={{ margin: 0, fontSize: 15 }}>Parts</h3>
+            <Tip width={320} text="A part is one dish the guest gets, chosen from the dishes you list in it. A part with one dish is included automatically — that is how you build a set meal.">
+              <span aria-hidden="true">ⓘ</span><span className="sr-only">About parts</span>
             </Tip>
             {hasPrice && state.picks.length > 0 && (
-              <Tip width={340} text="The combo price is shared over the picks in proportion to each pick’s cheapest dish’s menu price, so reports show each dish’s fair share. Swapping a dish within a pick never moves the others; an extra charge goes to its own dish.">
+              <Tip width={340} text="The combo price is shared over the parts in proportion to the menu price of each part’s cheapest dish, so reports show each dish’s fair share. Swapping a dish within a part never moves the others; an extra charge goes to its own dish.">
                 <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>How the price is split</span>
               </Tip>
             )}
           </div>
           {setMeal && (
             <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--theme-text2)' }}>
-              Set meal: every pick has one dish, so the till adds the whole combo in one tap.
+              Set meal: every part has one dish, so the till adds the whole combo in one tap.
             </p>
           )}
 
@@ -212,14 +208,14 @@ export default function ComboEditorModal({
               const share = shares[p.key]
               const defaultKey = p.items.find(it => it.is_default)?.key || null
               const multi = p.items.length > 1
-              const pickLabel = p.name.trim() || `pick ${pi + 1}`
+              const pickLabel = p.name.trim() || `part ${pi + 1}`
               return (
-                <section key={p.key} aria-label={`Pick ${pi + 1}`}
+                <section key={p.key} aria-label={`Part ${pi + 1}`}
                   style={{ border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-md)', padding: 12 }}>
                   <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10 }}>
                     <div className="form-field" style={{ margin: 0, flex: '1 1 220px' }}>
-                      <label htmlFor={`cp-name-${p.key}`}>Pick {pi + 1}</label>
-                      <input id={`cp-name-${p.key}`} value={p.name} placeholder="e.g. Pick a momo"
+                      <label htmlFor={`cp-name-${p.key}`}>Part {pi + 1}</label>
+                      <input id={`cp-name-${p.key}`} value={p.name} placeholder="e.g. Momo"
                         onChange={e => setPick(p.key, x => ({ ...x, name: e.target.value }))}
                         {...fieldAria(`cp-name-${p.key}`, err.pickName[p.key])} />
                       <FieldError id={`cp-name-${p.key}`} message={err.pickName[p.key]} />
@@ -246,7 +242,7 @@ export default function ComboEditorModal({
                           <tr>
                             <th>Dish</th>
                             <th style={{ textAlign: 'right' }}>
-                              <Tip width={240} text={`What a guest pays for the dish ordered on its own${vatReg ? ', VAT included' : ''}. The pick’s cheapest dish decides its part of the combo price.`}>On its own</Tip>
+                              <Tip width={240} text={`What a guest pays for the dish ordered on its own${vatReg ? ', VAT included' : ''}. The part’s cheapest dish decides its share of the combo price.`}>On its own</Tip>
                             </th>
                             <th>
                               <Tip width={260} text={`Added to the combo price when the guest picks this dish${vatReg ? ', VAT included' : ''} — e.g. +50 for Chicken over Veg. Leave blank for none.`}>Extra charge</Tip>
@@ -275,10 +271,13 @@ export default function ComboEditorModal({
                                       : [r.category || 'No category', r.pos_enabled === false ? 'not sold alone' : null].filter(Boolean).join(' · ')}
                                   </div>
                                 </td>
-                                <td className="stack-third" data-label="On its own" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                {/* On a phone the price and the extra charge share a line half and half, and
+                                    Default shares the next with the row's buttons (S867): at a third each
+                                    the extra-charge box measured 73px wide at 390px. */}
+                                <td className="stack-half" data-label="On its own" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                                   {own > 0 ? npr(own) : <span style={{ color: 'var(--theme-text3)' }}>no menu price</span>}
                                 </td>
-                                <td className="stack-third" data-label="Extra charge">
+                                <td className="stack-half" data-label="Extra charge">
                                   <input id={`cp-extra-${it.key}`} className="form-input form-input--auto" type="number" step="any" min="0" inputMode="decimal"
                                     style={{ width: 110 }} placeholder="0" value={it.extra}
                                     aria-label={`Extra charge for ${dishName} in ${pickLabel}`}
@@ -293,7 +292,7 @@ export default function ComboEditorModal({
                                       onChange={() => setPick(p.key, x => setDefault(x, it.key))} />
                                   </td>
                                 )}
-                                <td style={{ whiteSpace: 'nowrap' }}>
+                                <td className="stack-half" style={{ whiteSpace: 'nowrap' }}>
                                   <div style={{ display: 'flex', gap: 2 }}>
                                     <button type="button" className="btn btn-ghost btn-icon" aria-label={`Move ${dishName} up`} title={`Move ${dishName} up`}
                                       disabled={ii === 0} onClick={() => setPick(p.key, x => ({ ...x, items: moveItem(x.items, ii, -1) }))}>↑</button>
@@ -337,10 +336,10 @@ export default function ComboEditorModal({
           </div>
 
           <div style={{ marginTop: 12 }}>
-            <Tip width={300} text="A pick with one dish is included automatically — that is how you build a set meal. Give a pick several dishes to let the guest choose one.">
+            <Tip width={300} text="A part with one dish is included automatically — that is how you build a set meal. Give a part several dishes to let the guest choose one.">
               <button type="button" id="combo-add-pick" className={`btn btn-sm ${state.picks.length ? 'btn-ghost' : 'btn-primary'}`}
                 aria-describedby={err.picks ? 'combo-add-pick-err' : undefined} onClick={addPick}>
-                + Add a pick
+                + Add a part
               </button>
             </Tip>
             <div><FieldError id="combo-add-pick" message={err.picks} /></div>

@@ -49,7 +49,7 @@ export function ComboTiles({ combos, countOf, onPick }) {
 /**
  * One combo on the cart: its name, one quantity for every dish, its total and Remove, then each dish
  * indented with its own sent marks, choices and note. A dish has no quantity or remove of its own (the
- * server refuses a combo missing a dish); Swap changes it within its pick.
+ * server refuses a combo missing a dish); Swap changes it within its part.
  *
  * `block` is groupComboBlocks' entry. `lineTotalOf(item)` is a dish's amount as the cart shows a line.
  * `swapLabelOf(item)` is 'Swap' or 'Change' when the dish can be changed, else null. `troubleOf(item)`
@@ -64,7 +64,7 @@ export function ComboCartBlock({ block, lineTotalOf, renderMarks, renderNote, sw
         <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--theme-text1)', lineHeight: 1.3 }}>{name}</span>
           <Tip style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}
-            text="A combo: its dishes go to their own stations but share one quantity. Remove takes the whole combo off; Swap changes one dish within its pick. A bill discount does not apply to a combo.">
+            text="A combo: its dishes go to their own stations but share one quantity. Remove takes the whole combo off; Swap changes one dish within its part. A bill discount does not apply to a combo.">
             <span className="badge badge-gray" style={{ fontSize: 10, cursor: 'default' }}>Combo</span>
           </Tip>
         </div>
@@ -90,7 +90,7 @@ export function ComboCartBlock({ block, lineTotalOf, renderMarks, renderNote, sw
                 </div>
                 {swap && (
                   <Tip text={swap === 'Swap'
-                    ? 'Change this dish for another of its pick. If it was already sent, it is taken off with a reason and the new dish goes on the next ticket.'
+                    ? 'Change this dish for another in its part. If it was already sent, it is taken off with a reason and the new dish goes on the next ticket.'
                     : 'Change this dish’s choices. If it was already sent, it is taken off with a reason and made again with the new choices.'}>
                     <button type="button" className="btn btn-ghost btn-sm till-hit--row"
                       aria-label={`${swap} ${item.name} in ${name}`}

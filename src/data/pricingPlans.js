@@ -152,8 +152,8 @@ export const CUSTOMIZATION_PRICING = {
     'Combos and set meals at one price, on the till and the QR menu',
     'Build-your-own dishes, walked step by step, costed as a range with IMS',
     'Works on the till and the guest QR menu alike',
-    'Kitchen tickets print every option — bold NO for removals',
-    'Stock & food cost follow each option (with Crest IMS)',
+    'Kitchen tickets print every choice — bold NO for removals',
+    'Stock & food cost follow each choice (with Crest IMS)',
     'Modifier reports — attach rate, add-on revenue & margin, removals',
   ],
 }

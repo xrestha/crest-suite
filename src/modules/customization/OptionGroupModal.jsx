@@ -16,7 +16,7 @@ import { groupEditEffects, groupEditRefusal, shortfallText } from './optionCheck
 // What the owner decides, in the order they think about it: a name, what KIND of choice it is
 // (three cards with an example each), and — for anything but a size — one sentence built from two
 // dropdowns ("Guests may skip this and can pick any number"). Everything else (the kitchen ticket
-// wording, "first picks free", offering it) sits under More options, closed unless it already holds
+// wording, "first picks free", offering it) sits under More settings, closed unless it already holds
 // something.
 //
 // Picking a kind RESETS the pick rule to that kind's default. It used to keep whatever was in the
@@ -37,14 +37,20 @@ import { groupEditEffects, groupEditRefusal, shortfallText } from './optionCheck
 // was the unchecked way back), and one that leaves a dish with more to pick than the group offers
 // asks first. SETUP-4: a group holding a "No …" choice cannot become a Size (the database refuses
 // it as group_kind_has_removals), so that is said when Size is picked, from `group.options`.
+//
+// S867 (critique): the words follow the owner's list (a guest taps a choice; the kind stored as
+// 'choice' reads Preference). The size-scaling chooser shows only where it can matter: a client
+// with a build-your-own dish, or a group already set to scale. Hidden, it saves what it would have
+// (none for a new group, the stored value for an edit). The dialog keeps OptionModal's shape, a
+// scrolling body under 90vh with the buttons outside it, so Create stays on a 390px phone screen.
 
 // The three kinds differ in what they DO, and the hint says that rather than repeating the pick
 // rule twice: a size prices the dish (as a difference that follows the dish's own price, S809 4h),
-// an add-on can add to it, a choice is usually free.
+// an add-on can add to it, a preference is usually free.
 const KINDS = [
-  { key: 'size',   title: 'Size',    example: 'Half / Full · Small / Large', hint: 'Picks one · each size prices the dish and moves with it', rule: { min: 1, max: 1 } },
-  { key: 'addon',  title: 'Add-ons', example: 'Extra cheese · Add egg · No onion', hint: 'Picks several · each can add to the price', rule: { min: 0, max: null } },
-  { key: 'choice', title: 'Choice',  example: 'Mild / Medium / Hot',         hint: 'Picks one · usually free',                   rule: { min: 1, max: 1 } },
+  { key: 'size',   title: 'Size',       example: 'Half / Full · Small / Large', hint: 'Picks one · each size prices the dish and moves with it', rule: { min: 1, max: 1 } },
+  { key: 'addon',  title: 'Add-ons',    example: 'Extra cheese · Add egg · No onion', hint: 'Picks several · each can add to the price', rule: { min: 0, max: null } },
+  { key: 'choice', title: 'Preference', example: 'Mild / Medium / Hot',         hint: 'Picks one · usually free',                   rule: { min: 1, max: 1 } },
 ]
 
 const MIN_CHOICES = [0, 1, 2, 3, 4, 5]
@@ -81,6 +87,9 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, c
   const effMax = isSize ? 1 : max
   const effIncluded = kind === 'addon' ? Math.min(included, effMax ?? included) : 0
   const removalBlocksSize = isSize && !!group && group.kind !== 'size' && (group.options || []).some(o => o.is_removal)
+  // S867: only a build-your-own dish scales a group by size, so the chooser is offered where one
+  // exists, or where this group already scales (so it can be set back).
+  const offerScaling = !isSize && ((catalog?.buildYourOwn?.length || 0) > 0 || (group?.size_scaling || 'none') !== 'none')
 
   function pickKind(k) {
     if (k === kind) return
@@ -172,8 +181,9 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, c
   const kindChangedLive = !!group && kind !== group.kind && attachedCount > 0
 
   return (
-    <Modal onClose={onClose} title={group ? `Edit group — ${group.name}` : 'New option group'} maxWidth={560}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <Modal onClose={onClose} title={group ? `Edit group — ${group.name}` : 'New choice group'} maxWidth={560}
+      panelStyle={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 20, paddingRight: 2 }}>
         <div className="form-field" style={{ margin: 0 }}>
           <label htmlFor="og-name">Name</label>
           <input id="og-name" autoFocus value={name} onChange={e => setName(e.target.value)}
@@ -202,19 +212,22 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, c
           </div>
           {removalBlocksSize && (
             <p role="alert" className="field-error" style={{ margin: 0 }}>
-              This group has a “No …” choice, and a size cannot be one. Delete the “No …” choice first, or keep the group as Add-ons or Choice.
+              This group has a “No …” choice, and a size cannot be one. Delete the “No …” choice first, or keep the group as Add-ons or Preference.
             </p>
           )}
           {kindChangedLive && !removalBlocksSize && (
             <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--theme-amber-text)' }}>
-              This group is on {attachedCount} dish{attachedCount === 1 ? '' : 'es'}. Changing its kind resets the pick rule to “{summary}” for all of them the moment you save, including any rule a dish had of its own; bills already rung are not affected.
+              This group is on {attachedCount} dish{attachedCount === 1 ? '' : 'es'}. Changing its kind resets the rule to “{summary}” for all of them the moment you save, including any rule a dish had of its own; bills already rung are not affected.
             </p>
           )}
         </div>
 
         {isSize ? (
           <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>
-            Guests always pick exactly one size. You set each size's price when you add it.
+            {/* S867: the order that makes a size take its full menu price, said where Size is picked. */}
+            Guests always pick exactly one size. {attachedCount > 0
+              ? 'You set each size’s price when you add it.'
+              : 'Put the group on its dishes before you add the sizes, so each size takes its full menu price.'}
           </p>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 14 }}>
@@ -232,10 +245,10 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, c
           </div>
         )}
 
-        {!isSize && (
+        {offerScaling && (
           <div className="form-field" style={{ margin: 0 }}>
             <span className="field-label" id="og-scaling-label">
-              <Tip width={320} text="For build-your-own dishes. A Size option carries a portion — Small 0.75, Large 1.5 — and this decides what that portion does to the picks in this group. Example: toppings on an acai bowl scale stock and price, so chicken popcorn on a Large bowl uses 1.5× the chicken and costs 1.5× as much.">When a bigger size is picked</Tip>
+              <Tip width={320} text="For build-your-own dishes. A size carries a portion — Small 0.75, Large 1.5 — and this decides what that portion does to the choices in this group. Example: toppings on an acai bowl scale stock and price, so chicken popcorn on a Large bowl uses 1.5× the chicken and costs 1.5× as much.">When a bigger size is picked</Tip>
             </span>
             <div role="radiogroup" aria-labelledby="og-scaling-label"
               onKeyDown={e => moveRovingFocus(e, '[role="radio"]')?.click()}
@@ -261,7 +274,7 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, c
         <div>
           <button type="button" className="btn btn-ghost btn-sm" aria-expanded={moreOpen} aria-controls="og-more"
             onClick={() => setMoreOpen(o => !o)}>
-            {moreOpen ? '▾' : '▸'} More options
+            {moreOpen ? '▾' : '▸'} More settings
           </button>
           {moreOpen && (
             <div id="og-more" style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 12, paddingLeft: 12, borderLeft: '1px solid var(--theme-border)' }}>
@@ -274,18 +287,18 @@ export default function OptionGroupModal({ group, attachedCount = 0, nextSort, c
               {kind === 'addon' && (
                 <div className="form-field" style={{ margin: 0 }}>
                   <label htmlFor="og-incl">
-                    <Tip width={300} text="For a deal like “2 toppings included, pay for each extra”. Of what the guest picks, the ones listed EARLIEST in this group are the free ones — not the cheapest — so put the options you are happy to give away at the top of the list (Move up on the Groups page). The till and guest menu show a pick as Included once it is free. A “No …” option is never a free pick, and it takes no place under “up to”.">Free picks before charging</Tip>
+                    <Tip width={300} text="For a deal like “2 toppings included, pay for each extra”. Of what the guest picks, the ones listed EARLIEST in this group are the free ones — not the cheapest — so put the choices you are happy to give away at the top of the list (↑ on the Choice Groups page). The till and guest menu show a choice as Included once it is free. A “No …” choice is never a free one, and it takes no place under “up to”.">Free choices before charging</Tip>
                   </label>
                   <select id="og-incl" className="form-select" value={effIncluded} onChange={e => setIncluded(Number(e.target.value))} style={{ width: 'auto' }}>
                     {Array.from({ length: (effMax ?? 10) + 1 }, (_, n) => n).map(n => (
-                      <option key={n} value={n}>{n === 0 ? 'None — every pick is charged' : `First ${n} free`}</option>
+                      <option key={n} value={n}>{n === 0 ? 'None — every choice is charged' : `First ${n} free`}</option>
                     ))}
                   </select>
                 </div>
               )}
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                 <input type="checkbox" checked={active} onChange={e => setActive(e.target.checked)} />
-                <Tip width={260} text="Untick to hide this group without deleting it — the same as Hide on the Groups page. It stays on its dishes; old bills are not affected.">Shown on the till and guest menu</Tip>
+                <Tip width={260} text="Untick to hide this group without deleting it — the same as Hide on the Choice Groups page. It stays on its dishes; old bills are not affected.">Shown on the till and guest menu</Tip>
               </label>
             </div>
           )}

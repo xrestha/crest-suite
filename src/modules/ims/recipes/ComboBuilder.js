@@ -41,7 +41,7 @@ export default function ComboBuilder() {
   // `posEnabled`, not clientModules.pos — CLAUDE.md: anything asking "does this client have POS"
   // reads posEnabled/hrEnabled. It resolves true for admin, which is right here: an operator
   // viewing a client should see the report rather than the module notice.
-  // S839: with Crest Customization a pairing becomes a real combo (Custom → Combos), opened with the
+  // S839: with Crest Customization a pairing becomes a real combo (Choices → Combos), opened with the
   // two dishes and the suggested price filled in; without it the bundle is still made by hand in
   // Menu Pricing.
   const { clientId, posEnabled, hasImsAccess, customizationEnabled } = useAuth()
@@ -201,7 +201,7 @@ export default function ComboBuilder() {
       <div className="page-header">
         <h1 className="page-title">
           Combo Builder{' '}
-          <Tip text={`Shows which items are actually ordered together most often on real paid POS bills (last N days) and suggests a discounted combo price. Insight-only — pick a pairing you like, then ${customizationEnabled ? 'Create as combo opens it in Custom → Combos with both dishes and the price filled in.' : 'create the priced bundle yourself in Menu Pricing.'}`} width={320}>ⓘ</Tip>
+          <Tip text={`Shows which items are actually ordered together most often on real paid POS bills (last N days) and suggests a discounted combo price. Insight-only — pick a pairing you like, then ${customizationEnabled ? 'Create as combo opens it in Choices → Combos with both dishes and the price filled in.' : 'create the priced bundle yourself in Menu Pricing.'}`} width={320}>ⓘ</Tip>
         </h1>
         <p className="page-subtitle">
           What actually sells together — and what to charge if you bundle it.

@@ -1817,6 +1817,12 @@ tr.interactive-row:focus-visible {
   opacity: 0.7;
   cursor: not-allowed;
 }
+/* S867: a full chip (its group is at the maximum) stays pressable, so the press can say why. A
+   dashed edge marks it, never opacity, so its name and price stay readable at arm's length. */
+.choice-chip[aria-disabled="true"] {
+  border-style: dashed;
+  cursor: not-allowed;
+}
 .choice-chip:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--theme-focus-outline), 0 0 0 5px var(--theme-focus-ring);

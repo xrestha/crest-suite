@@ -351,7 +351,8 @@ export function buildComboReport({ lines, closedAtOf = null }) {
       picks: [...c.picks.values()]
         .map(g => ({
           group_id: g.group_id,
-          name: g.nameFrom?.combo_group_name || 'Pick',
+          // A combo's slot is a "part" wherever a person reads it (S867, the owner's word list).
+          name: g.nameFrom?.combo_group_name || 'Part',
           sort: num(g.nameFrom?.combo_sort),
           plates: g.plates,
           dishes: [...g.dishes.values()]

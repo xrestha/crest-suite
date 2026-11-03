@@ -19,14 +19,14 @@ const capFirst = s => (s ? s[0].toUpperCase() + s.slice(1) : s)
 function sentGoneText(gone, optionsById, lineOptions, dish) {
   const names = goneChoicesText(gone, optionsById, lineOptions)
   const one = gone.length === 1
-  // Still in the catalog: hidden, or its group hidden or taken off the dish. Option Groups brings it back.
+  // Still in the catalog: hidden, or its group hidden or taken off the dish. Choice Groups (Option Groups until S867) brings it back.
   if (gone.every(id => optionsById?.[id])) {
-    return `${names} ${one ? 'is' : 'are'} hidden in Option Groups. Turn ${one ? 'it' : 'them'} back on to bill ${dish} as made, or take the dish off.`
+    return `${names} ${one ? 'is' : 'are'} hidden in Choice Groups. Turn ${one ? 'it' : 'them'} back on to bill ${dish} as made, or take the dish off.`
   }
-  return `${capFirst(dish)} was made with ${names}, and Option Groups no longer has ${one ? 'it' : 'them'}, so it cannot be billed as made. Take the dish off.`
+  return `${capFirst(dish)} was made with ${names}, and Choice Groups no longer has ${one ? 'it' : 'them'}, so it cannot be billed as made. Take the dish off.`
 }
 function sentCountText(groupName, dish) {
-  return `${groupName} was changed in Option Groups after ${dish} was made, so it cannot be billed as made. Ask a manager to change ${groupName} back, or take the dish off.`
+  return `${groupName} was changed in Choice Groups after ${dish} was made, so it cannot be billed as made. Ask a manager to change ${groupName} back, or take the dish off.`
 }
 
 /**
@@ -90,7 +90,7 @@ const isCode = (err, code) => err?.hint === code || new RegExp(`^${code}:`).test
  * choice the server refused (its catalog is older than the server's).
  */
 export function sentDishWayOut(dish) {
-  return `${dish} was already made, so its choices cannot be changed here. Ask a manager to turn its choice back on in Option Groups to bill it as made, or take the dish off.`
+  return `${dish} was already made, so its choices cannot be changed here. Ask a manager to turn its choice back on in Choice Groups to bill it as made, or take the dish off.`
 }
 
 /**
@@ -148,7 +148,7 @@ export function choiceRefusalText(err, { sentWayOut = null } = {}) {
       return `${head} ${made.join(' ')}${change} Then save again.`
     }
     // S862 PRICING-3: the cart's button reads Change on a line with picks and Choices on one without.
-    return `${head} Tap Change (or Choices) on ${one ? 'that dish' : 'each of those dishes'}, fix the picks, then save again.`
+    return `${head} Tap Change (or Choices) on ${one ? 'that dish' : 'each of those dishes'}, fix the choices, then save again.`
   }
   if (isCode(err, 'option_price_below_zero')) {
     const m = msg.match(BELOW_ZERO_RE)
@@ -156,7 +156,7 @@ export function choiceRefusalText(err, { sentWayOut = null } = {}) {
     const dishes = m[1].split(', ').map(s => s.trim()).filter(Boolean)
     if (!dishes.length) return null
     const one = dishes.length === 1
-    return `${andList(dishes)} would cost less than nothing with the choices picked, so nothing on this order was saved. Tap Change on ${one ? 'it' : 'each of them'} to pick other choices, or ask a manager to fix the price in Option Groups.`
+    return `${andList(dishes)} would cost less than nothing with the choices picked, so nothing on this order was saved. Tap Change on ${one ? 'it' : 'each of them'} to pick other choices, or ask a manager to fix the price in Choice Groups.`
   }
   return null
 }

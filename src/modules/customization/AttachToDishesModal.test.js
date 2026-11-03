@@ -98,3 +98,51 @@ it('S863: a dish name is not cut off with an ellipsis', () => {
   expect(name.style.textOverflow).toBe('')
   expect(name.style.whiteSpace).toBe('')
 })
+
+// S867: a Size group put on dishes shows each ticked dish's price at every size, so a full menu
+// price typed as a difference (Full at dish + 250 rather than 250) is seen before Save.
+describe('a Size group', () => {
+  const size = { id: 'g-size', name: 'Size', kind: 'size', min_select: 1, max_select: 1, included_count: 0, is_active: true }
+  const sizes = [
+    { id: 's1', group_id: 'g-size', name: 'Half', price_delta: -50, is_removal: false, is_active: true, sort: 0 },
+    { id: 's2', group_id: 'g-size', name: 'Full', price_delta: 250, is_removal: false, is_active: true, sort: 1 },
+    { id: 's3', group_id: 'g-size', name: 'Family', price_delta: 500, is_removal: false, is_active: false, sort: 2 },
+  ]
+  // A PAN-bill dish (no VAT) and a 13% one, already carrying the group.
+  const tikka = { id: 'p1', name: 'Paneer Tikka', category: 'Grill', selling_price: 250, inclPrice: 250, pos_enabled: true }
+  const thali = { id: 'p2', name: 'Veg Thali', category: 'Meals', selling_price: 220, inclPrice: 248.6, pos_enabled: true }
+  const attached = [{ id: 'a1', recipe_id: 'p2', group_id: 'g-size', sort: 0 }]
+
+  function renderSize() {
+    const catalog = { groups: [size], options: sizes, attachments: attached }
+    render(<AttachToDishesModal group={size} dishes={[tikka, thali]} attachments={attached} catalog={catalog}
+      onClose={() => {}} onSaved={() => {}} />)
+  }
+
+  it('shows each shown size at its price on a ticked dish, and nothing on an unticked one', () => {
+    renderSize()
+    expect(box('Paneer Tikka')).not.toHaveAttribute('aria-describedby')
+    fireEvent.click(box('Paneer Tikka'))
+    // The hidden Family size is not offered, so it is not listed.
+    expect(box('Paneer Tikka')).toHaveAccessibleDescription('Half NPR 200 · Full NPR 500')
+    // The difference takes the dish's own VAT: (220 − 50) × 1.13 and (220 + 250) × 1.13.
+    expect(box('Veg Thali')).toHaveAccessibleDescription('Half NPR 192 · Full NPR 531')
+    // Each price is one unbroken atom, so a narrow phone wraps between sizes, never inside one.
+    expect(screen.getByText('NPR 500')).toHaveStyle({ whiteSpace: 'nowrap' })
+  })
+
+  it('keeps the price line out of the checkbox name, and drops it on untick', () => {
+    renderSize()
+    expect(screen.getByRole('checkbox', { name: 'Veg Thali NPR 249' })).toHaveAttribute('aria-describedby', 'atd-sizes-p2')
+    fireEvent.click(box('Veg Thali'))
+    expect(box('Veg Thali')).not.toBeChecked()
+    expect(box('Veg Thali')).not.toHaveAttribute('aria-describedby')
+    expect(screen.queryByText('NPR 531')).toBeNull()
+  })
+
+  it('is not shown for a group of another kind', () => {
+    renderModal()
+    fireEvent.click(box('Coke'))
+    expect(box('Coke')).not.toHaveAttribute('aria-describedby')
+  })
+})

@@ -39,20 +39,20 @@ describe('subRecipeInUseText — delete', () => {
       .toBe('Can\'t delete "House Granola" — it\'s used as an ingredient in: Acai Bowl, Parfait. Remove it from those recipes first.')
   })
 
-  it('choices only: names Group › Choice and sends the reader to Option Groups', () => {
+  it('choices only: names Group › Choice and sends the reader to Choice Groups', () => {
     expect(subRecipeInUseText({ ...base, ...live, choiceNames: ['Toppings › Granola'] }))
-      .toBe('Can\'t delete "House Granola" — it\'s a stock line on these choices: Toppings › Granola. Remove it from those choices in Option Groups first.')
+      .toBe('Can\'t delete "House Granola" — it\'s a stock line on these choices: Toppings › Granola. Remove it from those choices in Choice Groups first.')
   })
 
   it('both: names both in one message', () => {
     expect(subRecipeInUseText({ ...base, ...live, recipeNames: ['Parfait'], choiceNames: ['Toppings › Granola'] }))
-      .toBe('Can\'t delete "House Granola" — it\'s used as an ingredient in: Parfait, and it\'s a stock line on these choices: Toppings › Granola. Remove it from those recipes, and from those choices in Option Groups, first.')
+      .toBe('Can\'t delete "House Granola" — it\'s used as an ingredient in: Parfait, and it\'s a stock line on these choices: Toppings › Granola. Remove it from those recipes, and from those choices in Choice Groups, first.')
   })
 
   it('Customization off, Owner: says the choices cannot be changed here and to ask Crest support', () => {
     const text = subRecipeInUseText({ ...base, ...off, choiceNames: ['Toppings › Granola'] })
     expect(text).toBe('Can\'t delete "House Granola" — it\'s a stock line on these choices: Toppings › Granola. Crest Customization is switched off at this outlet, so those choices can\'t be changed here — ask Crest support to remove it from them, then try again.')
-    expect(text).not.toMatch(/Remove it from those choices in Option Groups/)
+    expect(text).not.toMatch(/Remove it from those choices in Choice Groups/)
   })
 
   it('Customization off, Owner, recipes too: the recipes are still theirs to fix', () => {
@@ -65,20 +65,20 @@ describe('subRecipeInUseText — delete', () => {
       .toBe('Can\'t delete "House Granola" — it\'s used as an ingredient in: Parfait. Remove it from those recipes first.')
   })
 
-  it('Customization off, Crest support: can still edit the choices, so is sent to Option Groups', () => {
+  it('Customization off, Crest support: can still edit the choices, so is sent to Choice Groups', () => {
     const text = subRecipeInUseText({ ...base, ...operatorOff, choiceNames: ['Toppings › Granola'] })
-    expect(text).toBe('Can\'t delete "House Granola" — it\'s a stock line on these choices: Toppings › Granola. Remove it from those choices in Option Groups first. Crest Customization is switched off at this outlet, but as Crest support you can still edit its choices.')
+    expect(text).toBe('Can\'t delete "House Granola" — it\'s a stock line on these choices: Toppings › Granola. Remove it from those choices in Choice Groups first. Crest Customization is switched off at this outlet, but as Crest support you can still edit its choices.')
     expect(text).not.toMatch(/ask Crest support/)
   })
 
-  it('Customization live, Crest support: the plain Option Groups sentence', () => {
+  it('Customization live, Crest support: the plain Choice Groups sentence', () => {
     expect(subRecipeInUseText({ ...base, customizationLive: true, isAdmin: true, canEditChoices: true, choiceNames: ['Toppings › Granola'] }))
-      .toBe('Can\'t delete "House Granola" — it\'s a stock line on these choices: Toppings › Granola. Remove it from those choices in Option Groups first.')
+      .toBe('Can\'t delete "House Granola" — it\'s a stock line on these choices: Toppings › Granola. Remove it from those choices in Choice Groups first.')
   })
 
   it('Customization live, a rank that cannot edit choices: ask the Owner or a manager', () => {
     expect(subRecipeInUseText({ ...base, customizationLive: true, isAdmin: false, canEditChoices: false, choiceNames: ['Toppings › Granola'] }))
-      .toBe('Can\'t delete "House Granola" — it\'s a stock line on these choices: Toppings › Granola. Ask the Owner or a manager to remove it from those choices in Option Groups.')
+      .toBe('Can\'t delete "House Granola" — it\'s a stock line on these choices: Toppings › Granola. Ask the Owner or a manager to remove it from those choices in Choice Groups.')
   })
 })
 
@@ -96,13 +96,13 @@ describe('subRecipeInUseText — moving it out of the Sub-Recipe category', () =
 
   it('choices only: names the consequence and does not offer Hide', () => {
     const text = subRecipeInUseText({ ...base, ...live, choiceNames: ['Toppings › Granola'] })
-    expect(text).toBe('"House Granola" is a stock line on these choices: Toppings › Granola, so it can\'t stop being a Sub-Recipe — those choices would keep taking it off stock while it disappeared from Option Groups. Remove it from those choices in Option Groups first.')
+    expect(text).toBe('"House Granola" is a stock line on these choices: Toppings › Granola, so it can\'t stop being a Sub-Recipe — those choices would keep taking it off stock while it disappeared from Choice Groups. Remove it from those choices in Choice Groups first.')
     expect(text).not.toMatch(/Hide/)
   })
 
   it('both: one sentence naming both', () => {
     expect(subRecipeInUseText({ ...base, ...live, recipeNames: ['Parfait'], choiceNames: ['Toppings › Granola'] }))
-      .toBe('"House Granola" is an ingredient in Parfait and a stock line on these choices: Toppings › Granola, so it can\'t stop being a Sub-Recipe — they would keep consuming it while it disappeared from the recipes\' ingredient pickers and from Option Groups. Remove it from those recipes, and from those choices in Option Groups, first.')
+      .toBe('"House Granola" is an ingredient in Parfait and a stock line on these choices: Toppings › Granola, so it can\'t stop being a Sub-Recipe — they would keep consuming it while it disappeared from the recipes\' ingredient pickers and from Choice Groups. Remove it from those recipes, and from those choices in Choice Groups, first.')
   })
 
   it('Customization off, Owner: ask Crest support', () => {
@@ -110,9 +110,9 @@ describe('subRecipeInUseText — moving it out of the Sub-Recipe category', () =
       .toMatch(/Crest Customization is switched off at this outlet, so those choices can't be changed here — ask Crest support to remove it from them, then try again\.$/)
   })
 
-  it('Customization off, Crest support: Option Groups, not "ask Crest support"', () => {
+  it('Customization off, Crest support: Choice Groups, not "ask Crest support"', () => {
     const text = subRecipeInUseText({ ...base, ...operatorOff, choiceNames: ['Toppings › Granola'] })
-    expect(text).toMatch(/Remove it from those choices in Option Groups first\. Crest Customization is switched off at this outlet, but as Crest support you can still edit its choices\.$/)
+    expect(text).toMatch(/Remove it from those choices in Choice Groups first\. Crest Customization is switched off at this outlet, but as Crest support you can still edit its choices\.$/)
     expect(text).not.toMatch(/ask Crest support/)
   })
 })

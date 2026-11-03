@@ -83,7 +83,7 @@ function MenuGrid({ menu, menuTab, menuQuery, orderItems, vatReg, dishGroupsByRe
               {fmtNpr(price)}
             </span>
             {hasOptions && (
-              <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>Choices</span>
+              <span style={{ fontSize: 11, color: 'var(--theme-text2)' }}>Choices</span>
             )}
             {kotTimer && (
               <span style={{ fontSize: 10, fontWeight: 600, color: kotTimer.color }}>
