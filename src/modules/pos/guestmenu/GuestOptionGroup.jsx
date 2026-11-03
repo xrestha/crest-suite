@@ -3,6 +3,7 @@ import { npr } from '../../../shared/nepalMoney'
 import { moveRovingFocus, rovingTabIndex } from '../../../shared/rovingFocus'
 import { tidyName, guestRuleText } from './guestMenuHelpers'
 import DietMark from './DietMark'
+import { allergenLabel } from '../../../shared/constants/allergens'
 
 // One option group as a guest picks it: its heading and rule, the free picks used, and its choices as
 // chips (S844: one copy, shared by the dish sheet and the combo sheet; each had its own until then).
@@ -87,7 +88,7 @@ export default function GuestOptionGroup({ group, rule, options, label, labelId,
                 {(o.diet || allergens.length > 0) && (
                   <span className="gm-option-meta">
                     {o.diet && <DietMark diet={o.diet} />}
-                    {allergens.length > 0 && `Contains ${allergens.join(', ')}`}
+                    {allergens.length > 0 && `Contains ${allergens.map(allergenLabel).join(', ')}`}
                   </span>
                 )}
               </span>

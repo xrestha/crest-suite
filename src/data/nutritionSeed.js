@@ -11,6 +11,9 @@
 //
 // Row: { name, match:[lowercase keywords], unit:'GM'|'ML', source,
 //        energy_kcal, protein_g, carbs_g, fat_g, sugar_g, sodium_mg, allergens }
+//
+// `allergens` uses the keys of src/shared/constants/allergens.js only (S870). Mustard oil carries
+// mustard because Nepali mustard oil is usually cold-pressed and keeps the seed's protein.
 
 export const NUTRITION_SEED = [
   // ════════════════════════ USDA (FoodData Central) ════════════════════════
@@ -43,22 +46,22 @@ export const NUTRITION_SEED = [
   { name: 'Buff / buffalo (raw)',   match: ['buff', 'buffalo', 'rango'], unit: 'GM', source: 'USDA', energy_kcal: 130, protein_g: 26, carbs_g: 0, fat_g: 1.8, sugar_g: 0, sodium_mg: 70, allergens: '' },
   { name: 'Pork (raw)',             match: ['pork', 'bangur', 'sungur'], unit: 'GM', source: 'USDA', energy_kcal: 242, protein_g: 27, carbs_g: 0, fat_g: 14, sugar_g: 0, sodium_mg: 62, allergens: '' },
   { name: 'Fish (freshwater, raw)', match: ['fish', 'machha', 'rohu'], unit: 'GM', source: 'USDA', energy_kcal: 97, protein_g: 17, carbs_g: 0, fat_g: 2.8, sugar_g: 0, sodium_mg: 50, allergens: 'fish' },
-  { name: 'Prawn / shrimp (raw)',   match: ['prawn', 'shrimp'], unit: 'GM', source: 'USDA', energy_kcal: 99, protein_g: 24, carbs_g: 0.2, fat_g: 0.3, sugar_g: 0, sodium_mg: 111, allergens: 'shellfish' },
-  { name: 'Egg (whole)',            match: ['egg', 'anda', 'phul'], unit: 'GM', source: 'USDA', energy_kcal: 155, protein_g: 13, carbs_g: 1.1, fat_g: 11, sugar_g: 1.1, sodium_mg: 124, allergens: 'egg' },
+  { name: 'Prawn / shrimp (raw)',   match: ['prawn', 'shrimp'], unit: 'GM', source: 'USDA', energy_kcal: 99, protein_g: 24, carbs_g: 0.2, fat_g: 0.3, sugar_g: 0, sodium_mg: 111, allergens: 'crustaceans' },
+  { name: 'Egg (whole)',            match: ['egg', 'anda', 'phul'], unit: 'GM', source: 'USDA', energy_kcal: 155, protein_g: 13, carbs_g: 1.1, fat_g: 11, sugar_g: 1.1, sodium_mg: 124, allergens: 'eggs' },
 
   // ── Dairy ──
-  { name: 'Milk (whole)',           match: ['milk', 'dudh'], unit: 'GM', source: 'USDA', energy_kcal: 61, protein_g: 3.2, carbs_g: 4.8, fat_g: 3.3, sugar_g: 5.1, sodium_mg: 43, allergens: 'dairy' },
-  { name: 'Curd / yogurt (dahi)',   match: ['dahi', 'curd', 'yogurt', 'yoghurt'], unit: 'GM', source: 'USDA', energy_kcal: 61, protein_g: 3.5, carbs_g: 4.7, fat_g: 3.3, sugar_g: 4.7, sodium_mg: 46, allergens: 'dairy' },
-  { name: 'Paneer / cheese (soft)', match: ['paneer', 'chenna'], unit: 'GM', source: 'USDA', energy_kcal: 265, protein_g: 18, carbs_g: 1.2, fat_g: 21, sugar_g: 1.2, sodium_mg: 22, allergens: 'dairy' },
-  { name: 'Cheese (processed)',     match: ['cheese', 'cheddar'], unit: 'GM', source: 'USDA', energy_kcal: 402, protein_g: 25, carbs_g: 1.3, fat_g: 33, sugar_g: 0.5, sodium_mg: 621, allergens: 'dairy' },
-  { name: 'Butter',                 match: ['butter', 'makhan'], unit: 'GM', source: 'USDA', energy_kcal: 717, protein_g: 0.9, carbs_g: 0.1, fat_g: 81, sugar_g: 0.1, sodium_mg: 11, allergens: 'dairy' },
-  { name: 'Ghee / clarified butter', match: ['ghee', 'ghiu'], unit: 'GM', source: 'USDA', energy_kcal: 900, protein_g: 0, carbs_g: 0, fat_g: 100, sugar_g: 0, sodium_mg: 0, allergens: 'dairy' },
-  { name: 'Cream',                  match: ['cream', 'malai'], unit: 'GM', source: 'USDA', energy_kcal: 340, protein_g: 2.1, carbs_g: 2.8, fat_g: 36, sugar_g: 2.9, sodium_mg: 27, allergens: 'dairy' },
-  { name: 'Khuwa / mawa',           match: ['khuwa', 'mawa', 'khoa'], unit: 'GM', source: 'USDA', energy_kcal: 421, protein_g: 15, carbs_g: 25, fat_g: 31, sugar_g: 25, sodium_mg: 80, allergens: 'dairy' },
+  { name: 'Milk (whole)',           match: ['milk', 'dudh'], unit: 'GM', source: 'USDA', energy_kcal: 61, protein_g: 3.2, carbs_g: 4.8, fat_g: 3.3, sugar_g: 5.1, sodium_mg: 43, allergens: 'milk' },
+  { name: 'Curd / yogurt (dahi)',   match: ['dahi', 'curd', 'yogurt', 'yoghurt'], unit: 'GM', source: 'USDA', energy_kcal: 61, protein_g: 3.5, carbs_g: 4.7, fat_g: 3.3, sugar_g: 4.7, sodium_mg: 46, allergens: 'milk' },
+  { name: 'Paneer / cheese (soft)', match: ['paneer', 'chenna'], unit: 'GM', source: 'USDA', energy_kcal: 265, protein_g: 18, carbs_g: 1.2, fat_g: 21, sugar_g: 1.2, sodium_mg: 22, allergens: 'milk' },
+  { name: 'Cheese (processed)',     match: ['cheese', 'cheddar'], unit: 'GM', source: 'USDA', energy_kcal: 402, protein_g: 25, carbs_g: 1.3, fat_g: 33, sugar_g: 0.5, sodium_mg: 621, allergens: 'milk' },
+  { name: 'Butter',                 match: ['butter', 'makhan'], unit: 'GM', source: 'USDA', energy_kcal: 717, protein_g: 0.9, carbs_g: 0.1, fat_g: 81, sugar_g: 0.1, sodium_mg: 11, allergens: 'milk' },
+  { name: 'Ghee / clarified butter', match: ['ghee', 'ghiu'], unit: 'GM', source: 'USDA', energy_kcal: 900, protein_g: 0, carbs_g: 0, fat_g: 100, sugar_g: 0, sodium_mg: 0, allergens: 'milk' },
+  { name: 'Cream',                  match: ['cream', 'malai'], unit: 'GM', source: 'USDA', energy_kcal: 340, protein_g: 2.1, carbs_g: 2.8, fat_g: 36, sugar_g: 2.9, sodium_mg: 27, allergens: 'milk' },
+  { name: 'Khuwa / mawa',           match: ['khuwa', 'mawa', 'khoa'], unit: 'GM', source: 'USDA', energy_kcal: 421, protein_g: 15, carbs_g: 25, fat_g: 31, sugar_g: 25, sodium_mg: 80, allergens: 'milk' },
 
   // ── Oils & fats ──
   { name: 'Cooking oil (vegetable)', match: ['oil', 'tel', 'soybean oil', 'sunflower'], unit: 'GM', source: 'USDA', energy_kcal: 884, protein_g: 0, carbs_g: 0, fat_g: 100, sugar_g: 0, sodium_mg: 0, allergens: '' },
-  { name: 'Mustard oil',            match: ['mustard oil', 'tori'], unit: 'GM', source: 'USDA', energy_kcal: 884, protein_g: 0, carbs_g: 0, fat_g: 100, sugar_g: 0, sodium_mg: 0, allergens: '' },
+  { name: 'Mustard oil',            match: ['mustard oil', 'tori'], unit: 'GM', source: 'USDA', energy_kcal: 884, protein_g: 0, carbs_g: 0, fat_g: 100, sugar_g: 0, sodium_mg: 0, allergens: 'mustard' },
   { name: 'Olive oil',              match: ['olive oil', 'olive'], unit: 'GM', source: 'USDA', energy_kcal: 884, protein_g: 0, carbs_g: 0, fat_g: 100, sugar_g: 0, sodium_mg: 2, allergens: '' },
 
   // ── Vegetables ──
@@ -92,7 +95,7 @@ export const NUTRITION_SEED = [
   { name: 'Strawberry',             match: ['strawberry'], unit: 'GM', source: 'USDA', energy_kcal: 32, protein_g: 0.7, carbs_g: 8, fat_g: 0.3, sugar_g: 4.9, sodium_mg: 1, allergens: '' },
   { name: 'Blueberry',              match: ['blueberry'], unit: 'GM', source: 'USDA', energy_kcal: 57, protein_g: 0.7, carbs_g: 14, fat_g: 0.3, sugar_g: 10, sodium_mg: 1, allergens: '' },
   { name: 'Granola',                match: ['granola', 'muesli'], unit: 'GM', source: 'USDA', energy_kcal: 471, protein_g: 10, carbs_g: 64, fat_g: 20, sugar_g: 25, sodium_mg: 26, allergens: 'gluten, tree nuts' },
-  { name: 'Peanut butter',          match: ['peanut butter'], unit: 'GM', source: 'USDA', energy_kcal: 588, protein_g: 25, carbs_g: 20, fat_g: 50, sugar_g: 9, sodium_mg: 17, allergens: 'peanut' },
+  { name: 'Peanut butter',          match: ['peanut butter'], unit: 'GM', source: 'USDA', energy_kcal: 588, protein_g: 25, carbs_g: 20, fat_g: 50, sugar_g: 9, sodium_mg: 17, allergens: 'peanuts' },
   { name: 'Chia seed',              match: ['chia'], unit: 'GM', source: 'USDA', energy_kcal: 486, protein_g: 17, carbs_g: 42, fat_g: 31, sugar_g: 0, sodium_mg: 16, allergens: '' },
 
   // ── Sugars & sweeteners ──
@@ -101,7 +104,7 @@ export const NUTRITION_SEED = [
   { name: 'Honey',                  match: ['honey', 'maha'], unit: 'GM', source: 'USDA', energy_kcal: 304, protein_g: 0.3, carbs_g: 82, fat_g: 0, sugar_g: 82, sodium_mg: 4, allergens: '' },
 
   // ── Nuts & seeds ──
-  { name: 'Peanut / groundnut',     match: ['peanut', 'groundnut', 'badam'], unit: 'GM', source: 'USDA', energy_kcal: 567, protein_g: 26, carbs_g: 16, fat_g: 49, sugar_g: 4, sodium_mg: 18, allergens: 'peanut' },
+  { name: 'Peanut / groundnut',     match: ['peanut', 'groundnut', 'badam'], unit: 'GM', source: 'USDA', energy_kcal: 567, protein_g: 26, carbs_g: 16, fat_g: 49, sugar_g: 4, sodium_mg: 18, allergens: 'peanuts' },
   { name: 'Cashew',                 match: ['cashew', 'kaju'], unit: 'GM', source: 'USDA', energy_kcal: 553, protein_g: 18, carbs_g: 30, fat_g: 44, sugar_g: 6, sodium_mg: 12, allergens: 'tree nuts' },
   { name: 'Almond',                 match: ['almond', 'badam giri'], unit: 'GM', source: 'USDA', energy_kcal: 579, protein_g: 21, carbs_g: 22, fat_g: 50, sugar_g: 4.4, sodium_mg: 1, allergens: 'tree nuts' },
   { name: 'Walnut',                 match: ['walnut', 'okhar'], unit: 'GM', source: 'USDA', energy_kcal: 654, protein_g: 15, carbs_g: 14, fat_g: 65, sugar_g: 2.6, sodium_mg: 2, allergens: 'tree nuts' },
@@ -115,10 +118,10 @@ export const NUTRITION_SEED = [
   { name: 'Chilli powder',          match: ['chilli powder', 'chili powder', 'red chilli'], unit: 'GM', source: 'USDA', energy_kcal: 282, protein_g: 12, carbs_g: 50, fat_g: 14, sugar_g: 8, sodium_mg: 1640, allergens: '' },
   { name: 'Garam masala / mixed spice', match: ['masala', 'garam', 'mixed spice'], unit: 'GM', source: 'USDA', energy_kcal: 379, protein_g: 14, carbs_g: 45, fat_g: 15, sugar_g: 3, sodium_mg: 90, allergens: '' },
   { name: 'Black pepper',           match: ['pepper', 'marich'], unit: 'GM', source: 'USDA', energy_kcal: 251, protein_g: 10, carbs_g: 64, fat_g: 3.3, sugar_g: 0.6, sodium_mg: 20, allergens: '' },
-  { name: 'Soy sauce',              match: ['soy sauce', 'soya sauce'], unit: 'GM', source: 'USDA', energy_kcal: 53, protein_g: 8, carbs_g: 4.9, fat_g: 0.6, sugar_g: 0.4, sodium_mg: 5493, allergens: 'soy, gluten' },
+  { name: 'Soy sauce',              match: ['soy sauce', 'soya sauce'], unit: 'GM', source: 'USDA', energy_kcal: 53, protein_g: 8, carbs_g: 4.9, fat_g: 0.6, sugar_g: 0.4, sodium_mg: 5493, allergens: 'gluten, soy' },
   { name: 'Tomato ketchup',         match: ['ketchup', 'tomato sauce'], unit: 'GM', source: 'USDA', energy_kcal: 101, protein_g: 1.3, carbs_g: 27, fat_g: 0.1, sugar_g: 22, sodium_mg: 907, allergens: '' },
   { name: 'Vinegar',                match: ['vinegar'], unit: 'GM', source: 'USDA', energy_kcal: 18, protein_g: 0, carbs_g: 0.9, fat_g: 0, sugar_g: 0.4, sodium_mg: 5, allergens: '' },
-  { name: 'Mayonnaise',             match: ['mayonnaise', 'mayo'], unit: 'GM', source: 'USDA', energy_kcal: 680, protein_g: 1, carbs_g: 0.6, fat_g: 75, sugar_g: 0.6, sodium_mg: 635, allergens: 'egg' },
+  { name: 'Mayonnaise',             match: ['mayonnaise', 'mayo'], unit: 'GM', source: 'USDA', energy_kcal: 680, protein_g: 1, carbs_g: 0.6, fat_g: 75, sugar_g: 0.6, sodium_mg: 635, allergens: 'eggs' },
   { name: 'Tamarind (imli)',        match: ['tamarind', 'imli', 'titri'], unit: 'GM', source: 'USDA', energy_kcal: 239, protein_g: 2.8, carbs_g: 63, fat_g: 0.6, sugar_g: 39, sodium_mg: 28, allergens: '' },
 
   // ── Beverages ──
@@ -140,10 +143,10 @@ export const NUTRITION_SEED = [
   { name: 'Black gram (maas/urad) — IFCT', match: ['maas', 'urad', 'black gram'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 341, protein_g: 24, carbs_g: 59, fat_g: 1.6, sugar_g: 0, sodium_mg: 38, allergens: '' },
   { name: 'Chickpea (chana) — IFCT',     match: ['chana', 'chickpea', 'kabuli'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 360, protein_g: 18, carbs_g: 60, fat_g: 5.3, sugar_g: 0, sodium_mg: 24, allergens: '' },
   { name: 'Soybean (bhatmas) — IFCT',    match: ['soybean', 'soya', 'bhatmas'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 432, protein_g: 37, carbs_g: 21, fat_g: 19, sugar_g: 0, sodium_mg: 2, allergens: 'soy' },
-  { name: 'Paneer — IFCT',               match: ['paneer', 'chenna'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 290, protein_g: 18, carbs_g: 6, fat_g: 22, sugar_g: 6, sodium_mg: 22, allergens: 'dairy' },
+  { name: 'Paneer — IFCT',               match: ['paneer', 'chenna'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 290, protein_g: 18, carbs_g: 6, fat_g: 22, sugar_g: 6, sodium_mg: 22, allergens: 'milk' },
   { name: 'Chicken (country/desi) — IFCT', match: ['chicken', 'kukhura'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 166, protein_g: 26, carbs_g: 0, fat_g: 6.6, sugar_g: 0, sodium_mg: 70, allergens: '' },
   { name: 'Goat / mutton — IFCT',        match: ['mutton', 'goat', 'khasi', 'boka'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 122, protein_g: 21, carbs_g: 0, fat_g: 3.6, sugar_g: 0, sodium_mg: 82, allergens: '' },
-  { name: 'Hen egg, whole — IFCT',       match: ['egg', 'anda', 'phul'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 173, protein_g: 13, carbs_g: 1.2, fat_g: 13, sugar_g: 0, sodium_mg: 124, allergens: 'egg' },
+  { name: 'Hen egg, whole — IFCT',       match: ['egg', 'anda', 'phul'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 173, protein_g: 13, carbs_g: 1.2, fat_g: 13, sugar_g: 0, sodium_mg: 124, allergens: 'eggs' },
   { name: 'Jaggery (gud) — IFCT',        match: ['jaggery', 'gud', 'sakhar', 'chaku'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 383, protein_g: 0.4, carbs_g: 95, fat_g: 0.1, sugar_g: 90, sodium_mg: 30, allergens: '' },
   { name: 'Bamboo shoot (tama) — IFCT',  match: ['bamboo', 'tama'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 21, protein_g: 2.6, carbs_g: 3, fat_g: 0.3, sugar_g: 2, sodium_mg: 4, allergens: '' },
   { name: 'Colocasia / taro root (pidalu) — IFCT', match: ['taro', 'colocasia', 'pidalu', 'karkalo'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 97, protein_g: 2.7, carbs_g: 21, fat_g: 0.1, sugar_g: 0, sodium_mg: 11, allergens: '' },
@@ -153,18 +156,18 @@ export const NUTRITION_SEED = [
   // ════════════════ DFTQC Nepal (Food Composition Table for Nepal) ════════════════
   // Nepal-specific items & local processing; values per 100 g unless noted.
   { name: 'Beaten rice (chiura) — Nepal', match: ['chiura', 'beaten rice', 'poha'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 346, protein_g: 6.6, carbs_g: 77, fat_g: 1.2, sugar_g: 0, sodium_mg: 5, allergens: '' },
-  { name: 'Buffalo milk — Nepal',        match: ['buffalo milk', 'milk', 'dudh'], unit: 'ML', source: 'DFTQC Nepal', energy_kcal: 117, protein_g: 4.3, carbs_g: 5, fat_g: 8.8, sugar_g: 5, sodium_mg: 40, allergens: 'dairy' },
-  { name: 'Cow milk — Nepal',            match: ['cow milk', 'milk', 'dudh'], unit: 'ML', source: 'DFTQC Nepal', energy_kcal: 67, protein_g: 3.2, carbs_g: 4.4, fat_g: 4.1, sugar_g: 4.4, sodium_mg: 43, allergens: 'dairy' },
-  { name: 'Curd, buffalo (dahi) — Nepal', match: ['dahi', 'curd', 'yogurt', 'yoghurt'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 100, protein_g: 3.7, carbs_g: 4, fat_g: 7.5, sugar_g: 4, sodium_mg: 45, allergens: 'dairy' },
+  { name: 'Buffalo milk — Nepal',        match: ['buffalo milk', 'milk', 'dudh'], unit: 'ML', source: 'DFTQC Nepal', energy_kcal: 117, protein_g: 4.3, carbs_g: 5, fat_g: 8.8, sugar_g: 5, sodium_mg: 40, allergens: 'milk' },
+  { name: 'Cow milk — Nepal',            match: ['cow milk', 'milk', 'dudh'], unit: 'ML', source: 'DFTQC Nepal', energy_kcal: 67, protein_g: 3.2, carbs_g: 4.4, fat_g: 4.1, sugar_g: 4.4, sodium_mg: 43, allergens: 'milk' },
+  { name: 'Curd, buffalo (dahi) — Nepal', match: ['dahi', 'curd', 'yogurt', 'yoghurt'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 100, protein_g: 3.7, carbs_g: 4, fat_g: 7.5, sugar_g: 4, sodium_mg: 45, allergens: 'milk' },
   { name: 'Buffalo meat (buff) — Nepal', match: ['buff', 'buffalo', 'rango'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 131, protein_g: 19, carbs_g: 0, fat_g: 5.9, sugar_g: 0, sodium_mg: 70, allergens: '' },
   { name: 'Dried meat (sukuti) — Nepal', match: ['sukuti', 'dried meat'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 313, protein_g: 55, carbs_g: 0, fat_g: 10, sugar_g: 0, sodium_mg: 600, allergens: '' },
-  { name: 'Hard cheese (chhurpi) — Nepal', match: ['chhurpi', 'churpi', 'hard cheese'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 360, protein_g: 56, carbs_g: 22, fat_g: 4, sugar_g: 0, sodium_mg: 70, allergens: 'dairy' },
+  { name: 'Hard cheese (chhurpi) — Nepal', match: ['chhurpi', 'churpi', 'hard cheese'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 360, protein_g: 56, carbs_g: 22, fat_g: 4, sugar_g: 0, sodium_mg: 70, allergens: 'milk' },
   { name: 'Fermented dried greens (gundruk) — Nepal', match: ['gundruk', 'sinki'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 105, protein_g: 9, carbs_g: 15, fat_g: 1, sugar_g: 0, sodium_mg: 50, allergens: '' },
   { name: 'Finger millet flour (kodo) — Nepal', match: ['kodo', 'millet', 'ragi', 'dhido'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 320, protein_g: 7.3, carbs_g: 72, fat_g: 1.3, sugar_g: 0, sodium_mg: 11, allergens: '' },
   { name: 'Buckwheat flour (phapar) — Nepal', match: ['buckwheat', 'phapar'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 335, protein_g: 13, carbs_g: 71, fat_g: 3.4, sugar_g: 0, sodium_mg: 1, allergens: '' },
-  { name: 'Mustard oil — Nepal',         match: ['mustard oil', 'tori'], unit: 'ML', source: 'DFTQC Nepal', energy_kcal: 900, protein_g: 0, carbs_g: 0, fat_g: 100, sugar_g: 0, sodium_mg: 0, allergens: '' },
-  { name: 'Ghee (clarified butter) — Nepal', match: ['ghee', 'ghiu'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 900, protein_g: 0, carbs_g: 0, fat_g: 100, sugar_g: 0, sodium_mg: 0, allergens: 'dairy' },
-  { name: 'Khuwa (mawa) — Nepal',        match: ['khuwa', 'mawa', 'khoa'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 421, protein_g: 20, carbs_g: 25, fat_g: 26, sugar_g: 25, sodium_mg: 80, allergens: 'dairy' },
+  { name: 'Mustard oil — Nepal',         match: ['mustard oil', 'tori'], unit: 'ML', source: 'DFTQC Nepal', energy_kcal: 900, protein_g: 0, carbs_g: 0, fat_g: 100, sugar_g: 0, sodium_mg: 0, allergens: 'mustard' },
+  { name: 'Ghee (clarified butter) — Nepal', match: ['ghee', 'ghiu'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 900, protein_g: 0, carbs_g: 0, fat_g: 100, sugar_g: 0, sodium_mg: 0, allergens: 'milk' },
+  { name: 'Khuwa (mawa) — Nepal',        match: ['khuwa', 'mawa', 'khoa'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 421, protein_g: 20, carbs_g: 25, fat_g: 26, sugar_g: 25, sodium_mg: 80, allergens: 'milk' },
 ]
 
 // Normalize an item name to lowercase words for matching.

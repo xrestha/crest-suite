@@ -47,7 +47,7 @@ jest.mock('../../../shared/hooks/useScopedDb', () => ({
   }),
 }))
 jest.mock('../../../context/AuthContext', () => ({
-  useAuth: () => ({ clientId: 'c1', isAdmin: false, hasImsAccess: () => true }),
+  useAuth: () => ({ clientId: 'c1', isAdmin: false, hasImsAccess: () => true, hasFeature: () => false }),
 }))
 // No `settingsClientId`, so the outlet's VAT basis reads as unknown and the VAT price review stays out.
 jest.mock('../../../context/SettingsContext', () => ({

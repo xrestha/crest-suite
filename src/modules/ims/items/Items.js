@@ -25,6 +25,9 @@ import VatCostPriceBanner from './VatCostPriceBanner'
 import { unitRateText, unitRateCell } from '../../../shared/unitRate'
 import { FilterChips } from '../../../components/Tabs'
 import { vatModeOf } from '../recipes/menuPriceVat'
+import NutritionEditorModal from '../nutrition/NutritionEditorModal'
+import { allergensChecked } from '../../../utils/nutrition'
+import { normaliseAllergens, allergenLabel } from '../../../shared/constants/allergens'
 
 const DEFAULT_CATEGORIES = [
   'Dairy & Bakery',
@@ -85,7 +88,10 @@ export function bookWith(book, row, previousName) {
 }
 
 export default function Items() {
-  const { clientId, isAdmin, hasImsAccess } = useAuth()
+  const { clientId, isAdmin, hasImsAccess, hasFeature } = useAuth()
+  // S870: each ingredient's nutrition and allergens, edited here as well as from a recipe row. The
+  // page guard below is IMS supervisor, the same rank ims_items_guard needs to write the item.
+  const showNutrition = hasFeature('nutrition_facts')
   const settingsCtx = useSettings()
   const { settings } = settingsCtx
   // S792 (D32): 'pan' | 'vat' | null, for the Item Master VAT-basis review banner.
@@ -121,6 +127,8 @@ export default function Items() {
   const [filterCat, setFilterCat] = useState('all')
   const [search, setSearch] = useState('')
   const [sortConvFirst, setSortConvFirst] = useState(false)
+  const [onlyUnchecked, setOnlyUnchecked] = useState(false)
+  const [nutriItemId, setNutriItemId] = useState(null)
   const [initingCats, setInitingCats] = useState(false)
   // Every referencing row, whatever its quantity — `{ [itemId]: ['CS', 'P'] }`. ONE map drives the
   // Used In chip, the Used In filters and the delete guard, so the column can never show "—" for an
@@ -866,11 +874,15 @@ export default function Items() {
   // inside every category tab's render (O(tabs × items), with the same predicate re-evaluated
   // ~20× per keystroke of the search box). tabCounts is the per-category count of items matching
   // search + usage (category deliberately excluded — each tab shows what it WOULD hold).
-  const { filtered, tabCounts } = useMemo(() => {
+  const { filtered, tabCounts, uncheckedCount } = useMemo(() => {
     const s = search.toLowerCase()
     const tabCounts = { all: 0 }
     const searchMatched = []
+    let uncheckedCount = 0
     items.forEach(item => {
+      const unchecked = !allergensChecked(item.nutrition)
+      if (unchecked) uncheckedCount += 1
+      if (showNutrition && onlyUnchecked && !unchecked) return
       const matchSearch = item.name.toLowerCase().includes(s) || (item.item_code || '').toLowerCase().includes(s)
       const usage = refMap[item.id] || []
       const matchUsage =
@@ -890,8 +902,16 @@ export default function Items() {
         const bHas = !!(b.purchase_unit && b.conversion_factor > 1)
         return bHas - aHas
       })
-    return { filtered, tabCounts }
-  }, [items, search, refMap, shownUsage, shownCat, sortConvFirst])
+    return { filtered, tabCounts, uncheckedCount }
+  }, [items, search, refMap, shownUsage, shownCat, sortConvFirst, showNutrition, onlyUnchecked])
+
+  const nutriItem = nutriItemId ? items.find(i => i.id === nutriItemId) || null : null
+  function handleNutriSaved(itemId, payload) {
+    const next = items.map(i => i.id === itemId ? { ...i, nutrition: payload } : i)
+    setItems(next)
+    writePageCache('items', 'items', clientId, next)
+    setNutriItemId(null)
+  }
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
@@ -1285,6 +1305,16 @@ export default function Items() {
         >
           {sortConvFirst ? '✕ ' : ''}With Conversion
         </button>
+        {showNutrition && (
+          <Tip width={280} text="Ingredients nobody has checked for allergens yet. Open Nutrition on each one, tick what it contains and save; saving with nothing ticked records that it has none. Until then, guests see the dishes using it as allergen info incomplete.">
+            <button type="button" aria-pressed={onlyUnchecked}
+              onClick={() => setOnlyUnchecked(v => !v)}
+              className={`tab-btn${onlyUnchecked ? ' tab-btn--active' : ''}`}
+            >
+              {onlyUnchecked ? '✕ ' : '△ '}Allergens not checked ({uncheckedCount})
+            </button>
+          </Tip>
+        )}
       </div>
 
       {/* Category filter (S796). A hand-rolled row of bare buttons with no pressed state, so which
@@ -1326,7 +1356,9 @@ export default function Items() {
             <p className="empty-state-text">
               {items.length === 0
                 ? 'No items yet. Add your first ingredient to get started.'
-                : 'No items match your search.'}
+                : showNutrition && onlyUnchecked && uncheckedCount === 0
+                  ? 'Every ingredient has been checked for allergens.'
+                  : 'No items match your search.'}
             </p>
           </div>
         ) : (
@@ -1348,6 +1380,9 @@ export default function Items() {
                   </th>
                   <th><Tip text="Purchase unit → base unit mapping (e.g. 1 carton = 12 bottles). Set this when your vendor sells in bulk but you track stock in individual units." width={280}>Conversion</Tip></th>
                   <th><Tip text="Blank means active: the item shows in pickers and on the stock sheet. Hidden takes it out of them from now on; its past purchases and counts keep their figures." width={260}>Status</Tip></th>
+                  {showNutrition && (
+                    <th><Tip width={280} text="The allergens this ingredient contains, from its Nutrition button. Not checked means nobody has saved its allergens yet, so the guest menu shows every dish using it as allergen info incomplete.">Allergens</Tip></th>
+                  )}
                   <th><Tip text="Where this item already has records. An item with any of these can't be deleted — hide it instead: past months keep its purchases and counts, and it only leaves the pickers and the stock sheet from now on. The chip names the first two places; hover it for the full list. An item sent or received between your outlets (Stock Transfers) can be hidden but never force-deleted, because both outlets keep the transfer on their books." width={320}>Used In</Tip></th>
                   <th></th>
                 </tr>
@@ -1395,6 +1430,17 @@ export default function Items() {
                         {/* Only the exception is marked (S796): a green "Active" on every row was a column of the same word that hid the few hidden ones. The Hide button says "Hide", so the state says "Hidden". */}
                         {!item.is_active && <span className="badge badge-gray">Hidden</span>}
                       </td>
+                      {showNutrition && (
+                        <td>
+                          {(() => {
+                            const { keys, other } = normaliseAllergens(item.nutrition?.allergens)
+                            const words = [...keys, ...other].map(allergenLabel).join(', ')
+                            return allergensChecked(item.nutrition)
+                              ? <span style={{ fontSize: 12, color: 'var(--theme-text1)' }}><span aria-hidden="true" style={{ color: 'var(--theme-green-text)' }}>✓ </span>{words || 'None'}</span>
+                              : <span style={{ fontSize: 12, color: 'var(--theme-amber-text)' }}>△ Not checked{words ? ` (${words})` : ''}</span>
+                          })()}
+                        </td>
+                      )}
                       <td>
                         {refMap[item.id]?.length > 0 ? (
                           <UsageChip names={refMap[item.id].map(code => USAGE_LABELS[code] || code)}
@@ -1421,6 +1467,10 @@ export default function Items() {
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
                           onClick={() => openEdit(item)} aria-label={`Edit ${item.name}`}>Edit</button>
+                        {showNutrition && (
+                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
+                            onClick={() => setNutriItemId(item.id)} aria-label={`Nutrition and allergens for ${item.name}`}>Nutrition</button>
+                        )}
                         <button className="btn btn-ghost" style={{ fontSize: 12, padding: '5px 10px' }}
                           onClick={() => toggleActive(item)} disabled={togglingId != null}
                           aria-label={`${item.is_active ? 'Hide' : 'Show'} ${item.name}`}>
@@ -1442,6 +1492,9 @@ export default function Items() {
         )}
       </div>
 
+      {nutriItem && (
+        <NutritionEditorModal item={nutriItem} onClose={() => setNutriItemId(null)} onSaved={handleNutriSaved} />
+      )}
       {confirmEl}
     </div>
   )

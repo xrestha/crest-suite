@@ -2,12 +2,24 @@ import { useState } from 'react'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import Modal from '../../../components/Modal'
-import { NUTRIENTS, EMPTY_NUTRITION, buildNutritionPayload, defaultBasisUnit } from '../../../utils/nutrition'
+import AllergenTicks from '../../../components/AllergenTicks'
+import { NUTRIENTS, EMPTY_NUTRITION, buildNutritionPayload, defaultBasisUnit, pieceToBasisDim } from '../../../utils/nutrition'
+import { normaliseAllergens, allergenLabel } from '../../../shared/constants/allergens'
 import { suggestSeedsForSource } from '../../../data/nutritionSeed'
-import { UNITS } from './recipeCostCalc'
+import { UNITS } from '../recipes/recipeCostCalc'
 import ActionError, { asActionError } from '../../../components/ActionError'
 
 const LIBRARIES = ['DFTQC Nepal', 'IFCT 2017', 'USDA']
+
+// The form keeps allergens as an array of words (the ticked keys, then any unmatched word).
+function allergenWords(raw) {
+  const { keys, other } = normaliseAllergens(raw)
+  return [...keys, ...other]
+}
+// A library or Open Food Facts pick adds its allergens to what is already ticked, never replaces it.
+function withAllergens(current, added) {
+  return allergenWords([...(current || []), ...allergenWords(added)])
+}
 
 // Builds the initial form from an item's saved nutrition (or sensible defaults).
 function initFormFromItem(item) {
@@ -17,18 +29,21 @@ function initFormFromItem(item) {
     // Default to GM/ML for mass/volume items so per-100g table values drop in directly;
     // the engine converts the recipe qty (e.g. 0.009 KG) into this unit automatically.
     basis_unit: n.basis_unit || defaultBasisUnit(item?.uom),
-    allergens: n.allergens || '',
+    allergens: allergenWords(n.allergens),
+    grams_per_unit: n.grams_per_unit != null ? n.grams_per_unit : '',
     source: n.source || '',
   }
   NUTRIENTS.forEach(d => { form[d.key] = n[d.key] != null ? n[d.key] : '' })
   return form
 }
 
-// Inline per-ingredient nutrition editor — saves to items.nutrition. Self-contained: owns its
+// Per-ingredient nutrition and allergen editor — saves to items.nutrition. Self-contained: owns its
 // form + library-suggestion + Open Food Facts lookup state; the parent passes the item being
 // edited and gets onSaved(itemId, payload) so it can update its local items/recipes caches.
+// Opened from a recipe's ingredient row and, since S870, from Item Master. Saving marks the
+// ingredient checked for allergens (buildNutritionPayload), even with nothing ticked.
 export default function NutritionEditorModal({ item, onClose, onSaved }) {
-  const [nutriForm, setNutriForm] = useState(() => item ? initFormFromItem(item) : { ...EMPTY_NUTRITION })
+  const [nutriForm, setNutriForm] = useState(() => item ? initFormFromItem(item) : { ...EMPTY_NUTRITION, allergens: [] })
   const [nutriMatches, setNutriMatches] = useState([])
   const [nutriMatchSource, setNutriMatchSource] = useState('')
   const [nutriSaving, setNutriSaving] = useState(false)
@@ -58,7 +73,7 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
       basis_unit: seed.unit || item?.uom || 'GM',
       energy_kcal: seed.energy_kcal, protein_g: seed.protein_g, carbs_g: seed.carbs_g,
       fat_g: seed.fat_g, sugar_g: seed.sugar_g, sodium_mg: seed.sodium_mg,
-      allergens: seed.allergens || '', source: seed.source || '',
+      allergens: withAllergens(prev.allergens, seed.allergens), source: seed.source || '',
     }))
   }
 
@@ -124,7 +139,7 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
       basis_qty: 100, basis_unit: 'GM',
       energy_kcal: row.energy_kcal ?? '', protein_g: row.protein_g ?? '', carbs_g: row.carbs_g ?? '',
       fat_g: row.fat_g ?? '', sugar_g: row.sugar_g ?? '', sodium_mg: row.sodium_mg ?? '',
-      allergens: row.allergens || '', source: 'Open Food Facts',
+      allergens: withAllergens(prev.allergens, row.allergens), source: 'Open Food Facts',
     }))
   }
 
@@ -134,15 +149,21 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
     setNutriError('')
     const payload = buildNutritionPayload(nutriForm, nutriForm.basis_unit)
     const { error } = await supabase.from('items').update({ nutrition: payload }).eq('id', item.id)
-    if (error) { const a = asActionError(error); setNutriError({ text: 'The nutrition figures were not saved. ' + a.text, detail: a.detail }); setNutriSaving(false); return }
+    if (error) { const a = asActionError(error); setNutriError({ text: 'The nutrition and allergens were not saved. ' + a.text, detail: a.detail }); setNutriSaving(false); return }
     setNutriSaving(false)
     onSaved(item.id, payload)
   }
 
   if (!item) return null
 
+  // S870: an item counted in pieces with figures per grams or ml needs what one piece weighs.
+  const pieceDim = pieceToBasisDim(item.uom, nutriForm.basis_unit)
+  const pieceUnit = pieceDim === 'vol' ? 'ml' : 'g'
+  const weightMissing = pieceDim && !(parseFloat(nutriForm.grams_per_unit) > 0)
+    && NUTRIENTS.some(d => parseFloat(nutriForm[d.key]) > 0)
+
   return (
-    <Modal onClose={onClose} title={`Nutrition — ${item.name}`} maxWidth={640}>
+    <Modal onClose={onClose} title={`Nutrition and allergens — ${item.name}`} maxWidth={640}>
       <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 18px' }}>
         Enter values <strong style={{ color: 'var(--theme-text1)' }}>per the reference quantity below</strong> (e.g. per {nutriForm.basis_qty} {nutriForm.basis_unit}).
         {defaultBasisUnit(item.uom) !== (item.uom || '').toUpperCase() && (
@@ -163,6 +184,18 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
             {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
           </select>
         </div>
+        {pieceDim && (
+          <div className="form-field" style={{ width: 170 }}>
+            <label htmlFor="nutrit-gpu">
+              <Tip width={290} text={`The figures are per ${nutriForm.basis_unit}, but this item is counted in ${item.uom}. Crest needs what one ${item.uom} weighs to count it in a recipe: an egg is about 50 g, a burger bun about 60 g. Without it, this ingredient counts as missing nutrition data.`}>
+                Weight of one {item.uom} ({pieceUnit})
+              </Tip>
+            </label>
+            <input id="nutrit-gpu" type="number" min="0" step="any" value={nutriForm.grams_per_unit}
+              onChange={e => setNF({ grams_per_unit: e.target.value })} placeholder="e.g. 50"
+              aria-invalid={weightMissing || undefined} aria-describedby={weightMissing ? 'nutrit-gpu-note' : undefined} />
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
           {LIBRARIES.map(lib => (
             <button
@@ -183,6 +216,12 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
           <span style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 8 }}>Source: {nutriForm.source}</span>
         )}
       </div>
+
+      {weightMissing && (
+        <p id="nutrit-gpu-note" style={{ fontSize: 12, color: 'var(--theme-amber-text)', margin: '-6px 0 14px' }}>
+          △ Add the weight of one {item.uom}. Until then this ingredient counts as missing nutrition data in every recipe.
+        </p>
+      )}
 
       {nutriMatches.length > 0 && (
         <div style={{ marginBottom: 16, padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)' }}>
@@ -227,7 +266,7 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
                 <span style={{ display: 'block', color: 'var(--theme-text1)', fontWeight: 600 }}>{r.name}</span>
                 <span style={{ display: 'block', color: 'var(--theme-text2)', fontSize: 11 }}>
                   {r.energy_kcal ?? '–'} kcal · P{r.protein_g ?? '–'} C{r.carbs_g ?? '–'} F{r.fat_g ?? '–'} /100g
-                  {r.allergens ? ` · ${r.allergens}` : ''}
+                  {r.allergens ? ` · ${allergenWords(r.allergens).map(allergenLabel).join(', ')}` : ''}
                 </span>
               </button>
             ))}
@@ -248,10 +287,13 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
               onChange={e => setNF({ [def.key]: e.target.value })} placeholder="0" />
           </div>
         ))}
-        <div className="form-field" style={{ gridColumn: 'span 2' }}>
-          <label htmlFor="nutrit-f4"><Tip width={240} text="Comma-separated allergen tags (e.g. dairy, gluten, nuts). Aggregated across the recipe's ingredients.">Allergens</Tip></label>
-          <input id="nutrit-f4" value={nutriForm.allergens} onChange={e => setNF({ allergens: e.target.value })} placeholder="e.g. dairy, gluten" />
-        </div>
+      </div>
+
+      <div className="form-field" style={{ marginTop: 18 }}>
+        <span className="field-label" id="nutrit-allergens-label">
+          <Tip width={300} text="Tick every allergen this ingredient contains. Saving marks the ingredient as checked, even with nothing ticked, and every dish using it carries what you tick. On the guest menu, a dish with an ingredient nobody checked asks the guest to check with staff.">Allergens it contains</Tip>
+        </span>
+        <AllergenTicks id="nutrit-allergens" value={nutriForm.allergens} onChange={allergens => setNF({ allergens })} disabled={nutriSaving} />
       </div>
 
       <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '12px 0 0' }}>
@@ -261,7 +303,7 @@ export default function NutritionEditorModal({ item, onClose, onSaved }) {
       <div className="form-actions" style={{ marginTop: 16, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" onClick={saveNutri} disabled={nutriSaving}>
-          {nutriSaving ? 'Saving…' : 'Save Nutrition'}
+          {nutriSaving ? 'Saving…' : 'Save'}
         </button>
       </div>
     </Modal>

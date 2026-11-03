@@ -8,7 +8,9 @@ import ActionError from '../../components/ActionError'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { useConfirm } from '../../shared/hooks/useConfirm'
 import { settleWithin, isTimeout } from '../../utils/withTimeout'
-import { OPTION_COLS, DIET_LABEL, parseAllergens, CUSTOMIZATION_WRITE_MS, writeFailure } from './customizationData'
+import { OPTION_COLS, DIET_LABEL, CUSTOMIZATION_WRITE_MS, writeFailure } from './customizationData'
+import AllergenTicks from '../../components/AllergenTicks'
+import { normaliseAllergens } from '../../shared/constants/allergens'
 import { signedPrice, dishesBelowZero, belowZeroText, belowZeroAmount } from '../../shared/optionPricing'
 import { moveRovingFocus, rovingTabIndex } from '../../shared/rovingFocus'
 import { fullPriceBase, priceSeed, priceEntry, optionLossText } from './optionChecks'
@@ -65,7 +67,8 @@ export default function OptionModal({
     is_removal: !!option?.is_removal,
     is_default: !!option?.is_default,
     diet: option?.diet || '',
-    allergens: (option?.allergens || []).join(', '),
+    // S870: the ticked keys, then any word saved before the tick-list existed (kept until removed).
+    allergens: (({ keys, other }) => [...keys, ...other])(normaliseAllergens(option?.allergens || [])),
     is_active: option ? option.is_active !== false : true,
     portion: option?.portion_factor != null ? String(Number(option.portion_factor)) : '',
   }))
@@ -110,7 +113,7 @@ export default function OptionModal({
   // What "More details" holds, said on the closed button so a folded section is not a hidden one.
   const detailSummary = [
     form.diet ? DIET_LABEL[form.diet] : null,
-    parseAllergens(form.allergens).length ? 'allergens' : null,
+    form.allergens.length ? 'allergens' : null,
     form.is_default ? 'pre-selected' : null,
     form.kitchen_name.trim() ? 'ticket name' : null,
     form.is_active ? null : 'hidden',
@@ -219,7 +222,7 @@ export default function OptionModal({
       is_removal: isSize ? false : form.is_removal,
       is_default: form.is_default,
       diet: form.is_removal ? null : (form.diet || null),
-      allergens: form.is_removal ? [] : parseAllergens(form.allergens),
+      allergens: form.is_removal ? [] : form.allergens,
       is_active: form.is_active,
     }
     if (isSize) {
@@ -469,15 +472,15 @@ export default function OptionModal({
               </select>
             </div>
           )}
-          {!form.is_removal && (
-            <div className="form-field" style={{ margin: 0 }}>
-              <label htmlFor="opt-allergens">
-                <Tip width={260} text="Comma-separated, the same tags as dishes use — e.g. dairy, gluten, nuts. Shown to guests beside the choice.">Allergens</Tip>
-              </label>
-              <input id="opt-allergens" value={form.allergens} onChange={e => set({ allergens: e.target.value })} placeholder="e.g. dairy" />
-            </div>
-          )}
         </div>
+        {!form.is_removal && (
+          <div className="form-field" style={{ margin: 0 }}>
+            <span className="field-label" id="opt-allergens-label">
+              <Tip width={260} text="Tick every allergen this choice adds to the plate, from the same list as ingredients use. Shown to guests beside the choice.">Allergens it adds</Tip>
+            </span>
+            <AllergenTicks id="opt-allergens" value={form.allergens} onChange={allergens => set({ allergens })} />
+          </div>
+        )}
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>

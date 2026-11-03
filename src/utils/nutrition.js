@@ -7,6 +7,10 @@
 //
 // Item nutrition is stored on items.nutrition (jsonb), expressed per `basis_qty` of the
 // item's OWN uom (e.g. per 100 GM, or per 1 PCS) so the math is unit-agnostic.
+//
+// The guest menu runs the same walk in SQL (_nutrition_rollup); change one, change the other.
+
+import { normaliseAllergens, allergensToText, sortAllergens } from '../shared/constants/allergens'
 
 // Ordered nutrient field definitions (the "Standard 6").
 export const NUTRIENTS = [
@@ -44,6 +48,19 @@ export function convertQty(qty, fromUnit, toUnit) {
   if (a.dim === b.dim && a.dim !== 'count') return qty * a.f / b.f
   return qty
 }
+// S870: an item counted in pieces (PCS, PKT, BTL…) whose figures are per grams or ml needs the
+// weight of one piece (`grams_per_unit` in items.nutrition: grams, or ml for a volume basis).
+// Without it there is no honest conversion, and it used to count one piece as one gram; now the
+// item counts as missing nutrition data instead. _nutrition_item_contribution in SQL does the same.
+export function pieceToBasisDim(uom, basisUnit) {
+  const a = unitInfo(uom), b = unitInfo(basisUnit || uom)
+  return a.dim === 'count' && b.dim !== 'count' ? b.dim : null
+}
+export function needsPieceWeight(item) {
+  const n = item?.nutrition
+  return hasNutrition(n) && pieceToBasisDim(item?.uom, n.basis_unit) !== null && !(parseFloat(n.grams_per_unit) > 0)
+}
+
 // Sensible default nutrition basis unit for an item's uom: grams for mass, ml for volume,
 // else the item's own unit (counts like PCS).
 export function defaultBasisUnit(uom) {
@@ -62,32 +79,67 @@ export function hasNutrition(n) {
   })
 }
 
-// Split a free-text allergens field ("nuts, dairy") into a clean array.
-export function parseAllergens(raw) {
-  if (!raw) return []
-  return String(raw)
-    .split(/[,;/]/)
-    .map(s => s.trim())
-    .filter(Boolean)
+// An ingredient's allergens as one list: the 14 keys it carries, then any unmatched words.
+function itemAllergens(n) {
+  const { keys, other } = normaliseAllergens(n?.allergens)
+  return [...keys, ...other]
+}
+
+// S870: an ingredient counts as checked for allergens once someone saved its form, even with nothing
+// ticked. The flag lives in items.nutrition; the database clears it while an unmatched word remains.
+export function allergensChecked(n) {
+  return n?.allergens_checked === true
 }
 
 // Nutrition contribution of `qty` (in the item's uom) of a single item.
-// → { has, values:{...nutrient keys}, allergens:[] }
+// → { has, checked, values:{...nutrient keys}, allergens:[] }
 export function itemNutrition(item, qty) {
   const n = item?.nutrition
   const q = parseFloat(qty)
+  const checked = allergensChecked(n)
   if (!hasNutrition(n) || !Number.isFinite(q) || q <= 0) {
-    return { has: hasNutrition(n), values: ZERO(), allergens: parseAllergens(n?.allergens) }
+    return { has: hasNutrition(n) && !needsPieceWeight(item), checked, values: ZERO(), allergens: itemAllergens(n) }
   }
   const basis = parseFloat(n.basis_qty) > 0 ? parseFloat(n.basis_qty) : 100
   const basisUnit = n.basis_unit || item?.uom
-  const qtyInBasis = convertQty(q, item?.uom, basisUnit) // KG→GM, LTR→ML, etc.
+  const pieceDim = pieceToBasisDim(item?.uom, basisUnit)
+  let qtyInBasis
+  if (pieceDim) {
+    const perPiece = parseFloat(n.grams_per_unit)
+    if (!(perPiece > 0)) return { has: false, checked, values: ZERO(), allergens: itemAllergens(n) }
+    qtyInBasis = convertQty(q * perPiece, pieceDim === 'mass' ? 'GM' : 'ML', basisUnit)
+  } else {
+    qtyInBasis = convertQty(q, item?.uom, basisUnit) // KG→GM, LTR→ML, etc.
+  }
   const factor = qtyInBasis / basis
   const values = NUTRIENTS.reduce((o, def) => {
     o[def.key] = (parseFloat(n[def.key]) || 0) * factor
     return o
   }, {})
-  return { has: true, values, allergens: parseAllergens(n.allergens) }
+  return { has: true, checked, values, allergens: itemAllergens(n) }
+}
+
+// The allergen check for one walk (S870): every ingredient item reached, and whether the walk hit
+// a cycle or a sub-recipe it could not find. The guest menu calls a dish complete only when it
+// reached at least one item, every item is checked, and nothing was broken (_nutrition_rollup).
+function newCheck() {
+  return { items: new Map(), broken: false }
+}
+// `id` comes from the ingredient row (recipe_ingredients.item_id): the recipes page joins items
+// without their id.
+function noteItem(check, id, item) {
+  if (check && id && !check.items.has(id)) {
+    check.items.set(id, { id, name: item?.name, checked: allergensChecked(item?.nutrition), needsWeight: needsPieceWeight(item) })
+  }
+}
+function summariseCheck(check) {
+  const all = Array.from(check.items.values())
+  const unchecked = all.filter(i => !i.checked).map(({ id, name }) => ({ id, name }))
+  return { total: all.length, unchecked, broken: check.broken, complete: all.length > 0 && unchecked.length === 0 && !check.broken }
+}
+// The ingredients reached whose calories need the weight of one piece (S870).
+function weightsMissing(check) {
+  return Array.from(check.items.values()).filter(i => i.needsWeight).map(({ id, name }) => ({ id, name }))
 }
 
 function addInto(target, values) {
@@ -95,10 +147,14 @@ function addInto(target, values) {
 }
 
 // Per-yield-unit nutrition of a sub-recipe (recursive). Mirrors calcSubRecipeCostPerUnit.
+// `check` (optional) collects the allergen check across the whole walk.
 // → { values:{...per yield unit}, allergens:Set, covered:boolean }
-export function calcSubRecipeNutritionPerUnit(sub, allRecipes, seen = new Set()) {
+export function calcSubRecipeNutritionPerUnit(sub, allRecipes, seen = new Set(), check = null) {
   const empty = { values: ZERO(), allergens: new Set(), covered: false }
-  if (!sub || seen.has(sub.id)) return empty
+  if (!sub || seen.has(sub.id)) {
+    if (check) check.broken = true
+    return empty
+  }
   seen.add(sub.id)
 
   const total = ZERO()
@@ -108,16 +164,19 @@ export function calcSubRecipeNutritionPerUnit(sub, allRecipes, seen = new Set())
     if (ri.item_id && ri.items) {
       const r = itemNutrition(ri.items, ri.qty_per_portion)
       if (r.has) covered = true
+      noteItem(check, ri.item_id, ri.items)
       addInto(total, r.values)
       r.allergens.forEach(a => allergens.add(a))
     } else if (ri.sub_recipe_id) {
       const nested = allRecipes.find(r => r.id === ri.sub_recipe_id)
       if (nested) {
-        const sr = calcSubRecipeNutritionPerUnit(nested, allRecipes, new Set(seen))
+        const sr = calcSubRecipeNutritionPerUnit(nested, allRecipes, new Set(seen), check)
         if (sr.covered) covered = true
         const q = parseFloat(ri.qty_per_portion) || 0
         NUTRIENTS.forEach(def => { total[def.key] += (sr.values[def.key] || 0) * q })
         sr.allergens.forEach(a => allergens.add(a))
+      } else if (check) {
+        check.broken = true
       }
     }
   })
@@ -128,10 +187,12 @@ export function calcSubRecipeNutritionPerUnit(sub, allRecipes, seen = new Set())
 }
 
 // Full per-portion nutrition of a recipe.
-// → { perPortion:{...nutrient keys}, allergens:[], coverage:{ have, total } }
+// → { perPortion:{...nutrient keys}, allergens:[], coverage:{ have, total },
+//     allergenCheck:{ total, unchecked:[{id,name}], broken, complete } }
 export function calcRecipeNutrition(recipe, allRecipes) {
   const perPortion = ZERO()
   const allergens = new Set()
+  const check = newCheck()
   let have = 0
   let total = 0
 
@@ -140,28 +201,32 @@ export function calcRecipeNutrition(recipe, allRecipes) {
       total += 1
       const r = itemNutrition(ri.items, ri.qty_per_portion)
       if (r.has) have += 1
+      noteItem(check, ri.item_id, ri.items)
       addInto(perPortion, r.values)
       r.allergens.forEach(a => allergens.add(a))
     } else if (ri.sub_recipe_id) {
       const sub = ri.sub_recipe || allRecipes.find(r => r.id === ri.sub_recipe_id)
       if (sub) {
         total += 1
-        const sr = calcSubRecipeNutritionPerUnit(sub, allRecipes)
+        const sr = calcSubRecipeNutritionPerUnit(sub, allRecipes, new Set([recipe?.id].filter(Boolean)), check)
         if (sr.covered) have += 1
         const q = parseFloat(ri.qty_per_portion) || 0
         NUTRIENTS.forEach(def => { perPortion[def.key] += (sr.values[def.key] || 0) * q })
         sr.allergens.forEach(a => allergens.add(a))
+      } else {
+        check.broken = true
       }
     }
   })
 
-  return { perPortion, allergens: Array.from(allergens), coverage: { have, total } }
+  return { perPortion, allergens: sortAllergens(Array.from(allergens)), coverage: { have, total }, allergenCheck: summariseCheck(check), needsWeight: weightsMissing(check) }
 }
 
 // Live per-portion nutrition from the edit-form ingredient rows (mirrors calcLiveCost).
 export function calcLiveNutrition(ingList, itemsList, allRecipes) {
   const perPortion = ZERO()
   const allergens = new Set()
+  const check = newCheck()
   let have = 0
   let total = 0
 
@@ -173,14 +238,15 @@ export function calcLiveNutrition(ingList, itemsList, allRecipes) {
       total += 1
       const r = itemNutrition(item, ing.qty_per_portion)
       if (r.has) have += 1
+      noteItem(check, item.id, item)
       addInto(perPortion, r.values)
       r.allergens.forEach(a => allergens.add(a))
     } else {
       if (!ing.sub_recipe_id || !ing.qty_per_portion) return
       const sub = allRecipes.find(r => r.id === ing.sub_recipe_id)
-      if (!sub) return
+      if (!sub) { check.broken = true; return }
       total += 1
-      const sr = calcSubRecipeNutritionPerUnit(sub, allRecipes)
+      const sr = calcSubRecipeNutritionPerUnit(sub, allRecipes, new Set(), check)
       if (sr.covered) have += 1
       const q = parseFloat(ing.qty_per_portion) || 0
       NUTRIENTS.forEach(def => { perPortion[def.key] += (sr.values[def.key] || 0) * q })
@@ -188,15 +254,14 @@ export function calcLiveNutrition(ingList, itemsList, allRecipes) {
     }
   })
 
-  return { perPortion, allergens: Array.from(allergens), coverage: { have, total } }
+  return { perPortion, allergens: sortAllergens(Array.from(allergens)), coverage: { have, total }, allergenCheck: summariseCheck(check), needsWeight: weightsMissing(check) }
 }
 
-// Build a nutrition object from form fields for saving; returns null when fully blank.
+// Build a nutrition object from form fields for saving. S870: always an object, because saving the
+// form is what marks an ingredient checked for allergens, even with no figures and nothing ticked.
+// `form.allergens` may be free text or an array of words; an unmatched word leaves it not checked.
 export function buildNutritionPayload(form, fallbackUnit) {
   if (!form) return null
-  const anyValue = NUTRIENTS.some(def => form[def.key] !== '' && form[def.key] != null)
-  const hasAllergens = !!(form.allergens && form.allergens.trim())
-  if (!anyValue && !hasAllergens) return null
   const out = {
     basis_qty: parseFloat(form.basis_qty) > 0 ? parseFloat(form.basis_qty) : 100,
     basis_unit: (form.basis_unit || fallbackUnit || '').toUpperCase(),
@@ -205,7 +270,27 @@ export function buildNutritionPayload(form, fallbackUnit) {
     const v = parseFloat(form[def.key])
     if (Number.isFinite(v)) out[def.key] = v
   })
-  if (hasAllergens) out.allergens = form.allergens.trim()
+  const perPiece = parseFloat(form.grams_per_unit)
+  if (perPiece > 0) out.grams_per_unit = perPiece
+  const parsed = normaliseAllergens(form.allergens)
+  const text = allergensToText(parsed)
+  if (text) out.allergens = text
   if (form.source) out.source = form.source
+  out.allergens_checked = parsed.other.length === 0
+  return out
+}
+
+// A bulk fill (library auto-fill, USDA lookup) laid over what an ingredient already holds (S870).
+// Nobody reviewed the ingredient, so it keeps whatever checked state it had and is otherwise not
+// checked, and any allergens it already carried survive beside the library's.
+export function mergeNutritionFill(existing, fill) {
+  const parsed = normaliseAllergens([existing?.allergens, fill?.allergens].filter(Boolean))
+  const out = { ...fill }
+  // A piece weight someone entered outlives a fill, which never carries one.
+  if (!(parseFloat(out.grams_per_unit) > 0) && parseFloat(existing?.grams_per_unit) > 0) out.grams_per_unit = existing.grams_per_unit
+  const text = allergensToText(parsed)
+  if (text) out.allergens = text
+  else delete out.allergens
+  out.allergens_checked = allergensChecked(existing) && parsed.other.length === 0
   return out
 }

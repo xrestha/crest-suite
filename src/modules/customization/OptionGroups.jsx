@@ -23,6 +23,7 @@ import { fullPriceBase, optionLossText as lossTextOf, stillHiddenText, stillShow
 import { vatModeOf, VAT_MODE_UNKNOWN_TEXT } from '../ims/recipes/menuPriceVat'
 import OptionGroupModal from './OptionGroupModal'
 import OptionModal from './OptionModal'
+import { allergenLabel } from '../../shared/constants/allergens'
 import AttachGroupsModal from './AttachGroupsModal'
 import AttachToDishesModal from './AttachToDishesModal'
 import BuildYourOwnTemplateModal from './BuildYourOwnTemplateModal'
@@ -733,7 +734,7 @@ export default function OptionGroups() {
                                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>{badges}</div>
                               </td>
                               <td className="phone-hide" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
-                                {[o.diet ? DIET_LABEL[o.diet] : null, (o.allergens || []).length ? (o.allergens || []).join(', ') : null].filter(Boolean).join(' · ') || '—'}
+                                {[o.diet ? DIET_LABEL[o.diet] : null, (o.allergens || []).length ? (o.allergens || []).map(allergenLabel).join(', ') : null].filter(Boolean).join(' · ') || '—'}
                               </td>
                               {imsOn && (
                                 <td className="phone-hide" style={{ fontSize: 12 }}>

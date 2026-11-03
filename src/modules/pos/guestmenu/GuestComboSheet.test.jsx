@@ -2,7 +2,7 @@ import { render, screen, fireEvent, act, within } from '@testing-library/react'
 import { createRef } from 'react'
 import GuestComboSheet, {
   comboPicksOf, comboOrderable, comboCartKey, defaultDishOf, comboOrderItem, pickChoices, comboUnitPrice,
-  comboOrderName, comboContents, comboLineProblem, comboCartWithout, comboMatches,
+  comboOrderName, comboContents, comboLineProblem, comboCartWithout, comboMatches, comboDishAllowed,
 } from './GuestComboSheet'
 import { groupsForDish } from '../../../shared/optionPricing'
 
@@ -140,6 +140,19 @@ describe('combo helpers', () => {
     const allergensOf = rid => (rid === VEG ? ['gluten'] : rid === MOMO ? ['gluten'] : [])
     expect(comboMatches(combo, { excludedAllergens: ['gluten'], allergensOf })).toBe(false)
     expect(comboMatches(combo, { excludedAllergens: ['dairy'], allergensOf })).toBe(true)
+  })
+
+  test('S870: a dish nobody checked for allergens is never offered under an allergen filter', () => {
+    const onlyChicken = rid => (rid === VEG ? ['gluten'] : [])
+    // Chicken Momo is the pick's one gluten-free dish; once it is unchecked the pick has none to offer.
+    expect(comboMatches(combo, { excludedAllergens: ['gluten'], allergensOf: onlyChicken })).toBe(true)
+    expect(comboMatches(combo, { excludedAllergens: ['gluten'], allergensOf: onlyChicken, isIncomplete: rid => rid === MOMO })).toBe(false)
+    // The combo's own row says so too (get_guest_menu_options), for a dish that is not on the menu itself.
+    const own = { ...combo, groups: [combo.groups[0], { ...combo.groups[1], items: combo.groups[1].items.map(it => (it.recipe_id === MOMO ? { ...it, allergens_complete: false } : it)) }] }
+    expect(comboMatches(own, { excludedAllergens: ['gluten'], allergensOf: onlyChicken })).toBe(false)
+    // With no filter, nothing is hidden for being unchecked.
+    expect(comboMatches(combo, { isIncomplete: () => true })).toBe(true)
+    expect(comboDishAllowed({ recipe_id: MOMO, allergens: ['milk'] }, { excludedAllergens: ['milk'] })).toBe(false)
   })
 })
 

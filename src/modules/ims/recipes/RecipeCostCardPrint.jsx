@@ -1,4 +1,5 @@
 import { NUTRIENTS, calcRecipeNutrition } from '../../../utils/nutrition'
+import { allergenLabel } from '../../../shared/constants/allergens'
 import { calcRecipeCost, calcSubRecipeCostPerUnit, vatOf, fmtNutrient, allocateOverhead } from './recipeCostCalc'
 import { recipeCostOf, menuFcPct } from '../../../shared/imsFormulas'
 import { BYO_STATUS } from './buildYourOwnRating'
@@ -176,8 +177,13 @@ export default function RecipeCostCardPrint({ recipe, recipes, settings, overhea
             ))}
           </div>
           {nutri.allergens.length > 0 && (
-            <div style={{ fontSize: 10, color: '#555', marginTop: 8, textTransform: 'capitalize' }}>
-              Allergens: {nutri.allergens.join(', ')}
+            <div style={{ fontSize: 10, color: '#555', marginTop: 8 }}>
+              Allergens: {nutri.allergens.map(allergenLabel).join(', ')}
+            </div>
+          )}
+          {!nutri.allergenCheck.complete && (
+            <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
+              Allergens not confirmed{nutri.allergenCheck.unchecked.length > 0 ? `: not checked on ${nutri.allergenCheck.unchecked.map(i => i.name).join(', ')}` : ''}.
             </div>
           )}
         </div>

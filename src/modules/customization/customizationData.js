@@ -141,7 +141,3 @@ export const SIZE_SCALING_HELP = {
 
 export const DIET_LABEL = { veg: 'Veg', egg: 'Egg', non_veg: 'Non-veg' }
 
-/** "dairy, Gluten ,, nuts" -> ["dairy","gluten","nuts"] — the rollup's own tag shape. */
-export function parseAllergens(text) {
-  return Array.from(new Set(String(text || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean)))
-}

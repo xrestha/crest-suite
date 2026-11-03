@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom'
 import { Plus, Minus, X, Search, SlidersHorizontal, ChevronRight } from 'lucide-react'
 import { supabase } from '../../../supabaseClient'
 import { NUTRIENTS } from '../../../utils/nutrition'
+import { ALLERGEN_KEYS, allergenLabel, sortAllergens } from '../../../shared/constants/allergens'
 import { withTimeout, settleWithin } from '../../../utils/withTimeout'
 import { DEFAULT_RECIPE_CATS } from '../../../context/SettingsContext'
 import Modal from '../../../components/Modal'
@@ -12,7 +13,7 @@ import { guestOrderRefusal } from './guestOrderRefusal'
 import GuestOptionSheet from './GuestOptionSheet'
 import DietMark, { dietOfDish, DietLabel, DIET_ORDER } from './DietMark'
 import GuestComboSheet, {
-  comboOrderable, comboMatches, comboCartKey, comboUnitPrice, comboOrderItem, comboOrderName,
+  comboOrderable, comboMatches, comboDishAllowed, comboCartKey, comboUnitPrice, comboOrderItem, comboOrderName,
   comboLineProblem, comboCartWithout, comboContents, comboPicksOf, pickChoices,
 } from './GuestComboSheet'
 import { groupsForDish, describeSelection, lowestDishPrice, inclFromEx } from '../../../shared/optionPricing'
@@ -608,7 +609,14 @@ export default function GuestMenu() {
   const logoUrl = meta?.logo_url || null
   const byRecipe = useMemo(() => Object.fromEntries((rows || []).map(r => [r.recipe_id, r])), [rows])
 
-  const allAllergens = useMemo(() => Array.from(new Set((rows || []).flatMap(r => r.allergens || []))).sort(), [rows])
+  // S870: a restaurant whose dishes are judged for allergen completeness (allergens_complete is set,
+  // i.e. a Growth or Pro plan or the nutrition switch) offers all 14 allergens to filter by, in the
+  // list order, so a guest can hide one no dish names: that is what also hides the dishes nobody has
+  // checked. Any other restaurant offers the allergens its dishes carry, as before.
+  const allergenCheckOn = meta?.allergens_complete != null
+  const allAllergens = useMemo(() => (allergenCheckOn
+    ? ALLERGEN_KEYS
+    : sortAllergens(Array.from(new Set((rows || []).flatMap(r => r.allergens || []))))), [rows, allergenCheckOn])
   const hasVegMarks = (rows || []).some(r => r.is_veg != null)
   // S846: the marks this menu actually uses (dishes, combo dishes and choices alike), for the key
   // beside the vegetarian filter, in the key's order: veg, egg, non-veg.
@@ -625,7 +633,7 @@ export default function GuestMenu() {
 
   const filteredRows = useMemo(() => (rows || []).filter(r =>
     (!vegOnly || r.is_veg) &&
-    (excludedAllergens.length === 0 || !(r.allergens || []).some(a => excludedAllergens.includes(a))) &&
+    (excludedAllergens.length === 0 || (r.allergens_complete !== false && !(r.allergens || []).some(a => excludedAllergens.includes(a)))) &&
     matchesSearch({ name: tidyName(r.name), description: r.description, category: r.category }, trimmedQuery)
   ), [rows, vegOnly, excludedAllergens, trimmedQuery])
   const activeFilterCount = (vegOnly ? 1 : 0) + excludedAllergens.length
@@ -646,6 +654,7 @@ export default function GuestMenu() {
   const visibleCombos = useMemo(() => (optionCatalog.combos || [])
     .filter(c => comboOrderable(c) && comboMatches(c, {
       query: trimmedQuery, vegOnly, excludedAllergens, allergensOf: rid => byRecipe[rid]?.allergens || [],
+      isIncomplete: rid => byRecipe[rid]?.allergens_complete === false,
     }))
     .sort((a, b) => (Number(a.sort) || 0) - (Number(b.sort) || 0) || String(a.name).localeCompare(String(b.name))),
   [optionCatalog, trimmedQuery, vegOnly, excludedAllergens, byRecipe])
@@ -1344,14 +1353,18 @@ export default function GuestMenu() {
                       className="gm-chip gm-allergen"
                     >
                       {excludedAllergens.includes(a) && <X size={14} aria-hidden="true" />}
-                      {a}
+                      {allergenLabel(a)}
                     </button>
                   ))}
                 </div>
                 {/* Decision S767: allergens reach every restaurant's guests. What they are built from
                     is the ingredients the restaurant has recorded, and the page must not let a missing
                     record read as "free of it". */}
-                <p className="gm-note">Based on the ingredients the restaurant has recorded. If you have a serious allergy, please ask a member of staff.</p>
+                <p className="gm-note">
+                  Based on the ingredients the restaurant has recorded.
+                  {allergenCheckOn && ' While you hide an allergen, dishes the restaurant has not fully checked are hidden too.'}
+                  {' '}If you have a serious allergy, please ask a member of staff.
+                </p>
               </div>
             )}
             <div className="gm-sheet-actions">
@@ -1481,6 +1494,11 @@ export default function GuestMenu() {
           initialPicks={comboSheet.initialPicks}
           editing={!!comboSheet.editKey}
           backRef={comboBackRef}
+          dishAllowed={it => comboDishAllowed(it, {
+            excludedAllergens,
+            allergensOf: rid => byRecipe[rid]?.allergens || [],
+            isIncomplete: rid => byRecipe[rid]?.allergens_complete === false,
+          })}
           onClose={() => setComboSheet(null)}
           onConfirm={picks => { addCombo(comboSheet.combo, picks, comboSheet.editKey); setComboSheet(null) }}
         />
@@ -1683,10 +1701,13 @@ function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, q
   const showFrom = fromPrice != null && fromPrice !== priceInc
   const hasImage = item.image_url && !imgFailed
   const allergens = item.allergens || []
+  // S870: only a Growth or Pro restaurant (or one with the nutrition switch) gets false here; NULL
+  // means the question is not asked.
+  const allergenIncomplete = item.allergens_complete === false
   const showNutrition = nutritionEnabled && item.has_nutrition
   // A dish with nothing but a name and a price is one line: the printed-menu row. A card per dish
   // with the Add button on a row of its own made a 120-dish menu 24–31 phone screens long.
-  const compact = !hasImage && !item.description && allergens.length === 0 && !showNutrition
+  const compact = !hasImage && !item.description && allergens.length === 0 && !allergenIncomplete && !showNutrition
 
   // Pressing "+ Add" replaces it with the stepper, and focus used to fall to the page. It moves to
   // the new "+"; taking the dish back to 0 returns it to "+ Add".
@@ -1714,7 +1735,10 @@ function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, q
         </p>
         {item.description && <p className="gm-desc">{item.description}</p>}
         {allergens.length > 0 && (
-          <p className="gm-allergens">Contains: {allergens.join(', ')}</p>
+          <p className="gm-allergens">Contains: {allergens.map(allergenLabel).join(', ')}</p>
+        )}
+        {allergenIncomplete && (
+          <p className="gm-allergens">Allergen info incomplete, please ask staff</p>
         )}
         {showNutrition && (
           <p className="gm-nutrition">

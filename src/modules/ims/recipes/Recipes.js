@@ -14,7 +14,8 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { nprInt } from '../../../shared/nepalMoney'
-import { NUTRIENTS, calcRecipeNutrition, calcLiveNutrition, hasNutrition } from '../../../utils/nutrition'
+import { NUTRIENTS, calcRecipeNutrition, calcLiveNutrition, hasNutrition, allergensChecked, mergeNutritionFill, needsPieceWeight } from '../../../utils/nutrition'
+import { allergenLabel } from '../../../shared/constants/allergens'
 import { getSuggestedPrice } from '../../../utils/recipeCost'
 import { printWithTitle } from '../../../utils/printTitle'
 import { suggestSeeds } from '../../../data/nutritionSeed'
@@ -25,7 +26,7 @@ import { productCodePrefix, nextProductCode, SUB_RECIPE_CATEGORY } from '../../.
 import RecipeCostCardPrint, { costPerYieldTile } from './RecipeCostCardPrint'
 import { unitRateText, unitRateCell } from '../../../shared/unitRate'
 import RecipeImportButton from './RecipeImportButton'
-import NutritionEditorModal from './NutritionEditorModal'
+import NutritionEditorModal from '../nutrition/NutritionEditorModal'
 import DishPhotoField, { useUnsavedDishPhotos } from './DishPhotoField'
 import { Link, Navigate } from 'react-router-dom'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
@@ -585,9 +586,14 @@ export default function Recipes() {
 
   // Applies a set of { it, payload } targets to items.nutrition and reflects the change
   // into local items/recipes state so the live label + coverage recompute immediately.
+  // S870: a bulk fill is laid over what the item holds (mergeNutritionFill), so allergens already
+  // ticked survive and nobody's review is claimed: the item keeps its checked state, else not checked.
   async function saveNutritionTargets(targets) {
     const results = await Promise.all(
-      targets.map(t => supabase.from('items').update({ nutrition: t.payload }).eq('id', t.it.id).then(r => ({ id: t.it.id, payload: t.payload, error: r.error })))
+      targets.map(t => {
+        const payload = mergeNutritionFill(t.it.nutrition, t.payload)
+        return supabase.from('items').update({ nutrition: payload }).eq('id', t.it.id).then(r => ({ id: t.it.id, payload, error: r.error }))
+      })
     )
     const okMap = {}
     let failed = 0
@@ -2382,6 +2388,11 @@ Check the recipe list before saving again — if it timed out after the recipe w
               <span style={{ color: liveNutri.coverage.have < liveNutri.coverage.total ? 'var(--theme-text1)' : 'var(--theme-text2)', fontSize: 12 }}>
                 · data {liveNutri.coverage.have}/{liveNutri.coverage.total}
               </span>
+              {liveNutri.allergenCheck.unchecked.length > 0 && (
+                <span style={{ color: 'var(--theme-amber-text)', fontSize: 12 }}>
+                  · △ allergens not checked on {liveNutri.allergenCheck.unchecked.length}
+                </span>
+              )}
             </div>
           )}
 
@@ -2519,11 +2530,17 @@ Check the recipe list before saving again — if it timed out after the recipe w
                         <td style={{ padding: '6px 8px', textAlign: 'center' }}>
                           {ing.type === 'item' && ing.item_id ? (() => {
                             const it = items.find(i => i.id === ing.item_id)
-                            const has = hasNutrition(it?.nutrition)
+                            const needsWeight = needsPieceWeight(it)
+                            const has = hasNutrition(it?.nutrition) && !needsWeight
+                            const checked = allergensChecked(it?.nutrition)
+                            const notes = [needsWeight && 'weight of one piece missing', !checked && 'allergens not checked'].filter(Boolean)
                             return (
                               <button onClick={() => setNutriItemId(ing.item_id)}
+                                aria-label={`Nutrition and allergens for ${it?.name || 'this ingredient'}${notes.length ? `, ${notes.join(', ')}` : ''}`}
+                                title={notes.length ? notes.join(', ') : undefined}
                                 style={{ background: 'none', border: `1px solid ${has ? 'color-mix(in srgb, var(--theme-green) 40%, transparent)' : 'var(--theme-border)'}`, borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: 11, color: has ? 'var(--theme-green-text)' : 'var(--theme-text2)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                                {has ? '● Edit' : '+ Add'}
+                                {has ? '● Edit' : needsWeight ? '+ Weight' : '+ Add'}
+                                {!checked && <span aria-hidden="true" style={{ color: 'var(--theme-amber-text)', marginLeft: 4 }}>△</span>}
                               </button>
                             )
                           })() : (
@@ -2742,7 +2759,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     🍽 Nutrition ({nutriLabel})
                   </div>
                   <div style={{ fontSize: 11, color: nutri.coverage.have < nutri.coverage.total ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
-                    <Tip width={260} text="How many ingredients have nutrition data entered. Missing ingredients contribute 0, so values below 100% are underestimates. Add data on each item's Nutrition tab.">
+                    <Tip width={260} text="How many ingredients have nutrition data entered. Missing ingredients contribute 0, so values below 100% are underestimates. Add data with the Nutrition button on each ingredient row, or in Item Master.">
                       Data: {nutri.coverage.have}/{nutri.coverage.total} ingredients
                     </Tip>
                   </div>
@@ -2759,13 +2776,24 @@ Check the recipe list before saving again — if it timed out after the recipe w
                   <span style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Allergens</span>
                   {nutri.allergens.length > 0
                     ? nutri.allergens.map(a => (
-                        <span key={a} className="badge" style={{ background: 'color-mix(in srgb, var(--theme-red) 12%, transparent)', color: 'var(--theme-red-text)', textTransform: 'capitalize' }}>{a}</span>
+                        <span key={a} className="badge" style={{ background: 'color-mix(in srgb, var(--theme-red) 12%, transparent)', color: 'var(--theme-red-text)' }}>{allergenLabel(a)}</span>
                       ))
-                    : <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>None tagged</span>}
+                    : <span style={{ fontSize: 12, color: 'var(--theme-text2)' }}>{nutri.allergenCheck.complete ? 'None' : 'None ticked so far'}</span>}
                 </div>
+                {!nutri.allergenCheck.complete && (
+                  <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 10 }}>
+                    △ {nutri.allergenCheck.unchecked.length > 0
+                      ? `Allergens not checked on ${nutri.allergenCheck.unchecked.length} ingredient${nutri.allergenCheck.unchecked.length === 1 ? '' : 's'}: ${nutri.allergenCheck.unchecked.map(i => i.name).join(', ')}.`
+                      : nutri.allergenCheck.broken
+                        ? 'A sub-recipe in this dish is missing or loops back on itself, so its allergens cannot be confirmed.'
+                        : 'This dish has no ingredients, so its allergens cannot be confirmed.'}
+                    {' '}The guest menu shows it as allergen info incomplete and asks the guest to check with staff.
+                  </div>
+                )}
                 {nutri.coverage.have < nutri.coverage.total && (
                   <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 10 }}>
                     ⚠ {nutri.coverage.total - nutri.coverage.have} ingredient(s) missing nutrition data — values are estimates.
+                    {nutri.needsWeight.length > 0 && ` Counted in pieces with no weight of one piece: ${nutri.needsWeight.map(i => i.name).join(', ')}.`}
                   </div>
                 )}
               </div>
