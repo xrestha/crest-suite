@@ -85,9 +85,9 @@ describe('choiceRefusalText', () => {
   })
 
   test('option_price_below_zero names the dish (S809 4h)', () => {
-    const err = { hint: 'option_price_below_zero', message: 'option_price_below_zero: Kids Momo would cost less than nothing with the choices picked — change the choices, or ask a manager to fix the price in Option Groups' }
+    const err = { hint: 'option_price_below_zero', message: 'option_price_below_zero: Kids Momo would cost less than nothing with the choices picked — change the choices, or ask a manager to fix the price in Choice Groups' }
     expect(choiceRefusalText(err)).toBe('Kids Momo would cost less than nothing with the choices picked, so nothing on this order was saved. Tap Change on it to pick other choices, or ask a manager to fix the price in Choice Groups.')
-    const two = { ...err, message: 'option_price_below_zero: Kids Momo, Mini Thali would cost less than nothing with the choices picked — change the choices, or ask a manager to fix the price in Option Groups' }
+    const two = { ...err, message: 'option_price_below_zero: Kids Momo, Mini Thali would cost less than nothing with the choices picked — change the choices, or ask a manager to fix the price in Choice Groups' }
     expect(choiceRefusalText(two)).toMatch(/^Kids Momo and Mini Thali would cost .* Tap Change on each of them/)
   })
 
