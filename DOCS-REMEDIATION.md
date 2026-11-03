@@ -455,6 +455,10 @@ buried under history, so the file stops being read as a to-do list.
 
 ### T5b — Three modules have no backlog at all
 
+**MOSTLY DONE (status checked S873, 2026-11-03).** `IMS_TODO.md` (S756), `HR_TODO.md` (S798) and
+`SUITE_TODO.md` (S848, the owner layer) follow `POS_TODO.md`'s shape. `PLATFORM_TODO.md` was never made;
+the platform items it was meant to hold are still tracked in this file.
+
 POS has one. IMS, HR and platform-level work have nothing. That asymmetry is why the roadmap for
 two-thirds of the product still exists only in your head, which is the real risk when the Twine
 contractor starts.
@@ -1055,11 +1059,12 @@ check is watching.
    budget is no longer met (1536x864 scrolls 61px) and the comments in `Login.css` and
    `.claude/rules/auth-and-pins.md` were updated to the re-measured numbers rather than left
    asserting a fit the page no longer achieves.
-6. T5 (backlog) — **T5a and T5c DONE, S665/S666. T5b outstanding**, before the contractor starts.
-7. T6 (monitoring) — before launch. Jump the queue if a launch date lands. **Items 1 and 3 are
-   done (S673, S731/S732); only item 2, the reporting service, is left** — plus the POS half of
-   item 3, filed in `POS_TODO.md`.
-8. T7 (staging) — before the contractor starts.
+6. T5 (backlog) — **T5a and T5c DONE, S665/S666. T5b mostly done:** `IMS_TODO.md` (S756),
+   `HR_TODO.md` (S798) and `SUITE_TODO.md` (S848) exist; `PLATFORM_TODO.md` was never made, so the
+   platform items (T6, T7) still live in this file.
+7. ~~T6 (monitoring)~~ — **DONE S872**: items 1 and 3 (S673, S731/S732, the POS half S833), item 2
+   (Sentry) checked live 2026-11-03.
+8. T7 (staging) — before the contractor starts. **Owner decision 2026-11-03: not yet** (see T7).
 9. T8 (money-math coverage audit).
 10. T9, T10 (debt register, origins).
 

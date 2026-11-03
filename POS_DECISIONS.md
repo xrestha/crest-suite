@@ -117,6 +117,10 @@ by design, so an admin session proves nothing about them.
   included)", one discount figure with its VAT, over the lines being paid (owner decision).
 - [x] ~~The tile after a cancelled close~~ — **fixed S854** (owner decision: the tile matches the order screen):
   `openBillTotal` counts a comped row a cancelled close left, as `foldCompedSplits` charges it on the order screen.
+- [x] ~~Two Billing station guards (S762) were never clicked~~ — **both pressed live** (moved from POS_TODO.md B3 in
+  S873): a Staff PIN typing `/pos/billing` was sent back to Orders but the bills list stayed on screen, fixed S856
+  (route keys, crest-v471); the refusal for a bill settled on another till between the load and the tap was pressed
+  2026-10-22 on BLOOM CAFE and says so.
 
 Not competitor-derived — like B2, these came out of critiques of our own code. Recorded here so the
 same ground is not re-walked; full detail in README S652/S653/S654.
