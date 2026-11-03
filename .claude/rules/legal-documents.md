@@ -47,6 +47,10 @@ import anywhere, and `Login.js` does) and `generated/legalText.js` (~27 kB, reac
   `sha256sum`; if it changed with the checkout platform it would promise nothing.
 - **Publishing a new version is a deploy, and requires a `CACHE_NAME` bump**, or existing users keep
   the old text.
+- **Every published version ships, not only the current one (Privacy 1.1, 2026-11-03).** `SOURCES`
+  in `hash-legal.mjs` is a list per doc type, last = current; the generator also emits
+  `LEGAL_PRIOR_META` / `LEGAL_PRIOR_TEXT` keyed `${docType}-${version}`, in the same lazy chunk. A
+  published `.md` is never edited or deleted. The steps are the comment at the top of `index.js`.
 - **Hashing is not done in SQL.** pgcrypto lives in the `extensions` schema on Supabase and every
   `SECURITY DEFINER` body here sets `search_path TO 'public'`, so an unqualified `digest()` fails at
   runtime — the same call `20260812110000_pin_vault.sql` already documented avoiding.
@@ -185,6 +189,21 @@ passes.
 the 1000-row truncation rule and the RESTRICTIVE-policy empty read — an empty result is not evidence
 of an empty table.
 
+## The gate reads an acceptance FLOOR, not the current version (2026-11-03)
+
+`requiresReacceptance` belongs to a VERSION. `acceptanceFloor(docType)` is the newest published
+version, current or in `PRIOR_VERSIONS`, that set it, and an outlet passes once it holds a row at or
+above the floor. Privacy 1.1 was published with the flag off (owner decision: adding Sentry is not
+material under §12, clients told by email), so every 1.0 acceptance still stands while an outlet with
+no privacy row at all is still asked. Comparing rows to the current version alone would have held
+every Owner in the product.
+
+- **`outstandingLegalDocs(legalAccepted)` is the one decision.** AuthContext raises the gate when it
+  is non-empty and the gate lists exactly it, so accepting records only what was outstanding.
+- `docsRequiringReacceptance()` kept its name and now means "can gate" (has a floor, not a draft).
+- A `PRIOR_VERSIONS` entry keeps the flag it had while current: the floor is read from it.
+- The "what changed" summary shows only for a document the outlet accepted before.
+
 ## First acceptance or update is read from the outlet's own ledger (S855)
 
 The gate's heading and sentence come from AuthContext's `legalAccepted` (every row of the gating
@@ -234,25 +253,17 @@ print job title) and `SubscriptionAgreement.jsx` (`providerName`, matching its a
 `<h1>`); the footer copyright is `COMPANY.name`. Same line DESIGN.md draws for Pricing's plan
 names — product names are not the client's to rebrand.
 
-## A versioned URL must not serve a version it does not hold (S678)
+## A versioned URL serves that version's own text, or none (S678, finished 2026-11-03)
 
-`LEGAL_TEXT` is keyed by **doc type alone**, so this bundle only ever holds the current wording.
-`loadLegalText(docType)` ignored the version entirely, which meant `/legal/terms/0.9` rendered
-v1.0's full text underneath a banner reading *"Version 0.9 is not a version of this document that
-we published"* — and after 1.1 ships, `/legal/terms/1.0` would render **1.1's text** under
-*"Version 1.0 has been superseded"*. Both acceptance tables deep-link there with the version they
-recorded, so the single link whose entire purpose is *"show me the text I agreed to"* would have
-shown a different document, correctly labelled, with nothing saying so.
+`loadLegalText(docType)` once ignored the version, so `/legal/terms/0.9` rendered the current
+text under a banner naming 0.9. Both acceptance tables deep-link to the version they recorded, so
+the one link whose purpose is *"show me the text I agreed to"* would have shown a different document.
 
-`loadLegalText(docType, version)` now returns null for anything but the current version, and the
-page renders **no body, no meta row and no hash** — the hash is the sharp one: printing v1.0's
-fingerprint on a page reached by asking for 0.9 attaches this document's identity to another
-document's address, which is the opposite of what the fingerprint is for. The banner says what it
-cannot show and gives the support address.
-
-**This is the safe failure, not the finished one.** Step 5 of the "Adding version 1.1" checklist
-in `index.js` says so: make `SOURCES` a list per doc type and emit prior versions before
-publishing 1.1, or the ledger's own links answer with an apology.
+Now a version in `PRIOR_VERSIONS` renders **its own** text, meta row, hash and download under a "not
+the current version" banner, and a version the bundle does not hold renders **no body, no meta row
+and no hash**. The hash is the sharp one: one document's fingerprint on another's address is the
+opposite of what it is for. `Legal.jsx` reads the prebuilt `LEGAL_DOCS` / `LEGAL_PRIOR_DOCS`, never
+`legalDoc()` (a new object per call), because its load effect depends on the document. `Legal.test.jsx`.
 
 ## The "In short" box is page chrome, keyed by version (S679)
 

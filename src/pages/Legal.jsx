@@ -31,9 +31,9 @@ import {
   PRODUCT_NAME,
   legalDoc,
   loadLegalText,
-  isDraft,
   legalPath,
-  PRIOR_VERSIONS,
+  LEGAL_DOCS,
+  LEGAL_PRIOR_DOCS,
 } from '../legal'
 import { legalSummary } from '../legal/legalSummaries'
 import './Legal.css'
@@ -76,30 +76,35 @@ export default function Legal() {
   // meet the terms, not a map of them.
   const [tocOpen, setTocOpen] = useState(false)
 
-  const doc = DOC_TYPES.includes(docType) ? legalDoc(docType) : null
+  // The prebuilt objects, not legalDoc(): the load effect below depends on the document, and
+  // legalDoc() returns a new object on every call, so each render would restart the load.
+  const doc = DOC_TYPES.includes(docType) ? LEGAL_DOCS[docType] : null
 
   // Derived above the effects, not below them, because the effect has to know whether the URL is
-  // asking for a version this bundle can actually produce. PRIOR_VERSIONS is empty until a second
-  // version of anything ships, so today the mismatch branch only catches a typo or a stale link —
-  // but an acceptance row references its version forever, so it has to exist before it is needed.
+  // asking for a version this bundle can actually produce. A superseded version the bundle holds
+  // (Privacy 1.0 since 1.1) renders its OWN text, hash and dates, because an acceptance row links to
+  // its version forever; any other version (a typo, a stale link) renders a banner and no text.
   const requestedVersion = version || doc?.version
   const isCurrentVersion = Boolean(doc) && requestedVersion === doc.version
-  const knownPriorVersion = Boolean(PRIOR_VERSIONS[`${docType}-${requestedVersion}`])
-  const draft = Boolean(doc) && isDraft(docType)
+  const priorDoc = doc && !isCurrentVersion ? LEGAL_PRIOR_DOCS[`${docType}-${requestedVersion}`] || null : null
+  const knownPriorVersion = Boolean(priorDoc)
+  // The version on screen, or null when the URL names one this bundle does not hold.
+  const shown = isCurrentVersion ? doc : priorDoc
+  const draft = Boolean(shown) && shown.missing.length > 0
 
   useEffect(() => {
     let alive = true
     // No document, or a version whose wording this bundle does not hold. Either way there is
     // nothing to fetch, and fetching anyway would put the CURRENT text under a banner naming a
     // different version.
-    if (!doc || !isCurrentVersion) {
+    if (!doc || !shown) {
       setText(null)
       setLoadFailed(false)
       return undefined
     }
     setText(null)
     setLoadFailed(false)
-    loadLegalText(docType, requestedVersion)
+    loadLegalText(docType, shown.version)
       .then((t) => {
         if (!alive) return
         // A missing document is a failed read, not an empty one. Rendering nothing here would show
@@ -113,7 +118,7 @@ export default function Legal() {
     return () => {
       alive = false
     }
-  }, [docType, doc, isCurrentVersion, requestedVersion])
+  }, [docType, doc, shown])
 
   // The tab, the bookmark and the browser history entry. index.html's <title> is a static
   // "Crest Suite", so before this both documents — the two most link-shared, most bookmarked pages
@@ -167,7 +172,7 @@ export default function Legal() {
   // does not inherit the old one's paraphrases). Its clause references resolve against the same
   // contents list the rail is built from, so a renumbered heading turns the reference into plain
   // text on screen rather than a link that scrolls nowhere.
-  const summary = doc && isCurrentVersion ? legalSummary(docType, doc.version) : null
+  const summary = shown ? legalSummary(docType, shown.version) : null
   const sectionHref = (n) => {
     const hit = toc.find((s) => s.label.startsWith(`${n}.`))
     return hit ? `#${hit.id}` : null
@@ -177,7 +182,7 @@ export default function Legal() {
   // the hash was taken across.
   const bodyText = useMemo(() => (text ? stripDocFrontMatter(text) : null), [text])
 
-  const printName = doc ? `${PRODUCT_NAME} ${doc.title} v${doc.version}` : PRODUCT_NAME
+  const printName = shown ? `${PRODUCT_NAME} ${shown.title} v${shown.version}` : PRODUCT_NAME
 
   /**
    * Hands over the exact bytes the hash was computed from.
@@ -194,7 +199,7 @@ export default function Legal() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = doc.filename
+    a.download = shown.filename
     document.body.appendChild(a)
     a.click()
     a.remove()
@@ -204,8 +209,8 @@ export default function Legal() {
   }
 
   function copyHash() {
-    if (!doc.sha256 || !navigator.clipboard) return
-    navigator.clipboard.writeText(doc.sha256).then(
+    if (!shown.sha256 || !navigator.clipboard) return
+    navigator.clipboard.writeText(shown.sha256).then(
       () => {
         setCopied(true)
         setTimeout(() => setCopied(false), 2000)
@@ -287,10 +292,10 @@ export default function Legal() {
 
       {/* Repeats on every printed page — see Legal.css. A filed or posted copy of a contract has to
           be identifiable from any single sheet. */}
-      {doc && (
+      {shown && (
         <div className="legal-print-foot" aria-hidden="true">
-          {PRODUCT_NAME} · {doc.title} · v{doc.version} · effective {doc.effectiveAdLabel} · sha256{' '}
-          {doc.sha256}
+          {PRODUCT_NAME} · {shown.title} · v{shown.version} · effective {shown.effectiveAdLabel} ·
+          sha256 {shown.sha256}
         </div>
       )}
     </div>
@@ -323,21 +328,21 @@ export default function Legal() {
       <header className="legal-doc-head">
         <h1 className="legal-doc-title">{doc.title}</h1>
 
-        {/* On a version we cannot serve, the meta row and the verify panel are deliberately absent:
-            both describe the version in FORCE, and printing "Version 1.0 · sha256 2af14e…" on a
-            page the reader reached by asking for 0.9 attaches the current document's fingerprint to
-            a different document's address. The banner below names the version in force and links
-            to it, which is the whole of what this page can honestly say. */}
-        {isCurrentVersion && (
+        {/* The meta row and the verify panel describe the version ON SCREEN: the one in force, or
+            the superseded one asked for, each with its own date and hash. On a version we cannot
+            serve both are deliberately absent: printing "Version 1.0 · sha256 2af14e…" on a page
+            the reader reached by asking for 0.9 attaches one document's fingerprint to a different
+            document's address. The banner below names the version in force and links to it. */}
+        {shown && (
           <>
             <div className="legal-meta-row">
               <span className="legal-meta-item">
                 <span className="legal-meta-key">Version</span>
-                {doc.version}
+                {shown.version}
               </span>
               <span className="legal-meta-item">
                 <span className="legal-meta-key">Effective</span>
-                {doc.effectiveAdLabel} ({doc.effectiveBsLabel} BS)
+                {shown.effectiveAdLabel} ({shown.effectiveBsLabel} BS)
               </span>
               <button
                 type="button"
@@ -388,7 +393,7 @@ export default function Legal() {
                 </p>
                 <div className="legal-verify-row">
                   <span className="legal-meta-key">SHA-256</span>
-                  <code className="legal-verify-hash">{doc.sha256}</code>
+                  <code className="legal-verify-hash">{shown.sha256}</code>
                   {/* "Copy" alone does not say what; the visible word stays short because the
                       64-character hash beside it already says. The status line is for a screen
                       reader: the button's label flipping to "Copied" is a visual change only. */}
@@ -411,7 +416,7 @@ export default function Legal() {
                 <p className="legal-verify-lead">
                   To check it yourself, download the exact text this was taken over and hash it:
                 </p>
-                <pre className="legal-verify-cmd">sha256sum {doc.filename}</pre>
+                <pre className="legal-verify-cmd">sha256sum {shown.filename}</pre>
                 {/* btn-primary, not a bare `btn`. `.btn` alone carries the box — padding, radius,
                     weight, focus ring — and declares no background or colour at all, so this
                     rendered as browser-default button chrome: #f0f0f0 on black, on a #0f1117 panel.
@@ -508,14 +513,24 @@ export default function Legal() {
           </div>
         )}
 
-        {!isCurrentVersion && (
+        {knownPriorVersion && (
           <div className="legal-banner legal-banner--old" role="status">
-            <strong>This is not the current version.</strong>{' '}
-            {knownPriorVersion
-              ? `Version ${requestedVersion} has been superseded.`
-              : `Version ${requestedVersion} is not a version of this document that we published.`}{' '}
-            Only the wording in force is published here, so the text of {requestedVersion} is not
-            shown — asking us for it is the reliable way to get it, at{' '}
+            <strong>This is not the current version.</strong> Version {shown.version} took effect on{' '}
+            {shown.effectiveAdLabel} and has since been replaced. It is kept here word for word,
+            because each acceptance record links to the version that was accepted. The version in
+            force is{' '}
+            <Link to={legalPath(docType)}>
+              {doc.version}, effective {doc.effectiveAdLabel}
+            </Link>
+            .
+          </div>
+        )}
+
+        {!isCurrentVersion && !knownPriorVersion && (
+          <div className="legal-banner legal-banner--old" role="status">
+            <strong>This is not the current version.</strong> Version {requestedVersion} is not a
+            version of this document that we published, so there is no text to show here. If a
+            record of yours links to it, email us at{' '}
             <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>. The version in force is{' '}
             <Link to={legalPath(docType)}>
               {doc.version}, effective {doc.effectiveAdLabel}
@@ -533,7 +548,7 @@ export default function Legal() {
           </div>
         )}
 
-        {isCurrentVersion && !loadFailed && (
+        {shown && !loadFailed && (
           text === null ? (
             <p className="legal-p legal-loading">Loading…</p>
           ) : (

@@ -60,6 +60,34 @@ export const LEGAL_SUMMARIES = {
       text: 'You can ask what we hold about you, have it corrected, or have it deleted. We answer within 15 days.',
     },
   ],
+  // 1.1 adds Sentry (§4, §5, §6, §9). The 1.0 lines whose clauses did not change are repeated as
+  // written; §6 gains Sentry, and §4 has a line of its own.
+  'privacy-1.1': [
+    {
+      section: '1',
+      text: 'The records you enter about guests, staff and vendors are yours. We handle them only on your instructions.',
+    },
+    {
+      section: '6',
+      text: 'Your data is stored with Supabase in Tokyo, Japan, and delivered through Vercel. Error reports are stored with Sentry in Germany.',
+    },
+    {
+      section: '5',
+      text: 'We share it only with the service providers listed below, or where Nepali law requires.',
+    },
+    {
+      section: '4',
+      text: 'When the app fails on a device, it sends an error report to Sentry so we can fix it. Nothing is sent when nothing breaks, and email addresses and phone numbers are removed first.',
+    },
+    {
+      section: '9',
+      text: 'After an account closes we delete its data within 90 days. A trial that does not subscribe is deleted 15 days after it ends.',
+    },
+    {
+      section: '10',
+      text: 'You can ask what we hold about you, have it corrected, or have it deleted. We answer within 15 days.',
+    },
+  ],
 }
 
 /** The summary for one published version, or null when none has been written for it. */

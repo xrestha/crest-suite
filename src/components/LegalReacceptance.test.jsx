@@ -87,4 +87,16 @@ describe('LegalReacceptance', () => {
     expect(screen.getByText(/since you last accepted/i)).toBeTruthy()
     expect(screen.getAllByText(/last accepted: version 0\.9/i)).toHaveLength(pending.length)
   })
+
+  // Privacy 1.1 does not require re-acceptance (2026-11-03): only what is outstanding is listed, so
+  // an outlet holding the Terms is asked for the Privacy Policy alone, as a first acceptance, and its
+  // "what changed" note (meant for an outlet that accepted before) stays off.
+  it('lists only the outstanding document, and a first acceptance carries no change summary', () => {
+    mockAuth = { ...mockAuth, legalAccepted: [row('terms', '1.0')] }
+    render(<LegalReacceptance />)
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Please accept our terms')
+    expect(screen.getByRole('link', { name: /Privacy Policy/ })).toBeTruthy()
+    expect(screen.queryByRole('link', { name: /Terms of Service/ })).toBeNull()
+    expect(screen.queryByText(/Adds Sentry/)).toBeNull()
+  })
 })

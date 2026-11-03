@@ -9,7 +9,7 @@ import { outletSwitchArg, readTillDevice } from '../modules/pos/tillOutlet'
 import { signOutThisDevice } from '../shared/deviceSignOut'
 import { getAccessState, suiteLive, suiteState, customizationState } from '../utils/subscription'
 import { setPageCacheUser, clearPageCache } from '../shared/sessionDataCache'
-import { docsRequiringReacceptance, reacceptDocTypes } from '../legal'
+import { outstandingLegalDocs, reacceptDocTypes } from '../legal'
 import { weatherEntitled } from '../modules/dashboard/weatherSettings'
 
 const AuthContext = createContext({})
@@ -1002,13 +1002,12 @@ export function AuthProvider({ children }) {
   // "off": SuiteGate shows a neutral card and Layout one banner instead of the sales pitch.
   const clientKnown   = isAdmin || !profile?.client_id || !!profile?.clients
 
-  // A document that demands re-acceptance and has no matching row for this client's CURRENT
-  // version. `null` means the read failed, which is treated as "not required" — see the fetch.
+  // A gating document this outlet has no acceptance of at or above its floor (the newest version
+  // that required acceptance; see acceptanceFloor in src/legal). `null` means the read failed,
+  // which is treated as "not required" — see the fetch. The gate lists the same set.
   const legalReacceptRequired = useMemo(() => {
     if (isAdmin || !isOwner || legalAccepted === null) return false
-    return docsRequiringReacceptance().some(doc =>
-      !legalAccepted.some(r => r.doc_type === doc.docType && r.doc_version === doc.version)
-    )
+    return outstandingLegalDocs(legalAccepted).length > 0
   }, [isAdmin, isOwner, legalAccepted])
   const accessLocked  = !isAdmin && accessState.locked
   const accessReason  = accessState.reason

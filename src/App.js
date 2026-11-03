@@ -1,6 +1,6 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { AuthProvider } from './context/AuthContext'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import { SettingsProvider } from './context/SettingsContext'
 import { ThemeProvider } from './context/ThemeContext'
 // Structural pieces stay eagerly imported — they render on every route (Layout, the guards,
@@ -15,6 +15,7 @@ import ModuleGate from './components/ModuleGate'
 import TillOutletGate from './modules/pos/TillOutletGate'
 import RouteFallback from './components/RouteFallback'
 import AppErrorBoundary from './components/AppErrorBoundary'
+import { setMonitoringIdentity } from './shared/monitoring'
 import './components/Layout.css'
 const Login = lazy(() => import('./pages/Login'))
 const Signup = lazy(() => import('./pages/Signup'))
@@ -163,6 +164,25 @@ function preloadBootPage() {
 }
 preloadBootPage()
 
+// Labels each crash report with who and where (S872): the profile's random id, the outlet and the
+// staff ranks, never a name or an email (src/shared/monitoring.js). Renders nothing.
+function MonitoringIdentity() {
+  const { profile, clientId, isAdmin, isOwner } = useAuth()
+  const userId = profile?.id || null
+  const role = !profile ? null
+    : isAdmin ? 'admin'
+    : isOwner ? 'owner'
+    : profile.hr_self_service ? 'self-service'
+    : 'staff'
+  const posRole = profile?.pos_role || null
+  const imsRole = profile?.ims_role || null
+  const hrRole = profile?.hr_role || null
+  useEffect(() => {
+    setMonitoringIdentity({ userId, clientId, role, posRole, imsRole, hrRole })
+  }, [userId, clientId, role, posRole, imsRole, hrRole])
+  return null
+}
+
 function RootRedirect() {
   if (localStorage.getItem('pos_device_client_id')) return <Navigate to="/pos/login" replace />
   return <Navigate to="/dashboard" replace />
@@ -176,6 +196,7 @@ export default function App() {
     <AppErrorBoundary>
     <ThemeProvider>
     <AuthProvider>
+      <MonitoringIdentity />
       <SettingsProvider>
         <BrowserRouter>
           <Suspense fallback={<RouteFallback />}>

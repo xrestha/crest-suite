@@ -9,6 +9,8 @@ paths:
   - "src/components/SupportContactLine.jsx"
   - "src/components/AppErrorBoundary.jsx"
   - "src/components/AppErrorBoundary.test.jsx"
+  - "src/shared/monitoring.js"
+  - "src/shared/monitoring.test.js"
   - "src/pages/Login.js"
   - "src/pages/Signup.js"
   - "src/pages/Legal.jsx"
@@ -167,6 +169,27 @@ boundary only, never the page-scope one.
 `pin|password|token|secret|key|bearer`-shaped, JWT-shaped triples, and long base64 runs — a thrown
 error's message or stack can carry a query string, and this text is going into WhatsApp or email,
 not staying inside the product. Deliberately excludes the user's email and the client name too.
+
+## Crash reports go to Sentry, errors only (S872)
+
+`src/shared/monitoring.js` sends a report when something breaks, from the deployed app only
+(`monitoringEnabled()`: production build, not localhost). `AppErrorBoundary.componentDidCatch` calls
+`reportCrash`, because React 19 gives a caught render error to the boundary alone; window errors and
+unhandled rejections reach Sentry's own handlers. The SDK is a dynamic import after `load`, never in
+the main bundle, and errors before it arrives wait in a queue of ten.
+
+- **Privacy Policy v1.1 §4 and §5 describe exactly this setup.** Owner decision 2026-11-03: errors
+  only. Turning on replay, tracing, logs or session tracking, or adding a field to a report, is a
+  policy change first (15 days' notice per §5), never a config tweak.
+- **`monitoring.test.js` is the policy's promise**: emails, phone numbers, seven-digit runs and
+  credentials leave `scrubText`; query strings leave every address (`cleanUrl`), because PostgREST
+  filters live there; clicks and console lines are never breadcrumbs. Extend the tests, never loosen
+  them to make a report more useful.
+- A stale-deploy chunk failure is dropped (`isChunkLoadError`): it is a deploy, and `chunkReload.js`
+  already reloads for it. The SDK import catches its own failure, so the chunk guard never reloads
+  the page because Sentry could not load offline.
+- `connect-src` names the project's exact ingest host, not `*.sentry.io` (`security-headers.md`).
+- After a deploy, `crestTestCrash()` in the browser console sends a deliberate report.
 
 ## `APP_VERSION` and `CACHE_NAME` move together
 

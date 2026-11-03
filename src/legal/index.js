@@ -16,27 +16,27 @@
 // unrepresentable — they are the same deploy or they are neither. The cost is that publishing a new
 // version is a deploy, which it was always going to be, since the text is written in git.
 //
-// Adding version 1.1 of a document:
-//   1. Copy src/legal/terms-v1.0.md to terms-v1.1.md and edit it.
-//   2. Point SOURCES in scripts/hash-legal.mjs at the new file; keep the old one listed under
-//      PRIOR_VERSIONS below so /legal/terms/1.0 still resolves.
-//   3. node scripts/hash-legal.mjs
-//   4. Bump `version` and the effective dates here, and set requiresReacceptance if the change
-//      materially affects the customer's rights.
-//   5. SHIP THE OLD TEXT TOO, or /legal/terms/1.0 shows the reader that it cannot. `LEGAL_TEXT` is
-//      keyed by doc type alone, so this bundle only ever holds the CURRENT wording — and
-//      `loadLegalText` therefore refuses any other version rather than serving the new text under
-//      a banner naming the old one. That refusal is the safe failure, not the finished one: every
-//      acceptance row in the ledger deep-links to the exact version it recorded, so until the
-//      generator emits prior versions as well, the one link whose whole purpose is "show me what I
-//      agreed to" answers with an apology. Make `SOURCES` a list per doc type before publishing 1.1.
-//   6. Bump CACHE_NAME in public/service-worker.js, or existing users keep the old text.
-//   7. Write the "In short" box for the new version in ./legalSummaries.js, checking every line
-//      against the clause it cites. It is keyed by version on purpose: 1.1 renders NO summary
-//      until one is written for it, because a paraphrase of a clause that has since changed is
-//      worse than none.
+// Publishing a new version of a document (Privacy 1.1 was the first, 2026-11-03):
+//   1. Copy the current file (e.g. privacy-v1.1.md) to the next version's name and edit the copy.
+//      Never edit or delete a published file: every acceptance row links to the version it
+//      recorded, and /legal/<doc>/<version> serves that file's own bytes and hash.
+//   2. Append the new file to its list in SOURCES in scripts/hash-legal.mjs (last = current), then
+//      run node scripts/hash-legal.mjs. It emits the current text as before plus every earlier
+//      version (LEGAL_PRIOR_META / LEGAL_PRIOR_TEXT), all in the one lazily loaded text chunk.
+//   3. Move the outgoing version's REGISTRY entry into PRIOR_VERSIONS below, unchanged (its
+//      `requiresReacceptance` included: the acceptance floor is read from it), and write the new
+//      version, effective dates and `changeSummary` into REGISTRY.
+//   4. Decide `requiresReacceptance` for the new version. true: every Owner must accept THIS
+//      version, even one who accepted an earlier one. false: an earlier acceptance still stands,
+//      and only an outlet that never accepted any version is asked (see acceptanceFloor()). Privacy
+//      §12 asks for fresh acceptance only where a change materially affects Customer Data.
+//   5. Bump CACHE_NAME in public/service-worker.js, or existing users keep the old text.
+//   6. Write the "In short" box for the new version in ./legalSummaries.js, checking every line
+//      against the clause it cites. It is keyed by version on purpose: a new version renders NO
+//      summary until one is written for it, because a paraphrase of a clause that has since
+//      changed is worse than none.
 
-import { LEGAL_META } from './generated/legalMeta'
+import { LEGAL_META, LEGAL_PRIOR_META } from './generated/legalMeta'
 
 // ── The production origin ────────────────────────────────────────────────────────────────────
 //
@@ -137,6 +137,31 @@ const REGISTRY = {
   privacy: {
     docType: 'privacy',
     title: 'Privacy Policy',
+    version: '1.1',
+    effectiveAd: '2026-11-03',
+    effectiveAdLabel: '3 November 2026',
+    effectiveBs: '2083-07-17',
+    effectiveBsLabel: '17 Kartik 2083',
+    // OFF for 1.1, by owner decision (2026-11-03). 1.1 adds Sentry, which receives an error report
+    // when the app fails, to the sub-processor list (§4, §5, §6, §9). That is not a material change
+    // to Customer Data under §12, so clients are told by email and nobody is asked again: an outlet
+    // that accepted 1.0 keeps that acceptance. An outlet with no privacy acceptance at all is still
+    // asked, because 1.0 required one (acceptanceFloor()).
+    requiresReacceptance: false,
+    changeSummary:
+      'Adds Sentry, the service that receives an error report when the app fails on a device, to the list of service providers (sections 4, 5, 6 and 9).',
+  },
+}
+
+// Superseded versions, kept so /legal/privacy/1.0 keeps resolving with ITS OWN text and hash after
+// 1.1 ships. An acceptance row references a version forever; a link in it that shows a different
+// wording, or none, makes the record harder to rely on. Each entry is the REGISTRY entry as it stood
+// while that version was current, `requiresReacceptance` included, because acceptanceFloor() reads
+// it. Keyed `${docType}-${version}`, the same key as LEGAL_PRIOR_META and LEGAL_PRIOR_TEXT.
+export const PRIOR_VERSIONS = {
+  'privacy-1.0': {
+    docType: 'privacy',
+    title: 'Privacy Policy',
     version: '1.0',
     effectiveAd: '2026-09-03',
     effectiveAdLabel: '3 September 2026',
@@ -147,29 +172,89 @@ const REGISTRY = {
   },
 }
 
-// Superseded versions, kept so /legal/terms/1.0 keeps resolving after 1.1 ships. An acceptance row
-// references a version forever; a URL in it that 404s makes the record harder to rely on, not
-// merely untidy. Empty until there is a second version of anything.
-export const PRIOR_VERSIONS = {}
-
-/** Everything known about the current version of a document, hash included. */
-export function legalDoc(docType) {
-  const base = REGISTRY[docType]
-  if (!base) return null
-  const meta = LEGAL_META[docType] || {}
+function withMeta(base, meta) {
   return {
     ...base,
     // The source filename, so the page can offer the EXACT bytes the hash was taken over. Without
     // it the published hash is only checkable by someone who can reach the git repo, which is a
     // poor kind of verifiable for a document aimed at a customer's lawyer.
-    filename: meta.filename || `${docType}-v${base.version}.md`,
+    filename: meta.filename || `${base.docType}-v${base.version}.md`,
     sha256: meta.sha256 || null,
     bytes: meta.bytes || 0,
     missing: meta.missing || [],
   }
 }
 
+/** Everything known about the current version of a document, hash included. */
+export function legalDoc(docType) {
+  const base = REGISTRY[docType]
+  if (!base) return null
+  return withMeta(base, LEGAL_META[docType] || {})
+}
+
+/**
+ * One superseded version, with its own hash, filename and byte count, or null when this bundle does
+ * not hold that version. Never the current version: ask legalDoc() for that.
+ */
+export function priorLegalDoc(docType, version) {
+  const key = `${docType}-${version}`
+  const base = PRIOR_VERSIONS[key]
+  if (!base) return null
+  return withMeta(base, LEGAL_PRIOR_META[key] || {})
+}
+
+// Built once, so a page can use them as effect dependencies: legalDoc() returns a new object on
+// every call.
 export const LEGAL_DOCS = Object.fromEntries(DOC_TYPES.map((t) => [t, legalDoc(t)]))
+export const LEGAL_PRIOR_DOCS = Object.fromEntries(
+  Object.values(PRIOR_VERSIONS).map((p) => [`${p.docType}-${p.version}`, priorLegalDoc(p.docType, p.version)])
+)
+
+/**
+ * Compares two "major.minor" version strings by number ("1.10" is after "1.9"). Negative, zero or
+ * positive, like a sort comparator.
+ */
+export function compareLegalVersions(x, y) {
+  const parts = (v) => String(v).split('.').map((n) => parseInt(n, 10) || 0)
+  const a = parts(x)
+  const b = parts(y)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const d = (a[i] || 0) - (b[i] || 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
+/**
+ * The oldest version whose acceptance still satisfies the gate: the newest published version
+ * (current or prior) that set `requiresReacceptance`. Null when no version ever required acceptance,
+ * and then the document never gates anyone.
+ *
+ * So a version published with `requiresReacceptance: false` keeps every earlier acceptance standing
+ * (Privacy 1.1: the floor stays 1.0) while still asking an outlet that never accepted ANY version,
+ * because some earlier version required acceptance. A later version that sets the flag again moves
+ * the floor up to itself, and an acceptance below it no longer counts.
+ */
+export function acceptanceFloor(docType) {
+  const current = REGISTRY[docType]
+  if (!current) return null
+  const versions = [
+    current,
+    ...Object.values(PRIOR_VERSIONS).filter((p) => p.docType === docType),
+  ]
+  return versions
+    .filter((v) => v.requiresReacceptance)
+    .map((v) => v.version)
+    .reduce((best, v) => (best === null || compareLegalVersions(v, best) > 0 ? v : best), null)
+}
+
+/** True when an accepted ledger version satisfies this document's gate. */
+export function acceptanceSatisfies(doc, acceptedVersion) {
+  const floor = acceptanceFloor(doc.docType)
+  if (floor === null) return true
+  if (acceptedVersion == null) return false
+  return compareLegalVersions(acceptedVersion, floor) >= 0
+}
 
 /**
  * A document still carrying an unfilled [[NEEDS VALUE: X]] marker is a draft and must not be
@@ -190,16 +275,18 @@ export function anyLegalDraft() {
 }
 
 /**
- * The documents that should currently block a tenant Owner until accepted.
+ * The documents that CAN hold a tenant Owner at the gate: every complete document with an
+ * acceptance floor (some version of it required acceptance). Whether a given outlet is actually
+ * held is outstandingLegalDocs(), which also reads its ledger.
  *
- * `requiresReacceptance` alone is NOT sufficient, and this function exists so that can never be
- * forgotten: a document still carrying an unfilled placeholder is excluded no matter what its flag
- * says. Gating every Owner in the product behind a blocking screen showing them
- * "[[NEEDS VALUE: COMPANY_REG_NO]]" would be worse than the consent gap it was meant to close, and
- * the two settings live far enough apart in this file that someone will eventually set one without
- * checking the other.
+ * A flag alone is NOT sufficient, and this function exists so that can never be forgotten: a
+ * document still carrying an unfilled placeholder is excluded no matter what its flag says. Gating
+ * every Owner in the product behind a blocking screen showing them "[[NEEDS VALUE: COMPANY_REG_NO]]"
+ * would be worse than the consent gap it was meant to close, and the two settings live far enough
+ * apart in this file that someone will eventually set one without checking the other.
  *
- * Both the gate's own render and AuthContext's decision read this, so they cannot disagree.
+ * The name predates Privacy 1.1, when a document either required its current version or did not
+ * gate at all. It now also covers a document that needs only a FIRST acceptance.
  */
 export function docsRequiringReacceptance() {
   // Returns DOCUMENTS, not doc-type strings. Both callers read `.docType`, `.version` and
@@ -207,7 +294,25 @@ export function docsRequiringReacceptance() {
   // fields, and — far worse — AuthContext compared an accepted row's doc_version against
   // `undefined`, so the condition stayed true forever and an Owner who accepted would have been
   // held at the blocking screen permanently with no way out. Caught by reacceptGuard.test.js.
-  return DOC_TYPES.map(legalDoc).filter((d) => d && d.requiresReacceptance && !isDraft(d.docType))
+  return DOC_TYPES.map(legalDoc).filter(
+    (d) => d && acceptanceFloor(d.docType) !== null && !isDraft(d.docType)
+  )
+}
+
+/**
+ * The documents this outlet still has to accept, from its own ledger rows (`{ doc_type,
+ * doc_version }`, AuthContext's `legalAccepted`). Empty means the gate stays down.
+ *
+ * AuthContext's decision and the gate's own list both read this, so they cannot disagree: the gate
+ * shows exactly the documents that raised it, and accepting them is exactly what clears it.
+ * `accepted` null (a failed read) counts nothing as accepted; AuthContext fails OPEN before it
+ * asks, so that branch only ever shapes the gate's copy.
+ */
+export function outstandingLegalDocs(accepted) {
+  const rows = accepted || []
+  return docsRequiringReacceptance().filter(
+    (doc) => !rows.some((r) => r.doc_type === doc.docType && acceptanceSatisfies(doc, r.doc_version))
+  )
 }
 
 /**
@@ -244,20 +349,21 @@ export function legalReadiness() {
 /**
  * The text, on demand. Only the /legal routes and the re-acceptance gate should call this.
  *
- * `version` is optional, and passing it is what makes a versioned URL honest. `LEGAL_TEXT` holds
- * exactly one wording per doc type — the current one — so before this took a version,
- * `/legal/terms/1.0` after 1.1 shipped would have rendered **1.1's text** underneath a banner
- * reading "Version 1.0 has been superseded". Both acceptance tables deep-link there with the
- * version they recorded, so the single link whose purpose is "show me the text I agreed to" would
- * have shown a different document and said so nowhere. Returning null is not a good answer, but it
- * is a true one, and Legal.jsx says plainly which version it cannot show.
+ * `version` is optional, and passing it is what makes a versioned URL honest. Both acceptance
+ * tables deep-link to the version they recorded, so the single link whose purpose is "show me the
+ * text I agreed to" must answer with THAT text: the current version from `LEGAL_TEXT`, a superseded
+ * one from `LEGAL_PRIOR_TEXT` (its own bytes, matching its own hash), and anything this bundle does
+ * not hold with null, never the current wording under another version's banner. Legal.jsx says
+ * plainly which version it cannot show.
  */
 export async function loadLegalText(docType, version) {
   const doc = legalDoc(docType)
   if (!doc) return null
-  if (version && version !== doc.version) return null
-  const { LEGAL_TEXT } = await import('./generated/legalText')
-  return LEGAL_TEXT[docType] || null
+  const current = !version || version === doc.version
+  const priorKey = `${docType}-${version}`
+  if (!current && !PRIOR_VERSIONS[priorKey]) return null
+  const { LEGAL_TEXT, LEGAL_PRIOR_TEXT } = await import('./generated/legalText')
+  return (current ? LEGAL_TEXT[docType] : LEGAL_PRIOR_TEXT[priorKey]) || null
 }
 
 /**

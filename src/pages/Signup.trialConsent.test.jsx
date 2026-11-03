@@ -171,10 +171,13 @@ describe('what the signup sends to the server', () => {
   it('carries the current version and hash of both documents', async () => {
     const body = await submitAndCaptureBody()
     expect(body.action).toBe('register_trial')
+    // The version is read from the file the hash was taken over, so publishing a new version (Privacy
+    // 1.1, 2026-11-03) moves both together instead of failing here on a hand-typed number.
     expect(body.accepted_legal).toEqual({
-      terms: { version: '1.0', sha256: LEGAL_META.terms.sha256 },
-      privacy: { version: '1.0', sha256: LEGAL_META.privacy.sha256 },
+      terms: { version: LEGAL_META.terms.version, sha256: LEGAL_META.terms.sha256 },
+      privacy: { version: LEGAL_META.privacy.version, sha256: LEGAL_META.privacy.sha256 },
     })
+    expect(LEGAL_META.privacy.version).toBe('1.1')
   })
 
   // The address and identity on an acceptance row have to come off the request, server-side. If

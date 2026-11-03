@@ -1141,6 +1141,10 @@ candidates: keeping every version of an edited sale and purchase line, the centr
 link, the invoice and credit-note layout), plan it, and apply. QR payment auto-confirmation, the
 other item that sat here, was dropped in S856.
 
+**Owner decision (2026-11-03, asked in plain words): research first.** Find IRD's current rules for
+billing software and write the owner a plain list of what the till would have to change; nothing is
+built until the owner has read it and agreed. Queued after the crash alerts (DOCS-REMEDIATION.md T6).
+
 ---
 
 Shipped history and closed decisions: **[POS_DECISIONS.md](POS_DECISIONS.md)**

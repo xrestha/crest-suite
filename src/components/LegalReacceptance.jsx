@@ -1,5 +1,6 @@
-// The blocking gate an Owner sees when a new version of the Terms or Privacy Policy demands a
-// fresh acceptance.
+// The blocking gate an Owner sees when their outlet has not accepted the Terms or Privacy Policy,
+// or a new version demands a fresh acceptance. It lists exactly the outstanding documents
+// (outstandingLegalDocs in src/legal, the same helper AuthContext raises the gate from).
 //
 // A FULL PAGE, not a Modal, and that is not a style choice. `Modal` closes on Escape and on a
 // backdrop click, unconditionally — there is no `dismissible={false}`. A gate built on it would be
@@ -18,7 +19,7 @@ import { useAuth } from '../context/AuthContext'
 import { adminOp } from '../shared/adminOp'
 import { withTimeout } from '../utils/withTimeout'
 import ActionError, { asActionError } from './ActionError'
-import { docsRequiringReacceptance, acceptancePayload, legalPath } from '../legal'
+import { outstandingLegalDocs, acceptancePayload, legalPath, compareLegalVersions } from '../legal'
 
 // First acceptance or a changed document, told from this outlet's own ledger (S855). Until then the
 // gate guessed from whether an earlier version had ever been PUBLISHED (S852), which cannot tell an
@@ -39,22 +40,11 @@ export function splitPendingDocs(pending, accepted) {
 }
 
 // The newest version of a document type this outlet accepted, for the "last accepted" line.
-const versionParts = v => String(v).split('.').map(n => parseInt(n, 10) || 0)
-function compareVersions(x, y) {
-  const a = versionParts(x)
-  const b = versionParts(y)
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const d = (a[i] || 0) - (b[i] || 0)
-    if (d !== 0) return d
-  }
-  return 0
-}
-
 export function lastAcceptedVersion(accepted, docType) {
   return (accepted || [])
     .filter(r => r.doc_type === docType && r.doc_version != null)
     .map(r => r.doc_version)
-    .reduce((best, v) => (best === null || compareVersions(v, best) > 0 ? v : best), null)
+    .reduce((best, v) => (best === null || compareLegalVersions(v, best) > 0 ? v : best), null)
 }
 
 const titlesOf = docs => {
@@ -101,7 +91,9 @@ export default function LegalReacceptance() {
   const [error, setError] = useState(null)
   const [recorded, setRecorded] = useState(false)
 
-  const pending = docsRequiringReacceptance()
+  // Only what this outlet still has to accept. An earlier acceptance that still stands (Privacy 1.0
+  // under 1.1) is not asked again, and accepting records only these.
+  const pending = outstandingLegalDocs(legalAccepted)
   const copy = gateCopy(pending, legalAccepted)
   const changedTypes = new Set(splitPendingDocs(pending, legalAccepted).changed.map(d => d.docType))
   const many = pending.length > 1
@@ -223,9 +215,9 @@ export default function LegalReacceptance() {
                   )}
                 </span>
               </div>
-              {/* Only rendered when there is one. A "What changed" heading over an empty box is a
-                  worse answer than not offering the summary at all. */}
-              {d.changeSummary && (
+              {/* Only rendered when there is one, and only for a document this outlet accepted
+                  before: "what changed" means nothing to a first acceptance. */}
+              {changedTypes.has(d.docType) && d.changeSummary && (
                 <p style={{ margin: '8px 0 0', fontSize: 13, lineHeight: 1.55, color: 'var(--theme-text2)' }}>
                   {d.changeSummary}
                 </p>

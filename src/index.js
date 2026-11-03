@@ -9,6 +9,11 @@ import reportWebVitals from './reportWebVitals';
 import { initInstallPrompt } from './utils/installPrompt';
 import { initChunkReloadGuard } from './shared/chunkReload';
 import { initReleaseWatch } from './shared/releaseWatch';
+import { initMonitoring } from './shared/monitoring';
+
+// Crash reports to Sentry, on the deployed app only (S872). Listening before the first render, so a
+// crash during it is queued until the SDK chunk arrives after `load`.
+initMonitoring();
 
 // Listens for a new release taking over this page, so a till screen can reload itself at a safe
 // moment (S809 1b). Before the worker registers: a first visit's worker claiming the page must be

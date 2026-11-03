@@ -506,6 +506,10 @@ it was deferred.
 stays open and stays the blocker.** Read the item statuses below rather than the paragraph after
 this one, which is preserved as it was written.
 
+**Owner decision (2026-11-03, asked in plain words): item 2 uses Sentry's free plan, and it is the
+first of the three big projects** (before IRD approval for the till and before staging). Crash reports
+may go to Sentry; customer names, bill contents and pay never do.
+
 - **Item 1 — DONE, S673.** `src/components/AppErrorBoundary.jsx`, mounted twice: at app scope in
   `App.js` above `ThemeProvider`, and at page scope in `Layout.js` around the `<Outlet />` only, so
   a page crash leaves the top bar and navigation working and `resetKey={location.pathname}` clears
@@ -526,7 +530,10 @@ this one, which is preserved as it was written.
   breadcrumb. It is better placed than Stock Count was — `pendingOrderIds` and the conflict list
   are real UI — but a sync that keeps failing for a reason the cashier could act on still says
   nothing. Filed in `POS_TODO.md` under B3.
-- **Item 2 — NOT DONE.** No error reporting service is wired. This is what keeps T6 open: a
+- **Item 2 — BUILT S872; the live check runs after the deploy.** Sentry, errors only, from the deployed
+  app (`src/shared/monitoring.js`, rules in `.claude/rules/support-contact.md`), with Privacy Policy v1.1
+  listing it. The acceptance criterion below is met once `crestTestCrash()` on the live site shows up in
+  Sentry tagged and scrubbed. *As first written:* No error reporting service is wired. This is what keeps T6 open: a
   boundary tells the person in front of the screen, and tells nobody else. When a till throws at
   8pm on a Friday the detection mechanism is still the client phoning.
 
@@ -565,6 +572,9 @@ must **not** report those as application errors, or the first week of data is mo
 One mention of `staging` in the entire log. Deploys go straight to production. This is survivable
 for a solo developer with your session discipline. It is not survivable with a contractor who does
 not have it.
+
+**Owner decision (2026-11-03, asked in plain words): not yet.** Testing stays on BLOOM CAFE, with a
+rolled-back dry run before each migration. Revisit when a second person starts working on the code.
 
 **Do.**
 

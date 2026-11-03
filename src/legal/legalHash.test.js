@@ -14,9 +14,15 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 
-const { LEGAL_META } = require('./generated/legalMeta')
-const { LEGAL_TEXT } = require('./generated/legalText')
-const { DOC_TYPES, legalDoc, isDraft, missingLegalValues, acceptancePayload } = require('./index')
+const { LEGAL_META, LEGAL_PRIOR_META } = require('./generated/legalMeta')
+const { LEGAL_TEXT, LEGAL_PRIOR_TEXT } = require('./generated/legalText')
+const {
+  DOC_TYPES, legalDoc, priorLegalDoc, PRIOR_VERSIONS, isDraft, missingLegalValues, acceptancePayload,
+  loadLegalText,
+} = require('./index')
+
+const PRIOR_KEYS = Object.keys(PRIOR_VERSIONS)
+const versionInName = (filename) => (/-v(\d+\.\d+)\.md$/.exec(filename) || [])[1]
 
 function readCanonical(filename) {
   const raw = fs.readFileSync(path.join(__dirname, filename), 'utf8')
@@ -54,10 +60,68 @@ describe('legal document hashes', () => {
   })
 })
 
+// A superseded version is served at /legal/<doc>/<version> with its own text and hash, because every
+// acceptance row links to the version it recorded. Its file must therefore never change after it
+// is published, and these hold it to the bytes on disk exactly as the current version is held.
+describe('prior version hashes', () => {
+  it('there is at least one prior version (Privacy 1.0), so these tests are not vacuous', () => {
+    expect(PRIOR_KEYS).toContain('privacy-1.0')
+  })
+
+  it.each(PRIOR_KEYS)('%s: committed hash, bytes and bundled text match the markdown on disk', (key) => {
+    const meta = LEGAL_PRIOR_META[key]
+    expect(meta).toBeDefined()
+    const canonical = readCanonical(meta.filename)
+    expect(sha256(canonical)).toBe(meta.sha256)
+    expect(Buffer.byteLength(canonical, 'utf8')).toBe(meta.bytes)
+    expect(LEGAL_PRIOR_TEXT[key]).toBe(canonical)
+    expect(fs.readFileSync(path.join(__dirname, meta.filename), 'utf8')).not.toMatch(/\r\n/)
+  })
+
+  it.each(PRIOR_KEYS)('%s: priorLegalDoc() carries its own version, dates and hash', (key) => {
+    const p = PRIOR_VERSIONS[key]
+    const doc = priorLegalDoc(p.docType, p.version)
+    expect(doc.sha256).toBe(LEGAL_PRIOR_META[key].sha256)
+    expect(doc.sha256).not.toBe(legalDoc(p.docType).sha256)
+    expect(versionInName(doc.filename)).toBe(p.version)
+    expect(doc.effectiveAd).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+})
+
+describe('loadLegalText', () => {
+  it('serves the current version with or without a version in the address', async () => {
+    const privacy = legalDoc('privacy')
+    const canonical = readCanonical(privacy.filename)
+    expect(await loadLegalText('privacy')).toBe(canonical)
+    expect(await loadLegalText('privacy', privacy.version)).toBe(canonical)
+  })
+
+  it('serves a superseded version its OWN text, never the current wording', async () => {
+    const text = await loadLegalText('privacy', '1.0')
+    expect(text).toBe(readCanonical('privacy-v1.0.md'))
+    expect(text).not.toBe(LEGAL_TEXT.privacy)
+    expect(text).toContain('**Version 1.0 ')
+  })
+
+  it('returns null for a version this bundle does not hold, and for an unknown document', async () => {
+    expect(await loadLegalText('privacy', '0.9')).toBeNull()
+    expect(await loadLegalText('terms', '1.1')).toBeNull()
+    expect(await loadLegalText('cookies')).toBeNull()
+  })
+})
+
 describe('registry and generated metadata agree', () => {
   it('every registered document has generated metadata, and vice versa', () => {
     expect(Object.keys(LEGAL_META).sort()).toEqual([...DOC_TYPES].sort())
     expect(Object.keys(LEGAL_TEXT).sort()).toEqual([...DOC_TYPES].sort())
+    expect(Object.keys(LEGAL_PRIOR_META).sort()).toEqual([...PRIOR_KEYS].sort())
+    expect(Object.keys(LEGAL_PRIOR_TEXT).sort()).toEqual([...PRIOR_KEYS].sort())
+  })
+
+  // The filename is where a version is written next to its text. A registry that says 1.1 over a
+  // file named -v1.0 would stamp every acceptance with a version its hash does not belong to.
+  it.each(DOC_TYPES)('%s: the registry version is the version in the current file name', (docType) => {
+    expect(versionInName(LEGAL_META[docType].filename)).toBe(legalDoc(docType).version)
   })
 
   it.each(DOC_TYPES)('%s: legalDoc() exposes a non-empty hash and version', (docType) => {

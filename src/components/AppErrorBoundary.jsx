@@ -3,6 +3,7 @@ import { TriangleAlert } from 'lucide-react'
 import SupportContactLine from './SupportContactLine'
 import { APP_VERSION } from '../shared/appVersion'
 import { isChunkLoadError, recoverFromChunkError, chunkErrorMessage } from '../shared/chunkReload'
+import { reportCrash } from '../shared/monitoring'
 
 // Catches a render throw in a lazy route — or, mounted at app scope, in the providers themselves
 // — and renders a fallback instead of letting React unmount the whole tree to a blank page (S673).
@@ -93,6 +94,9 @@ export default class AppErrorBoundary extends Component {
   componentDidCatch(error, info) {
     // eslint-disable-next-line no-console
     console.error('AppErrorBoundary caught:', error, info)
+    // To Sentry (S872). React 19 gives a caught error to the boundary alone, so this is the only
+    // place a render crash can be reported from; a stale-deploy chunk failure is dropped inside.
+    reportCrash(error, info && info.componentStack)
     // A lazy route whose chunk no longer exists is a DEPLOY, not a crash — every page component
     // in App.js is `React.lazy`, Vercel replaces the deployment's files, and the service worker
     // keeps only the chunks this device already fetched, one build back (S855). Reload once and the new index.html names
