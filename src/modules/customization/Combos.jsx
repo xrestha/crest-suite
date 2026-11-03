@@ -147,7 +147,7 @@ export default function Combos() {
           <h1 className="page-title">Combos</h1>
           <p className="page-subtitle">{PAGE_SUBTITLE}</p>
         </div>
-        <div className="empty-state">No client is selected. Pick a client in the top bar to see its combos.</div>
+        <div className="empty-state">No client selected. Pick a client in the top-left switcher to see its combos.</div>
       </div>
     )
   }
