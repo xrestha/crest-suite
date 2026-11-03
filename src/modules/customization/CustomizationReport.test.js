@@ -34,6 +34,7 @@ jest.mock('../../shared/hooks/useScopedDb', () => ({ useScopedDb: () => mockScop
 jest.mock('../../shared/fetchAllRows', () => ({
   fetchAllRows: makeQuery => makeQuery(),
   fetchAllRowsChunked: (ids, makeQuery) => (ids.length ? makeQuery(ids) : Promise.resolve({ data: [], error: null })),
+  fetchAllRowsParallel: makeQuery => makeQuery({ count: 'exact' }),
 }))
 jest.mock('../../supabaseClient', () => ({ supabase: { from: table => mockBuilder(table), rpc: () => mockBuilder('rpc') } }))
 const mockAuth = { clientId: 'c1', isAdmin: true, isOwner: false, profile: {}, clientModules: { ims: false } }
@@ -42,8 +43,22 @@ jest.mock('../../shared/hooks/useBizInfo', () => ({
   useBizInfo: () => ({ name: 'Test Cafe', vat: '', address: '', vatReg: true, error: null, ready: true }),
 }))
 const mockRates = {}
+// S869: the book the page asks for beside the bills, and what the costing was handed.
+const mockBook = { items: new Map(), recipes: new Map() }
+const mockBookCalls = []
+const mockCostingCalls = []
 jest.mock('../pos/orders/posRecipeBook', () => ({
-  posDeltaCosting: () => Promise.resolve({ explosion: { itemYield: {}, subPerUnit: {} }, rateOf: id => mockRates[id] || 0 }),
+  posDeltaCosting: (...args) => {
+    mockCostingCalls.push(args)
+    return Promise.resolve({ explosion: { itemYield: {}, subPerUnit: {} }, rateOf: id => mockRates[id] || 0 })
+  },
+  loadPosRecipeBook: (...args) => { mockBookCalls.push(args); return Promise.resolve(mockBook) },
+  deltaIdsOf: lists => {
+    const itemIds = new Set()
+    const subRecipeIds = new Set()
+    for (const list of lists || []) for (const d of list || []) (d.item_id ? itemIds.add(d.item_id) : d.sub_recipe_id && subRecipeIds.add(d.sub_recipe_id))
+    return { itemIds: [...itemIds], subRecipeIds: [...subRecipeIds] }
+  },
 }))
 // The range the page opens on, fixed for the test (and backwards where a test says so).
 let mockRange = null
@@ -66,6 +81,8 @@ beforeEach(() => {
   mockAnswers = {}
   Object.keys(mockReads).forEach(k => delete mockReads[k])
   Object.keys(mockRates).forEach(k => delete mockRates[k])
+  mockBookCalls.length = 0
+  mockCostingCalls.length = 0
   mockRange = { from: '2025-09-01', to: '2025-09-10' }
   mockAuth.clientModules = { ims: false }
   mockAuth.clientId = 'c1'
@@ -296,4 +313,48 @@ test('every tab points at a panel that exists, and print names the view', async 
   expect(screen.getByText(/^Showing Popular choices · Paid bills closed/).className).toMatch(/print-only/)
   fireEvent.click(screen.getByRole('tab', { name: 'Combos' }))
   expect(await screen.findByText(/^Showing Combos · /)).toBeTruthy()
+})
+
+// S869 (poor connections): the page asks for the attachments once, through the catalog it already
+// reads, and, with IMS, the recipe book for today's choices beside the bills, so the Margin tab's
+// costing needs no wait of its own after the bill lines.
+describe('the reads', () => {
+  test('the attachments are read once, through the catalog', async () => {
+    answerOnePlate()
+    renderPage()
+    expect(await screen.findByRole('tab', { name: 'Popular choices' })).toBeTruthy()
+    await waitFor(() => expect(mockReads.pos_order_items).toBe(1))
+    expect(mockReads.pos_recipe_option_groups).toBe(1)
+  })
+
+  test('with IMS, the choices\' recipe book is asked for before the bill lines answer, and the costing gets it', async () => {
+    mockAuth.clientModules = { ims: true }
+    answerOnePlate()
+    mockAnswers.pos_option_ingredients = { data: [{ id: 'x1', item_id: 'i1', sub_recipe_id: null }], error: null }
+    const lines = mockAnswers.pos_order_items
+    let releaseLines
+    mockAnswers.pos_order_items = () => new Promise(res => { releaseLines = res })
+    mockAnswers.pos_order_item_options = {
+      data: [{ id: 's1', order_item_id: 'l1', option_id: 'op1', group_name: 'Extras', group_kind: 'addon', option_name: 'Cheese',
+        is_removal: false, price_delta: 50, list_price_delta: 50, included: false, ingredient_deltas: [{ item_id: 'i1', qty: 1 }] }],
+      error: null,
+    }
+    renderPage()
+    await waitFor(() => expect(typeof releaseLines).toBe('function'))
+    await waitFor(() => expect(mockBookCalls.length).toBe(1))
+    expect(mockBookCalls[0][2]).toEqual({ recipeIds: [], itemIds: ['i1'] })
+    expect(mockCostingCalls.length).toBe(0)
+    releaseLines(lines)
+    await waitFor(() => expect(mockCostingCalls.length).toBe(1))
+    expect(mockCostingCalls[0][3]).toEqual({ book: mockBook })
+  })
+
+  test('without IMS, no recipe book is asked for', async () => {
+    answerOnePlate()
+    renderPage()
+    expect(await screen.findByRole('tab', { name: 'Popular choices' })).toBeTruthy()
+    await waitFor(() => expect(mockReads.pos_order_items).toBe(1))
+    expect(mockBookCalls.length).toBe(0)
+    expect(mockReads.pos_option_ingredients).toBeUndefined()
+  })
 })

@@ -1,5 +1,5 @@
 import { buildRecipeBook, computeRecipeCosts } from '../../../utils/recipeCost'
-import { lineIngredientDeltas, loadDeltaExplosion } from '../../../utils/orderLineIngredients'
+import { lineIngredientDeltas, loadDeltaExplosion, bookCoversDeltas } from '../../../utils/orderLineIngredients'
 import { plateExtrasCost } from '../../ims/recipes/extrasCost'
 import { fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { isMissingColumn } from '../../customization/customizationData'
@@ -72,12 +72,17 @@ export async function posFoodCosts(supabase, clientId, recipeIds) {
  * `rateOf(itemId)` is each raw item's per_uom_rate, 0 for one the book does not hold. A POS manager on
  * a PIN read `items` directly and got every yield 100% and every rate 0.
  */
-export async function posDeltaCosting(supabase, clientId, deltaLists) {
+export async function posDeltaCosting(supabase, clientId, deltaLists, { book: early = null } = {}) {
   const { itemIds, subRecipeIds } = deltaIdsOf(deltaLists)
   if (itemIds.length === 0 && subRecipeIds.length === 0) {
     return { explosion: { itemYield: {}, subPerUnit: {} }, rateOf: () => 0 }
   }
-  const book = await loadPosRecipeBook(supabase, clientId, { recipeIds: subRecipeIds, itemIds })
+  // S869: a book read ahead (the Customization Report asks for today's choices' book beside its bill
+  // lines) is used only when it holds every id these lines name, since the rows it holds for them
+  // are the rows a read for exactly them returns. Otherwise the book is read for exactly them.
+  const book = bookCoversDeltas(early, deltaLists)
+    ? early
+    : await loadPosRecipeBook(supabase, clientId, { recipeIds: subRecipeIds, itemIds })
   const explosion = await loadDeltaExplosion(supabase, deltaLists, { book })
   return { explosion, rateOf: id => Number(book.items.get(id)?.per_uom_rate) || 0 }
 }

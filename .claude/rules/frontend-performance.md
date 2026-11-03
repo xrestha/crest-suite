@@ -7,6 +7,7 @@ paths:
   - "src/modules/ims/**"
   - "src/modules/hr/**"
   - "src/modules/pos/**"
+  - "src/modules/customization/**"
   - "src/shared/setIfChanged.js"
   - "src/supabaseClient.js"
   - "src/utils/withTimeout.js"
@@ -105,6 +106,16 @@ profile and outlet reads); `index.html` preconnects to the Supabase origin; and 
 The same test applies inside a page: a read that needs only today's BS month (the Dashboard's
 forecast history) or only the session (Crest Staff's own RPCs) starts before the read it used to
 follow, and a late answer that no longer applies is dropped, never rendered.
+
+**A read that saves a round trip can still lose on the server, so time both (S869).** On this
+database the security policies cost about 1 ms a row (IMS_TODO PERF-12). A filter through an embed
+(`pos_order_items` with `pos_orders!inner(closed_at)` filtered on the bill) walks every child row
+the outlet ever had: 5.5 s of server time for one month. Bills with their lines embedded walked only
+the range, but on one connection, where chunked `.in()` reads had run side by side: 19.6 s against
+10.2 s for three months. Log each request's server time (fetch start to body read) beside the
+simulated network time, and compare the figures before and after on two ranges.
+`src/modules/customization/**` joined this file's `paths:` in S869; it had missed every sweep.
+History: docs/rules-archive/frontend-performance.md#s869-customization-report-shapes
 
 **Bulking a read means re-checking the 1000-row cap.** Collapsing N per-period queries into one
 `.in()` multiplies the row count — page it with `fetchAllRows` and give the sort a unique

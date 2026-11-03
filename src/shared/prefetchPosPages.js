@@ -10,6 +10,7 @@
 //     Display while staff pick their name and type the PIN, so sign-in lands on code already here.
 //   - prefetchPosPages(paths): once a POS page is up, the other POS pages THIS login's sidebar offers
 //     (Layout's isItemVisible), one file at a time, the till first. The same shape as prefetchHrPages.
+//   - prefetchCustomizationPages(paths): the same for Crest Customization's three pages (S869).
 //
 // The service worker caches each file (cache-first), so this is paid once per release, not per visit.
 // The imports are App.js's own: webpack serves one chunk per module, so `import()` here and
@@ -84,4 +85,27 @@ export function prefetchPosPages(paths) {
   if (pagesStarted) return
   pagesStarted = true
   fetchInTurn(posPagesToFetch(paths), START_DELAY_MS)
+}
+
+// Crest Customization's pages (S869): the paid add-on's own routes, outside /pos/. A manager setting
+// up choices moves between the three, and each first visit after a release downloaded the page's code
+// before any read. Once one is up, the others this login's sidebar offers follow, as POS's do.
+export const CUSTOMIZATION_PAGES = [
+  ['/customization/groups', () => import('../modules/customization/OptionGroups')],
+  ['/customization/combos', () => import('../modules/customization/Combos')],
+  ['/customization/report', () => import('../modules/customization/CustomizationReport')],
+]
+
+/** The Customization pages to fetch for these reachable routes, in CUSTOMIZATION_PAGES' order. */
+export function customizationPagesToFetch(paths) {
+  const reachable = new Set(paths || [])
+  return CUSTOMIZATION_PAGES.filter(([path]) => reachable.has(path)).map(([, load]) => load)
+}
+
+let customizationStarted = false
+
+export function prefetchCustomizationPages(paths) {
+  if (customizationStarted) return
+  customizationStarted = true
+  fetchInTurn(customizationPagesToFetch(paths), START_DELAY_MS)
 }

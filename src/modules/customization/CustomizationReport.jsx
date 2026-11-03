@@ -5,7 +5,7 @@ import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
 import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
 import { useBizInfo } from '../../shared/hooks/useBizInfo'
-import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked, fetchAllRowsParallel } from '../../shared/fetchAllRows'
 import { firstError } from '../../shared/queryError'
 import { npr, nprExact, nprInt } from '../../shared/nepalMoney'
 import { plural } from '../../shared/plural'
@@ -23,7 +23,7 @@ import { withTimeout } from '../../utils/withTimeout'
 import { adToBsSafe, BS_MONTHS, daysInBsMonth, formatAdAsBs, formatBsDay } from '../../utils/bsCalendar'
 import { nepalDayStartTs, nepalDayEndTs, bsMonthRangeIso } from '../pos/reports/reportRange'
 import { deltaItems } from '../../utils/orderLineIngredients'
-import { posDeltaCosting } from '../pos/orders/posRecipeBook'
+import { posDeltaCosting, loadPosRecipeBook, deltaIdsOf } from '../pos/orders/posRecipeBook'
 import { loadOptionCatalog, isMissingColumn } from './customizationData'
 import { buildCustomizationReport, withOptionCosts, allDeltaSets, mostAddedOf, sliceByOrders, weeklyDishShares, TREND_MIN_PLATES, TREND_DROP_POINTS, buildComboReport } from './customizationReportCalc'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer } from 'recharts'
@@ -430,26 +430,39 @@ export default function CustomizationReport() {
     // range AND the one before it, which the bill read spans.
     const readMs = rangeReadMs(prevFromIso, toIso)
     const LOAD_LABEL = 'Loading the Customization Report'
+    // S869: the recipe book for today's choices, asked for beside the bills, so the Margin tab's
+    // costing usually needs no wait of its own after the lines. posDeltaCosting uses it only when it
+    // holds every item and sub-recipe the range's plates name, and reads the book for exactly those
+    // otherwise, so the figures are the same either way. Read apart from the catalog, so a login
+    // that cannot read the stock lines loses only the head start, never the report.
+    const readChoiceBook = async () => {
+      const r = await fetchAllRows(() => scopedFrom('pos_option_ingredients', 'id, item_id, sub_recipe_id').order('id'))
+      const { itemIds, subRecipeIds } = deltaIdsOf([r.data || []])
+      if (r.error || (itemIds.length === 0 && subRecipeIds.length === 0)) return null
+      return loadPosRecipeBook(supabase, clientId, { recipeIds: subRecipeIds, itemIds })
+    }
+    const earlyBook = imsOn ? readChoiceBook().catch(() => null) : Promise.resolve(null)
     try {
-      const [ordersRes, attachRes, catalog] = await settleAll([
+      const [ordersRes, catalog] = await settleAll([
         // Paged: a month of bills passes 1000 at any real volume, and every share on this page
-        // divides by a count taken from it.
+        // divides by a count taken from it. In parallel after the first page (S869): three months
+        // on BLOOM CAFE was three 1000-bill pages, one after another.
         // S800: the chosen range AND the equal range before it, in one read, so the tiles can say
         // how this period compares and the trend costs no second round of reads.
-        fetchAllRows(() => scopedFrom('pos_orders', 'id, closed_at')
+        fetchAllRowsParallel(opts => scopedFrom('pos_orders', 'id, closed_at', opts)
           .eq('close_type', 'paid')
           .gte('closed_at', nepalDayStartTs(prevFromIso)).lte('closed_at', nepalDayEndTs(toIso))
           .order('id')),
-        fetchAllRows(() => scopedFrom('pos_recipe_option_groups', 'id, recipe_id').order('id')),
-        // Today's catalog: which group a choice belongs to (a size is not an add-on) and its list
-        // price (a free-by-design choice is not a loss). A failed catalog read is a failed report
-        // read — without it the tiles and the Margin tab would state things they cannot know.
-        // S809 3o (REPORTS-12): each bill's own snapshot decides both now; the catalog only fills a
-        // snapshot row that carries no kind or list price. Bounded, it answers `{ error }` on a
-        // timeout, the shape a refused catalog read has.
+        // Today's catalog: which group a choice belongs to (a size is not an add-on), its list price
+        // (a free-by-design choice is not a loss) and which dishes have a group attached (S869: its
+        // own attachment read, where the page used to read them a second time). A failed catalog
+        // read is a failed report read — without it the tiles and the Margin tab would state things
+        // they cannot know. S809 3o (REPORTS-12): each bill's own snapshot decides kind and list
+        // price now; the catalog only fills a snapshot row that carries neither. Bounded, it answers
+        // `{ error }` on a timeout, the shape a refused catalog read has.
         loadOptionCatalog(scopedFrom),
       ], readMs, LOAD_LABEL)
-      const err1 = firstError([ordersRes, attachRes]) || catalog.error
+      const err1 = ordersRes.error || catalog.error
       if (err1) throw err1
       const kindByGroup = Object.fromEntries(catalog.groups.map(g => [g.id, g.kind]))
       const kindByOptionId = Object.fromEntries(catalog.options.map(o => [o.id, kindByGroup[o.group_id] || 'unknown']))
@@ -470,7 +483,7 @@ export default function CustomizationReport() {
       ], readMs, LOAD_LABEL)
       const err2 = firstError([linesRes, snapRes])
       if (err2) throw err2
-      const attachedRecipeIds = new Set((attachRes.data || []).map(a => a.recipe_id))
+      const attachedRecipeIds = new Set(catalog.attachments.map(a => a.recipe_id))
       const curStartMs = Date.parse(nepalDayStartTs(fromIso))
       const curOrders = (ordersRes.data || []).filter(o => Date.parse(o.closed_at) >= curStartMs)
       const prevIds = new Set((ordersRes.data || []).filter(o => Date.parse(o.closed_at) < curStartMs).map(o => o.id))
@@ -511,7 +524,8 @@ export default function CustomizationReport() {
       if (imsOn && deltaSets.length > 0) {
         try {
           // Bounded in its own try (S862 REPORTS-STOCK-5): a hung costing fails the Margin tab only.
-          const { explosion, rateOf } = await withTimeout(posDeltaCosting(supabase, clientId, deltaSets), readMs, 'Costing the choices')
+          const costing = async () => posDeltaCosting(supabase, clientId, deltaSets, { book: await earlyBook })
+          const { explosion, rateOf } = await withTimeout(costing(), readMs, 'Costing the choices')
           const toItems = d => deltaItems(d, explosion)
           const itemIds = [...new Set(deltaSets.flatMap(d => toItems(d).map(x => x.item_id)))]
           const rateByItem = Object.fromEntries(itemIds.map(id => [id, rateOf(id)]))

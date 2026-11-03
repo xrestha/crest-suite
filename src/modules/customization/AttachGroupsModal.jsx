@@ -27,15 +27,43 @@ const NOT_LOADED = 'The groups could not be loaded, so there is nothing to save 
 
 const toInt = v => (v === '' || v == null ? null : Number.parseInt(v, 10))
 
-export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
+// The dialog's state from a catalog read: the groups, the active choices per group, this dish's
+// attachments and the draft they start the ticks from.
+function fromCatalog(cat) {
+  const optionsByGroup = {}
+  cat.options.filter(o => o.is_active !== false).forEach(o => {
+    if (!optionsByGroup[o.group_id]) optionsByGroup[o.group_id] = []
+    optionsByGroup[o.group_id].push(o)
+  })
+  const draft = {}
+  cat.attachments.forEach(a => {
+    draft[a.group_id] = {
+      on: true,
+      min: a.min_override == null ? '' : String(a.min_override),
+      max: a.max_override == null ? '' : String(a.max_override),
+      def: a.default_option_id || '',
+      sort: a.sort || 0,
+    }
+  })
+  return { groups: cat.groups, options: cat.options, optionsByGroup, existing: cat.attachments, draft }
+}
+
+// `catalog` (S869): the option catalog the opener already holds. Choice Groups passes its own, so the
+// dialog opens on it with no read, as "Put it on dishes" (AttachToDishesModal) always has; a slow line
+// paid a whole wait per dish before. Taken once, when the dialog opens, so a reload of the page behind
+// it never resets the ticks. Without it (Menu Pricing) the dialog reads the catalog itself.
+export default function AttachGroupsModal({ recipe, catalog = null, onClose, onSaved }) {
   const { scopedFrom, scopedUpsert, scopedDelete } = useScopedDb()
-  const [loading, setLoading] = useState(true)
+  const [given] = useState(() => (catalog
+    ? fromCatalog({ ...catalog, attachments: catalog.attachments.filter(a => a.recipe_id === recipe.id) })
+    : null))
+  const [loading, setLoading] = useState(!given)
   const [loadError, setLoadError] = useState(null)
-  const [groups, setGroups] = useState([])
-  const [options, setOptions] = useState([])
-  const [optionsByGroup, setOptionsByGroup] = useState({})
-  const [existing, setExisting] = useState([])
-  const [draft, setDraft] = useState({}) // { [groupId]: { on, min, max, def, sort } }
+  const [groups, setGroups] = useState(given?.groups || [])
+  const [options, setOptions] = useState(given?.options || [])
+  const [optionsByGroup, setOptionsByGroup] = useState(given?.optionsByGroup || {})
+  const [existing, setExisting] = useState(given?.existing || [])
+  const [draft, setDraft] = useState(given?.draft || {}) // { [groupId]: { on, min, max, def, sort } }
   const [saving, setSaving] = useState(false)
   // A second press mid-save is dropped by this ref, not by disabling the focused button (S863).
   const savingRef = useRef(false)
@@ -46,36 +74,23 @@ export default function AttachGroupsModal({ recipe, onClose, onSaved }) {
   const pendingFocus = useRef(null)
 
   useEffect(() => {
+    if (given && attempt === 0) return undefined
     let alive = true
     ;(async () => {
       // settleWithin answers a timeout as `{ error }`, the shape a refused catalog read already has.
       const cat = await settleWithin(loadOptionCatalog(scopedFrom, { recipeId: recipe.id }), CUSTOMIZATION_READ_MS, 'Loading the choices')
       if (!alive) return
       if (cat.error) { setLoadError(cat.error); setLoading(false); return }
-      const byGroup = {}
-      cat.options.filter(o => o.is_active !== false).forEach(o => {
-        if (!byGroup[o.group_id]) byGroup[o.group_id] = []
-        byGroup[o.group_id].push(o)
-      })
-      const current = {}
-      cat.attachments.forEach(a => {
-        current[a.group_id] = {
-          on: true,
-          min: a.min_override == null ? '' : String(a.min_override),
-          max: a.max_override == null ? '' : String(a.max_override),
-          def: a.default_option_id || '',
-          sort: a.sort || 0,
-        }
-      })
-      setGroups(cat.groups)
-      setOptions(cat.options)
-      setOptionsByGroup(byGroup)
-      setExisting(cat.attachments)
-      setDraft(current)
+      const read = fromCatalog(cat)
+      setGroups(read.groups)
+      setOptions(read.options)
+      setOptionsByGroup(read.optionsByGroup)
+      setExisting(read.existing)
+      setDraft(read.draft)
       setLoading(false)
     })()
     return () => { alive = false }
-  }, [recipe.id, scopedFrom, attempt])
+  }, [recipe.id, scopedFrom, attempt, given])
 
   function retryLoad() {
     setLoading(true)

@@ -5,7 +5,7 @@ import { renderHook, waitFor, act } from '@testing-library/react'
 import { useBuildCostRanges } from './useBuildCostRanges'
 import { loadOptionCatalog } from './customizationData'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
-import { fetchAllRowsChunked } from '../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { buildCostRange } from '../../shared/buildCost'
 
 jest.mock('../../supabaseClient', () => ({ supabase: {} }))
@@ -15,7 +15,7 @@ jest.mock('../../shared/hooks/useScopedDb', () => {
 })
 jest.mock('./customizationData', () => ({ loadOptionCatalog: jest.fn(), CUSTOMIZATION_READ_MS: 20000 }))
 jest.mock('../../utils/orderLineIngredients', () => ({ loadDeltaExplosion: jest.fn() }))
-jest.mock('../../shared/fetchAllRows', () => ({ fetchAllRowsChunked: jest.fn() }))
+jest.mock('../../shared/fetchAllRows', () => ({ fetchAllRows: jest.fn(), fetchAllRowsChunked: jest.fn() }))
 jest.mock('../../shared/buildCost', () => ({ buildCostRange: jest.fn(), typicalSelections: jest.fn() }))
 
 const never = () => new Promise(() => {})
@@ -33,6 +33,7 @@ const CATALOG = {
 beforeEach(() => {
   loadOptionCatalog.mockReset()
   loadDeltaExplosion.mockReset()
+  fetchAllRows.mockReset()
   fetchAllRowsChunked.mockReset()
   buildCostRange.mockReset().mockReturnValue({ typicalFilled: false })
 })
@@ -87,13 +88,28 @@ test('an order-line read that hangs falls back to the pre-selected choices, and 
   const quiet = jest.spyOn(console, 'error').mockImplementation(() => {})
   loadOptionCatalog.mockResolvedValue(CATALOG)
   loadDeltaExplosion.mockResolvedValue({ subPerUnit: {} })
-  fetchAllRowsChunked.mockImplementation(ids => (ids.includes('bowl') ? never() : Promise.resolve({ data: [{ id: 'i1', per_uom_rate: 2 }], error: null })))
+  fetchAllRows.mockResolvedValue({ data: [{ id: 'i1', per_uom_rate: 2 }], error: null })
+  fetchAllRowsChunked.mockImplementation(never)
   const { result } = renderHook(() => useBuildCostRanges({ enabled: true, recipes: [bowl], fixedCostOf }))
-  await waitFor(() => expect(fetchAllRowsChunked).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(fetchAllRowsChunked).toHaveBeenCalledTimes(1))
   await act(async () => { jest.advanceTimersByTime(20000) })
   await waitFor(() => expect(result.current.loading).toBe(false))
   expect(result.current.error).toBeNull()
   expect(result.current.byRecipe.bowl.typicalSource).toMatch(/pre-selected choices/)
   expect(quiet).toHaveBeenCalledWith(expect.stringMatching(/order lines unreadable/), expect.anything())
   quiet.mockRestore()
+})
+
+// S869: the rates and the recent orders need nothing from the explosion, so they go out beside it.
+// They used to wait for it: one more wait on Recipe Costing and Menu Pricing than the page's own reads.
+test('asks for the rates and the recent orders while the stock-line walk is still out', async () => {
+  loadOptionCatalog.mockResolvedValue(CATALOG)
+  loadDeltaExplosion.mockImplementation(never)
+  fetchAllRows.mockImplementation(never)
+  fetchAllRowsChunked.mockImplementation(never)
+  renderHook(() => useBuildCostRanges({ enabled: true, recipes: [bowl], fixedCostOf }))
+  await waitFor(() => expect(loadDeltaExplosion).toHaveBeenCalledTimes(1))
+  expect(fetchAllRows).toHaveBeenCalledTimes(1)
+  expect(fetchAllRowsChunked).toHaveBeenCalledTimes(1)
+  expect(fetchAllRowsChunked.mock.calls[0][0]).toEqual(['bowl'])
 })

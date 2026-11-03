@@ -88,6 +88,23 @@ function nextStepOf(g, onDishes) {
   return !hasChoices ? 'option' : !onDishes ? 'attach' : null
 }
 
+// S869: what a confirmed write did, put on the catalog on screen without waiting for a re-read.
+// A move: the rows it renumbered (`ids`, in their new order) take the slots those rows held, each
+// with its position as its sort, which is what writeMove wrote. A row gone from the list since the
+// press (another device) leaves the list as it is, for the re-read to settle.
+export function withMove(list, ids) {
+  const byId = new Map(list.map(r => [r.id, r]))
+  if (!ids.every(id => byId.has(id))) return list
+  const moved = new Set(ids)
+  let k = 0
+  return list.map(r => {
+    if (!moved.has(r.id)) return r
+    const sort = k++
+    return { ...byId.get(ids[sort]), sort }
+  })
+}
+export const withActive = (list, id, isActive) => list.map(r => (r.id === id ? { ...r, is_active: isActive } : r))
+
 // S867: a ticket name that only repeats the choice ("Ticket: Regular" under "Regular") says nothing.
 const sameName = (a, b) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase()
 
@@ -143,11 +160,14 @@ export default function OptionGroups() {
   // An admin switching client mid-load must not let the previous tenant's catalog land.
   const loadSeq = useRef(0)
 
-  const load = useCallback(async ({ quiet = false } = {}) => {
+  // `recheck` (S869): the quiet re-read behind a change already on screen. The change was confirmed
+  // by the write's own answer, so a failed or hung re-read keeps what is shown instead of replacing
+  // the page with the load error; the next action or visit reads again.
+  const load = useCallback(async ({ quiet = false, recheck = false } = {}) => {
     if (!clientId) return
     const seq = ++loadSeq.current
     if (!quiet) setLoading(true)
-    setLoadError(null)
+    if (!recheck) setLoadError(null)
     let results
     try {
       results = await withTimeout(Promise.all([
@@ -166,6 +186,7 @@ export default function OptionGroups() {
     } catch (err) {
       // A hang used to leave Loading… on screen for good, with nothing to press (S852).
       if (seq !== loadSeq.current) return
+      if (recheck) { console.error('Choice Groups: the re-check after a change did not answer', err); return }
       setLoadError(err)
       setLoading(false)
       return
@@ -173,6 +194,7 @@ export default function OptionGroups() {
     if (seq !== loadSeq.current) return
     const [cat, ...rest] = results
     const failed = cat.error || firstError(rest)
+    if (failed && recheck) { console.error('Choice Groups: the re-check after a change failed', failed); return }
     if (failed) { setLoadError(failed); setLoading(false); return }
     const [{ data: recipes }, { data: items }] = rest
     const all = recipes || []
@@ -315,9 +337,11 @@ export default function OptionGroups() {
     if (err) { setPageError(pageFailure(err)); return false }
     return swapSort(table, rows.map((r, i) => ({ ...r, sort: i })), idx, dir)
   }
-  // S863: the controls stay locked until the RELOAD has landed, not just the write. Clearing them
-  // first left the arrows live on the old order for the 1–3 s a reload takes on mobile data, and a
-  // quick second press wrote sort values worked out from rows that had already moved.
+  // S863: the arrows must never go live on the OLD order: clearing them while the list still showed
+  // it let a quick second press write sort values worked out from rows that had already moved. They
+  // waited for a whole reload for that. S869 (owner decision): the new order goes on screen as soon
+  // as both writes answer, since it is exactly what they wrote (withMove), so the arrows unlock on
+  // the order the server now holds, one wait sooner; the re-read follows in the background.
   async function moveRow(table, rows, idx, dir, via = 'arrow') {
     const other = idx + dir
     if (movingRef.current || other < 0 || other >= rows.length) return
@@ -325,8 +349,14 @@ export default function OptionGroups() {
     movingRef.current = target
     setMoving(target)
     setPageError(null)
+    const ids = rows.map(r => r.id)
+    ;[ids[idx], ids[other]] = [ids[other], ids[idx]]
     try {
-      if (await writeMove(table, rows, idx, dir)) await load({ quiet: true })
+      if (await writeMove(table, rows, idx, dir)) {
+        const key = table === 'pos_option_groups' ? 'groups' : 'options'
+        setCatalog(c => ({ ...c, [key]: withMove(c[key], ids) }))
+        load({ quiet: true, recheck: true })
+      }
     } finally {
       movingRef.current = null
       focusAfterMove.current = target
@@ -364,7 +394,9 @@ export default function OptionGroups() {
     if (error) { setPageError(pageFailure(error)); return }
     if (!data?.length) { setPageError('That group no longer exists — reload the page.'); return }
     flash(g.is_active ? `“${g.name}” is hidden from the till and guest menu.` : `“${g.name}” is shown again.`)
-    load({ quiet: true })
+    // S869: the confirmed change on screen at once, the re-read behind it.
+    setCatalog(c => ({ ...c, groups: withActive(c.groups, g.id, !g.is_active) }))
+    load({ quiet: true, recheck: true })
   }
 
   function deleteGroup(g) {
@@ -408,7 +440,9 @@ export default function OptionGroups() {
     const { data, error } = await bounded(scopedUpdate('pos_options', { is_active: active }).eq('id', o.id).select('id'), 'Saving the choice')
     if (error) { setPageError(pageFailure(error)); return }
     if (!data?.length) { setPageError('That choice no longer exists — reload the page.'); return }
-    await load({ quiet: true })
+    // S869: the confirmed change on screen at once, the re-read behind it.
+    setCatalog(c => ({ ...c, options: withActive(c.options, o.id, active) }))
+    load({ quiet: true, recheck: true })
   }
 
   function toggleOptionActive(o) {
@@ -870,7 +904,7 @@ export default function OptionGroups() {
       )}
 
       {attachFor && (
-        <AttachGroupsModal recipe={attachFor} onClose={() => setAttachFor(null)}
+        <AttachGroupsModal recipe={attachFor} catalog={catalog} onClose={() => setAttachFor(null)}
           onSaved={(n, r) => {
             load({ quiet: true })
             // A save that stopped part-way keeps the dialog open with its own message (S862 SETUP-10).

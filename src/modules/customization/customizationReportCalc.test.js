@@ -429,7 +429,8 @@ describe('the Customization Report page', () => {
     expect(src).not.toMatch(/await Promise\.all\(\[/)
   })
   test('the costing is bounded in its own try, so a hang reaches costError only', () => {
-    expect(src).toMatch(/try \{ const \{ explosion, rateOf \} = await withTimeout\(posDeltaCosting\(supabase, clientId, deltaSets\), readMs, /)
+    // S869: the costing takes the book read ahead beside the bills, and is still bounded as a whole.
+    expect(src).toMatch(/try \{ const costing = async \(\) => posDeltaCosting\(supabase, clientId, deltaSets, \{ book: await earlyBook \}\) const \{ explosion, rateOf \} = await withTimeout\(costing\(\), readMs, /)
     // S863: converted at the call site, for ActionError's detail line (the consequence is the page's own).
     expect(src).toMatch(/setCostError\(\{ text: COST_ERROR_TEXT, detail: asActionError\(e\)\.detail \}\)/)
   })

@@ -131,3 +131,23 @@ it('S867: a group with nothing in it says "No choices in this group yet"', async
   expect(await screen.findByText('No choices in this group yet')).toBeInTheDocument()
   expect(screen.getByText(/^Tick the choice groups this dish offers/)).toBeInTheDocument()
 })
+
+// S869: Choice Groups hands over the catalog it holds, so the dialog opens on it with no read (a
+// whole wait per dish on a slow line), and only this dish's attachments become its ticks.
+it('S869: with the page\'s catalog it opens at once, reads nothing, and ticks only this dish\'s groups', () => {
+  const catalog = {
+    error: null,
+    groups: [extras, spice],
+    options,
+    attachments: [
+      { id: 'a1', recipe_id: 'd1', group_id: 'g-extras', sort: 0, min_override: 2, max_override: null, default_option_id: null },
+      { id: 'a9', recipe_id: 'other-dish', group_id: 'g-spice', sort: 0, min_override: null, max_override: null, default_option_id: null },
+    ],
+    ingredients: [],
+    buildYourOwn: [],
+  }
+  render(<AttachGroupsModal recipe={momo} catalog={catalog} onClose={() => {}} onSaved={() => {}} />)
+  expect(mockCatalog).not.toHaveBeenCalled()
+  expect(screen.getByLabelText('Must pick (this dish) from Extras').value).toBe('2')
+  expect(screen.queryByLabelText('Must pick (this dish) from Spice')).toBeNull()
+})

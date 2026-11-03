@@ -93,7 +93,7 @@ beforeEach(() => {
   mockCatalog.mockReset()
 })
 
-it('S863: the pressed arrow stays enabled and busy until the reload lands, then focus follows the row', async () => {
+it('S863/S869: the pressed arrow stays busy until the writes answer, then the new order is on screen before the re-read lands', async () => {
   mockCatalog.mockResolvedValueOnce(catalogOf([opt('o1', 'First', 0), opt('o2', 'Second', 1), opt('o3', 'Third', 2)]))
   render(<OptionGroups />)
   const down = await screen.findByRole('button', { name: 'Move Second down' })
@@ -108,26 +108,40 @@ it('S863: the pressed arrow stays enabled and busy until the reload lands, then 
   expect(down).toHaveAttribute('aria-busy', 'true')
   expect(screen.getByRole('button', { name: 'Move First down' })).toBeDisabled()
 
-  // A second press mid-write is dropped, not written again.
+  // A second press mid-write is dropped, not written again: the arrows never go live on the old order.
   fireEvent.click(down)
   expect(mockWrites).toHaveLength(2)
 
-  const reload = deferred()
-  mockCatalog.mockReturnValueOnce(reload.promise)
+  // S869 (owner decision): once both writes answer, the order they wrote is on screen and the arrows
+  // unlock on it, while the re-read is still out.
+  const reread = deferred()
+  mockCatalog.mockReturnValueOnce(reread.promise)
   await act(async () => { write.resolve() })
   await waitFor(() => expect(mockCatalog).toHaveBeenCalledTimes(2))
-
-  // The write has landed but the list has not reloaded: the arrows must stay locked on the old order.
-  expect(down).toHaveAttribute('aria-busy', 'true')
-  expect(screen.getByRole('button', { name: 'Move First down' })).toBeDisabled()
-  fireEvent.click(screen.getByRole('button', { name: 'Move First down' }))
-  expect(mockWrites).toHaveLength(2)
-
-  await act(async () => { reload.resolve(catalogOf([opt('o1', 'First', 0), opt('o3', 'Third', 1), opt('o2', 'Second', 2)])) })
   // Second is last now, so its down arrow is disabled and focus moves to its up arrow.
   await waitFor(() => expect(screen.getByRole('button', { name: 'Move Second down' })).toBeDisabled())
   expect(screen.getByRole('button', { name: 'Move Second up' })).toHaveFocus()
   expect(screen.getByRole('button', { name: 'Move First down' })).not.toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Move Third down' })).not.toBeDisabled()
+
+  // The re-read agrees, and changes nothing on screen.
+  await act(async () => { reread.resolve(catalogOf([opt('o1', 'First', 0), opt('o3', 'Third', 1), opt('o2', 'Second', 2)])) })
+  expect(screen.getByRole('button', { name: 'Move Second down' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Move Second up' })).toHaveFocus()
+})
+
+it('S869: a re-read that fails after a move keeps the moved order on screen instead of the load error', async () => {
+  mockCatalog.mockResolvedValueOnce(catalogOf([opt('o1', 'First', 0), opt('o2', 'Second', 1)]))
+  render(<OptionGroups />)
+  const down = await screen.findByRole('button', { name: 'Move First down' })
+  const quiet = jest.spyOn(console, 'error').mockImplementation(() => {})
+  mockCatalog.mockResolvedValueOnce({ error: { message: 'connection reset', code: '08006' }, groups: [], options: [], attachments: [], ingredients: [], buildYourOwn: [] })
+  await act(async () => { fireEvent.click(down) })
+  await waitFor(() => expect(mockCatalog).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(quiet).toHaveBeenCalledWith(expect.stringMatching(/re-check after a change failed/), expect.anything()))
+  expect(screen.getByRole('button', { name: 'Move First down' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Move Second down' })).not.toBeDisabled()
+  quiet.mockRestore()
 })
 
 it('S863: the tabs name their counts as a phrase and point at a panel that exists', async () => {

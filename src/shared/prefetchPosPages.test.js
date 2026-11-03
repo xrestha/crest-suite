@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { POS_PAGES, posPagesToFetch } from './prefetchPosPages'
+import { POS_PAGES, posPagesToFetch, CUSTOMIZATION_PAGES, customizationPagesToFetch } from './prefetchPosPages'
 
 const app = fs.readFileSync(path.join(__dirname, '..', 'App.js'), 'utf8')
 const list = fs.readFileSync(path.join(__dirname, 'prefetchPosPages.js'), 'utf8')
@@ -30,4 +30,21 @@ test('fetches what the login can reach, the till first, each file once', () => {
   expect(posPagesToFetch(['/pos/kds'])).toEqual([byRoute['/pos/kds']])
   expect(posPagesToFetch([])).toEqual([])
   expect(posPagesToFetch(['/menu-pricing'])).toEqual([])
+})
+
+// S869: Crest Customization's pages, held to App.js the same way.
+test('prefetches exactly the Customization pages App.js lazy-loads, each at a route App.js serves', () => {
+  const appPages = [...app.matchAll(/lazy\(\(\) => import\('\.\/(modules\/customization\/[^']+)'\)\)/g)].map(m => m[1]).sort()
+  const listed = [...list.matchAll(/import\('\.\.\/(modules\/customization\/[^']+)'\)/g)].map(m => m[1]).sort()
+  expect(appPages.length).toBe(3)
+  expect(listed).toEqual(appPages)
+  for (const [route] of CUSTOMIZATION_PAGES) expect(app).toContain(`path="${route}"`)
+})
+
+test('fetches only the Customization pages the login can reach', () => {
+  const byRoute = Object.fromEntries(CUSTOMIZATION_PAGES)
+  // A manager on a PIN who is not a POS manager sees Choice Groups and Combos, not the report.
+  expect(customizationPagesToFetch(['/customization/combos', '/customization/groups']))
+    .toEqual([byRoute['/customization/groups'], byRoute['/customization/combos']])
+  expect(customizationPagesToFetch(['/pos/orders'])).toEqual([])
 })

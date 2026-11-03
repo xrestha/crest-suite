@@ -265,3 +265,36 @@ Migrated from the root `CLAUDE.md` (S663). The rules — guard user-gating await
 - **A supabase-js call can hang forever — and `.abortSignal()` does not save you.** Every call goes through `fetchWithAuth` (`@supabase/supabase-js/src/lib/fetch.ts`), which does `await getAccessToken()` on **line 43** and only reaches `fetch(...)` on **line 70**. `getAccessToken()` calls `auth.getSession()`, which can itself stall (a token refresh that never settles, or one of the known GoTrue init/lock deadlocks — the reason `supabaseClient.js` already installs a no-op `lock`). When it stalls, `fetch` is never invoked, so the AbortController passed via `.abortSignal()` is attached to nothing and firing it does *nothing*: the promise never resolves **and** never rejects, so a `try/finally` that resets a `saving` flag never runs and the button stays disabled forever. Guard any user-gating await with `withTimeout()` (`src/utils/withTimeout.js`) — a `Promise.race` against a wall clock is the only thing immune to where the hang is. Keep `.abortSignal()` alongside it (that's still what cancels a genuinely in-flight request); it's a complement, not a substitute. S449→S454 burned four rounds on this exact bug in `Sales.js` because each fix only covered the layer above the real one.
 
 - **Why `getSession()` stalls in the first place, and the client-level fix (S455).** auth-js sets **no timeout on its own network calls**. An expired access token makes the next `getSession()` call `_callRefreshToken()` → `fetch('/auth/v1/token')`; if that stalls, the auth client wedges *permanently*, not just for that call — `_acquireLock` drains via `while (this.pendingInLock.length) { await Promise.all(waitOn) }` (`GoTrueClient.ts` ~2803), so one never-settling promise means the loop never exits, `lockAcquired` is never reset, and every later `_acquireLock` chains `await last` onto the dead promise. Because supabase-js awaits `getAccessToken()` before *every* DB request, one stalled refresh silently freezes every query/insert/update app-wide with no error anywhere until the tab is closed. `src/supabaseClient.js` now passes `global.fetch` (handed straight to the auth client by supabase-js, `SupabaseClient.ts:340-344`) through `makeAuthTimeoutFetch()` (`src/utils/authFetchTimeout.js`), which bounds **only** `/auth/v1/` requests at 15s so the promise settles, the drain loop completes and the client self-heals. PostgREST and Storage traffic is deliberately left unbounded there so a slow report or a large upload is never cut off — bound those per-call with `withTimeout()` instead.
+
+## S869 Customization report shapes
+
+`/impeccable optimize` for "the customization module, especially loading data on poor connections"
+(2026-11-03). Measured live in Chrome against the dev server as BLOOM CAFE, every database request
+held to Fast 3G in the page (563 ms a request, then the body through one shared 200 KB/s pipe;
+bytes on the wire estimated as decoded ÷ 5, since Supabase does not expose them cross-origin), with
+each request's real server time logged beside it. Upload was not throttled, so the old chunked
+reads' ~5.5 KB addresses cost more on a real link than these figures show.
+
+The Customization Report reads the chosen range and the one before it. Three shapes, single load,
+figures compared tab by tab against the old code each time (identical in every run):
+
+| Shape | This month | Last 3 months |
+| --- | --- | --- |
+| Old: bills paged one at a time, then lines and choices by `.in('order_id')` chunks of 150, then the recipe book | 2.1 s, 3 waits | 10.2 s, 51 requests, 116 s of summed server time |
+| Lines and choices filtered through `pos_orders!inner(closed_at)` | 5.5 s of server time for the lines alone | not run |
+| Bills with `pos_order_items(...)` and `pos_order_item_options(...)` embedded, 1,000 bills a page | 2.0 s | 19.6 s (8.9 s of server time a page) |
+| The same at 250 bills a page, pages together | 3.4 s | 11.0 s (~8 s of server time a page) |
+| Shipped: old shape, bill pages in parallel, the recipe book read beside the bills, attachments from the catalog | 1.6 s, 2 waits | 8.9 s |
+
+The inner-join filter cannot use the bills' close date to narrow the lines, so the database walks
+every line the outlet has ever sold and probes its bill: the cost grows with history. The embed
+walks only the range's bills, but at about 9 ms a bill (its lines and choices included), on one
+connection. The chunked reads pay the same per-row cost and hide it by running side by side. That
+per-row cost, about 1 ms a row even for the bills alone, is the database's policies (IMS_TODO
+PERF-12), and it is the real lever for every report.
+
+The rest of the sweep, for the record: Choice Groups and Combos already loaded in one wait; the dish
+dialog on Choice Groups re-read the whole catalog per open (now opens from the page's own, 72 ms, no
+request); the build-your-own cost range on Recipe Costing and Menu Pricing read its rates and recent
+orders after the stock-line walk (now beside it, 3 waits to 2, 1.9 s to 1.6 s); the three pages were
+missing from the background code fetch (now `prefetchCustomizationPages`).

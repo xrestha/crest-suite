@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../supabaseClient'
 import { useScopedDb } from '../../shared/hooks/useScopedDb'
-import { fetchAllRowsChunked } from '../../shared/fetchAllRows'
+import { fetchAllRows, fetchAllRowsChunked } from '../../shared/fetchAllRows'
 import { groupsForDish, defaultSelection } from '../../shared/optionPricing'
 import { buildCostRange, typicalSelections } from '../../shared/buildCost'
 import { loadDeltaExplosion } from '../../utils/orderLineIngredients'
@@ -15,10 +15,10 @@ import { loadOptionCatalog, CUSTOMIZATION_READ_MS } from './customizationData'
 // database the S760 migration has not reached), and reads the item rates it needs itself, so a page
 // adopting it adds no column to its own queries.
 //
-// Reads, the last three only when at least one dish is marked:
+// Reads, the last three only when at least one dish is marked, and those three side by side:
 //   the option catalog with its stock lines · the explosion of those lines (item yield %, sub-recipe
-//   per-unit items) · the per-base-unit rate of every item they reach · the marked dishes' order
-//   lines on bills PAID in the last 30 days, for the TYPICAL build.
+//   per-unit items) · the per-base-unit rate of every item · the marked dishes' order lines on bills
+//   PAID in the last 30 days, for the TYPICAL build.
 //
 // A failed catalog, explosion or rate read is an ERROR the page shows in place of the range — never
 // a range computed without the choices' stock, which would be the near-zero food cost this exists to
@@ -66,13 +66,14 @@ export function useBuildCostRanges({ enabled, recipes, fixedCostOf }) {
         }
         if (!cancelled) setState(s => ({ ...s, catalog }))
         const deltas = catalog.ingredients.map(i => ({ item_id: i.item_id, sub_recipe_id: i.sub_recipe_id, qty: i.qty_per_portion }))
-        const explosion = await withTimeout(loadDeltaExplosion(supabase, [deltas]), CUSTOMIZATION_READ_MS, 'Reading the stock lines of the choices')
-
-        const itemIds = new Set(catalog.ingredients.map(i => i.item_id).filter(Boolean))
-        Object.values(explosion.subPerUnit).forEach(list => list.forEach(x => itemIds.add(x.item_id)))
         const since = new Date(Date.now() - TYPICAL_WINDOW_DAYS * 86400000).toISOString()
-        const [rateRes, lines] = await Promise.all([
-          settleWithin(fetchAllRowsChunked([...itemIds], ids => scopedFrom('items', 'id, per_uom_rate').in('id', ids).order('id')),
+        // S869: the rates and the recent orders go out WITH the explosion, not after it: neither needs
+        // its answer. The rates are every item's (a few KB), because which raw items a sub-recipe line
+        // reaches is only known once the walk lands, and a read after it was one more wait on Recipe
+        // Costing and Menu Pricing than the page's own reads.
+        const [explosion, rateRes, lines] = await Promise.all([
+          withTimeout(loadDeltaExplosion(supabase, [deltas]), CUSTOMIZATION_READ_MS, 'Reading the stock lines of the choices'),
+          settleWithin(fetchAllRows(() => scopedFrom('items', 'id, per_uom_rate').order('id')),
             CUSTOMIZATION_READ_MS, 'Reading item rates'),
           // Only builds a guest paid for (S792, RECIPES-10): the line's bill closed 'paid' — the house
           // definition get_cooccurrence and the POS reports use — windowed by when the BILL closed.

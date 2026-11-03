@@ -16,7 +16,7 @@ import { isSoloGroup } from '../shared/navSoloGroup'
 import { runBeforePosLock } from '../modules/pos/posLockedCart'
 import { useNavBadgeCounts } from '../shared/hooks/useNavBadgeCounts'
 import { prefetchHrPages } from '../shared/prefetchHrPages'
-import { prefetchPosPages } from '../shared/prefetchPosPages'
+import { prefetchPosPages, prefetchCustomizationPages } from '../shared/prefetchPosPages'
 import { outletMovedText, outletHeldText } from '../shared/outletWatch'
 import { isTillPath, readTillDevice, tillStop } from '../modules/pos/tillOutlet'
 import { withTimeout, isTimeout } from '../utils/withTimeout'
@@ -476,6 +476,10 @@ export default function Layout() {
     // (prefetchPosPages.js). The public POS routes (guest menu, booking, PIN screen) are not in the shell.
     if (location.pathname === '/pos' || location.pathname.startsWith('/pos/')) {
       prefetchPosPages([POS_DASHBOARD, ...POS_GROUPS.flatMap(g => g.items)].filter(isItemVisible).map(i => i.to))
+    }
+    // S869: and for Crest Customization's three pages.
+    if (location.pathname.startsWith('/customization/')) {
+      prefetchCustomizationPages(CUSTOMIZATION_GROUPS.flatMap(g => g.items).filter(isItemVisible).map(i => i.to))
     }
   }, [location.pathname]) // eslint-disable-line react-hooks/exhaustive-deps -- isItemVisible is rebuilt each render; the prefetch runs once a session
 
