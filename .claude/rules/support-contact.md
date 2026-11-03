@@ -189,7 +189,10 @@ the main bundle, and errors before it arrives wait in a queue of ten.
   already reloads for it. The SDK import catches its own failure, so the chunk guard never reloads
   the page because Sentry could not load offline.
 - `connect-src` names the project's exact ingest host, not `*.sentry.io` (`security-headers.md`).
-- After a deploy, `crestTestCrash()` in the browser console sends a deliberate report.
+- After a deploy, `crestTestCrash()` in the browser console sends a deliberate report. Checked live
+  2026-11-03 (DOCS-REMEDIATION T6 closed).
+- Sentry's organization setting "Prevent Storing of IP Addresses" is on (2026-11-03): a second lock
+  behind `sendDefaultPii: false`, never a reason to loosen `scrubEvent`.
 
 ## `APP_VERSION` and `CACHE_NAME` move together
 
@@ -204,11 +207,11 @@ disagree, the same pattern `legalHash.test.js` uses for the legal documents. Thi
 Tickets, the operator alert (Telegram/email/SMS) and the admin inbox from the source spec are not
 built. Notes for whoever picks it up:
 
-- **Standing up transactional email costs a Privacy Policy amendment.** `privacy-v1.0.md` states no
-  third-party transactional email provider is used and commits to 15 days' notice before a new
-  sub-processor handles Customer Data. A ticket-alert email carrying a client name and message makes
-  the vendor a sub-processor — budget the re-hash and the notice period into that work, not into
-  surprise.
+- **Standing up transactional email costs a Privacy Policy amendment.** The policy (v1.1 since S872)
+  states no third-party transactional email provider is used and commits to 15 days' notice before a
+  new sub-processor handles Customer Data. A ticket-alert email carrying a client name and message
+  makes the vendor a sub-processor — budget a new policy version and the notice period into that work,
+  not into surprise. S872's Sentry row is the worked precedent (`legal-documents.md`).
 - **No Storage bucket for attachments without re-verifying the S531/hr_employee_photo failure
   mode** — `20260714140000_hr_employee_photo_revert.sql` documents an exhaustive, unresolved 42501
   failure on a new authenticated-INSERT bucket.
