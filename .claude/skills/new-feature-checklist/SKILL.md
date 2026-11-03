@@ -1,6 +1,6 @@
 ---
 name: new-feature-checklist
-description: The 9-step checklist for shipping a new Crest Suite feature — feature_flags DB column plus the tier set in AuthContext, route guards in App.js, the Layout.js nav entry, Tip tooltips, the Help page entry, the CHANGELOG entry and E-drive mirror, Danger Zone table registration in admin-user-ops, Export/Import RESTORE_ORDER, and closing the backlog entry. Use when adding any new page, report, or module feature.
+description: The 9-step checklist for shipping a new Crest Suite feature — feature_flags DB column plus the tier set in AuthContext, route guards in App.js, the Layout.js nav entry, Tip tooltips, the Help page entry, the CHANGELOG entry and docs-backup mirror, Danger Zone table registration in admin-user-ops, Export/Import RESTORE_ORDER, and closing the backlog entry. Use when adding any new page, report, or module feature.
 ---
 
 ## When adding a new feature

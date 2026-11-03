@@ -19,7 +19,7 @@ in `.claude/rules/*.md`; each rules file loads automatically when you open a fil
 - `npm run build:verify`: the local verification build. Runs `check:docs`, deletes the stale `.eslintcache`, then builds with `CI=true` so warnings fail. There is no separate lint script: ESLint runs inside the build. `npm run build` is what Vercel runs; leave it as a plain `react-scripts build`.
 - `npm run check:docs`: rules-glob, pointer-stub and CLAUDE.md size checks. Run it after any edit to this file or `.claude/rules/`.
 - Tests: `npx react-scripts test --watchAll=false <pattern>`. Jest via CRA; `*.test.js` files sit next to their source.
-- Docs: a session entry goes in the newest `CHANGELOG/S###-S###.md`, then `npm run changelog:index`, never in `README.md`. After editing tracked `.md` files, run `npm run mirror:docs` to copy them to the E: backup drive.
+- Docs: a session entry goes in the newest `CHANGELOG/S###-S###.md`, then `npm run changelog:index`, never in `README.md`. After editing tracked `.md` files, run `npm run mirror:docs` to copy them to the backup drive (`CREST_DOCS_MIRROR`).
 - **Trim command output without hiding exit codes: redirect to a file, echo the exit code, then tail.** Builds and tests run through the Bash tool, so this works as written: `npm run build:verify > /tmp/build.log 2>&1; echo "exit=$?"; tail -40 /tmp/build.log`. Never pipe a build or test run straight into `tail`: a pipeline reports `tail`'s status, so a build that printed `Failed to compile` reads as exit 0 (S693).
 
 ## Context discipline

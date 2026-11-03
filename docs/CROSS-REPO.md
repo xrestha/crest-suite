@@ -1,13 +1,13 @@
 # Cross-repo ledger — crest-suite ↔ hss-suite
 
 **Why this file exists.** A sister app, **hss-suite** (an internal operations platform for a
-Kathmandu hospitality-support company, at `C:\HSS`), was built by copying this repo's HR module,
+Kathmandu hospitality-support company, at `~/HSS`), was built by copying this repo's HR module,
 payroll engine, settlement and `src/utils/bsCalendar.js`. Copies only stay cheap if fixes flow back.
 Until 2026-09-02 nothing on this side recorded that relationship at all — this repo's `CLAUDE.md`
 did not mention hss-suite once — so defects found over there had nowhere to land here.
 
 **The rule** (also in `CLAUDE.md` on both sides): *a bug fixed there is still open here until it is
-filed in `docs/CROSS-REPO.md` on this side.* The mirror of this file is `c:\HSS\docs\CROSS-REPO.md`.
+filed in `docs/CROSS-REPO.md` on this side.* The mirror of this file is `~/HSS/docs/CROSS-REPO.md`.
 
 **Format.** One row per item. *Found in* is where it surfaced, *Affects* is which repo has to act.
 Newest at the top; never delete a closed row — a shared defect that came back is worth seeing twice.

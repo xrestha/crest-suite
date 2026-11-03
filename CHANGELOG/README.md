@@ -7,12 +7,12 @@ its job as a map.
 
 ## Session Log
 
-905 entries, S023 to S864, across 22 files. **Newest first**, both inside each file and
+906 entries, S023 to S865, across 22 files. **Newest first**, both inside each file and
 down this table.
 
 | Range | Entries | Dates | Size |
 | --- | ---: | --- | ---: |
-| [S854–S864](S854-S903.md) | 11 | 2026-10-21 → 2026-11-03 | 52 KB |
+| [S854–S865](S854-S903.md) | 12 | 2026-10-21 → 2026-11-03 | 54 KB |
 | [S804–S853](S804-S853.md) | 73 | 2026-10-07 → 2026-10-21 | 310 KB |
 | [S754–S803](S754-S803.md) | 86 | 2026-09-14 → 2026-10-06 | 411 KB |
 | [S725–S753](S725-S774.md) | 31 | 2026-09-10 → 2026-09-14 | 188 KB |
@@ -68,7 +68,7 @@ fix something no reader has ever been misled by.
    `scripts/gen-changelog-index.mjs`, not `CHANGELOG/README.md`, or the next run discards it.
 4. Run `npm run mirror:docs`. It copies every git-tracked `.md` — this log, `CLAUDE.md`,
    all of `.claude/rules/`, `PRODUCT.md`, `DESIGN.md`, `docs/` — to
-   `E:\CREST SUITE MANAGEMENT\` at the same relative path, so the documentation exists
+   `/mnt/Data/CREST SUITE MANAGEMENT/` (the folder `CREST_DOCS_MIRROR` names) at the same relative path, so the documentation exists
    off-machine as well as in git. It never deletes and it skips silently when the drive is not
    mounted, so it is safe to run every time. Do not copy files across by hand: the mirror was
    `README.md` + `CHANGELOG/` only until 2026-09-10, precisely because hand-copying is what a

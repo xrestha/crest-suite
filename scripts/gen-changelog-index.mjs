@@ -121,7 +121,7 @@ fix something no reader has ever been misled by.
    \`scripts/gen-changelog-index.mjs\`, not \`CHANGELOG/README.md\`, or the next run discards it.
 4. Run \`npm run mirror:docs\`. It copies every git-tracked \`.md\` ${EM} this log, \`CLAUDE.md\`,
    all of \`.claude/rules/\`, \`PRODUCT.md\`, \`DESIGN.md\`, \`docs/\` ${EM} to
-   \`E:\\CREST SUITE MANAGEMENT\\\` at the same relative path, so the documentation exists
+   \`/mnt/Data/CREST SUITE MANAGEMENT/\` (the folder \`CREST_DOCS_MIRROR\` names) at the same relative path, so the documentation exists
    off-machine as well as in git. It never deletes and it skips silently when the drive is not
    mounted, so it is safe to run every time. Do not copy files across by hand: the mirror was
    \`README.md\` + \`CHANGELOG/\` only until 2026-09-10, precisely because hand-copying is what a
