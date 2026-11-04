@@ -126,6 +126,7 @@ export default function Items() {
   // single box owns. A message about one box belongs under that box (S603).
   const [fieldErr, setFieldErr] = useState({})
   const [filterCat, setFilterCat] = useState('all')
+  const [filterUom, setFilterUom] = useState('all')
   const [search, setSearch] = useState('')
   const [sortConvFirst, setSortConvFirst] = useState(false)
   const [onlyUnchecked, setOnlyUnchecked] = useState(false)
@@ -865,6 +866,15 @@ export default function Items() {
   // brief empty `items` and wipe the choice; the chips and the list read this one value.
   const shownCat = filterCat === 'all' || catsWithItems.some(c => c.id === filterCat) ? filterCat : 'all'
   const showCategoryCol = shownCat === 'all'
+  // The units the book actually uses, in the form's own order (anything older and off that list
+  // last). Same derived-not-reset rule as `shownCat`: a unit chip whose last item was hidden or
+  // re-united falls back to All rather than leaving an empty list with nothing pressed.
+  const uomsWithItems = useMemo(() => {
+    const used = [...new Set(items.map(i => i.uom).filter(Boolean))]
+    const rank = u => { const r = UNITS.indexOf(u); return r < 0 ? UNITS.length : r }
+    return used.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+  }, [items])
+  const shownUom = filterUom === 'all' || uomsWithItems.includes(filterUom) ? filterUom : 'all'
   // S855 (PERF-3): the Used In filters read `refMap`, so they open only on a complete answer. Before
   // the first scan lands (or after a scan failed) the map is empty or partial, and the Unused filter
   // read it as "nothing references any of these" and listed every item. While a RE-scan runs (after
@@ -877,11 +887,13 @@ export default function Items() {
   // One memoized pass replaces what used to be a fresh filter here PLUS a full items.filter()
   // inside every category tab's render (O(tabs × items), with the same predicate re-evaluated
   // ~20× per keystroke of the search box). tabCounts is the per-category count of items matching
-  // search + usage (category deliberately excluded — each tab shows what it WOULD hold).
-  const { filtered, tabCounts, uncheckedCount } = useMemo(() => {
+  // search + usage + unit (category deliberately excluded — each tab shows what it WOULD hold);
+  // uomCounts is the same for the unit chips, with the category applied and the unit left out.
+  const { filtered, tabCounts, uomCounts, uncheckedCount } = useMemo(() => {
     const s = search.toLowerCase()
     const tabCounts = { all: 0 }
-    const searchMatched = []
+    const uomCounts = { all: 0 }
+    const filtered = []
     let uncheckedCount = 0
     items.forEach(item => {
       const unchecked = !allergensChecked(item.nutrition)
@@ -895,19 +907,26 @@ export default function Items() {
         shownUsage === 'stock'  ? (usage.includes('OS') || usage.includes('CS')) :
         usage.includes(shownUsage)
       if (!matchSearch || !matchUsage) return
-      searchMatched.push(item)
-      tabCounts.all += 1
-      if (item.category_id) tabCounts[item.category_id] = (tabCounts[item.category_id] || 0) + 1
+      const matchCat = shownCat === 'all' || item.category_id === shownCat
+      const matchUom = shownUom === 'all' || item.uom === shownUom
+      if (matchUom) {
+        tabCounts.all += 1
+        if (item.category_id) tabCounts[item.category_id] = (tabCounts[item.category_id] || 0) + 1
+      }
+      if (matchCat) {
+        uomCounts.all += 1
+        if (item.uom) uomCounts[item.uom] = (uomCounts[item.uom] || 0) + 1
+      }
+      if (matchCat && matchUom) filtered.push(item)
     })
-    const filtered = (shownCat === 'all' ? searchMatched : searchMatched.filter(i => i.category_id === shownCat))
-      .sort((a, b) => {
-        if (!sortConvFirst) return 0
-        const aHas = !!(a.purchase_unit && a.conversion_factor > 1)
-        const bHas = !!(b.purchase_unit && b.conversion_factor > 1)
-        return bHas - aHas
-      })
-    return { filtered, tabCounts, uncheckedCount }
-  }, [items, search, refMap, shownUsage, shownCat, sortConvFirst, showNutrition, onlyUnchecked])
+    filtered.sort((a, b) => {
+      if (!sortConvFirst) return 0
+      const aHas = !!(a.purchase_unit && a.conversion_factor > 1)
+      const bHas = !!(b.purchase_unit && b.conversion_factor > 1)
+      return bHas - aHas
+    })
+    return { filtered, tabCounts, uomCounts, uncheckedCount }
+  }, [items, search, refMap, shownUsage, shownCat, shownUom, sortConvFirst, showNutrition, onlyUnchecked])
 
   const nutriItem = nutriItemId ? items.find(i => i.id === nutriItemId) || null : null
   function handleNutriSaved(itemId, payload) {
@@ -937,6 +956,7 @@ export default function Items() {
   const usageScope = usageScopeLabel[shownUsage]
   const printScope = [
     shownCat === 'all' ? 'All categories' : (categories.find(c => c.id === shownCat)?.name || 'One category'),
+    shownUom === 'all' ? null : `counted in ${shownUom}`,
     search.trim() ? `matching "${search.trim()}"` : null,
     usageScope && usageScan.status === 'pending' ? `${usageScope}, as of the last finished check` : usageScope,
   ].filter(Boolean).join(' · ')
@@ -1350,6 +1370,21 @@ export default function Items() {
         onChange={setFilterCat}
       />
 
+      {/* Unit filter: one chip per UOM the book uses, counted like the category row. */}
+      {uomsWithItems.length > 1 && (
+        <FilterChips
+          className="no-print"
+          label="Filter by unit"
+          style={{ marginBottom: 12 }}
+          options={[{ key: 'all', name: 'All Units' }, ...uomsWithItems.map(u => ({ key: u, name: u }))].map(o => ({
+            key: o.key,
+            label: <>{o.name} <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 4 }}>{uomCounts[o.key] || 0}</span></>,
+          }))}
+          active={shownUom}
+          onChange={setFilterUom}
+        />
+      )}
+
       <div className="card" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
         {loading ? (
           <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
@@ -1375,7 +1410,7 @@ export default function Items() {
                 ? 'No items yet. Add your first ingredient to get started.'
                 : showNutrition && onlyUnchecked && uncheckedCount === 0
                   ? 'Every ingredient has been checked for allergens.'
-                  : 'No items match your search.'}
+                  : 'No items match your search and filters.'}
             </p>
           </div>
         ) : (
