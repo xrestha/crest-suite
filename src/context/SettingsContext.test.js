@@ -136,3 +136,22 @@ describe('no client (signed out, or support with none selected)', () => {
     expect(probe()).toMatchObject({ email: 'help@crest.example', platformLoaded: true, settingsFor: null, loading: false })
   })
 })
+
+// The error table left the main file (S876, PERF-8): a failed save fetches it then, and the sentence
+// a settings screen shows is the same one errorLine gave when the table was a static import.
+describe('a failed save', () => {
+  it('throws the error table sentence, with the raw detail kept in brackets', async () => {
+    let ctx
+    function Grab() { ctx = useSettings(); return null }
+    useAuth.mockReturnValue({ isPremium: false, isAdmin: true, clientId: null })
+    render(<SettingsProvider><Grab /></SettingsProvider>)
+    await flush()
+
+    const saving = ctx.savePlatformSupport({ email: 'help@crest.example' })
+    // Watched before the read is answered, so the rejection is never left unhandled for a moment.
+    const outcome = expect(saving).rejects.toThrow(/^Couldn.t reach the server.+\(TypeError: Failed to fetch\)$/)
+    const read = platform()[platform().length - 1]
+    await answer(read, { data: null, error: { message: 'TypeError: Failed to fetch' } })
+    await outcome
+  })
+})

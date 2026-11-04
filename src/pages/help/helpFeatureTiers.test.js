@@ -1,6 +1,7 @@
 import { FEATURE_TIER } from '../../shared/featureCatalog'
 import { SUITE_KEYS, planHasFeature } from '../../context/AuthContext'
-import { IMS_FEATURES, SUITE_FEATURES } from '../Help'
+import { IMS_FEATURES } from './imsFeatures'
+import { SUITE_FEATURES } from './suiteFeatures'
 import { TIER_META, groupImsFeatures, tierOfEntry } from './helpFeatureTiers'
 
 jest.mock('../../supabaseClient', () => ({ supabase: {} }))

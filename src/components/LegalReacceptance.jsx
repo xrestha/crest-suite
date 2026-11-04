@@ -18,7 +18,10 @@ import { ScrollText, ExternalLink } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { adminOp } from '../shared/adminOp'
 import { withTimeout } from '../utils/withTimeout'
-import ActionError, { asActionError } from './ActionError'
+// The renderer alone, and the sentence fetched on failure: ActionError.jsx would put the whole error
+// table in the main file, since ProtectedRoute mounts this screen eagerly (S876).
+import ActionError from './ActionErrorView'
+import { errorInfoLater } from '../shared/lazyErrorText'
 import { outstandingLegalDocs, acceptancePayload, legalPath, compareLegalVersions } from '../legal'
 
 // First acceptance or a changed document, told from this outlet's own ledger (S855). Until then the
@@ -137,7 +140,7 @@ export default function LegalReacceptance() {
       // between a stuck screen and a recoverable one.
       setRecorded(true)
     } catch (e) {
-      setError(asActionError(e, 'operator'))
+      setError(await errorInfoLater(e, 'operator'))
     } finally {
       // Always, including the success path. If the gate cleared, this is a no-op on an unmounted
       // component; if it did not, the button must not stay stuck on "Recording…".

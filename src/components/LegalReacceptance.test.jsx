@@ -6,7 +6,7 @@
  * from one who never accepted anything once v1.1 shipped.
  */
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 
 let mockAuth = { signOut: jest.fn(), refreshProfile: jest.fn(), legalAccepted: [] }
 jest.mock('../context/AuthContext', () => ({ useAuth: () => mockAuth }))
@@ -15,6 +15,7 @@ jest.mock('../shared/adminOp', () => ({ adminOp: jest.fn() }))
 const {
   default: LegalReacceptance, splitPendingDocs, gateCopy, lastAcceptedVersion,
 } = require('./LegalReacceptance')
+const { adminOp } = require('../shared/adminOp')
 const { docsRequiringReacceptance } = require('../legal')
 
 const terms = { docType: 'terms', title: 'Terms of Service', version: '1.1' }
@@ -98,5 +99,19 @@ describe('LegalReacceptance', () => {
     expect(screen.getByRole('link', { name: /Privacy Policy/ })).toBeTruthy()
     expect(screen.queryByRole('link', { name: /Terms of Service/ })).toBeNull()
     expect(screen.queryByText(/Adds Sentry/)).toBeNull()
+  })
+
+  // The error table is fetched when the acceptance fails, not carried in the main file (S876): the
+  // sentence and its fine print are what asActionError gave when the table was a static import.
+  it('a failed acceptance says why, with the raw text as fine print, and frees the button', async () => {
+    mockAuth = { ...mockAuth, legalAccepted: [] }
+    adminOp.mockRejectedValueOnce(new Error('TypeError: Failed to fetch'))
+    render(<LegalReacceptance />)
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: 'Accept and continue' }))
+    const headline = await screen.findByText(/^Couldn.t reach the server/)
+    expect(headline.className).toBe('action-error-text')
+    expect(screen.getByText('TypeError: Failed to fetch').className).toBe('action-error-detail')
+    expect(screen.getByRole('button', { name: 'Accept and continue' }).disabled).toBe(false)
   })
 })

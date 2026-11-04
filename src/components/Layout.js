@@ -6,11 +6,9 @@ import { supabase } from '../supabaseClient'
 import { getSubStatus } from '../utils/subscription'
 import RailTip from './RailTip'
 import RouteFallback from './RouteFallback'
-import CommandPalette from './CommandPalette'
 import AppErrorBoundary from './AppErrorBoundary'
-// Aliased — `Calculator` is already taken in this file by the lucide icon used for the HR
-// Calculation nav entry.
-import QuickCalculator from './Calculator'
+import LoadOnOpen, { onDemand, whenIdle } from './LoadOnOpen'
+import { prefetchErrorText } from '../shared/lazyErrorText'
 import { usePosIdleLock, posIdleLockApplies, sessionIdFromToken, POS_IDLE_LOCK_MS } from '../modules/pos/usePosIdleLock'
 import { isSoloGroup } from '../shared/navSoloGroup'
 import { runBeforePosLock } from '../modules/pos/posLockedCart'
@@ -51,6 +49,13 @@ import { suiteLive } from '../utils/subscription'
 import { formatAdAsBs } from '../utils/bsCalendar'
 import { suitePagesText } from '../data/pricingPlans'
 import './Layout.css'
+
+// The command palette and the Quick Calculator are off the main file (S876, PERF-8): LoadOnOpen
+// fetches each once the browser is idle, mounts it on arrival and keeps it mounted. Declared below
+// the last import, or ESLint's import/first fails the CI build. "quickCalculator" because
+// `Calculator` is already taken in this file by the lucide icon used for the HR Calculation entry.
+const paletteTool = onDemand(() => import('./CommandPalette'))
+const quickCalculatorTool = onDemand(() => import('./Calculator'))
 
 // minPlan: 'growth' | 'pro' — used for lock icon and tier badge
 // minHrRole: 'staff' | 'supervisor' | 'manager' — HR staff-role gate (S430), same shape as IMS's
@@ -1173,6 +1178,11 @@ export default function Layout() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
+
+  // The error sentences are off the main file too (S876): the screens still on it fetch the table
+  // when something fails (shared/lazyErrorText.js). Fetched here once the browser is idle after
+  // sign-in, so the service worker holds it before any device needs it offline.
+  useEffect(() => whenIdle(prefetchErrorText), [])
 
   function handlePaletteSelect(item) {
     setPaletteOpen(false)
@@ -2384,14 +2394,16 @@ export default function Layout() {
         </AppErrorBoundary>
       </main>
 
-      <CommandPalette
+      <LoadOnOpen
+        tool={paletteTool}
+        label="Page search"
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         items={paletteItems}
         onSelect={handlePaletteSelect}
       />
 
-      <QuickCalculator open={calcOpen} onClose={() => setCalcOpen(false)} />
+      <LoadOnOpen tool={quickCalculatorTool} label="The calculator" open={calcOpen} onClose={() => setCalcOpen(false)} />
 
       {/* POS idle-lock warning — any deliberate input (pointerdown/keydown/touch/wheel) resets
           the timer, which is why the toast needs no button of its own. role="alert" so a screen

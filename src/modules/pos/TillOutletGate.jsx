@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
-import ActionError, { asActionError } from '../../components/ActionError'
+// The renderer alone, and the sentence fetched on failure: ActionError.jsx would put the whole error
+// table in the main file, since this gate is eager (S876).
+import ActionError from '../../components/ActionErrorView'
+import { errorInfoLater } from '../../shared/lazyErrorText'
 import { withTimeout, isTimeout } from '../../utils/withTimeout'
 import { outletHeldText } from '../../shared/outletWatch'
 import { readTillDevice, tillStop } from './tillOutlet'
@@ -99,7 +102,7 @@ export default function TillOutletGate({ children }) {
     // connection ("TypeError: Failed to fetch", no code) and a thrown profile reload used to reach a
     // waiter as the headline. switchOutlet's own queue sentence cannot come here: a till's way back is
     // to this window's or the till's outlet, which skips that check.
-    else setError(asActionError(err, isPin ? 'staff' : 'operator'))
+    else setError(await errorInfoLater(err, isPin ? 'staff' : 'operator'))
   }
 
   return (

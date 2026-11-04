@@ -2,7 +2,9 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { supabase } from '../supabaseClient'
 import { useAuth } from './AuthContext'
 import { DEFAULT_PLAN_PRICES, resolvePricing } from '../data/pricingPlans'
-import { errorLine } from '../shared/errorText'
+// Not errorText itself: this context is on the main file, and the table is fetched only when a save
+// fails (S876, PERF-8). errorLineLater never rejects; offline it still gives a sentence and the detail.
+import { errorLineLater } from '../shared/lazyErrorText'
 import { platformSupportFromRow } from '../shared/supportContact'
 import { isPinnedGuestSurface } from './ThemeContext'
 
@@ -222,17 +224,17 @@ export function SettingsProvider({ children }) {
     // A guard that drops its read error passes vacuously (S682): a failed read used to fall into
     // the INSERT branch and write a SECOND settings row for the client, which then splits every
     // settings read after it — the S613 trap, in the context every settings screen goes through.
-    if (exErr) throw new Error(errorLine(exErr))
+    if (exErr) throw new Error(await errorLineLater(exErr))
 
     if (existing?.id) {
       const { error } = await supabase.from('settings')
         .update({ ...payload, updated_at: new Date().toISOString() })
         .eq('id', existing.id)
-      if (error) throw new Error(errorLine(error))
+      if (error) throw new Error(await errorLineLater(error))
     } else {
       const { error } = await supabase.from('settings')
         .insert({ ...payload, client_id: cid })
-      if (error) throw new Error(errorLine(error))
+      if (error) throw new Error(await errorLineLater(error))
     }
     await loadSettings(cid)
   }
@@ -242,13 +244,13 @@ export function SettingsProvider({ children }) {
   // row, and this is one fact for every client. Same existing-row guard as the other two savers.
   async function savePlatformSupport(contact) {
     const { data: existing, error: exErr } = await supabase.from('settings').select('id').is('client_id', null).maybeSingle()
-    if (exErr) throw new Error(errorLine(exErr))
+    if (exErr) throw new Error(await errorLineLater(exErr))
     if (existing?.id) {
       const { error } = await supabase.from('settings').update({ support_contact: contact, updated_at: new Date().toISOString() }).eq('id', existing.id)
-      if (error) throw new Error(errorLine(error))
+      if (error) throw new Error(await errorLineLater(error))
     } else {
       const { error } = await supabase.from('settings').insert({ client_id: null, support_contact: contact })
-      if (error) throw new Error(errorLine(error))
+      if (error) throw new Error(await errorLineLater(error))
     }
     setPlatformSupport(contact)
   }
@@ -260,13 +262,13 @@ export function SettingsProvider({ children }) {
   // and the public pricing page would go on showing the old figure (S701).
   async function savePlatformPlanPrices(prices) {
     const { data: existing, error: exErr } = await supabase.from('settings').select('id').is('client_id', null).maybeSingle()
-    if (exErr) throw new Error(errorLine(exErr))
+    if (exErr) throw new Error(await errorLineLater(exErr))
     if (existing?.id) {
       const { error } = await supabase.from('settings').update({ plan_prices: prices, updated_at: new Date().toISOString() }).eq('id', existing.id)
-      if (error) throw new Error(errorLine(error))
+      if (error) throw new Error(await errorLineLater(error))
     } else {
       const { error } = await supabase.from('settings').insert({ client_id: null, plan_prices: prices })
-      if (error) throw new Error(errorLine(error))
+      if (error) throw new Error(await errorLineLater(error))
     }
     setPlatformPlanPrices(prices)
   }
@@ -283,14 +285,14 @@ export function SettingsProvider({ children }) {
       .select('id')
       .eq('client_id', cid)
       .maybeSingle()
-    if (exErr) throw new Error(errorLine(exErr))
+    if (exErr) throw new Error(await errorLineLater(exErr))
 
     if (existing?.id) {
       const { error } = await supabase.from('settings').update({ ...payload, updated_at: new Date().toISOString() }).eq('id', existing.id)
-      if (error) throw new Error(errorLine(error))
+      if (error) throw new Error(await errorLineLater(error))
     } else {
       const { error } = await supabase.from('settings').insert({ ...payload, client_id: cid })
-      if (error) throw new Error(errorLine(error))
+      if (error) throw new Error(await errorLineLater(error))
     }
   }
 
@@ -300,14 +302,14 @@ export function SettingsProvider({ children }) {
       .select('id')
       .eq('client_id', cid)
       .maybeSingle()
-    if (exErr) throw new Error(errorLine(exErr))
+    if (exErr) throw new Error(await errorLineLater(exErr))
 
     if (existing?.id) {
       const { error } = await supabase.from('feature_flags').update({ ...flags, updated_at: new Date().toISOString() }).eq('id', existing.id)
-      if (error) throw new Error(errorLine(error))
+      if (error) throw new Error(await errorLineLater(error))
     } else {
       const { error } = await supabase.from('feature_flags').insert({ client_id: cid, ...flags })
-      if (error) throw new Error(errorLine(error))
+      if (error) throw new Error(await errorLineLater(error))
     }
     if (cid === clientId) await loadFeatureFlags(cid)
   }
@@ -322,7 +324,7 @@ export function SettingsProvider({ children }) {
       .select('*')
       .eq('client_id', cid)
       .maybeSingle()
-    if (error) throw new Error(errorLine(error))
+    if (error) throw new Error(await errorLineLater(error))
     return data
   }
 

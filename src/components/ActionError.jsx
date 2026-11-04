@@ -29,22 +29,12 @@
  */
 import { errorInfo } from '../shared/errorText'
 
+// The renderer lives in ActionErrorView.jsx (S876), so a screen on the main file can show a failure
+// without pulling the error table in with it. Every other page imports it from here, as before.
+export { default } from './ActionErrorView'
+
 /** Turn a Supabase/Postgres error into what `<ActionError>` renders. */
 export function asActionError(err, audience = 'operator') {
   const { text, detail } = errorInfo(err, audience)
   return { text, detail }
-}
-
-/** `role="alert"` so the failure is announced at the moment it appears — a user who pressed Save
- *  and heard nothing has been told the save succeeded. */
-export default function ActionError({ error, className = '' }) {
-  if (!error) return null
-  const { text, detail } = typeof error === 'string' ? { text: error, detail: '' } : error
-  if (!text) return null
-  return (
-    <div className={`action-error ${className}`.trim()} role="alert">
-      <p className="action-error-text">{text}</p>
-      {detail && <p className="action-error-detail">{detail}</p>}
-    </div>
-  )
 }
