@@ -1357,33 +1357,32 @@ export default function Items() {
       {/* Category filter (S796). A hand-rolled row of bare buttons with no pressed state, so which
           category was applied was carried by colour alone, and it shortened any name past 13
           characters word by word — "Dairy & Beverages" became "Dairy &.". FilterChips gives it
-          aria-pressed, one Tab stop and arrow keys, and the row wraps instead of truncating. */}
-      <FilterChips
-        className="no-print"
-        label="Filter by category"
-        style={{ marginBottom: 12 }}
-        options={[{ id: 'all', name: 'All Items' }, ...catsWithItems].map(tab => ({
-          key: tab.id,
-          label: <>{tab.name} <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 4 }}>{tabCounts[tab.id] || 0}</span></>,
-        }))}
-        active={shownCat}
-        onChange={setFilterCat}
-      />
-
-      {/* Unit filter: one chip per UOM the book uses, counted like the category row. */}
-      {uomsWithItems.length > 1 && (
+          aria-pressed, one Tab stop and arrow keys, and the row wraps instead of truncating.
+          The unit chips share its line (each its own group), and drop below it when they do not fit. */}
+      <div className="no-print" style={{ marginBottom: 12, display: 'flex', gap: '8px 20px', flexWrap: 'wrap', alignItems: 'center' }}>
         <FilterChips
-          className="no-print"
-          label="Filter by unit"
-          style={{ marginBottom: 12 }}
-          options={[{ key: 'all', name: 'All Units' }, ...uomsWithItems.map(u => ({ key: u, name: u }))].map(o => ({
-            key: o.key,
-            label: <>{o.name} <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 4 }}>{uomCounts[o.key] || 0}</span></>,
+          label="Filter by category"
+          options={[{ id: 'all', name: 'All Items' }, ...catsWithItems].map(tab => ({
+            key: tab.id,
+            label: <>{tab.name} <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 4 }}>{tabCounts[tab.id] || 0}</span></>,
           }))}
-          active={shownUom}
-          onChange={setFilterUom}
+          active={shownCat}
+          onChange={setFilterCat}
         />
-      )}
+
+        {/* Unit filter: one chip per UOM the book uses, counted like the category row. */}
+        {uomsWithItems.length > 1 && (
+          <FilterChips
+            label="Filter by unit"
+            options={[{ key: 'all', name: 'All Units' }, ...uomsWithItems.map(u => ({ key: u, name: u }))].map(o => ({
+              key: o.key,
+              label: <>{o.name} <span style={{ fontSize: 11, color: 'var(--theme-text3)', marginLeft: 4 }}>{uomCounts[o.key] || 0}</span></>,
+            }))}
+            active={shownUom}
+            onChange={setFilterUom}
+          />
+        )}
+      </div>
 
       <div className="card" style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
         {loading ? (
