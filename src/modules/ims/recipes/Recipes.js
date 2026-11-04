@@ -20,7 +20,7 @@ import { getSuggestedPrice } from '../../../utils/recipeCost'
 import { printWithTitle } from '../../../utils/printTitle'
 import { suggestSeeds } from '../../../data/nutritionSeed'
 import { fetchUsdaNutrition } from '../../../utils/usdaNutrition'
-import { EMPTY_RECIPE, dietColumns, fmtNutrient, vatOf, calcSubRecipeCostPerUnit, calcRecipeCost, calcLiveCost, recipeHasIngredient, allocateOverhead } from './recipeCostCalc'
+import { EMPTY_RECIPE, dietColumns, fmtNutrient, vatOf, calcSubRecipeCostPerUnit, calcRecipeCost, calcLiveCost, recipeHasIngredient, allocateOverhead, YIELD_REQUIRED_TEXT, isValidYield } from './recipeCostCalc'
 import { dietOfDish } from '../../pos/guestmenu/DietMark'
 import { productCodePrefix, nextProductCode, SUB_RECIPE_CATEGORY } from '../../../shared/productCode'
 import RecipeCostCardPrint, { costPerYieldTile } from './RecipeCostCardPrint'
@@ -160,6 +160,7 @@ export default function Recipes() {
   // rejected write, and the ingredient-list rule, which belongs to the list rather than to any one
   // box and so has no field to sit under (S603).
   const [nameErr, setNameErr] = useState('')
+  const [yieldErr, setYieldErr] = useState('')
   const [search, setSearch] = useState('')
   const [ingSearch, setIngSearch] = useState('')
   const [printRecipe, setPrintRecipe] = useState(null)
@@ -378,6 +379,7 @@ export default function Recipes() {
     setUsdaCandidates([])
     setError('')
     setNameErr('')
+    setYieldErr('')
     setView('edit')
   }
 
@@ -423,6 +425,7 @@ export default function Recipes() {
     setUsdaCandidates([])
     setError('')
     setNameErr('')
+    setYieldErr('')
     setView('edit')
   }
 
@@ -464,6 +467,7 @@ export default function Recipes() {
     setUsdaCandidates([])
     setError('')
     setNameErr('')
+    setYieldErr('')
     setView('edit')
   }
 
@@ -794,6 +798,8 @@ export default function Recipes() {
     if (!clientId) { setError('No client selected. Pick a client in the top-left switcher before saving.'); return }
     if (!recipeForm.name.trim()) { setNameErr('Recipe name is required.'); return }
     setNameErr('')
+    if (recipeForm.category === SUB_RECIPE_CATEGORY && !isValidYield(recipeForm.yield_qty)) { setYieldErr(YIELD_REQUIRED_TEXT); return }
+    setYieldErr('')
     const validIngs = ingredients.filter(i =>
       (i.type === 'item' ? i.item_id : i.sub_recipe_id) && parseFloat(i.qty_per_portion) > 0
     )
@@ -2116,7 +2122,8 @@ Check the recipe list before saving again — if it timed out after the recipe w
                 <>
                   <div className="form-field">
                     <label htmlFor="recipe-f3"><Tip text="How many units this batch produces (e.g. 1000 for 1L of sauce). Cost per unit = total cost ÷ yield qty." width={240}>Yield Quantity *</Tip></label>
-                    <input id="recipe-f3" type="number" value={recipeForm.yield_qty} onChange={e => setRecipeForm(f => ({ ...f, yield_qty: e.target.value }))} placeholder="e.g. 1000" />
+                    <input id="recipe-f3" type="number" value={recipeForm.yield_qty} onChange={e => { setYieldErr(''); setRecipeForm(f => ({ ...f, yield_qty: e.target.value })) }} placeholder="e.g. 1000" {...fieldAria('recipe-f3', yieldErr)} />
+                    <FieldError id="recipe-f3" message={yieldErr} />
                   </div>
                   <div className="form-field">
                     <label htmlFor="recipe-f4"><Tip text="Unit for the batch output, e.g. ML, GM, PCS. Used when this sub-recipe is added as an ingredient elsewhere." width={260}>Yield UOM *</Tip></label>

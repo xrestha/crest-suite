@@ -1,6 +1,6 @@
 import {
-  daysInBsMonth, bsToAd, adToBs, adToBsSafe, getBsFiscalYear, formatAd, bsAddDays, bsDiffDays,
-  BS_YEAR_MIN, BS_YEAR_MAX, BS_MONTHS, BS_MONTHS_SHORT, bsDayOrdinal, formatBsDay, formatAdAsBs,
+  daysInBsMonth, bsToAd, adToBs, adToBsSafe, getBsFiscalYear, getBsFiscalYearStart, formatAd, bsAddDays, bsDiffDays,
+  bsDayBoundaryIso, BS_YEAR_MIN, BS_YEAR_MAX, BS_MONTHS, BS_MONTHS_SHORT, bsDayOrdinal, formatBsDay, formatAdAsBs,
 } from './bsCalendar'
 
 const d = s => new Date(s + 'T00:00:00')
@@ -330,5 +330,70 @@ describe('formatAdAsBs', () => {
     expect(formatAdAsBs(null)).toBe('—')
     expect(formatAdAsBs('')).toBe('—')
     expect(formatAdAsBs(undefined, { fallback: 'not set' })).toBe('not set')
+  })
+})
+
+// The fiscal year turns over between the last day of Ashadh (month 3) and 1 Shrawan (month 4).
+// Ashadh runs 31 or 32 days, so its last day is daysInBsMonth's answer, never 30. The AD dates are
+// the published first days of FY 2081/82 (16 Jul 2024) and FY 2082/83 (17 Jul 2025), not values
+// computed from this table.
+describe('the fiscal-year boundary: last day of Ashadh to 1 Shrawan', () => {
+  const CASES = [
+    // [BS year, days in Ashadh, last day of Ashadh in AD, 1 Shrawan in AD]
+    [2081, 31, '2024-07-15', '2024-07-16'],
+    [2082, 32, '2025-07-16', '2025-07-17'],
+  ]
+
+  test.each(CASES)('BS %i: Ashadh has %i days, and its last day and 1 Shrawan are consecutive AD days', (y, len, lastAshadh, firstShrawan) => {
+    expect(daysInBsMonth(y, 3)).toBe(len)
+    expect(formatAd(bsToAd(y, 3, len))).toBe(lastAshadh)
+    expect(formatAd(bsToAd(y, 4, 1))).toBe(firstShrawan)
+    expect(bsDiffDays(y, 3, len, y, 4, 1)).toBe(1)
+    expect(bsAddDays(y, 3, len, 1)).toEqual({ year: y, month: 4, day: 1 })
+  })
+
+  test.each(CASES)('BS %i: read back from the AD date, the fiscal year flips on 1 Shrawan', (y, len, lastAshadh, firstShrawan) => {
+    const before = adToBs(d(lastAshadh))
+    const after = adToBs(d(firstShrawan))
+    expect(before).toEqual({ year: y, month: 3, day: len })
+    expect(after).toEqual({ year: y, month: 4, day: 1 })
+    expect(getBsFiscalYearStart(before.year, before.month)).toBe(y - 1)
+    expect(getBsFiscalYearStart(after.year, after.month)).toBe(y)
+    expect(getBsFiscalYear(before.year, before.month)).toBe(`${(y - 1) % 100}/${y % 100}`)
+    expect(getBsFiscalYear(after.year, after.month)).toBe(`${y % 100}/${(y + 1) % 100}`)
+  })
+
+  test('the Nepal boundaries of the two days meet with no gap and no overlap', () => {
+    const lastEnd = bsDayBoundaryIso(2082, 3, 32, true)
+    const firstStart = bsDayBoundaryIso(2082, 4, 1, false)
+    expect(lastEnd).toBe('2025-07-16T23:59:59.999+05:45')
+    expect(firstStart).toBe('2025-07-17T00:00:00.000+05:45')
+    expect(Date.parse(firstStart) - Date.parse(lastEnd)).toBe(1)
+  })
+})
+
+// The trap that has shipped twice: bsToAd returns LOCAL midnight, and Nepal's midnight is 18:15Z on
+// the previous day, so `.toISOString().slice(0, 10)` names the wrong date for every user in the
+// country. formatAd reads the Date's local getters and names the day that was picked.
+describe('the .toISOString() trap on a date from bsToAd', () => {
+  test('formatAd names the picked day: 1 Shrawan 2082 is 2025-07-17', () => {
+    expect(formatAd(bsToAd(2082, 4, 1))).toBe('2025-07-17')
+  })
+
+  test('Nepal midnight on 1 Shrawan, read through toISOString, is the last day of Ashadh and of the old fiscal year', () => {
+    const nepalMidnight = new Date(bsDayBoundaryIso(2082, 4, 1, false))
+    expect(nepalMidnight.toISOString()).toBe('2025-07-16T18:15:00.000Z')
+    const trapped = nepalMidnight.toISOString().slice(0, 10)
+    expect(trapped).toBe('2025-07-16')
+    const bs = adToBs(d(trapped))
+    expect(bs).toEqual({ year: 2082, month: 3, day: 32 })
+    expect(getBsFiscalYear(bs.year, bs.month)).toBe('81/82')
+  })
+
+  test('on a runner east of UTC (Nepal is +05:45), bsToAd(...).toISOString() lands a day early; formatAd never does', () => {
+    const ad = bsToAd(2082, 4, 1)
+    const eastOfUtc = ad.getTimezoneOffset() < 0
+    expect(ad.toISOString().slice(0, 10)).toBe(eastOfUtc ? '2025-07-16' : '2025-07-17')
+    expect(formatAd(ad)).toBe('2025-07-17')
   })
 })

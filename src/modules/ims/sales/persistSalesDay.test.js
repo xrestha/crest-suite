@@ -3,7 +3,7 @@
 // in any environment without REACT_APP_SUPABASE_URL set, which includes a plain checkout and CI.
 // Mocked the same way scopedDb.test.js already does it; every test below passes its own mock
 // client into the function under test, so nothing here needs the real one.
-import { persistSalesDay, isMissingFunctionError, findSupersededRows, depleteManualSales, repostSupersededMovements, stockUpdateBusy, stockUpdateWaitingText } from './persistSalesDay'
+import { persistSalesDay, findSupersededRows, depleteManualSales, repostSupersededMovements, stockUpdateBusy, stockUpdateWaitingText } from './persistSalesDay'
 import { errorInfo } from '../../../shared/errorText'
 import { supabase as moduleClient } from '../../../supabaseClient'
 
@@ -67,22 +67,6 @@ const ROWS = [{ recipe_id: 'r1', qty_sold: 3, unit_price: 30.97, vat_rate: 13, d
 // Manual entry must only ever read or delete rows it wrote — POS bills, comps and credit-note
 // reversals live in this same table. NULL counts as manual (rows predating the column default).
 const MANUAL_ONLY = ['or', 'source.is.null,source.eq.manual']
-const MISSING_FN = { error: { code: 'PGRST202', message: 'Could not find the function public.save_sales_day' } }
-
-describe('isMissingFunctionError', () => {
-  test('detects the not-yet-migrated cases', () => {
-    expect(isMissingFunctionError({ code: 'PGRST202', message: '' })).toBe(true)
-    expect(isMissingFunctionError({ code: '42883', message: '' })).toBe(true)
-    expect(isMissingFunctionError({ message: 'Could not find the function public.save_sales_day' })).toBe(true)
-  })
-
-  test('does NOT swallow a real error as a missing function', () => {
-    // Critical: anything else must surface, never silently retry down the legacy path.
-    expect(isMissingFunctionError({ code: '23503', message: 'foreign key violation' })).toBe(false)
-    expect(isMissingFunctionError({ code: '42501', message: 'permission denied for table sales_entries' })).toBe(false)
-    expect(isMissingFunctionError(null)).toBe(false)
-  })
-})
 
 describe('persistSalesDay — atomic RPC path', () => {
   test('sends one RPC with the right params and makes no table calls', async () => {
@@ -109,6 +93,18 @@ describe('persistSalesDay — atomic RPC path', () => {
     const sb = makeMockSupabase({ rpcResult: { error: { code: '23503', message: 'fk violation' } } })
     await expect(persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS })).rejects.toThrow('fk violation')
     expect(sb.calls).toHaveLength(1) // no legacy fallback attempted
+  })
+
+  // S879: the three-call fallback is gone. A missing function, or a 42883 raised inside the RPC,
+  // is an error like any other: shown, never retried as separate delete and insert requests.
+  test.each([
+    ['PGRST202', 'Could not find the function public.save_sales_day'],
+    ['42883', 'function public.some_helper(uuid) does not exist'],
+  ])('a %s is shown, never saved a second way', async (code, message) => {
+    const sb = makeMockSupabase({ rpcResult: { error: { code, message } } })
+    const err = await persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS }).catch(e => e)
+    expect(err).toMatchObject({ code, fromSupabase: true })
+    expect(sb.calls.map(c => c.kind)).toEqual(['rpc'])
   })
 
   // S756: `throw new Error(error.message)` dropped the code, so errorText's code-keyed rules —
@@ -151,58 +147,6 @@ describe('persistSalesDay — expired token recovery (S458)', () => {
     const sb = makeMockSupabase({ rpcResults: [{ error: { code: '23503', message: 'fk violation' } }] })
     await expect(persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS })).rejects.toThrow('fk violation')
     expect(sb.calls.filter(c => c.kind === 'refreshSession')).toHaveLength(0)
-  })
-})
-
-describe('persistSalesDay — legacy fallback (migration not yet applied)', () => {
-  test('Daily: delete day → insert → delete superseded bulk rows, in that order', async () => {
-    const sb = makeMockSupabase({ rpcResult: MISSING_FN })
-    const res = await persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS })
-
-    expect(res).toEqual({ atomic: false })
-    expect(sb.calls.map(c => c.kind)).toEqual(['rpc', 'delete', 'insert', 'delete'])
-
-    expect(sb.calls[1].filters).toEqual([MANUAL_ONLY, ['eq', 'period_id', 'p1'], ['eq', 'bs_day', 11]])
-    expect(sb.calls[2].rows[0]).toMatchObject({ recipe_id: 'r1', period_id: 'p1', bs_day: 11, discount: 5, source: 'manual' })
-    // cross-mode: a Daily save supersedes the Bulk (bs_day = 0) row
-    expect(sb.calls[3].filters).toEqual([
-      ['eq', 'period_id', 'p1'], MANUAL_ONLY, ['eq', 'bs_day', 0], ['in', 'recipe_id', ['r1']],
-    ])
-  })
-
-  test('Bulk: cross-mode cleanup targets the dated rows instead', async () => {
-    const sb = makeMockSupabase({ rpcResult: MISSING_FN })
-    await persistSalesDay(sb, { periodId: 'p1', bsDay: 0, rows: ROWS })
-
-    expect(sb.calls[1].filters).toEqual([MANUAL_ONLY, ['eq', 'period_id', 'p1'], ['eq', 'bs_day', 0]])
-    expect(sb.calls[3].filters).toEqual([
-      ['eq', 'period_id', 'p1'], MANUAL_ONLY, ['gt', 'bs_day', 0], ['in', 'recipe_id', ['r1']],
-    ])
-  })
-
-  // The whole reason the legacy path scopes to manual (mirrors migration 20260727180000).
-  // sales_entries is shared with POS: without this, one Bulk save wiped a month of POS bill rows,
-  // and comp/credit-note rows were deleted with nothing re-inserted in their place.
-  test('every delete is scoped to manual rows, so POS rows are never touched', async () => {
-    const sb = makeMockSupabase({ rpcResult: MISSING_FN })
-    await persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS })
-
-    sb.calls.filter(c => c.kind === 'delete').forEach(c => {
-      expect(c.filters).toContainEqual(MANUAL_ONLY)
-    })
-    // and the rows written back are explicitly tagged, not left to the column default
-    expect(sb.calls.find(c => c.kind === 'insert').rows.every(r => r.source === 'manual')).toBe(true)
-  })
-
-  test('empty rows: deletes the day and skips insert + cross-mode cleanup', async () => {
-    const sb = makeMockSupabase({ rpcResult: MISSING_FN })
-    await persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: [] })
-    expect(sb.calls.map(c => c.kind)).toEqual(['rpc', 'delete'])
-  })
-
-  test('surfaces a legacy delete error', async () => {
-    const sb = makeMockSupabase({ rpcResult: MISSING_FN, tableResult: { error: { message: 'delete blocked' } } })
-    await expect(persistSalesDay(sb, { periodId: 'p1', bsDay: 11, rows: ROWS })).rejects.toThrow('delete blocked')
   })
 })
 

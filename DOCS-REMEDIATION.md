@@ -210,6 +210,13 @@ covered anywhere, and both were being carried only by a table nobody has updated
 
 ### T2a — Generate the route table; do not hand-write it
 
+**DONE — S879, 2026-11-04.** `scripts/check-routes.mjs` writes `ROUTES.md` (`npm run routes:write`) and, in its
+default check mode, runs inside `check:docs` and `build:verify`. It fails on the three-way plan mismatch, on a
+menu link to a missing route, and on any difference between the committed `ROUTES.md` and the code. Named
+`check-*` like its siblings rather than `gen-routes.mjs`, with `--write` instead of `--check`, because checking is
+what the build runs. First run: no mismatches. Verified by planting four in a copy (a route `minPlan`, a missing nav
+`minPlan`, a removed `PremiumGate`, a dead nav link); all four were reported with file and line.
+
 `CLAUDE.md` documents how the gates work in depth and never lists a single route. The route
 table is wrong: no HR routes at all despite 232 references to `/hr/` in the log, no Group
 Console, no kitchen board, no guest menu, no `/owner-dashboard`, no `/hr/self-service`. Since
@@ -243,6 +250,11 @@ the diff catches that. Give the generator a `--check` flag for the verify path a
 for the fix, so the failure message can say exactly which command resolves it.
 
 ### T2b — `PRODUCT.md` says who buys and why, never what they buy or what it costs
+
+**DONE — S879, 2026-11-04.** `PRODUCT.md` → "Plans and packaging": what is sold, the tier thesis and its three
+rules, where prices and plan gates live, no figures (owner decision: describe, do not price). The tier thesis had
+already left `CLAUDE.md` for `.claude/rules/access-control.md` in S663; the root keeps its one-line placement. The
+POS price question below is recorded there as open (owner decision, 2026-11-04).
 
 `PRODUCT.md` is a good positioning document. It covers users, purpose, competitors, brand, design
 principles, data ownership. It contains zero occurrences of `NPR` and no plan table.
@@ -580,7 +592,7 @@ One mention of `staging` in the entire log. Deploys go straight to production. T
 for a solo developer with your session discipline. It is not survivable with a contractor who does
 not have it.
 
-**Owner decision (2026-11-03, asked in plain words): not yet.** Testing stays on BLOOM CAFE, with a
+**Owner decision (2026-11-03, asked in plain words): not yet. Asked again 2026-11-04 (S879): still not yet.** Testing stays on BLOOM CAFE, with a
 rolled-back dry run before each migration. Revisit when a second person starts working on the code.
 
 **Do.**
@@ -598,6 +610,13 @@ zero production rows.
 ---
 
 ## T8 — Money-math test coverage (revised: a suite already exists)
+
+**DONE — S879, 2026-11-04.** Every item below audited; most were already covered. Seven gaps filled in four test
+files (`recipeCostCalc`, `recipeCost`, `posOrdersConstants`, `bsCalendar`): the till's own 0% VAT copy, blank and
+0 recipe quantities, a NULL or 0 sub-recipe yield, overhead allocation and its overhead-bucket-only filter (S35),
+the Ashadh → Shrawan boundary, and the `.toISOString()` trap. No new test found a wrong answer. FIFO is not how
+stock is valued (the item master rate is); FIFO only picks which batches are still on the shelf in Stock Ageing
+and the FIFO report, already covered. The per-item table is in the S879 CHANGELOG entry.
 
 **Correction to an earlier draft of this document.** This task previously claimed there was
 effectively no test suite, based on a grep for `jest` that returned 9 hits. That was wrong. The
@@ -629,6 +648,12 @@ knowing.
 
 ## T9 — `DEBT.md`
 
+**DONE — S879, 2026-11-04.** `DEBT.md`, six entries, each with a trigger and a grep instead of a count: CRA,
+the `src/pages/` / `src/modules/` split, the `exhaustive-deps` sites, three POS date reads with no index
+(judged from read-only `pg_indexes`, `pg_stats` and plain `EXPLAIN`), Sales Entry's legacy save fallback and the
+unpinned vendor delete lists. The "pages meant to move to `src/modules/`" premise below is not on record: S249
+left the shell and admin pages in `src/pages/` on purpose.
+
 There is no written list of known technical debt anywhere. Create one. Seed it with:
 
 - **CRA is unmaintained.** 47 mentions of CRA, 11 of Vite, so the migration has been considered.
@@ -646,6 +671,12 @@ There is no written list of known technical debt anywhere. Create one. Seed it w
 ---
 
 ## T10 — Reconstruct the origin note
+
+**DONE (draft for the owner) — S879, 2026-11-04.** `PRODUCT.md` → "Origins", rebuilt from git and the work log,
+every unrecorded reason marked "not recorded", and the gaps the owner may fill listed at its end. Two premises
+below proved wrong: the `shared_` / `ims_` / `pos_` / `hr_` scheme was only ever a planning document (deleted in
+S250 as never built; the core tables are unprefixed), and the unrecorded sessions are S1–S22, not S1–S33 (S23–S33
+have short entries).
 
 The log starts at S34 on 2026-06-17. S1 through S33 are absent, which means the founding schema
 decisions — table naming, the `shared_` / `ims_` / `pos_` / `hr_` prefix scheme, the multi-tenant
@@ -1051,8 +1082,8 @@ check is watching.
 1. ~~T3 + T4 + T11 (glob, stub and size checks)~~ — **DONE, S664.** All three land in `build:verify`
    together, and they protect the rules corpus before anything else touches it.
 2. ~~T1 (split `README.md`)~~ — **DONE, S666.** Everything else is easier afterwards.
-3. T2a (generated route table) — the gate-mismatch check is the real prize here.
-4. T2b + T2c (plans section in `PRODUCT.md`, entity name).
+3. ~~T2a (generated route table)~~ — **DONE, S879.** `check-routes.mjs` in `check:docs`; no mismatches on its first run.
+4. ~~T2b + T2c (plans section in `PRODUCT.md`, entity name)~~ — **DONE, S879 and S672.**
 5. ~~**T12 (login copy + S606)**~~ — **DONE, S667.** Copy replaced, S606 closed on all three public
    pages, service worker bumped. The module headings the copy specifies were built and then removed:
    they cost ~93px against the page one-screen budget, which the new copy already overran. That
@@ -1064,9 +1095,9 @@ check is watching.
    platform items (T6, T7) still live in this file.
 7. ~~T6 (monitoring)~~ — **DONE S872**: items 1 and 3 (S673, S731/S732, the POS half S833), item 2
    (Sentry) checked live 2026-11-03.
-8. T7 (staging) — before the contractor starts. **Owner decision 2026-11-03: not yet** (see T7).
-9. T8 (money-math coverage audit).
-10. T9, T10 (debt register, origins).
+8. T7 (staging) — before the contractor starts. **Owner decision 2026-11-03, repeated 2026-11-04 (S879): not yet** (see T7).
+9. ~~T8 (money-math coverage audit)~~ — **DONE, S879.** Seven gaps filled, no wrong answer found.
+10. ~~T9, T10 (debt register, origins)~~ — **DONE, S879.** `DEBT.md`; `PRODUCT.md` → Origins, for the owner to correct.
 
 T13 and T14 are findings, not tasks — each is a decision about how the corpus should be
 written, not a defect with a correct fix, so neither is scheduled here.

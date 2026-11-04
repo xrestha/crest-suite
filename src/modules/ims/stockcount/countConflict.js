@@ -32,10 +32,9 @@ export class CountConflictError extends Error {
 }
 
 // True when save_closing_counts is not in the schema yet — the migration is applied
-// by hand, so there is a window where this code runs before it exists (the persistSalesDay
-// precedent). Only a missing function falls back; every other error is returned as is.
-// (persistSalesDay's isMissingFunctionError, not imported: that module loads the Supabase client,
-// and this one stays pure so its tests run without one.)
+// by hand, so there is a window where this code runs before it exists. Only a missing function
+// falls back; every other error is returned as is. Sales Entry removed its own fallback of this
+// kind in S879; this one is in DEBT.md.
 export function rpcMissing(error) {
   if (!error) return false
   if (error.code === 'PGRST202' || error.code === '42883') return true

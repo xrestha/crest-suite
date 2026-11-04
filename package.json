@@ -26,7 +26,8 @@
     "build:verify": "node scripts/build-verify.mjs",
     "changelog:index": "node scripts/gen-changelog-index.mjs",
     "mirror:docs": "node scripts/mirror-docs.mjs",
-    "check:docs": "node scripts/check-rules-globs.mjs && node scripts/check-rules-stubs.mjs && node scripts/check-claude-size.mjs",
+    "check:docs": "node scripts/check-rules-globs.mjs && node scripts/check-rules-stubs.mjs && node scripts/check-claude-size.mjs && node scripts/check-routes.mjs",
+    "routes:write": "node scripts/check-routes.mjs --write",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },

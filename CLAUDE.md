@@ -17,7 +17,7 @@ in `.claude/rules/*.md`; each rules file loads automatically when you open a fil
 
 - `npm start`: CRA dev server on `localhost:3000`.
 - `npm run build:verify`: the local verification build. Runs `check:docs`, deletes the stale `.eslintcache`, then builds with `CI=true` so warnings fail. There is no separate lint script: ESLint runs inside the build. `npm run build` is what Vercel runs; leave it as a plain `react-scripts build`.
-- `npm run check:docs`: rules-glob, pointer-stub and CLAUDE.md size checks. Run it after any edit to this file or `.claude/rules/`.
+- `npm run check:docs`: rules-glob, pointer-stub, CLAUDE.md size and route checks. Run it after any edit to this file or `.claude/rules/`. A route or plan-lock change needs `npm run routes:write` (`ROUTES.md`).
 - Tests: `npx react-scripts test --watchAll=false <pattern>`. Jest via CRA; `*.test.js` files sit next to their source.
 - Docs: a session entry goes in the newest `CHANGELOG/S###-S###.md`, then `npm run changelog:index`, never in `README.md`. After editing tracked `.md` files, run `npm run mirror:docs` to copy them to the backup drive (`CREST_DOCS_MIRROR`).
 - **Trim command output without hiding exit codes: redirect to a file, echo the exit code, then tail.** Builds and tests run through the Bash tool, so this works as written: `npm run build:verify > /tmp/build.log 2>&1; echo "exit=$?"; tail -40 /tmp/build.log`. Never pipe a build or test run straight into `tail`: a pipeline reports `tail`'s status, so a build that printed `Failed to compile` reads as exit 0 (S693).
@@ -61,7 +61,7 @@ in `.claude/rules/*.md`; each rules file loads automatically when you open a fil
 ## Hard rules: access control
 
 - **Route guards stack `ModuleGate` (module) outside `PremiumGate` (plan tier or feature flag)**. `ProtectedRoute` enforces subscription state via `getAccessState()`; never add that check per page. It fails open and is a UI gate, not a security boundary.
-- **Moving a feature between tiers takes three edits in one change:** the key set in `AuthContext.js`, `minPlan` on its `App.js` route, and `minPlan` on its `Layout.js` nav item. Placement: Starter = Record & Comply, Growth = Control, Pro = Strategy, Crest Suite Pro = Synthesis.
+- **Moving a feature between tiers takes three edits in one change:** the key set in `AuthContext.js`, `minPlan` on its `App.js` route, and `minPlan` on its `Layout.js` nav item. `check:docs` fails when they disagree. Placement: Starter = Record & Comply, Growth = Control, Pro = Strategy, Crest Suite Pro = Synthesis.
 - **`SuiteGate` (`clients.suite_plan`) upsells in place instead of redirecting**, so a Suite nav item carries no `featureKey`/`minPlan`.
 - **A nav item hidden by role is not a guard.** No gate checks a role, and restrictive RLS returns `[]` instead of an error, so an unguarded report shows confident wrong figures. Put the role check (e.g. `if (!isAdmin && !isOwner) return <Navigate to="/dashboard" replace />`) in the page after its hooks. Audit by grepping `Layout.js` for `minPosRole`/`minImsRole`/`minHrRole` and `isAdmin || isOwner`. A sub-route inherits nothing from its parent.
 - **Staff ranks** are `pos_role`/`ims_role`/`hr_role` (`staff|supervisor|manager`, NULL = none). Admin and Owner resolve to `manager`, so gate staff-only (till) behaviour on the raw `profile.pos_role`. A page's rank guard must match its nav tag.

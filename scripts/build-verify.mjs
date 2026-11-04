@@ -54,10 +54,15 @@ const cache = join(root, 'node_modules', '.cache', '.eslintcache')
 // They are also available on their own as `npm run check:docs`, which is the loop to use while
 // editing the rules corpus. Failing early matters: there is no point spending a three-minute
 // build to then discover a rule has not been loading for two months.
+//
+// A fourth joined them in S879: check-routes.mjs fails when a page's plan lock disagrees between
+// AuthContext.js, App.js and Layout.js, or when ROUTES.md no longer matches the code. Same reason
+// to run first: a mismatched lock compiles cleanly and looks correct from inside one file.
 const DOC_CHECKS = [
   'check-rules-globs.mjs',
   'check-rules-stubs.mjs',
   'check-claude-size.mjs',
+  'check-routes.mjs',
 ]
 
 for (const script of DOC_CHECKS) {

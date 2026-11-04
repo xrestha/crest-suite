@@ -64,17 +64,6 @@ export function stockUpdateWaitingText({ label, queuedBehind, alsoRedo }) {
 // How long any single save request may hang before we give up and re-enable the button (S453/S454).
 export const SAVE_TIMEOUT_MS = 20000
 
-// PostgREST reports a missing/not-yet-cached function as PGRST202; Postgres itself as 42883.
-// This is ONLY used to decide whether to fall back to the pre-RPC path — every other error must
-// surface to the user, never be silently retried a second way.
-export function isMissingFunctionError(error) {
-  if (!error) return false
-  const code = error.code || ''
-  if (code === 'PGRST202' || code === '42883') return true
-  const msg = `${error.message || ''} ${error.details || ''} ${error.hint || ''}`
-  return /could not find the function|function .*save_sales_day.* does not exist/i.test(msg)
-}
-
 const signalled = (builder, signal) => (signal ? builder.abortSignal(signal) : builder)
 
 // A Supabase/PostgREST error, rethrown as a real Error that KEEPS its code, hint and details (S756).
@@ -161,11 +150,9 @@ export async function findSupersededRows(supabase, { periodId, bsDay, recipeIds,
 // nothing written back — real data loss, and not theoretical (a live smoke test saw a 12.4s round
 // trip on a connection that served the others in under a second).
 //
-// The legacy three-call path is kept ONLY as a fallback for the window between this code
-// deploying and the migration actually being applied by hand in the Supabase dashboard — which is
-// this project's documented migration workflow, so that window genuinely exists. It is not a
-// retry-on-failure path: anything other than "the function isn't there" is rethrown untouched.
-// Once the migration is applied everywhere, this fallback and `isMissingFunctionError` can go.
+// The old three-call path stayed as a fallback for a missing function until S879, which removed it:
+// the RPC is live, and a 42883 raised INSIDE it (a function it calls gone missing, the S735 shape)
+// would have sent the save down the non-atomic path in silence. Every error is now shown.
 export async function persistSalesDay(supabase, { periodId, bsDay, rows, signal, timeoutMs = SAVE_TIMEOUT_MS }) {
   const callRpc = () => withTimeout(
     signalled(
@@ -189,41 +176,8 @@ export async function persistSalesDay(supabase, { periodId, bsDay, rows, signal,
     ;({ error } = await callRpc())
   }
 
-  if (!error) return { atomic: true }
-  if (!isMissingFunctionError(error)) throw supabaseError(error)
-
-  await persistSalesDayLegacy(supabase, { periodId, bsDay, rows, signal, timeoutMs })
-  return { atomic: false }
-}
-
-async function persistSalesDayLegacy(supabase, { periodId, bsDay, rows, signal, timeoutMs }) {
-  const { error: delErr } = await withTimeout(
-    signalled(manualOnly(supabase.from('sales_entries').delete()).eq('period_id', periodId).eq('bs_day', bsDay), signal),
-    timeoutMs, 'Save'
-  )
-  if (delErr) throw supabaseError(delErr)
-
-  if (!rows.length) return
-
-  // source is written explicitly, matching the RPC — these rows are manual by construction, and
-  // the deletes above/below key off that value, so it must not be left to the column default.
-  const { error: insErr } = await withTimeout(
-    signalled(
-      supabase.from('sales_entries').insert(rows.map(r => ({ ...r, period_id: periodId, bs_day: bsDay, source: 'manual' }))),
-      signal
-    ),
-    timeoutMs, 'Save'
-  )
-  if (insErr) throw supabaseError(insErr)
-
-  const recipeIds = rows.map(r => r.recipe_id)
-  const cleanup = manualOnly(supabase.from('sales_entries').delete().eq('period_id', periodId))
-  const scoped = bsDay === 0 ? cleanup.gt('bs_day', 0) : cleanup.eq('bs_day', 0)
-  const { error: clearErr } = await withTimeout(
-    signalled(scoped.in('recipe_id', recipeIds), signal),
-    timeoutMs, 'Save'
-  )
-  if (clearErr) throw supabaseError(clearErr)
+  if (error) throw supabaseError(error)
+  return { atomic: true }
 }
 
 // Manual-sales stock depletion (added 2026-07-30) — mirrors PosOrders.jsx's POS depletion exactly

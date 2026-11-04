@@ -126,6 +126,8 @@ Two rules fall out of it, both of which had already been broken:
 - **A feature must be able to produce a number on its own tier's data.** `reorder_report` and `stock_movement_log` sat in `STARTER_KEYS` while deriving their core figure from recipe explosion (`ReorderReport.js`'s `explodeRecipeIngredients`, `StockMovements.js`'s `subRecipeUsage`) — and `recipe_costing` is Growth. Starter clients were sold a Reorder Report with no consumption figure and a permanently empty ledger. Neither fails loudly; they render nothing, forever.
 - **A statutory obligation never gates above the base tier**, and **a data-entry page must not sit above the tier of any figure that consumes it.** `vendor_balance_confirmation` (IRD Annexure 13) sat at Pro while `vat_report`/`non_vat_report` were always Starter; `overheads` sat at Pro while `ClientDashboard`, `OwnerDashboard`, `computeMonthlyReport` and `Recipes`' True Cost all read what it writes.
 
+**`scripts/check-routes.mjs` holds the three copies of a plan lock together (S879).** It runs in `check:docs` and fails when a key's set in `AuthContext.js`, the route's `minPlan` and the nav item's `minPlan` disagree, or when the generated `ROUTES.md` is stale (`npm run routes:write`). It does not read a page's own rank guard, so the audit below still stands.
+
 **Moving a feature between tiers requires a grandfather sweep in the same deploy.** `hasFeature()` is "plan tier OR explicit flag", so setting the flag `true` for affected clients restores prior access with no code change — that is what the `feature_flags` override exists for. Upward-*available* moves (a feature becoming available at a lower tier) need no sweep.
 
 ## A page reachable by URL needs the guard its nav item implies (S601)

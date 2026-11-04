@@ -20,6 +20,72 @@ Crest Suite is a SaaS platform for the Nepal F&B market, covering inventory and 
 
 Cost intelligence plus integrated HR, in one product, where competitors only do one or the other. POS-first rivals (Aegis, Restronp, RestroX) mainly handle billing without real costing depth; outsourced-service competitors (Silverline) provide human bookkeeping instead of software. Crest's edge is combining costing rigor and HR in a single tool an owner actually runs the business from.
 
+## Plans and packaging
+
+What a client buys, and why each piece sits where it does (S879). This section names no prices on purpose: Crest support changes them on Admin → Settings → Plan Pricing, so a figure written here would be wrong the first time someone repriced, and someone would quote it.
+
+**What is sold.**
+
+- **Crest IMS** comes in three plans: Starter, Growth and Pro. "The client's plan" (`clients.plan`) always means the IMS plan and nothing else.
+- **Crest HR** and **Crest POS** are each switched on or off, with no plans of their own: one flat price each.
+- **Crest Customization** (sizes, extras, build-your-own dishes, combos) is a flat add-on on top of POS.
+- **Crest Suite Pro** is an add-on charged per outlet, on top of whatever modules the outlet has. It is not a bundle that replaces them. It needs IMS switched on, and says nothing about which IMS plan, or whether HR or POS is on. It has one level only. It holds the six owner pages: Owner Dashboard, Monthly Owner Report, Consolidated P&L, Group Console, Demand Forecast and Fixed Assets.
+- **Paying yearly** gives the same discount on every line, Suite included.
+- **A new self-service signup** gets a short free trial (`TRIAL_DAYS`; 7 days when this was written) and waits for Crest to approve it.
+
+**What each plan is for.** Each plan sells one job:
+
+- **Starter = Record and Comply.** Write down what happened and stay legal: sales, purchases, stock counts, wastage, the VAT and non-VAT reports, the vendor balance confirmation (IRD Annexure 13), payables.
+- **Growth = Control.** Keep cost in check day to day: recipe costing, variance, reorder levels, budgets, purchase orders, requisitions, overheads.
+- **Pro = Strategy.** Decide what to change: menu engineering, period comparison, shrinkage, supplier analysis, stock ageing.
+- **Crest Suite Pro = Synthesis.** Read across modules and outlets at the owner's level.
+
+Three rules follow, and each was broken once before it was written down:
+
+- **A feature sits in a plan whose own data can produce its number.** A report built on recipes cannot be Starter, because Starter has no recipes; Starter clients were once sold a Reorder Report that could never show a figure.
+- **A legal obligation is never above Starter.** Filing VAT or Annexure 13 is not an upsell.
+- **A page where data is typed in never sits above a figure that reads it.** Otherwise the figure shows blank on the cheaper plan with no explanation.
+
+**Where the facts live.**
+
+- **Live prices:** Admin → Settings → Plan Pricing. They are laid over the shipped defaults in `src/data/pricingPlans.js`, and every screen that shows money reads the result. The money a client pays each month is worked out in `src/shared/clientMrr.js` only.
+- **Which plan each page needs:** [ROUTES.md](ROUTES.md), generated from the code. `npm run check:docs` fails when a page's plan disagrees between the plan lists, the page and the menu.
+- **The detailed reasoning** behind the plans: `.claude/rules/access-control.md`.
+
+**Moving a feature to a higher plan.** Clients who already use it must keep it: grant it to them through their feature switches in the same release.
+
+**Open question: the POS price (recorded 2026-11-04, nothing decided).** POS is one flat monthly fee, about what a plain billing app charges in this market. But Crest's POS does things a billing app cannot:
+
+- each closed bill takes its stock down by the recipe;
+- a free dish is valued at what it cost;
+- the database itself records who gave each discount, void or free dish.
+
+Whether the price should say so is a decision for the owner. The figure itself is changed on the Plan Pricing screen, with no code change.
+
+## Origins
+
+*Rebuilt from the code history on 2026-11-04, not from memory; the owner has been asked to read and correct it. Where a reason was never written down, this says "the reason is not recorded".*
+
+**What survives.** The first commit, "Initial commit - Crest Inventory v1", is dated 2026-06-10. The next one (2026-06-19, `deb836e`) bundles everything built since. The work log has short entries for S23 to S33 and full ones from S34 (2026-06-17); S1 to S22 are not recorded anywhere.
+
+**1. From Crest Inventory to Crest Suite.** It began as Crest Inventory, a stock and food-cost tool (IMS), piloted at Casa Acai Cafe, Kathmandu. On 2026-06-18 (S57) the plan was for HR and POS to be *separate products*. Two days later (S83, `8a83d6f`) a planning document reversed that: "One codebase. One database. Feature flags per client." S100 (2026-06-21) confirmed one React app, one Supabase project, one Vercel deployment, and started HR. POS followed from S193 (2026-06-30). The app was renamed Crest Suite on 2026-07-13 (`d9675f6`). Why the separate-products plan was dropped: the reason is not recorded.
+
+**2. One shared database, many businesses.** The product was never single-client. The very first schema already had a `clients` table, a `client_id` on each login's profile and on every main table, an admin role that sees all clients, and Row Level Security on all 13 tables, using a helper, `my_client_id()`, that reads the signed-in user's client. Child rows (stock counts, purchases, daily sales, recipe ingredients) had no `client_id` and took it from their parent month or recipe; they still work that way. Each login belonged to one client until 2026-08-12 (`6392252`), when multi-outlet groups added `profiles.active_client_id` so one login can switch between outlets in its group (each outlet is its own client row); that migration records why. The shared browser-side filter (`useScopedDb`) arrived on 2026-07-05; before that every page wrote its own. Why one shared database rather than one per business: the reason is not recorded.
+
+**3. Table names.** There is no single prefix scheme. The 2026-06-20 planning document proposed `shared_`, `ims_`, `pos_` and `hr_` prefixes "to avoid naming conflicts", but that scheme was never built (the log says so at S250). What exists: the original inventory and core tables have no prefix (`clients`, `profiles`, `items`, `vendors`, `purchase_entries`). HR tables start `hr_`, POS tables `pos_`. A few inventory tables added from July 2026 use `ims_` (the first was `ims_gate_passes`), and fixed assets use `assets_`. No `shared_` table has ever existed. Why the inventory tables were never renamed: the reason is not recorded.
+
+**4. The stack.** Create React App, React 19 and Supabase are in the first commit. Vercel has hosted it since the first production deploy (S74, 2026-06-19); `vercel.json` was added two days later because browsers kept loading an old copy of the app (S95). Why these three were chosen: the reason is not recorded.
+
+**5. Bikram Sambat.** BS was there from the first commit. A trading month is a BS year and month, and entries store the BS day (1 to 32) as a number. The exact BS month-length table (`src/utils/bsCalendar.js`) arrived by S41 (2026-06-17), and the Nepal fiscal year (Shrawan to Ashadh) first appeared in Annual Summary (S84, 2026-06-20). The planning document lists BS as a critical Nepal requirement; nothing fuller is recorded. The original monthly tables store BS numbers; some later tables store ordinary dates converted from BS, so check each table.
+
+**6. "Admin" means Crest, not the customer.** The first version had two roles, `admin` and `client`, and the admin's sidebar read "Consultant"; S40 (2026-06-17) made it a "pure consultant account" tied to no business. That is why `isAdmin` means the Crest operator, and the business owner is a separate, later idea.
+
+**7. Schema history before 2026-07-05 is not in migration files.** Until then, database changes were pasted into the Supabase SQL editor by hand. S249 dumped the live database into the baseline migration because the old schema file had gone stale. Anything older can be traced only through the work log.
+
+**Gaps the owner may be able to fill.** Why one shared database rather than one per business; what changed the
+plan from separate HR and POS apps to one app in two days; why Create React App, Supabase and Vercel; whether
+leaving the original inventory tables without a prefix was a choice; and what sessions S1 to S22 built.
+
 ## Brand Personality
 
 Approachable, modern, and empowering: the goal is to make a traditionally intimidating domain (accounting, payroll, compliance) feel usable by a non-technical restaurant owner, without diluting the precision the accountant-facing side depends on. Confidence should come from clarity, not decoration.

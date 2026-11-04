@@ -766,7 +766,7 @@ export default function Stock() {
   // check against another person's count and the write are one statement per item, so a
   // read-then-upsert race cannot slip a second tablet's figure through, and an add is atomic.
   // Until that migration is applied the RPC does not exist, and the old plain upsert runs instead
-  // (the persistSalesDay precedent) — every other error is thrown as it came.
+  // (see DEBT.md) — every other error is thrown as it came.
   async function saveClosingCounts(periodId, entries, by, mode = 'check') {
     const { data, error } = await supabase.rpc('save_closing_counts', { p_period_id: periodId, p_rows: closingRpcRows(entries, by, mode) })
     if (error && rpcMissing(error)) {

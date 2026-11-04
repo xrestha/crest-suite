@@ -468,3 +468,23 @@ describe('loadRecipeBook', () => {
     await expect(loadRecipeBook(failing)).rejects.toThrow('boom')
   })
 })
+
+// `recipes.yield_qty` is nullable with no CHECK. A sub-recipe with no yield, or a yield of 0, walks
+// as one output unit per batch — the rule calcSubRecipeCostPerUnit applies to the cost card and the
+// server post applies as COALESCE(NULLIF(yield_qty, 0), 1) — so COGS and Variance never divide a
+// batch by zero into an Infinity of raw items. Both feeds of the walk must agree on it.
+describe('explodeRecipeTree — a sub-recipe with no yield (NULL or 0)', () => {
+  test.each([[null], [0]])('yield %p: batches equal the units used, and the raw items stay finite', async y => {
+    const fx = {
+      ingredients: [
+        { recipe_id: 'dish',  qty_per_portion: 2,   item_id: null, sub_recipe_id: 'sauce', items: null },
+        { recipe_id: 'sauce', qty_per_portion: 300, item_id: 'tomato', sub_recipe_id: null, items: FULL_YIELD },
+      ],
+      recipes: [{ id: 'sauce', yield_qty: y }],
+    }
+    const tree = await explodeRecipeTree(makeStub(fx), ['dish'])
+    expect(bySub(tree.dish.subRecipes).sauce.batches).toBe(2)
+    expect(byItem(tree.dish.items).tomato).toBe(600)
+    expect(await explodeRecipeTree(null, ['dish'], { book: bookOf(fx) })).toEqual(tree)
+  })
+})

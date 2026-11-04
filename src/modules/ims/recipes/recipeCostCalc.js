@@ -69,6 +69,12 @@ export function calcSubRecipeCostPerUnit(subRecipe, allRecipes, seen = new Set()
   return total / yieldQty
 }
 
+// A sub-recipe's yield is what its batch cost is divided by. The form used to save a 0 or blank
+// yield as 1 without a word, so a mistyped yield became a silent cost error (S879, owner decision:
+// refuse it on the form). A row saved before that still reads as 1 per batch, above.
+export const YIELD_REQUIRED_TEXT = 'Yield must be more than 0. Type how much one batch makes.'
+export const isValidYield = value => parseFloat(value) > 0
+
 // Total ingredient cost of a saved recipe (one portion).
 export function calcRecipeCost(recipe, allRecipes) {
   return (recipe.recipe_ingredients || []).reduce((sum, ri) => {

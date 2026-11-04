@@ -5,7 +5,7 @@
 // customizations of one recipe are two lines.
 import {
   lineKeyOf, selectionKeyOf, missingFromServer, mergeUnsentLines, storedLinesMatchPayload,
-  menuDrift, withServerLineFields, toItemPayload, lineOptionIds, menuReadMode, MENU_FRESH_MS,
+  menuDrift, withServerLineFields, toItemPayload, lineOptionIds, menuReadMode, MENU_FRESH_MS, vatOf,
 } from './posOrdersConstants'
 
 const A = 'a1b2c3d4-0000-4000-8000-000000000001'
@@ -169,5 +169,22 @@ describe('menuReadMode', () => {
     expect(menuReadMode({ hasMenu: false, readAt: 0, now })).toBe('full')
     expect(menuReadMode({ hasMenu: true, readAt: now - 1000, now, force: true })).toBe('full')
     expect(menuReadMode({ hasMenu: true, savedToReplace: true, readAt: now - 1000, now })).toBe('full')
+  })
+})
+
+// The till's own copy of the VAT rule: MenuGrid prices a tile with it and comboCart a combo line.
+// S146 was this exact shape in Recipes — `parseFloat(vat_rate) || 0.13` turned a dish saved at 0%
+// back into 13%, because 0 is falsy. Only NULL (or a missing field) means 13% here, the rule
+// recipeCostCalc.js' vatOf pins for the pricing screens.
+describe('vatOf (till) — a 0% dish stays 0%', () => {
+  test('a stored 0, as a number or as text, is no VAT, never 13%', () => {
+    expect(vatOf({ vat_rate: 0 })).toBe(0)
+    expect(vatOf({ vat_rate: '0' })).toBe(0)
+  })
+
+  test('NULL or a missing rate reads as 13%, and a stored rate is kept', () => {
+    expect(vatOf({ vat_rate: null })).toBe(0.13)
+    expect(vatOf({})).toBe(0.13)
+    expect(vatOf({ vat_rate: '0.13' })).toBe(0.13)
   })
 })
