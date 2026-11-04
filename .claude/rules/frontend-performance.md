@@ -107,15 +107,23 @@ The same test applies inside a page: a read that needs only today's BS month (th
 forecast history) or only the session (Crest Staff's own RPCs) starts before the read it used to
 follow, and a late answer that no longer applies is dropped, never rendered.
 
-**A read that saves a round trip can still lose on the server, so time both (S869).** On this
-database the security policies cost about 1 ms a row (IMS_TODO PERF-12). A filter through an embed
+**A read that saves a round trip can still lose on the server, so time both (S869).** Until S876 the
+security policies cost about 1 ms a row (a bare helper per row; `supabase-sql.md`). A filter through an embed
 (`pos_order_items` with `pos_orders!inner(closed_at)` filtered on the bill) walks every child row
 the outlet ever had: 5.5 s of server time for one month. Bills with their lines embedded walked only
 the range, but on one connection, where chunked `.in()` reads had run side by side: 19.6 s against
 10.2 s for three months. Log each request's server time (fetch start to body read) beside the
 simulated network time, and compare the figures before and after on two ranges.
+`fetchAllRowsParallel(…, { onPage })` (S876, PERF-13) hands each page over as it lands, so a dependent
+chunked read starts per page; dispatch each id once (a bill read twice is counted twice).
 `src/modules/customization/**` joined this file's `paths:` in S869; it had missed every sweep.
 History: docs/rules-archive/frontend-performance.md#s869-customization-report-shapes
+
+**What the first screen downloads is a round trip too (S876, PERF-8/9).** The command palette and the
+Calculator mount through `LoadOnOpen` (fetched when idle, kept mounted, own error note), and no eager file
+imports `errorText.js` (`lazyErrorText.js`, prefetched when idle); `lazyErrorText.test.js` walks the
+imports from `src/index.js` and fails if either comes back. Help's five module guides are
+`src/pages/help/*Features.js`, loaded by `loadHelpFeatures()`; nothing imports them statically.
 
 **Bulking a read means re-checking the 1000-row cap.** Collapsing N per-period queries into one
 `.in()` multiplies the row count — page it with `fetchAllRows` and give the sort a unique

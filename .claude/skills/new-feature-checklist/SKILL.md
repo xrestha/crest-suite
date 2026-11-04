@@ -16,7 +16,7 @@ description: The 9-step checklist for shipping a new Crest Suite feature — fea
    and a labelled group becomes a bar dropdown automatically (`renderBarGroup`). A brand-new
    GROUP is likewise picked up on both surfaces from `IMS_GROUPS`/`HR_GROUPS`/`POS_GROUPS`.
 4. **Tooltips**: every non-obvious column header and form label needs a `<Tip>` tooltip.
-5. **Help page**: add an entry to `src/pages/Help.js`.
+5. **Help page**: add an entry to the module's list in `src/pages/help/<module>Features.js` (glossary, FAQ and setup steps stay in `src/pages/Help.js`).
 6. **Changelog**: prepend the session entry to the newest `CHANGELOG/S###-S###.md`, run
    `npm run changelog:index`, then mirror to the backup drive — `CHANGELOG/` first, then
    `README.md`. The convention is in `CHANGELOG/README.md`.
