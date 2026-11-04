@@ -1,7 +1,8 @@
 /**
  * `<ActionError>`'s renderer on its own, without the error table (S876, PERF-8). ActionError.jsx
  * re-exports this as its default, so every page keeps importing ActionError as before; only a screen
- * on the main file (TillOutletGate, LegalReacceptance) imports it from here, because ActionError.jsx
+ * that must not pull in the error table (TillOutletGate on the main file, and LegalReacceptance,
+ * fetched on its own since S878) imports it from here, because ActionError.jsx
  * also carries `asActionError`, and with it all of errorText.js. Those screens convert through
  * `errorInfoLater` in shared/lazyErrorText.js instead. The contract is ActionError.jsx's.
  *

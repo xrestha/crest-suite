@@ -6,7 +6,7 @@
  */
 
 import { Profiler } from 'react'
-import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act, within, cleanup } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 
 // Plain functions, not jest.fn: CRA resets mock implementations before every test.
@@ -83,6 +83,16 @@ beforeEach(() => {
     get_guest_table_status: { data: [], error: null },
     get_guest_order_progress: () => Promise.resolve({ data: mockProgress ? [mockProgress] : [], error: null }),
     submit_guest_order: { data: 'req-1', error: null },
+  }
+})
+
+// A sheet left open at the end of a test takes its Back guard down a moment after it unmounts
+// (useBackToClose: a setTimeout, then history.back(), whose popstate jsdom also queues). Unmount here
+// and wait for that Back to land, or it arrives during the next test and closes the sheet it opened.
+afterEach(async () => {
+  cleanup()
+  for (let i = 0; i < 20 && window.history.state?.guestSheet; i += 1) {
+    await new Promise(resolve => { setTimeout(resolve, 5) })
   }
 })
 
@@ -559,9 +569,6 @@ describe('a cart checked against the choices just read', () => {
   })
 
   it('S877: when a refusal takes off the only dish, the empty order still names it and why', async () => {
-    // A sheet the test before left open takes its Back guard down a moment after it unmounts
-    // (useBackToClose); let that Back land before this test opens the order sheet.
-    await act(() => new Promise(resolve => { setTimeout(resolve, 20) }))
     storedCart({ 'r-momo': { recipe_id: 'r-momo', qty: 1, option_ids: [] } })
     let reads = 0
     mockAnswers.get_guest_menu = () => Promise.resolve({ data: (reads += 1) === 1 ? [...ROWS, LATTE] : [LATTE], error: null })

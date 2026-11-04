@@ -136,7 +136,7 @@ it('S869: a re-read that fails after a move keeps the moved order on screen inst
   const down = await screen.findByRole('button', { name: 'Move First down' })
   const quiet = jest.spyOn(console, 'error').mockImplementation(() => {})
   mockCatalog.mockResolvedValueOnce({ error: { message: 'connection reset', code: '08006' }, groups: [], options: [], attachments: [], ingredients: [], buildYourOwn: [] })
-  await act(async () => { fireEvent.click(down) })
+  fireEvent.click(down)
   await waitFor(() => expect(mockCatalog).toHaveBeenCalledTimes(2))
   await waitFor(() => expect(quiet).toHaveBeenCalledWith(expect.stringMatching(/re-check after a change failed/), expect.anything()))
   expect(screen.getByRole('button', { name: 'Move First down' })).toBeDisabled()

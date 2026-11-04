@@ -124,6 +124,9 @@ Calculator mount through `LoadOnOpen` (fetched when idle, kept mounted, own erro
 imports `errorText.js` (`lazyErrorText.js`, prefetched when idle); `lazyErrorText.test.js` walks the
 imports from `src/index.js` and fails if either comes back. Help's five module guides are
 `src/pages/help/*Features.js`, loaded by `loadHelpFeatures()`; nothing imports them statically.
+Since S878 Settings → Guides fetches one module's guide when its tab is chosen (`GuidesTab.jsx`;
+`GuidesTab.test.jsx` refuses a static import of a guide file), and `ProtectedRoute` loads
+`LegalReacceptance` with `React.lazy`, so only an Owner with a document to accept downloads it.
 
 **Bulking a read means re-checking the 1000-row cap.** Collapsing N per-period queries into one
 `.in()` multiplies the row count — page it with `fetchAllRows` and give the sort a unique

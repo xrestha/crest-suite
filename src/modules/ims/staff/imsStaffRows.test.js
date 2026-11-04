@@ -2,7 +2,21 @@
  * S875: what an IMS Staff row offers once a leaver is blocked rather than deleted (owner decision
  * 2026-11-04, "Block, keep the name"), and how an admin-user-ops answer body is read.
  */
-import { imsRowState, blockOutcomeNotice, readEdgeBody, HAS_RECORDS_CODE, READY_REFUSAL_CODES } from './imsStaffRows'
+import { imsRowState, imsLoginCanSignIn, blockOutcomeNotice, readEdgeBody, HAS_RECORDS_CODE, READY_REFUSAL_CODES } from './imsStaffRows'
+
+describe('imsLoginCanSignIn (S878: who Stock Count → Settings offers sections to)', () => {
+  it('keeps an ordinary login', () => {
+    expect(imsLoginCanSignIn({ id: 'u1', ims_role: 'staff' })).toBe(true)
+  })
+
+  it('drops a login blocked on IMS Staff', () => {
+    expect(imsLoginCanSignIn({ id: 'u1', ims_role: 'staff', staff_blocked_at: '2026-11-04T05:00:00Z' })).toBe(false)
+  })
+
+  it('drops a login blocked at a Final Settlement', () => {
+    expect(imsLoginCanSignIn({ id: 'u1', ims_role: 'staff', settlement_blocked: true })).toBe(false)
+  })
+})
 
 describe('imsRowState', () => {
   it('offers Block on an ordinary row, and Reset with no reason', () => {

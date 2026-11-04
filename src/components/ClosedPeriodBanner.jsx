@@ -9,9 +9,9 @@
  * taken its first.
  *
  * The lock and the notice are the same fact, so any page that adopts the `isLocked` line owes its
- * reader this (`closed-periods.md`). Stock Count and Overheads render it in both forms (S792).
- * Requisitions renders only the red form: its Owner/admin note is its own amber text, because the
- * `canEdit` sentence below says to regenerate the snapshot and no frozen-report figure reads requisitions.
+ * reader this (`closed-periods.md`). Stock Count, Overheads and Requisitions render it in both forms.
+ * `feedsReport={false}` drops the amber form's "regenerate the snapshot" clause, for a page no frozen
+ * monthly report figure reads: Requisitions, whose slips reach only Stock Count (S878).
  *
  * `note` is for a page whose consequence genuinely differs — Purchase Orders' "no delivery can be
  * received into it" is real and worth keeping, so it rides as a second clause rather than as a
@@ -19,7 +19,7 @@
  * permitted to edit a closed month, so red would read as a block on an action that will succeed
  * (`closed-periods.md` — "Admin must be TOLD the month is closed").
  */
-export default function ClosedPeriodBanner({ periodLabel, note, canEdit = false, style }) {
+export default function ClosedPeriodBanner({ periodLabel, note, canEdit = false, feedsReport = true, style }) {
   const hue = canEdit ? 'amber' : 'red'
   return (
     <div
@@ -42,7 +42,9 @@ export default function ClosedPeriodBanner({ periodLabel, note, canEdit = false,
       <span>
         <strong>{periodLabel ? `${periodLabel} is closed.` : 'This period is closed.'}</strong>{' '}
         {canEdit
-          ? 'You can still edit it, and the frozen monthly report will not update on its own — regenerate the snapshot when you are done.'
+          ? (feedsReport
+            ? 'You can still edit it, and the frozen monthly report will not update on its own — regenerate the snapshot when you are done.'
+            : 'You can still edit it.')
           : 'Data is read-only. Contact your admin to re-open if needed.'}
         {note ? ` ${note}` : ''}
       </span>

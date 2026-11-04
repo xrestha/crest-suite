@@ -67,8 +67,9 @@ function mainFileModules() {
 describe('the main file', () => {
   const eager = mainFileModules()
 
-  it('reaches neither the error table, ActionError, the command palette nor the calculator', () => {
-    for (const file of ['shared/errorText.js', 'components/ActionError.jsx', 'components/CommandPalette.js', 'components/Calculator.js']) {
+  // S878: the legal re-acceptance screen too, fetched only for an Owner with a document to accept.
+  it('reaches neither the error table, ActionError, the command palette, the calculator nor the legal re-acceptance screen', () => {
+    for (const file of ['shared/errorText.js', 'components/ActionError.jsx', 'components/CommandPalette.js', 'components/Calculator.js', 'components/LegalReacceptance.jsx']) {
       expect(eager).not.toContain(file)
     }
   })
@@ -77,7 +78,7 @@ describe('the main file', () => {
   it('the walk is real: it reaches the screens that stand in for them', () => {
     expect(eager).toEqual(expect.arrayContaining([
       'App.js', 'components/Layout.js', 'components/LoadOnOpen.jsx', 'context/SettingsContext.js',
-      'modules/pos/TillOutletGate.jsx', 'components/LegalReacceptance.jsx', 'components/ActionErrorView.jsx',
+      'modules/pos/TillOutletGate.jsx', 'components/ProtectedRoute.js', 'components/ActionErrorView.jsx',
       'shared/lazyErrorText.js',
     ]))
   })

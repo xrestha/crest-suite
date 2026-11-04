@@ -8,6 +8,7 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
 import { IMS_COUNT_HOME } from '../../../shared/imsCountAccess'
+import { imsLoginCanSignIn } from '../staff/imsStaffRows'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 
 // Stock Count → Settings (S737). Manager-only; mounted by Stock.js as one tab body.
@@ -73,7 +74,9 @@ export default function StockCountSettings({ clientId, categories, uncategorised
     const failed = firstError(results)
     if (failed) { setLoadError(failed); setLoading(false); return }
     const [{ data: people }, { data: rows }] = results
-    setStaff((people || []).filter(p => p.ims_role))
+    // A blocked login (IMS Staff's Block, or a Final Settlement) is kept for its name on past counts,
+    // but it cannot sign in, so it has no sections to be given (S878).
+    setStaff((people || []).filter(p => p.ims_role && imsLoginCanSignIn(p)))
     setAssigned(new Set((rows || []).map(r => `${r.profile_id}:${r.category_id}`)))
     setLoading(false)
   }, [clientId, scopedFrom])

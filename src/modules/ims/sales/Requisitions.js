@@ -727,16 +727,16 @@ ${text}`, detail })
       {periodClosed && (
         <ClosedPeriodBanner />
       )}
-      {/* Same amber shape and lead as Sales.js's and Purchases.js's banner. Not ClosedPeriodBanner's
-          canEdit form: its sentence sends the reader to regenerate the frozen Monthly Report, and no
-          figure in that report reads requisitions — Stock Count's Requisitioned column is the only
-          place a slip saved here shows up. */}
+      {/* The amber form without its regenerate clause (feedsReport={false}): no figure in the frozen
+          Monthly Report reads requisitions, and Stock Count's Requisitioned column is the only place a
+          slip saved here shows up (S878). */}
       {canEditClosedPeriods && selectedPeriod?.status === 'closed' && (
-        <div role="note" style={{ background: 'color-mix(in srgb, var(--theme-amber) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 25%, transparent)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20, fontSize: 13, color: 'var(--theme-amber-text)' }}>
-          ✎ <strong>{periodLabel} is closed — you are editing a closed month.</strong> Requisitions raised, issued, corrected
-          or deleted here still change that month&apos;s Requisitioned column on Stock Count. The frozen Monthly Report does
-          not use requisitions, so nothing needs regenerating afterwards.
-        </div>
+        <ClosedPeriodBanner
+          canEdit
+          feedsReport={false}
+          periodLabel={periodLabel}
+          note="Requisitions raised, issued, corrected or deleted here still change the Requisitioned column on Stock Count for that month. The frozen monthly report does not use requisitions, so nothing needs regenerating afterwards."
+        />
       )}
 
       {/* Issue and Delete happen on the list and detail screens, neither of which had anywhere to

@@ -1,35 +1,33 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import ModuleGuideTab from './ModuleGuideTab'
-import { IMS_GUIDE_GROUPS } from './imsGuideData'
-import { HR_GUIDE_GROUPS } from './hrGuideData'
-import { POS_GUIDE_GROUPS } from './posGuideData'
-import { SUITE_GUIDE_GROUPS } from './suiteGuideData'
-import { CUSTOMIZATION_GUIDE_GROUPS } from './customizationGuideData'
+import ActionError, { asActionError } from '../../components/ActionError'
+import { recoverFromChunkError } from '../../shared/chunkReload'
 
 // Admin Settings → Guides: one deep per-page reference guide per module, switched by the pill
-// bar here. This wrapper (and everything it imports — the component plus all three data files)
-// is lazy-loaded by Settings.js so the guide prose lives in its own on-demand chunk: the tab is
-// admin-only, and before this split ~1200 lines of admin-only strings shipped inside the Settings
-// chunk to every client login that opened Settings.
+// bar here. This wrapper is lazy-loaded by Settings.js, and since S878 each module's guide is a chunk
+// of its own, fetched when its tab is chosen: the five files are ~780 KB of source, and the tab used
+// to download all of them before the first one showed. Nothing else may import a guide data file
+// statically, or it rides back into this chunk.
 const MODULES = [
   {
-    key: 'ims', label: 'Crest IMS', groups: IMS_GUIDE_GROUPS,
+    key: 'ims', label: 'Crest IMS', load: () => import('./imsGuideData').then(m => m.IMS_GUIDE_GROUPS),
     docTitle: 'Crest IMS — Module Guide',
     docSubtitle: 'Inventory & food-cost reference. Printed from Admin → Settings → Guides.',
   },
   {
-    key: 'hr', label: 'Crest HR', groups: HR_GUIDE_GROUPS,
+    key: 'hr', label: 'Crest HR', load: () => import('./hrGuideData').then(m => m.HR_GUIDE_GROUPS),
     docTitle: 'Crest HR — Module Guide',
     docSubtitle: 'Payroll, attendance & staff reference. Printed from Admin → Settings → Guides.',
   },
   {
-    key: 'pos', label: 'Crest POS', groups: POS_GUIDE_GROUPS,
+    key: 'pos', label: 'Crest POS', load: () => import('./posGuideData').then(m => m.POS_GUIDE_GROUPS),
     docTitle: 'Crest POS — Module Guide',
     docSubtitle: 'Billing, floor & kitchen reference. Printed from Admin → Settings → Guides.',
   },
   // The POS add-on (S758/S759): sits beside POS because it exists only on a client with a till.
   {
-    key: 'customization', label: 'Crest Customization', groups: CUSTOMIZATION_GUIDE_GROUPS,
+    key: 'customization', label: 'Crest Customization',
+    load: () => import('./customizationGuideData').then(m => m.CUSTOMIZATION_GUIDE_GROUPS),
     docTitle: 'Crest Customization — Module Guide',
     docSubtitle: 'Sizes, extras & "No …" choices reference. Printed from Admin → Settings → Guides.',
   },
@@ -37,15 +35,39 @@ const MODULES = [
   // reads across all of them. Its four pages belonged to no module guide and therefore sat in
   // none at all until S636.
   {
-    key: 'suite', label: 'Crest Suite', groups: SUITE_GUIDE_GROUPS,
+    key: 'suite', label: 'Crest Suite', load: () => import('./suiteGuideData').then(m => m.SUITE_GUIDE_GROUPS),
     docTitle: 'Crest Suite — Module Guide',
     docSubtitle: 'Owner, P&L & multi-outlet reference. Printed from Admin → Settings → Guides.',
   },
 ]
 
+// A guide fetched once stays for the page load, so switching back to a module shows it at once.
+const loadedGroups = {}
+
 export default function GuidesTab() {
   const [moduleKey, setModuleKey] = useState('ims')
   const mod = MODULES.find(m => m.key === moduleKey) || MODULES[0]
+  const [groupsByKey, setGroupsByKey] = useState(() => ({ ...loadedGroups }))
+  const [loadError, setLoadError] = useState(null)
+  const [attempt, setAttempt] = useState(0)
+  const groups = groupsByKey[mod.key] || null
+
+  // Fetch the chosen module's guide unless it is already here. A failed fetch says so with a Try
+  // again, never an empty guide; a deploy that replaced the files reloads onto the new build, as a
+  // lazy route does.
+  useEffect(() => {
+    if (loadedGroups[mod.key]) return undefined
+    let live = true
+    setLoadError(null)
+    mod.load().then(loaded => {
+      loadedGroups[mod.key] = loaded
+      if (live) setGroupsByKey(prev => ({ ...prev, [mod.key]: loaded }))
+    }, err => {
+      if (!live || recoverFromChunkError(err)) return
+      setLoadError(asActionError(err, 'operator'))
+    })
+    return () => { live = false }
+  }, [mod, attempt])
 
   // Roving tabindex + arrow keys. `role="tab"` PROMISES this behaviour to a screen-reader user,
   // and until S594 the markup delivered none of it: no aria-controls, no panel, no key handling,
@@ -86,7 +108,16 @@ export default function GuidesTab() {
       {/* key forces a remount per module: ModuleGuideTab seeds its active section once from
           groups[0], so reusing one instance across a switch would keep a stale activeId. */}
       <div role="tabpanel" id={`guide-panel-${mod.key}`} aria-labelledby={`guide-tab-${mod.key}`} tabIndex={-1}>
-        <ModuleGuideTab key={mod.key} groups={mod.groups} docTitle={mod.docTitle} docSubtitle={mod.docSubtitle} />
+        {groups ? (
+          <ModuleGuideTab key={mod.key} groups={groups} docTitle={mod.docTitle} docSubtitle={mod.docSubtitle} />
+        ) : loadError ? (
+          <div>
+            <ActionError error={loadError} className="action-error--top" />
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAttempt(a => a + 1)}>Try again</button>
+          </div>
+        ) : (
+          <p role="status" style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading the {mod.label} guide…</p>
+        )}
       </div>
     </div>
   )

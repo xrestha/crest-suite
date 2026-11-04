@@ -1,9 +1,13 @@
+import { lazy } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import SubscriptionLock from './SubscriptionLock'
-import LegalReacceptance from './LegalReacceptance'
 import { IMS_COUNT_HOME, IMS_COUNT_LOGIN, imsCountPathReachable, isCountDevice } from '../shared/imsCountAccess'
 import { readTillDevice } from '../modules/pos/tillOutlet'
+
+// Fetched only for an Owner who has a document to accept (S878): every other sign-in downloaded it
+// for nothing. App.js's top-level Suspense shows RouteFallback while it arrives.
+const LegalReacceptance = lazy(() => import('./LegalReacceptance'))
 
 export default function ProtectedRoute({ children, adminOnly = false }) {
   const { session, profile, ready, loading, accessLocked, legalReacceptRequired, imsCountOnly } = useAuth()

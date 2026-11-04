@@ -4,14 +4,14 @@
  * screen, never to the owner's email login.
  */
 
-import React from 'react'
+import React, { Suspense } from 'react'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 
 let mockAuth = {}
 jest.mock('../context/AuthContext', () => ({ useAuth: () => mockAuth }))
 jest.mock('./SubscriptionLock', () => () => null)
-jest.mock('./LegalReacceptance', () => () => null)
+jest.mock('./LegalReacceptance', () => () => require('react').createElement('p', null, 'ACCEPT TERMS'))
 
 // eslint-disable-next-line import/first
 import ProtectedRoute from './ProtectedRoute'
@@ -78,4 +78,20 @@ it('a profile-less session anywhere else goes to the email login, as before', ()
   mockAuth = { session: { user: { id: 'u-1' } }, profile: null, ready: true, loading: false }
   renderAt()
   expect(screen.getByText('EMAIL LOGIN')).toBeTruthy()
+})
+
+// S878: the re-acceptance screen is fetched on demand, so it arrives through the app's Suspense.
+it('an Owner with a document to accept gets the re-acceptance screen, fetched when needed', async () => {
+  mockAuth = { session: { user: { id: 'u-1' } }, profile: { id: 'u-1', role: 'client' }, ready: true, loading: false, legalReacceptRequired: true }
+  render(
+    <MemoryRouter initialEntries={['/pos/orders']}>
+      <Suspense fallback={<p>LOADING</p>}>
+        <Routes>
+          <Route path="/pos/orders" element={<ProtectedRoute><p>ORDERS</p></ProtectedRoute>} />
+        </Routes>
+      </Suspense>
+    </MemoryRouter>
+  )
+  expect(await screen.findByText('ACCEPT TERMS')).toBeTruthy()
+  expect(screen.queryByText('ORDERS')).toBeNull()
 })

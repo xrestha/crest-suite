@@ -19,6 +19,14 @@ supplier split (the aging half was already fixed in S849). PERF-5 stayed open.
 
 **S876 (2026-11-04, crest-v486): PERF-6 to PERF-13 done in one release**, the last of the load-time list, with three migrations applied live. Each row below says how.
 
+**S878 (2026-11-04): the small leftovers from S875–S877 closed.** ✅ Settings → Guides fetches one module's guide
+when its tab is chosen (`GuidesTab.jsx`). ✅ `ProtectedRoute` loads `LegalReacceptance` only for an Owner with a
+document to accept. ✅ Stock Count → Settings leaves a blocked counting login out of section assignment
+(`imsLoginCanSignIn`). **Decided, no change (owner, 2026-11-04):** about 100 pages still import the error table
+directly, so a cold first page downloads it (~41 KB compressed) beside its own code. Moving every page's error path
+to an on-demand table would touch ~110 files to save about a quarter of a second, once per release, on a slow link,
+and Layout already fetches the table when the browser is idle.
+
 **S856 (2026-10-21, crest-v471): PERF-5 shipped**, so the S793 load-time list is done. What is left in this file is
 not engineering: a count-PIN sign-in on a real storeroom phone (S761, below, done the same day) and the accountant's
 question about a sales-side VAT view for IMS-only clients (closed 2026-10-22: not needed). **Owner decisions (S856, asked in plain words):** the phone check is done
@@ -238,7 +246,7 @@ VAT-status rule and `ims_first_till_bill_at` (D35 for IMS-rank logins).
 - ✅ S877 (`20261104140000`, `record_payable_payments`) — ~~No SERVER guard against paying a bill twice~~: the three Pay paths go through one INVOKER step that locks the bill lines, refuses (`payables_moved`) when a payment on them moved since the page loaded them, and writes the rows and the `paid_at` stamps in one transaction.
 - ✅ S798 stage 4c (crest-v386) — The HR Staff page's Last Seen was still an AD `toLocaleDateString` (the ImsStaff/PosStaff fix, `nepalBsLong`). HR is shared with hss-suite: fixed here and filed in `docs/CROSS-REPO.md` there.
 - ✅ Found done S877 — ~~`PosOrders.jsx` and `IssueCreditNoteModal.jsx` date "today" with `getBsToday()`~~: both use the Nepal date now (`nepalBs(new Date())`, the device date only as a fallback).
-- `ClosedPeriodBanner` could take a prop to drop its "regenerate the snapshot" clause, so Requisitions can use the component too.
+- ✅ S878 (`feedsReport={false}`) — ~~`ClosedPeriodBanner` could take a prop to drop its "regenerate the snapshot" clause, so Requisitions can use the component too~~.
 - ✅ S849 (GROUP-5, crest-v465) — `get_group_summary` — the Group Console's Spend % — still values a PAN outlet's purchases ex-VAT (D32 covered `get_group_pnl` only). Fixed: the summary now adds the unclaimable 13% for a PAN-only outlet, as its own dashboard does.
 - ✅ S877 (`withMasterRate` / `withLineVat` in `billLineVat.js`) — ~~(stage 4) On a bill line, ticking VAT after the rate was prefilled from Item Master does not re-divide it by 1.13~~: a prefilled Rate nobody typed over follows the tick. Left as is: the Item Master VAT review banner looks back 3 months of bills.
 

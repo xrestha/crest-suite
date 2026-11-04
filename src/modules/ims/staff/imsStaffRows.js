@@ -40,6 +40,14 @@ export function imsRowState(p, selfId) {
   }
 }
 
+// A login that can still sign in: neither a block made here nor a Final Settlement has stopped it.
+// Stock Count → Settings offers only these for section assignment (S878), since a blocked login
+// cannot count and must not be named as someone "with no sections ticked".
+export const imsLoginCanSignIn = p => {
+  const { settlementBlocked, staffBlocked } = imsRowState(p)
+  return !settlementBlocked && !staffBlocked
+}
+
 const upperFirst = s => s.charAt(0).toUpperCase() + s.slice(1)
 
 // The notice after admin-user-ops answered a Block or Unblock with success. `outcome` is
