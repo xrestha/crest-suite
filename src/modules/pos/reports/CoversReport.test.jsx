@@ -10,6 +10,7 @@ import { render, screen, fireEvent, within, waitFor } from '@testing-library/rea
 import * as XLSX from 'xlsx'
 import { formatBsDay } from '../../../utils/bsCalendar'
 import { todayNepalBs } from './reportRange'
+import { LETTERHEAD_ERROR_TEXT, LETTERHEAD_WAIT_TEXT } from '../../../components/LetterheadButton'
 
 // The answer per table, set per test.
 let mockAnswers = {}
@@ -167,7 +168,14 @@ test('a failed letterhead read is the report-error card, and Excel is off', asyn
   const card = (await screen.findByText("Could not load this outlet's name")).closest('.report-error') // eslint-disable-line testing-library/no-node-access
   expect(card.getAttribute('role')).toBe('alert')
   expect(within(card).getByText(/Excel is switched off/)).toBeTruthy()
-  expect(screen.getByRole('button', { name: /Excel/ }).disabled).toBe(true)
+  // S877: a precondition is aria-disabled with a press that says why, never a bare `disabled`.
+  const excel = screen.getByRole('button', { name: /Excel/ })
+  expect(excel.disabled).toBe(false)
+  expect(excel.getAttribute('aria-disabled')).toBe('true')
+  XLSX.writeFile.mockClear()
+  fireEvent.click(excel)
+  expect(screen.getByText(LETTERHEAD_ERROR_TEXT)).toBeTruthy()
+  expect(XLSX.writeFile).not.toHaveBeenCalled()
 })
 
 test('Excel stays off until the letterhead read has answered', async () => {
@@ -175,7 +183,13 @@ test('Excel stays off until the letterhead read has answered', async () => {
   Object.assign(mockBiz, { name: '', ready: false }) // useBizInfo before its read lands: no name, no error yet
   await openTab('Daily Trend')
   await screen.findByRole('columnheader', { name: 'Date (BS)' })
-  expect(screen.getByRole('button', { name: /Excel/ }).disabled).toBe(true)
+  const excel = screen.getByRole('button', { name: /Excel/ })
+  expect(excel.disabled).toBe(false)
+  expect(excel.getAttribute('aria-disabled')).toBe('true')
+  XLSX.writeFile.mockClear()
+  fireEvent.click(excel)
+  expect(screen.getByText(LETTERHEAD_WAIT_TEXT)).toBeTruthy()
+  expect(XLSX.writeFile).not.toHaveBeenCalled()
   expect(screen.queryByText("Could not load this outlet's name")).toBeNull()
 })
 

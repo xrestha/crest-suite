@@ -6,6 +6,7 @@ import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import PeriodScope from '../../../components/PeriodScope'
 import { printWithTitle } from '../../../utils/printTitle'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
@@ -269,8 +270,10 @@ export default function StockReport() {
 
   // Print and Excel emit a document, so they wait for the figures and for the letterhead's name
   // (S792, PLANNING-5): live during a load they filed the previous month's rows under the new
-  // month's title and filename, and after a failed read an empty sheet named as a report.
-  const emitDisabled = !figuresReady || !rows.length || !biz.ready
+  // month's title and filename, and after a failed read an empty sheet named as a report. The
+  // letterhead name is LetterheadButton's (S877: aria-disabled, and a press says why); the rest
+  // stays on `disabled`.
+  const emitDisabled = !figuresReady || !rows.length
 
   return (
     <div>
@@ -290,8 +293,8 @@ export default function StockReport() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <button className="btn btn-ghost" onClick={() => printWithTitle(`Stock Report - ${periodLabel}`)} disabled={emitDisabled} style={{ fontSize: 12 }}>🖶 Print</button>
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={emitDisabled} style={{ fontSize: 12 }}>Export Excel</button>
+          <LetterheadButton ready={biz.ready} error={biz.error} onClick={() => printWithTitle(`Stock Report - ${periodLabel}`)} disabled={emitDisabled} style={{ fontSize: 12 }}>🖶 Print</LetterheadButton>
+          <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={emitDisabled} style={{ fontSize: 12 }}>Export Excel</LetterheadButton>
           <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}</option>)}
           </select>

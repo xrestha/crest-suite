@@ -15,6 +15,7 @@ import { BS_MONTHS } from '../../utils/bsCalendar'
 import { withTimeout, settleWithin, isTimeout } from '../../utils/withTimeout'
 import SuiteGate, { SUITE_PAGES, useSuiteAccess } from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
+import LetterheadButton from '../../components/LetterheadButton'
 import ConfirmModal from '../../components/ConfirmModal'
 import ActionError, { asActionError } from '../../components/ActionError'
 import ReportLoadError from '../../components/ReportLoadError'
@@ -513,8 +514,9 @@ function MonthlyOwnerReportBody() {
   const periodLabel = report ? `${BS_MONTHS[report.bs_month - 1]} ${report.bs_year}` : ''
   // Export and Print emit a FILE, so they wait for every read they print from (OWNER-REPORT-18):
   // the letterhead's name, the "made by" name (S859: it lands after the report now), and no load in
-  // flight (S728's stale-workbook rule).
-  const exportsReady = !!report && biz.ready && !loading && !generating && !regenerating && !makerPending
+  // flight (S728's stale-workbook rule). The letterhead name is LetterheadButton's (S877:
+  // aria-disabled, and a press says why); the report, the loads and the maker stay on `disabled`.
+  const exportsReady = !!report && !loading && !generating && !regenerating && !makerPending
 
   // Food Cost thresholds: the ones frozen with the report (schema 18, OWNER-REPORT-5), else today's
   // Settings for an older report.
@@ -679,13 +681,13 @@ function MonthlyOwnerReportBody() {
         </MonthStepper>
         {report && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button className="btn btn-ghost" onClick={handleExport} disabled={!exportsReady}>Export Excel</button>
-            <button
-              className="btn btn-ghost" disabled={!exportsReady}
+            <LetterheadButton ready={biz.ready} error={biz.error} onClick={handleExport} disabled={!exportsReady}>Export Excel</LetterheadButton>
+            <LetterheadButton
+              ready={biz.ready} error={biz.error} disabled={!exportsReady}
               onClick={() => printWithTitle(`Monthly Owner Report — ${periodLabel} — ${biz.name}`)}
             >
               Print / Save as PDF
-            </button>
+            </LetterheadButton>
             {/* The Owner regenerates too (S756): they now edit closed months in place, and a
                 frozen report that only an operator could refresh would lag every such fix. */}
             {(isAdmin || isOwner) && (

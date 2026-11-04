@@ -6,6 +6,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ChartCard from '../../../components/ChartCard'
 import { CHART_COLORS } from '../../../shared/chartColors'
@@ -542,8 +543,8 @@ export default function PeriodComparison() {
             {/* Gated on the load (S728/S756): while a range change loads, `stats` holds the previous
                 range's figures while scopeLine, the print title and the filename already name the new one. */}
             <button className="btn btn-ghost" onClick={() => printWithTitle(`Period-over-Period Comparison - ${scopeLine}`)} disabled={loading || !!loadError}>Print</button>
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !biz.ready || !shown.length}
-              title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
+            {/* The letterhead name is a precondition, not a busy state: a press before it lands says why (S877). */}
+            <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={loading || !!loadError || !shown.length}>Export Excel</LetterheadButton>
           </div>
         </div>
       </div>

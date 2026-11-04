@@ -9,6 +9,7 @@ import { initPeriodLoad } from '../../../shared/periodList'
 import { supabase } from '../../../supabaseClient'
 import { readPriorBillLines } from './readPriorBillLines'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -267,9 +268,10 @@ export default function NonVatReport() {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             {/* Gated on `loading` (S756): the label, scope line and filename move on the click, the
                 rows only when the read lands — an ungated export named last month's rows after this
-                month. Excel also waits on biz.ready, or the letterhead's company name is blank. */}
+                month. Excel also waits on biz.ready, or the letterhead's company name is blank; a press
+                before then says why (LetterheadButton, S877). */}
             <button className="btn btn-ghost" onClick={() => printWithTitle(`Non-VAT Report - ${periodLabel(selectedPeriod)}`)} disabled={loading || !!loadError || !hasFigures}>Print</button>
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !biz.ready || !hasFigures}>Export Excel</button>
+            <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={loading || !!loadError || !hasFigures}>Export Excel</LetterheadButton>
           </div>
         </div>
       </div>

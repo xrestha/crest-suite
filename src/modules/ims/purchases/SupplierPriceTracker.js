@@ -6,6 +6,7 @@ import { vatCostFactor } from '../reports/supplierAttribution'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import RowDisclosure from '../../../components/RowDisclosure'
+import LetterheadButton from '../../../components/LetterheadButton'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -552,11 +553,11 @@ export default function SupplierPriceTracker() {
           <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => printWithTitle(`Supplier Price Tracker - ${selectedVendorId === 'all' ? 'All Vendors' : (vendorMap[selectedVendorId]?.name || 'Vendor')}${selectedPeriod ? ` - ${periodLabel}` : ''}`)}>
             🖨 Print
           </button>
-          {/* Waits for the letterhead (useBizInfo `ready`, S845), or the sheet ships a blank CompanyName. */}
-          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel} disabled={!biz.ready}
-            title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>
+          {/* Waits for the letterhead (useBizInfo `ready`, S845), or the sheet ships a blank CompanyName;
+              a press before then says why (LetterheadButton, S877). */}
+          <LetterheadButton ready={biz.ready} error={biz.error} style={{ fontSize: 12 }} onClick={exportExcel}>
             ↓ Export Excel
-          </button>
+          </LetterheadButton>
         </div>
       </div>
 

@@ -56,6 +56,8 @@ jest.mock('../../../shared/hooks/useBizInfo', () => ({ useBizInfo: () => mockBiz
 
 // eslint-disable-next-line import/first
 import PosExceptionReport from './PosExceptionReport'
+// eslint-disable-next-line import/first
+import { LETTERHEAD_ERROR_TEXT } from '../../../components/LetterheadButton'
 
 beforeEach(() => { mockHang = false; mockVoidLinesError = null; mockNoBills = false; Object.assign(mockBiz, { name: 'Test Cafe', error: null, ready: true }) })
 afterEach(() => jest.useRealTimers())
@@ -127,5 +129,12 @@ test('a failed letterhead read is the report-error card, and Excel is off', asyn
   const card = (await screen.findByText("Could not load this outlet's name")).closest('.report-error') // eslint-disable-line testing-library/no-node-access
   expect(card.getAttribute('role')).toBe('alert')
   expect(within(card).getByText(/The figures below are unaffected/)).toBeTruthy()
-  expect(screen.getByRole('button', { name: /Excel/ }).disabled).toBe(true)
+  // S877: once the rows have loaded, Excel is held by the letterhead alone: aria-disabled, and a
+  // press says why instead of exporting.
+  await screen.findByRole('option', { name: 'Ram Thapa' })
+  const excel = screen.getByRole('button', { name: /Excel/ })
+  expect(excel.disabled).toBe(false)
+  expect(excel.getAttribute('aria-disabled')).toBe('true')
+  fireEvent.click(excel)
+  expect(screen.getByText(LETTERHEAD_ERROR_TEXT)).toBeTruthy()
 })

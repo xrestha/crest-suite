@@ -8,6 +8,7 @@ import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import PeriodScope from '../../../components/PeriodScope'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
 import { useRecipeBook } from '../../../shared/hooks/useRecipeBook'
@@ -415,8 +416,8 @@ export default function Variance() {
               </option>
             ))}
           </select>
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !biz.ready || filtered.length === 0}
-            title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
+          {/* The letterhead name is a precondition, not a busy state: a press before it lands says why (S877). */}
+          <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={loading || !!loadError || filtered.length === 0}>Export Excel</LetterheadButton>
         </div>
       </div>
 

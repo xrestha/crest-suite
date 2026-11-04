@@ -27,7 +27,7 @@ import { BS_MONTHS, getBsToday } from '../../../utils/bsCalendar'
 import { npr } from '../../../shared/nepalMoney'
 import { nepalTime24 } from '../../../shared/nepalTime'
 import Tabs from '../../../components/Tabs'
-import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import ConfirmModal from '../../../components/ConfirmModal'
 import ReportLoadError from '../../../components/ReportLoadError'
 import ActionError, { asActionError } from '../../../components/ActionError'
@@ -343,11 +343,12 @@ export default function StockTransfers() {
                 <option key={p.id} value={p.id}>{periodName(p)}{p.status === 'open' ? ' (open)' : ''}</option>
               ))}
             </select>
-            <Tip text="Every transfer line this outlet recorded in the month: stock sent, received, and stock that came back from a cancelled or refused transfer." width={280}>
-              <button type="button" className="btn btn-ghost" onClick={exportMonth} disabled={exporting || !biz.ready || !exportPeriodId}>
-                {exporting ? 'Exporting…' : 'Export'}
-              </button>
-            </Tip>
+            {/* The letterhead name is a precondition (LetterheadButton, S877): a press before it lands
+                says why. `tip` keeps the Tip on the button itself, so it stays one tab stop. */}
+            <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportMonth} disabled={exporting || !exportPeriodId}
+              tip="Every transfer line this outlet recorded in the month: stock sent, received, and stock that came back from a cancelled or refused transfer." tipWidth={280}>
+              {exporting ? 'Exporting…' : 'Export'}
+            </LetterheadButton>
           </div>
         )}
       </div>

@@ -42,6 +42,7 @@ import { usePeriodList } from '../../shared/hooks/usePeriodList'
 import { UncountedItemsBanner } from '../../shared/uncountedItems'
 import SuiteGate, { SUITE_PAGES, useSuiteAccess } from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
+import LetterheadButton from '../../components/LetterheadButton'
 import MonthStepper, { neighboursOf } from '../../components/MonthStepper'
 import ReportPage from '../../components/ReportPage'
 import PeriodScope from '../../components/PeriodScope'
@@ -573,9 +574,9 @@ export default function ConsolidatedPnl() {
       <button className="btn btn-ghost" style={{ fontSize: 12 }}
         disabled={busy || !!loadError || isEmpty || !isCurrent}
         onClick={() => printWithTitle(`Profit & Loss - ${scope}`)}>Print</button>
-      <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
-        disabled={busy || !!loadError || isEmpty || !isCurrent || !biz.ready}
-        title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
+      {/* The letterhead name is a precondition, not a busy state: a press before it lands says why (S877). */}
+      <LetterheadButton ready={biz.ready} error={biz.error} style={{ fontSize: 12 }} onClick={exportExcel}
+        disabled={busy || !!loadError || isEmpty || !isCurrent}>Export Excel</LetterheadButton>
       {/* ‹ › step within what is on screen (S858): month to month, or fiscal year to fiscal year. Never
           disabled while a statement loads: a disabled button drops the focus a keyboard user just put on
           it, and useLatestRequest already lets only the last step win (S601). */}

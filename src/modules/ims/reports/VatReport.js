@@ -11,6 +11,7 @@ import { initPeriodLoad } from '../../../shared/periodList'
 import { supabase } from '../../../supabaseClient'
 import { readPriorBillLines } from './readPriorBillLines'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -387,9 +388,10 @@ export default function VatReport() {
             {/* Gated on `loading` too (S756): the period label, print title, scope line and filename
                 move the moment a month is picked, and the rows on screen are the PREVIOUS month's
                 until the read lands — so an ungated export shipped last month's figures under this
-                month's name. And on biz.ready for Excel, or the letterhead's company name is blank. */}
+                month's name. And on biz.ready for Excel, or the letterhead's company name is blank; a
+                press before then says why (LetterheadButton, S877). */}
             <button className="btn btn-ghost" onClick={() => printWithTitle(`VAT Report - ${periodLabel(selectedPeriod)}`)} disabled={loading || !!loadError || !hasFigures}>Print</button>
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !biz.ready || !hasFigures}>Export Excel</button>
+            <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={loading || !!loadError || !hasFigures}>Export Excel</LetterheadButton>
           </div>
         </div>
       </div>

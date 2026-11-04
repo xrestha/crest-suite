@@ -30,6 +30,8 @@ jest.mock('../../../shared/hooks/useBizInfo', () => ({ useBizInfo: () => mockBiz
 
 // eslint-disable-next-line import/first
 import KotLog from './KotLog'
+// eslint-disable-next-line import/first
+import { LETTERHEAD_ERROR_TEXT, LETTERHEAD_WAIT_TEXT } from '../../../components/LetterheadButton'
 
 const tickets = Array.from({ length: 450 }, (_, i) => ({
   id: `k${i}`, order_id: `o${i}`, order_no: i + 1, table_name: 'T1', station: 'KOT', status: 'served',
@@ -89,7 +91,14 @@ test('a failed letterhead read is the report-error card, and Excel is off', asyn
     expect(card.getAttribute('role')).toBe('alert')
     expect(within(card).getByText(/The log below is unaffected/)).toBeTruthy()
     expect(within(card).getByText('PGRST301 · JWT expired').className).toBe('action-error-detail')
-    expect(screen.getByRole('button', { name: /Excel/ }).disabled).toBe(true)
+    // S877: once the log has loaded, Excel is held by the letterhead alone: aria-disabled, and a
+    // press says why instead of exporting.
+    await screen.findByText('200 of 450 tickets shown. Excel exports all of them.')
+    const excel = screen.getByRole('button', { name: /Excel/ })
+    expect(excel.disabled).toBe(false)
+    expect(excel.getAttribute('aria-disabled')).toBe('true')
+    fireEvent.click(excel)
+    expect(screen.getByText(LETTERHEAD_ERROR_TEXT)).toBeTruthy()
   } finally {
     Object.assign(mockBiz, { name: 'Test Cafe', error: null, ready: true })
   }
@@ -101,9 +110,14 @@ test('Excel stays off until the letterhead read has answered, then comes on', as
   Object.assign(mockBiz, { name: '', error: null, ready: false })
   const { rerender } = render(<KotLog />)
   await screen.findByRole('status')
-  expect(screen.getByRole('button', { name: /Excel/ }).disabled).toBe(true)
+  const excel = screen.getByRole('button', { name: /Excel/ })
+  expect(excel.disabled).toBe(false)
+  expect(excel.getAttribute('aria-disabled')).toBe('true')
+  fireEvent.click(excel)
+  expect(screen.getByText(LETTERHEAD_WAIT_TEXT)).toBeTruthy()
   expect(screen.queryByText("Could not load this outlet's name")).toBeNull()
   Object.assign(mockBiz, { name: 'Test Cafe', ready: true })
   rerender(<KotLog />)
-  expect(screen.getByRole('button', { name: /Excel/ }).disabled).toBe(false)
+  expect(screen.getByRole('button', { name: /Excel/ }).hasAttribute('aria-disabled')).toBe(false)
+  expect(screen.queryByText(LETTERHEAD_WAIT_TEXT)).toBeNull()
 })

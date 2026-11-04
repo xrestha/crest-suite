@@ -11,6 +11,7 @@ import { firstError } from '../../../shared/queryError'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import { Navigate } from 'react-router-dom'
 import ReportPage from '../../../components/ReportPage'
 import PeriodScope from '../../../components/PeriodScope'
@@ -383,11 +384,12 @@ export default function StockAgeing() {
 
   const actions = (
     <>
-      {/* Print and export gated on the load (S756, S728) and export on the client-name read. */}
+      {/* Print and export gated on the load (S756, S728) and export on the client-name read, which
+          LetterheadButton holds with aria-disabled and a press that says why (S877). */}
       <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={loading || !!loadError}
         onClick={() => printWithTitle(`Stock Ageing — ${scopeLine}`)}>🖨 Print</button>
-      <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
-        disabled={loading || !!loadError || filtered.length === 0 || !biz.ready}>↓ Export Excel</button>
+      <LetterheadButton ready={biz.ready} error={biz.error} style={{ fontSize: 12 }} onClick={exportExcel}
+        disabled={loading || !!loadError || filtered.length === 0}>↓ Export Excel</LetterheadButton>
       <select aria-label="As at month" className="form-select" value={selectedPeriod?.id || ''}
         onChange={e => handlePeriodChange(e.target.value)}>
         {periods.map(p => <option key={p.id} value={p.id}>As at {monthLabel(p)}{p.status === 'open' ? ' (open)' : ''}</option>)}

@@ -5,6 +5,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -435,8 +436,8 @@ export default function AnnualSummary() {
                   year change, while the print title, scope line and filename already name the new one.
                   `busy` also covers the render before a new year's load has begun (S792). */}
               <button className="btn btn-ghost" style={{ fontSize: 13 }} disabled={busy || !!loadError} onClick={() => printWithTitle(`Annual Summary - ${selectedLabel}`)}>⎙ Print</button>
-              <button className="btn btn-ghost" style={{ fontSize: 13 }} disabled={busy || !!loadError || !biz.ready || !report.rows.length} onClick={exportExcel}
-                title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
+              {/* The letterhead name is a precondition, not a busy state: a press before it lands says why (S877). */}
+              <LetterheadButton ready={biz.ready} error={biz.error} style={{ fontSize: 13 }} disabled={busy || !!loadError || !report.rows.length} onClick={exportExcel}>Export Excel</LetterheadButton>
             </div>
           )}
         </div>

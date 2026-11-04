@@ -10,6 +10,7 @@ import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
+import LetterheadButton from '../../../components/LetterheadButton'
 import LetterheadError from './LetterheadError'
 import Tip from '../../../components/Tip'
 import { FilterChips } from '../../../components/Tabs'
@@ -46,7 +47,7 @@ function invoiceLabel(order, vatReg, current) {
 }
 
 export default function PosExceptionReport() {
-  const { clientId, hasPosAccess, isAdmin, imsEnabled, clientModules, customizationEnabled } = useAuth()
+  const { clientId, hasPosAccess, isAdmin, imsEnabled, clientModules } = useAuth()
   const { scopedFrom } = useScopedDb()
   // How a comp is costed (posLineCosts): with its choices where the outlet has Crest IMS, a
   // build-your-own dish by its build while Customization is on — as on its Complimentary Slip.
@@ -165,7 +166,9 @@ export default function PosExceptionReport() {
         // Bounded too (S842): it throws a timeout into the same catch as a refused read.
         costing = await withTimeout(posLineCosts(supabase, clientId, compLines, {
           inventory,
-          buildYourOwn: inventory && customizationEnabled ? buildYourOwnAmong(scopedFrom, compLines.map(i => i.recipe_id)) : [],
+          // A past bill is costed by what it holds, not by today's Customization switch (S877), as
+          // its Complimentary Slip is (viewPosBill).
+          buildYourOwn: inventory ? buildYourOwnAmong(scopedFrom, compLines.map(i => i.recipe_id)) : [],
         }), readMs, 'Costing the comps')
       } catch (err) {
         if (!loadReq.isCurrent(reqKey)) return
@@ -239,7 +242,7 @@ export default function PosExceptionReport() {
     if (names.map !== firstNames) setStaffNames(names.map)
     setRows([...baseRows, ...itemCompRows].sort((a, b) => new Date(b.closed_at) - new Date(a.closed_at)))
     setLoading(false)
-  }, [clientId, fromIso, toIso, scopedFrom, loadReq, inventory, customizationEnabled])
+  }, [clientId, fromIso, toIso, scopedFrom, loadReq, inventory])
 
   useEffect(() => { if (clientId) load() }, [clientId, load])
 
@@ -336,11 +339,12 @@ export default function PosExceptionReport() {
         <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {/* Off while loading or failed as well as when empty (S728/S754): the filename and scope
               line come from the pickers, which move before the rows do. */}
-          {/* …and off until the letterhead's client-name read has answered, or the sheet ships with a
-              blank CompanyName (S754, S845 — useBizInfo's `ready`). */}
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={filtered.length === 0 || loading || !!loadError || !biz.ready}>
+          {/* …and held until the letterhead's client-name read has answered, or the sheet ships with a
+              blank CompanyName (S754, S845 — useBizInfo's `ready`); a press before then says why
+              (LetterheadButton, S877). */}
+          <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={filtered.length === 0 || loading || !!loadError}>
             ⬇ Excel
-          </button>
+          </LetterheadButton>
         </div>
       </div>
 

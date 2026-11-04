@@ -2,6 +2,7 @@ import { npr, npr2 } from '../../../shared/nepalMoney'
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
+import LetterheadButton from '../../../components/LetterheadButton'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -2148,12 +2149,12 @@ export default function Stock() {
               )
             })()}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-            {/* A failed client-name read would ship the register with a blank CompanyName line (S754 rule). */}
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={!biz.ready || figuresLoading}
-              title={biz.error ? 'Your business name could not be loaded, so the export is paused — reload the page and try again.' : undefined}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+            {/* A failed client-name read would ship the register with a blank CompanyName line (S754
+                rule). LetterheadButton (S877) holds it, and a press says why. */}
+            <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={figuresLoading}>
               Export Excel
-            </button>
+            </LetterheadButton>
           </div>
 
           <div className="card">

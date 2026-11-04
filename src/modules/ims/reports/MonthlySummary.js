@@ -5,6 +5,7 @@ import { fetchAllRows, fetchAllRowsParallel } from '../../../shared/fetchAllRows
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { COGS_FORMULA, fcFigure } from '../../../shared/imsFormulas'
@@ -253,7 +254,11 @@ export default function MonthlySummary() {
   // permanent, so it gates on more than `loading`).
   const reportIsCurrent = !!report && !!selectedPeriod
     && report.periodId === selectedPeriod.id && report.clientId === effectiveClientId
-  const exportBlocked = loading || !!loadError || !biz.ready || !reportIsCurrent
+  // The letterhead name is a precondition, not a busy state, so it is LetterheadButton's (S877:
+  // aria-disabled, and a press says why); `exportDisabled` keeps the rest on `disabled`, and the
+  // handler still refuses either.
+  const exportDisabled = loading || !!loadError || !reportIsCurrent
+  const exportBlocked = exportDisabled || !biz.ready
 
   async function exportExcel() {
     if (exportBlocked) return
@@ -302,8 +307,7 @@ export default function MonthlySummary() {
           {/* Help promised this export for your accountant and the page had none (S792, FIGURES-10).
               The letterhead read has its own error slot (useBizInfo, S754): a failed read would
               ship a workbook with a blank CompanyName line. */}
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={exportBlocked} style={{ fontSize: 13 }}
-            title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
+          <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={exportDisabled} style={{ fontSize: 13 }}>Export Excel</LetterheadButton>
         </div>
       </div>
 

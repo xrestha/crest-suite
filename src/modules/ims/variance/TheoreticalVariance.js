@@ -5,6 +5,7 @@ import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import PeriodScope from '../../../components/PeriodScope'
 import { COGS_FORMULA, computeUsed, varianceBand, varianceFlagPct } from '../../../shared/imsFormulas'
 import { selectDepletingSales } from '../sales/salesDepletion'
@@ -599,10 +600,10 @@ export default function TheoreticalVariance() {
         </div>
 
         {/* Gated on the load as well as the rows (S728): while a period change computes, `rows` is
-            the previous month's while the filename and scope line already name the new one. */}
-        <button className="btn btn-ghost" onClick={exportExcel}
-          disabled={loading || computing || !!loadError || !biz.ready || rows.length === 0}
-          title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
+            the previous month's while the filename and scope line already name the new one. The
+            letterhead name is held by LetterheadButton (S877), whose press says why. */}
+        <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel}
+          disabled={loading || computing || !!loadError || rows.length === 0}>Export Excel</LetterheadButton>
       </div>
 
       {/* Table */}

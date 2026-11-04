@@ -14,6 +14,7 @@ import { readPriorBillLines } from './readPriorBillLines'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import RowDisclosure from '../../../components/RowDisclosure'
+import LetterheadButton from '../../../components/LetterheadButton'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
 import PeriodScope from '../../../components/PeriodScope'
@@ -752,8 +753,8 @@ export default function VendorReport() {
               one month’s figures leaving the building inside another month’s workbook,
               which is the S601 rule verbatim. */}
           {/* biz.ready (S756, S845): a failed or unfinished client-name read shipped all three sheets
-              with a blank CompanyName line. */}
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !biz.ready}>Export Excel</button>
+              with a blank CompanyName line. LetterheadButton (S877) holds it, and a press says why. */}
+          <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={loading || !!loadError}>Export Excel</LetterheadButton>
         </div>
       </div>
 

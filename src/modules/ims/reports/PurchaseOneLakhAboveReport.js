@@ -6,6 +6,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import ReportLoadError from '../../../components/ReportLoadError'
 import PeriodScope from '../../../components/PeriodScope'
 import NoPeriodState from '../../../components/NoPeriodState'
@@ -311,9 +312,10 @@ export default function PurchaseOneLakhAboveReport() {
           </select>
         </div>
         {/* Gated on `loading` (S756): the FY label and filename move on the click and the rows only
-            when the read lands, so an ungated export named one year's disclosure after another. */}
-        <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={exportExcel}
-          disabled={loading || !!loadError || !biz.ready || rows.length === 0}>Export Excel</button>
+            when the read lands, so an ungated export named one year's disclosure after another. The
+            letterhead name is held by LetterheadButton (S877), whose press says why. */}
+        <LetterheadButton ready={biz.ready} error={biz.error} style={{ marginLeft: 'auto' }} onClick={exportExcel}
+          disabled={loading || !!loadError || rows.length === 0}>Export Excel</LetterheadButton>
       </div>
 
       {!loadError && !loading && openPeriods.length > 0 && (

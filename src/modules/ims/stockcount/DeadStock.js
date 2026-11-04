@@ -11,6 +11,7 @@ import { usePeriodList } from '../../../shared/hooks/usePeriodList'
 import { initPeriodLoad } from '../../../shared/periodList'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import NoPeriodState from '../../../components/NoPeriodState'
@@ -381,8 +382,9 @@ export default function DeadStock() {
           </select>
           <button className="btn btn-ghost" disabled={loading || !!loadError}
             onClick={() => printWithTitle(`Dead Stock / Slow Movers — ${scopeLine}`)}>Print</button>
-          {/* biz.ready (S756, S845): the export waits rather than send a nameless document. */}
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !rows.length || !biz.ready}>Export Excel</button>
+          {/* biz.ready (S756, S845): the export waits rather than send a nameless document, and a
+              press before then says why (LetterheadButton, S877). */}
+          <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={loading || !!loadError || !rows.length}>Export Excel</LetterheadButton>
         </div>
       </div>
 

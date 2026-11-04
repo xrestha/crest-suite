@@ -6,6 +6,7 @@ import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { npr, NPR_LOCALE } from '../../../shared/nepalMoney'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import NoPeriodState from '../../../components/NoPeriodState'
@@ -200,8 +201,8 @@ export default function WastageReport() {
             ))}
           </select>
           <button className="btn btn-ghost" disabled={loading || !!loadError} onClick={() => printWithTitle(`Wastage Report — ${scopeLine}`)}>Print</button>
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={loading || !!loadError || !rows.length || !biz.ready}
-            title={biz.error ? 'Your business details could not be loaded for the letterhead — reload the page to export' : undefined}>Export Excel</button>
+          {/* The letterhead name is a precondition, not a busy state: a press before it lands says why (S877). */}
+          <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={loading || !!loadError || !rows.length}>Export Excel</LetterheadButton>
         </div>
       </div>
 

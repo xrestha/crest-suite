@@ -3,6 +3,7 @@ import { nprInt } from '../../../shared/nepalMoney'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { printWithTitle } from '../../../utils/printTitle'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import { formatAd, formatAdAsBs, getBsFiscalYear, getBsFiscalYearStart, getBsToday } from '../../../utils/bsCalendar'
 import { nepalBsLong } from '../../../shared/nepalTime'
 import { getFiscalYearAdRange } from '../reports/vendorBalanceHelpers'
@@ -61,8 +62,9 @@ export default function DisposalReportTab({ assets }) {
           </select>
         </div>
         {disposed.length > 0 && (
-          // The printed heading names the business, so Print waits for its name (S845).
-          <button className="btn btn-primary" style={{ marginLeft: 'auto' }} disabled={!biz.ready} onClick={() => printWithTitle(title)}>Print</button>
+          // The printed heading names the business, so Print waits for its name (S845); a press
+          // before then says why (LetterheadButton, S877).
+          <LetterheadButton ready={biz.ready} error={biz.error} className="btn btn-primary" style={{ marginLeft: 'auto' }} onClick={() => printWithTitle(title)}>Print</LetterheadButton>
         )}
       </div>
       {disposed.length > 0 && biz.error && (

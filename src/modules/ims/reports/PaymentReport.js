@@ -5,6 +5,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { Link, Navigate } from 'react-router-dom'
@@ -270,9 +271,10 @@ export default function PaymentReport() {
           {/* Gated like every sibling (S792, TAX-5; the S728 rule for a control that emits a FILE).
               It had no gate at all: after a failed read it exported NPR 0 for every method under the
               period's scope line, during a period change the old month's figures under the new
-              month's name, and with no outlet name a blank CompanyName line. */}
-          <button className="btn btn-ghost" onClick={exportExcel}
-            disabled={loading || !!loadError || !biz.ready || !selectedPeriod}>Export Excel</button>
+              month's name, and with no outlet name a blank CompanyName line. The name is held by
+              LetterheadButton (S877), whose press says why. */}
+          <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel}
+            disabled={loading || !!loadError || !selectedPeriod}>Export Excel</LetterheadButton>
         </div>
       </div>
 

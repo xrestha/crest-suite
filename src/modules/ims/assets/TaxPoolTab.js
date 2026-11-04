@@ -6,6 +6,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
@@ -632,8 +633,9 @@ ${text}`, detail })
             </Tip>
           )}
           {lines && (
-            // The printed heading names the business, so Print waits for its name (S845).
-            <button className="btn btn-ghost" disabled={!biz.ready} onClick={() => printWithTitle(`Tax Depreciation Schedule - FY ${fyLabel}`)}>Print</button>
+            // The printed heading names the business, so Print waits for its name (S845); a press
+            // before then says why (LetterheadButton, S877).
+            <LetterheadButton ready={biz.ready} error={biz.error} onClick={() => printWithTitle(`Tax Depreciation Schedule - FY ${fyLabel}`)}>Print</LetterheadButton>
           )}
           {msg && <span style={{ fontSize: 12, color: 'var(--theme-green-text)' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>

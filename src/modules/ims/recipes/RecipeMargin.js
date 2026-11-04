@@ -8,6 +8,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { usePeriodList } from '../../../shared/hooks/usePeriodList'
 import { initPeriodLoad } from '../../../shared/periodList'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { useSettings } from '../../../context/SettingsContext'
@@ -276,8 +277,11 @@ export default function RecipeMargin() {
   // (S792, IMS_TODO S792.4; the S728 rule for a control that emits a FILE). On `display.length`
   // alone it stayed live while a period change was loading, so the previous month's rows could
   // leave in a file named for the new one; and a failed read was refused only because it happens
-  // to clear the rows, which is not a gate anyone can see.
-  const exportBlocked = loading || !!loadError || !biz.ready || !display.length
+  // to clear the rows, which is not a gate anyone can see. The letterhead name is a precondition,
+  // not a busy state, so it is LetterheadButton's (S877: aria-disabled, and a press says why);
+  // `exportDisabled` keeps the rest on `disabled`, and the handler still refuses either.
+  const exportDisabled = loading || !!loadError || !display.length
+  const exportBlocked = exportDisabled || !biz.ready
   async function exportExcel() {
     if (exportBlocked) return
     const XLSX = await import('xlsx')
@@ -337,7 +341,7 @@ export default function RecipeMargin() {
             ))}
           </select>
           <button className="btn btn-ghost" onClick={() => printWithTitle(`Recipe Contribution Margin - ${periodLabel}`)}>Print</button>
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={exportBlocked}>Export Excel</button>
+          <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={exportDisabled}>Export Excel</LetterheadButton>
         </div>
       </div>
 

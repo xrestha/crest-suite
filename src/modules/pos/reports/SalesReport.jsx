@@ -11,6 +11,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { firstError } from '../../../shared/queryError'
 import { errorInfo } from '../../../shared/errorText'
 import ReportLoadError from '../../../components/ReportLoadError'
+import LetterheadButton from '../../../components/LetterheadButton'
 import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
@@ -297,7 +298,7 @@ const REG_LEFT = { position: 'sticky', left: 0, zIndex: 1, background: STICKY_BG
 const REG_RIGHT = { position: 'sticky', right: 0, zIndex: 1, background: STICKY_BG }
 
 export default function SalesReport() {
-  const { clientId, hasPosAccess, isAdmin, imsEnabled, clientModules, customizationEnabled } = useAuth()
+  const { clientId, hasPosAccess, isAdmin, imsEnabled, clientModules } = useAuth()
   const { scopedFrom } = useScopedDb()
   // How Comped Bills costs a comp (posLineCosts): with its choices where the outlet has Crest IMS, a
   // build-your-own dish by its build while Customization is on — as on its Complimentary Slip.
@@ -585,7 +586,9 @@ export default function SalesReport() {
           // Bounded too (S842): it throws a timeout into the same catch as a refused read.
           costing = await withTimeout(posLineCosts(supabase, clientId, compedItems, {
             inventory,
-            buildYourOwn: inventory && customizationEnabled ? buildYourOwnAmong(scopedFrom, compedItems.map(i => i.recipe_id)) : [],
+            // A past bill is costed by what it holds, not by today's Customization switch (S877), as
+            // its Complimentary Slip is (viewPosBill).
+            buildYourOwn: inventory ? buildYourOwnAmong(scopedFrom, compedItems.map(i => i.recipe_id)) : [],
           }), readMs, 'Costing the comped dishes')
         } catch (err) {
           if (!rangeReq.isCurrent(reqKey)) return
@@ -623,7 +626,7 @@ export default function SalesReport() {
     setCompsByOrder(compsByOrderNext)
     setReceiptsByOrder(receiptsNext)
     setRangeLoading(false)
-  }, [clientId, fromIso, toIso, scopedFrom, rangeReq, inventory, customizationEnabled])
+  }, [clientId, fromIso, toIso, scopedFrom, rangeReq, inventory])
 
   useEffect(() => { loadRange() }, [loadRange])
 
@@ -1373,8 +1376,9 @@ export default function SalesReport() {
         <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {/* Figure-bearing control (S728): off while the active tab's pipeline is loading or has
               failed — the filename and scope line come from the pickers, which move before the data
-              does — and off until the letterhead read has answered, or the sheet ships blank (S754, S845). */}
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={isEmpty || loading || !!loadError || !bizLoaded}>⬇ Excel</button>
+              does — and held until the letterhead read has answered, or the sheet ships blank (S754,
+              S845), with aria-disabled and a press that says why (LetterheadButton, S877). */}
+          <LetterheadButton ready={bizLoaded} error={bizError} onClick={exportExcel} disabled={isEmpty || loading || !!loadError}>⬇ Excel</LetterheadButton>
         </div>
       </div>
 

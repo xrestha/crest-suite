@@ -11,11 +11,13 @@ import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { nepalBs, nepalBsLong, nepalCivilDate, nepalTime } from '../../../shared/nepalTime'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { BS_MONTHS, bsToAd, getBsToday, formatAd, daysInBsMonth } from '../../../utils/bsCalendar'
 import { runForecast } from '../../../utils/demandForecastData'
 import { splitDishList, totalQtyByRecipe, aggregateIngredientDemand, ingredientBuyList, scaleForecastDays, addDemand, SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD } from '../../../utils/demandForecastMath'
 import { packsFor, packText } from './reorderPacks'
+import { plateAverageLine, occasionalAverageLine, printedAverage } from './forecastAverageNote'
 import { useSettings } from '../../../context/SettingsContext'
 import { useWeatherStrip } from '../../dashboard/useWeatherStrip'
 import { rainFactorForMonth, rainPctValue, isRainyDay } from '../../dashboard/weatherEffect'
@@ -33,6 +35,9 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const WEEKDAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const fmtNpr = nprOrDash
 const PREVIEW_COUNT = 8
+// "Show averages" (S877): a dish becomes a two-line stack, its name and plates over a quiet line.
+const AVG_ITEM = { display: 'inline-flex', flexDirection: 'column' }
+const AVG_LINE = { fontSize: 10, color: 'var(--theme-text2)' }
 
 // Base-unit quantities span "0.25 kg" and "1,250 gm" — two decimals below 100, whole above.
 function fmtQty(q) {
@@ -137,6 +142,8 @@ function DemandForecastBody() {
   const EMPTY_ING = { loading: false, error: null, exploded: {}, choicePerPlate: {}, choiceError: null, items: [], stock: null, stockError: null, suppliers: null, supplierError: null }
   const [ingredients, setIngredients] = useState(EMPTY_ING)
   const [showCovered, setShowCovered] = useState(false)
+  // Off by default (S877): each dish's raw average and sample days as a second line under its plates.
+  const [showAverages, setShowAverages] = useState(false)
 
   // Covers exist only where POS does: manual Sales Entries carry none. Keyed on the viewed
   // client's real subscription, not the session's `posEnabled`, which is true for every admin
@@ -413,7 +420,9 @@ function DemandForecastBody() {
     : horizonLabel
   // Print and Export carry the figures, the dish names and the letterhead, so they wait on all
   // three (the S728 rule: a control that emits a file is where a stale or partial render sticks).
-  const emitBlocked = loading || !!loadError || forecast.length === 0 || ingredients.loading || !biz.ready || !!namesError
+  // The letterhead name is LetterheadButton's (S877: aria-disabled, and a press says why); the
+  // figures and the dish names stay on `disabled`.
+  const emitBlocked = loading || !!loadError || forecast.length === 0 || ingredients.loading || !!namesError
   // Whether the forecast has any dish to buy for (FORECAST-10d): the empty list says which case it is.
   const forecastHasDishes = forecast.some(d => Object.values(d.forecastQtyByRecipe).some(q => q > 0))
 
@@ -574,8 +583,8 @@ function DemandForecastBody() {
               {recomputing ? 'Recomputing…' : weatherPending ? 'Loading weather…' : 'Recompute Forecast'}
             </button>
           </Tip>
-          <button className="btn btn-ghost" onClick={handleExport} disabled={emitBlocked || !!ingredients.error}>Export Excel</button>
-          <button className="btn btn-ghost" onClick={handlePrint} disabled={emitBlocked}>Print</button>
+          <LetterheadButton ready={biz.ready} error={biz.error} onClick={handleExport} disabled={emitBlocked || !!ingredients.error}>Export Excel</LetterheadButton>
+          <LetterheadButton ready={biz.ready} error={biz.error} onClick={handlePrint} disabled={emitBlocked}>Print</LetterheadButton>
         </div>
         {/* This horizon's latest Recompute (FORECAST-8, GAPS-13): when by the server's clock, who
             (the stamp trigger writes the name; "Crest support" for the operator), and what it did. */}
@@ -642,6 +651,18 @@ function DemandForecastBody() {
         </div>
       ) : (
         <>
+        {/* S877: since S858 a keyboard user got one explanation per day, not each dish's average,
+            which sat in a hover `title`. A lone on/off is a bare .tab-btn with aria-pressed
+            (component-library.md, FilterChips). It adds plain text under each figure, never a
+            tab stop, and changes no figure. */}
+        <div className="no-print" style={{ margin: '0 0 10px' }}>
+          <Tip text="Adds a second line under each dish: its daily average before it is rounded up to whole plates, and how many past days of the same weekday that average comes from. Nothing in the forecast changes." width={280}>
+            <button type="button" className={`tab-btn${showAverages ? ' tab-btn--active' : ''}`}
+              aria-pressed={showAverages} onClick={() => setShowAverages(v => !v)}>
+              {showAverages && <span aria-hidden="true">✓ </span>}Show averages
+            </button>
+          </Tip>
+        </div>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
@@ -700,12 +721,15 @@ function DemandForecastBody() {
                               per day leads the line and says what the counts are, for the keyboard. */}
                           <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 11, color: 'var(--theme-text3)', alignItems: 'baseline' }}>
                             {plates.length > 0 && (
-                              <Tip text={`Whole plates to prep, rounded up from the daily average${evidence ? ` (${evidence}, recent weeks weighted more)` : ''}. Hover a dish for its average.`} width={260}>
+                              <Tip text={`Whole plates to prep, rounded up from the daily average${evidence ? ` (${evidence}, recent weeks weighted more)` : ''}. Hover a dish for its average, or turn on Show averages above the table.`} width={260}>
                                 <span style={{ fontStyle: 'italic' }}>Plates to prep:</span>
                               </Tip>
                             )}
                             {visiblePlates.map(p => (
-                              <span key={p.recipeId} title={avgTip(p.qty)}>{nameOf(p.recipeId)}: <strong style={{ color: 'var(--theme-text2)' }}>{p.plates}</strong></span>
+                              <span key={p.recipeId} title={avgTip(p.qty)} style={showAverages ? AVG_ITEM : undefined}>
+                                <span>{nameOf(p.recipeId)}: <strong style={{ color: 'var(--theme-text2)' }}>{p.plates}</strong></span>
+                                {showAverages && <span style={AVG_LINE}><span className="sr-only">, </span>{plateAverageLine(p.qty, f.sampleCount)}</span>}
+                              </span>
                             ))}
                             {!showingAll && (hiddenPlates > 0 || occasional.length > 0) && (
                               <button type="button" className="btn-linklike" onClick={() => setExpandedIdx(idx)}>
@@ -722,12 +746,18 @@ function DemandForecastBody() {
                             <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 11, color: 'var(--theme-text3)', marginTop: 6, alignItems: 'baseline' }}>
                               {/* S858: the same shape as the plates line, one Tip for the list and a
                                   `title` per dish rather than a Tab stop each. */}
-                              <Tip text={`Sold on fewer than one ${WEEKDAYS_FULL[weekday]} in two — under ${OCCASIONAL_THRESHOLD} a day on average. Worth having the ingredients for, not worth prepping a plate of. Hover a dish for the weeks behind its average.`} width={260}>
+                              <Tip text={`Sold on fewer than one ${WEEKDAYS_FULL[weekday]} in two — under ${OCCASIONAL_THRESHOLD} a day on average. Worth having the ingredients for, not worth prepping a plate of. Hover a dish for the weeks behind its average, or turn on Show averages above the table.`} width={260}>
                                 <span style={{ fontStyle: 'italic' }}>Occasional:</span>
                               </Tip>
-                              {occasional.map(o => (
-                                <span key={o.recipeId} title={avgTip(o.qty)}>{nameOf(o.recipeId)} <span style={{ opacity: 0.8 }}>({o.qty.toFixed(1)}/day)</span></span>
-                              ))}
+                              {occasional.map(o => {
+                                const days = showAverages ? occasionalAverageLine(f.sampleCount) : null
+                                return (
+                                  <span key={o.recipeId} title={avgTip(o.qty)} style={days ? AVG_ITEM : undefined}>
+                                    <span>{nameOf(o.recipeId)} <span style={{ opacity: 0.8 }}>({o.qty.toFixed(1)}/day)</span></span>
+                                    {days && <span style={AVG_LINE}><span className="sr-only">, </span>{days}</span>}
+                                  </span>
+                                )
+                              })}
                             </div>
                           )}
                           {/* Print always shows the complete list regardless of on-screen expand state —
@@ -736,13 +766,13 @@ function DemandForecastBody() {
                               won't apply here — spans get their own right-margin as a fallback. */}
                           <div className="print-only" style={{ fontSize: 11 }}>
                             {plates.map(p => (
-                              <span key={p.recipeId} style={{ marginRight: 14 }}>{nameOf(p.recipeId)}: <strong>{p.plates}</strong> <span style={{ opacity: 0.7 }}>({p.qty.toFixed(1)})</span></span>
+                              <span key={p.recipeId} style={{ marginRight: 14 }}>{nameOf(p.recipeId)}: <strong>{p.plates}</strong> <span style={{ opacity: 0.7 }}>{printedAverage(p.qty, f.sampleCount, showAverages)}</span></span>
                             ))}
                             {occasional.length > 0 && (
                               <div style={{ marginTop: 4 }}>
                                 <em>Occasional:</em>{' '}
                                 {occasional.map(o => (
-                                  <span key={o.recipeId} style={{ marginRight: 14 }}>{nameOf(o.recipeId)} ({o.qty.toFixed(1)})</span>
+                                  <span key={o.recipeId} style={{ marginRight: 14 }}>{nameOf(o.recipeId)} {printedAverage(o.qty, f.sampleCount, showAverages)}</span>
                                 ))}
                               </div>
                             )}

@@ -10,6 +10,7 @@ import { npr, nprInt } from '../../../shared/nepalMoney'
 import { unitRateCell } from '../../../shared/unitRate'
 import { supabase } from '../../../supabaseClient'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import PeriodScope from '../../../components/PeriodScope'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { explodeRecipeIngredients } from '../../../utils/recipeCost'
@@ -465,9 +466,10 @@ export default function FifoReport() {
           </select>
           <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={loading || !!loadError}
             onClick={() => printWithTitle(`FIFO / Expiry Report — ${scopeLine}`)}>🖨 Print</button>
-          {/* biz.ready (S756, S845): a failed or unfinished client-name read shipped a blank CompanyName line. */}
-          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
-            disabled={loading || !!loadError || filtered.length === 0 || !biz.ready}>↓ Export Excel</button>
+          {/* biz.ready (S756, S845): a failed or unfinished client-name read shipped a blank CompanyName line.
+              LetterheadButton (S877) holds it with aria-disabled, and a press says why. */}
+          <LetterheadButton ready={biz.ready} error={biz.error} style={{ fontSize: 12 }} onClick={exportExcel}
+            disabled={loading || !!loadError || filtered.length === 0}>↓ Export Excel</LetterheadButton>
         </div>
       </div>
 

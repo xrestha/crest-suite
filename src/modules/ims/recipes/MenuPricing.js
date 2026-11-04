@@ -26,6 +26,7 @@ import { FilterChips } from '../../../components/Tabs'
 import { vatModeOf, guestVatRate, storedFromMenuPrice, panPriceMismatches, PAN_LABEL, VAT_MODE_UNKNOWN_TEXT } from './menuPriceVat'
 import PanPriceBanner from './PanPriceBanner'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import LetterheadButton from '../../../components/LetterheadButton'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
 import FcBandKey from '../../../components/FcBandKey'
@@ -101,11 +102,17 @@ export default function MenuPricing() {
   // S862 SETUP-9: the read is bounded, so a hang becomes the failed-read state below, and only the
   // latest read answers: a timed-out first read must not mark a later good one as failed.
   const choicesReq = useRef(0)
+  // S877: in the IMS branch this one read, with the choices' stock lines, also feeds the build-your-own
+  // cost ranges (useBuildCostRanges takes it as `catalogRead`), which used to read the catalog again.
+  // Each keeps its own failed-read handling: here the labels and the price check, there the range.
+  const byoEnabled = customizationOn && !!clientModules?.ims
+  const [catalogRead, setCatalogRead] = useState(null) // { clientId, catalog } | { clientId, error }
   const loadChoiceNames = useCallback(async () => {
     if (!customizationOn || !effectiveClientId) return
     const req = ++choicesReq.current
-    const cat = await settleWithin(loadOptionCatalog(scopedFrom), CUSTOMIZATION_READ_MS, 'Loading the choices')
+    const cat = await settleWithin(loadOptionCatalog(scopedFrom, { withIngredients: byoEnabled }), CUSTOMIZATION_READ_MS, 'Loading the choices')
     if (req !== choicesReq.current) return
+    setCatalogRead(cat.error ? { clientId, error: cat.error } : { clientId, catalog: cat })
     if (cat.error) {
       console.error('Menu Pricing: the option catalog could not be read, so new prices are saved without the below-zero check', cat.error)
       setChoicesReadFailed(true)
@@ -121,7 +128,7 @@ export default function MenuPricing() {
     })
     setChoiceNames(map)
     setOptionCatalog({ groups: cat.groups, options: cat.options, attachments: cat.attachments })
-  }, [customizationOn, effectiveClientId, scopedFrom])
+  }, [customizationOn, byoEnabled, clientId, effectiveClientId, scopedFrom])
   useEffect(() => { loadChoiceNames() }, [loadChoiceNames])
   // What a new price does to the dish's sizes: "Half NPR 180 · Full NPR 280", and whether the dish
   // could then be ordered below zero with its choices (sizeEffect, optionPricing.js). `stored` is
@@ -562,7 +569,7 @@ export default function MenuPricing() {
   // POS-only branch has no costs to show. The hook reads the mark itself, so this page's recipe query
   // is unchanged. Above the guard and both returns, like every hook here.
   const byoFixedCost = useCallback(r => r.ingCost || 0, [])
-  const byoCost = useBuildCostRanges({ enabled: customizationOn && !!clientModules?.ims, recipes, fixedCostOf: byoFixedCost })
+  const byoCost = useBuildCostRanges({ enabled: byoEnabled, recipes, fixedCostOf: byoFixedCost, catalogRead })
   const [expandedByo, setExpandedByo] = useState(() => new Set())
 
   const posOnCount  = recipes.filter(r => r.pos_enabled).length
@@ -964,9 +971,11 @@ export default function MenuPricing() {
   // sent those old food costs out as current. The sheet now carries the letterhead and a scope
   // line (what it covers, as of when, at which rates) like every other export, and waits on the
   // outlet name that letterhead needs.
-  const exportBlocked = loading || !!loadError || !biz.ready || display.length === 0
+  // The letterhead wait is LetterheadButton's (S877): pressed early it says so rather than sitting
+  // grey; the figure reasons below keep the button disabled as before.
+  const exportBlocked = loading || !!loadError || display.length === 0
   async function exportExcel() {
-    if (exportBlocked) return
+    if (exportBlocked || !biz.ready || biz.error) return
     const XLSX = await import('xlsx')
     // A build-your-own dish's own ingredients are the bowl and the spoon (S792, RECIPES-1): its
     // cost and FC % would be the near-zero figure the screen replaces with a range, so the sheet
@@ -1032,11 +1041,10 @@ export default function MenuPricing() {
               🖨 Print
             </button>
           </Tip>
-          <Tip text="Downloads the list as filtered and sorted on screen, with a blank New Price column to fill in and send back." width={280}>
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={exportBlocked}>
-              ⬇ Excel
-            </button>
-          </Tip>
+          <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={exportBlocked}
+            tip="Downloads the list as filtered and sorted on screen, with a blank New Price column to fill in and send back." tipWidth={280}>
+            ⬇ Excel
+          </LetterheadButton>
           <button className="btn btn-ghost" onClick={refreshCosts} disabled={refreshing}>
             {refreshing ? 'Refreshing…' : '↻ Refresh Costs'}
           </button>

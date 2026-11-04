@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, Navigate, Link } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
+import LetterheadButton from '../../../components/LetterheadButton'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
@@ -543,10 +544,10 @@ export default function ReorderReport() {
             </Tip>
             {/* Export had no `disabled` at all (S756): during a period change it wrote the previous
                 period's rows into a file named for the new one, and after a failed read an empty
-                sheet named as a report. */}
-            <Tip text="Exports the current Category/Status/Search view to Excel — or just the checked rows, if any are checked." width={260}>
-              <button className="btn btn-ghost" onClick={exportExcel} disabled={!figuresReady || rows.length === 0 || !biz.ready} style={{ fontSize: 12 }}>Export Excel</button>
-            </Tip>
+                sheet named as a report. The letterhead name is held by LetterheadButton (S877),
+                whose press says why; its `tip` keeps the Tip on the button itself, one tab stop. */}
+            <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={!figuresReady || rows.length === 0} style={{ fontSize: 12 }}
+              tip="Exports the current Category/Status/Search view to Excel — or just the checked rows, if any are checked." tipWidth={260}>Export Excel</LetterheadButton>
           </div>
           <select aria-label="Period" className="form-select" style={{ marginLeft: 'auto' }} value={selectedPeriod?.id || ''} onChange={e => handlePeriodChange(e.target.value)}>
             {periods.map(p => <option key={p.id} value={p.id}>{BS_MONTHS[p.bs_month - 1]} {p.bs_year} {p.status === 'open' ? '(open)' : '(closed)'}</option>)}

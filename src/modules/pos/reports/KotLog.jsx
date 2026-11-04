@@ -9,6 +9,7 @@ import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
+import LetterheadButton from '../../../components/LetterheadButton'
 import LetterheadError from './LetterheadError'
 import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
@@ -523,8 +524,9 @@ export default function KotLog() {
         </div>
         <div className="no-print" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {/* Off while the active tab is loading or failed, not only when empty (S728/S754). */}
-          {/* …and off until the letterhead's client-name read has answered (useBizInfo `ready`, S845). */}
-          <button className="btn btn-ghost" onClick={exportExcel} disabled={isEmpty || loading || !!loadError || !biz.ready}>⬇ Excel</button>
+          {/* …and held until the letterhead's client-name read has answered (useBizInfo `ready`, S845):
+              aria-disabled with a press that says why (LetterheadButton, S877). */}
+          <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={isEmpty || loading || !!loadError}>⬇ Excel</LetterheadButton>
         </div>
       </div>
 

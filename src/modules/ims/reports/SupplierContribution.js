@@ -24,6 +24,7 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import Tip from '../../../components/Tip'
+import LetterheadButton from '../../../components/LetterheadButton'
 import ReportPage from '../../../components/ReportPage'
 import PeriodScope from '../../../components/PeriodScope'
 import RowDisclosure from '../../../components/RowDisclosure'
@@ -390,11 +391,12 @@ export default function SupplierContribution() {
       {/* Print gated on the load (S756, the S728 rule): it was always live, so during a period
           change it printed the previous month's table under the new month's title, and after a
           failed read it printed the error card as a report. Export also waits on the client-name
-          read, or both sheets ship with a blank CompanyName line. */}
+          read, or both sheets ship with a blank CompanyName line (LetterheadButton, S877: a press
+          before it lands says why). */}
       <button className="btn btn-ghost" style={{ fontSize: 12 }} disabled={loading || !!loadError}
         onClick={() => printWithTitle(`Supplier Contribution - ${periodLabel}`)}>🖨 Print</button>
-      <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={exportExcel}
-        disabled={loading || !!loadError || rows.length === 0 || !biz.ready}>↓ Export Excel</button>
+      <LetterheadButton ready={biz.ready} error={biz.error} style={{ fontSize: 12 }} onClick={exportExcel}
+        disabled={loading || !!loadError || rows.length === 0}>↓ Export Excel</LetterheadButton>
       <select aria-label="Period" className="form-select" value={selectedPeriod?.id || ''}
         onChange={e => handlePeriodChange(e.target.value)}>
         {periods.map(p => (

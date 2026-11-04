@@ -11,6 +11,7 @@ import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { firstError } from '../../../shared/queryError'
 import ReportLoadError from '../../../components/ReportLoadError'
+import LetterheadButton from '../../../components/LetterheadButton'
 import Tip from '../../../components/Tip'
 import Tabs from '../../../components/Tabs'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
@@ -472,8 +473,9 @@ export default function CoversReport() {
           {tab !== 'overview' && (
             // Off while loading or failed, not only when empty (S728/S754): the filename and scope
             // line come from the pickers, which move before the data does.
-            // …and off until the letterhead's read has answered, and while it has failed (S754).
-            <button className="btn btn-ghost" onClick={exportExcel} disabled={isEmpty || loading || !!loadError || !letterheadReady}>⬇ Excel</button>
+            // …and held until the letterhead's read has answered, and while it has failed (S754):
+            // aria-disabled with a press that says why, not `disabled` (LetterheadButton, S877).
+            <LetterheadButton ready={letterheadReady} error={biz.error} onClick={exportExcel} disabled={isEmpty || loading || !!loadError}>⬇ Excel</LetterheadButton>
           )}
         </div>
       </div>
