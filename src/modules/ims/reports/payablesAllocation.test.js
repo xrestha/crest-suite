@@ -7,6 +7,7 @@ import {
   billPaymentProblems, planBillPayment, compareBillsOldestFirst, expandCreditPartners,
   linesToReopen, isCreditRow, SUPPLIER_CREDIT_MODE, billOwedAfterReturns, linesToCloseByReturns,
   returnChangeReopensBill, returnEditReopensBill, paymentsMovedSince, paymentsMovedText,
+  paymentRecordArgs,
 } from './payablesAllocation'
 import { billPayables } from './purchaseTaxSplit'
 
@@ -634,5 +635,40 @@ describe('a payment written from an out-of-date page stops', () => {
   test('half a paisa of float noise is not an overpayment', () => {
     const b = bill()
     expect(paymentsMovedSince([b], loaded, { [b.key]: 1500.004 })).toEqual([])
+  })
+})
+
+// S877: what the page hands record_payable_payments. The server judges "moved" by the same id and
+// amount pairs paymentsMovedSince compares, over every line of every bill the payment touches.
+describe('paymentRecordArgs', () => {
+  const billA = {
+    key: 'A', entries: [{ id: 'a1' }, { id: 'a2' }],
+    payments: [{ id: 'p1', purchase_entry_id: 'a1', amount: '200.00' }, { id: 'px', purchase_entry_id: 'zz', amount: 5 }],
+  }
+  const billB = { key: 'B', entries: [{ id: 'b1' }], payments: [] }
+  const rows = [
+    { purchase_entry_id: 'a2', amount: 300, paid_at: '2026-11-04', note: null, payment_mode: 'Cash' },
+    { purchase_entry_id: 'b1', amount: -50, paid_at: '2026-11-04', note: 'x', payment_mode: SUPPLIER_CREDIT_MODE, credit_link_id: 'L1' },
+  ]
+
+  test('checks every line of every bill and only the payments on those lines', () => {
+    const args = paymentRecordArgs('c1', [billA, billB], rows, ['a2', 'a2'], '2026-11-04')
+    expect(args.p_client_id).toBe('c1')
+    expect(args.p_line_ids.sort()).toEqual(['a1', 'a2', 'b1'])
+    expect(args.p_seen).toEqual([{ id: 'p1', amount: 200 }])
+    expect(args.p_settle_ids).toEqual(['a2'])
+    expect(args.p_paid_at).toBe('2026-11-04')
+  })
+
+  test('sends each row with the six columns the server inserts, credit link kept', () => {
+    const args = paymentRecordArgs('c1', [billA, billB], rows, [], '2026-11-04')
+    expect(args.p_rows).toEqual([
+      { purchase_entry_id: 'a2', amount: 300, paid_at: '2026-11-04', note: null, payment_mode: 'Cash', credit_link_id: null },
+      { purchase_entry_id: 'b1', amount: -50, paid_at: '2026-11-04', note: 'x', payment_mode: SUPPLIER_CREDIT_MODE, credit_link_id: 'L1' },
+    ])
+  })
+
+  test('a bill with no payments loaded sends an empty seen list, not a missing one', () => {
+    expect(paymentRecordArgs('c1', [billB], rows.slice(1), [], null).p_seen).toEqual([])
   })
 })

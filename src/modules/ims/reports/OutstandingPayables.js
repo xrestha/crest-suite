@@ -16,10 +16,12 @@ import {
   EPS, SUPPLIER_CREDIT_MODE, isCreditRow, valueBillLines, groupIntoBills, allocatePayment,
   planSupplierLumpSum, supplierCreditSlots, billPaymentProblems, planBillPayment,
   expandCreditPartners, linesToReopen, linesToCloseByReturns, paymentsMovedSince, paymentsMovedText,
+  paymentRecordArgs,
 } from './payablesAllocation'
 import { fmtLineRate } from '../purchases/purchaseLines'
 import { unitRateCell } from '../../../shared/unitRate'
-import { withTimeout } from '../../../utils/withTimeout'
+import { withTimeout, isTimeout } from '../../../utils/withTimeout'
+import { isNetworkError } from '../../../shared/errorText'
 import Tip from '../../../components/Tip'
 import BsCalendarPicker from '../../../components/BsCalendarPicker'
 import Modal from '../../../components/Modal'
@@ -67,7 +69,7 @@ const INPUT = {
 export default function OutstandingPayables() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
-  const { scopedFrom, scopedInsert, scopedDelete, scopedUpdate } = useScopedDb()
+  const { scopedFrom, scopedDelete, scopedUpdate } = useScopedDb()
 
   const [entries, setEntries]           = useState([])
   const [paymentsMap, setPaymentsMap]   = useState({})
@@ -377,22 +379,44 @@ export default function OutstandingPayables() {
     setVendorCredit(m => ({ ...m, [vendorId]: { status: 'ready', available, creditBills, slots } }))
   }
 
-  // payment_mode may not exist on payable_payments yet if this client's DB predates the migration
-  // (this project applies schema changes by hand in the dashboard) — retry once without it rather
-  // than letting the whole Save fail, same tolerance persistSalesDay.js uses for its own RPC.
-  // PostgREST validates INSERT columns against its own schema cache and reports a missing one as
-  // PGRST204 ("Could not find the 'x' column ... in the schema cache"), NOT the raw Postgres 42703
-  // undefined_column code — 42703 only surfaces on a SELECT that reaches Postgres itself. Confirmed
-  // live: catching only 42703 here let this exact error reach the user instead of falling back.
+  // S877: ONE server step records a payment (`record_payable_payments`). It locks every line of the
+  // bills the payment touches, refuses (HINT payables_moved) when a payment on them is no longer one
+  // this page loaded, then writes the rows and the paid_at stamps in one transaction. Two screens
+  // paying one bill in the same second used to both land, because the re-read below and the insert
+  // were two requests; and a payment could land on a bill whose stamp then failed. paymentsMovedCheck
+  // still runs first, because it words the refusal bill by bill; the server is what makes it true.
+  // Every row goes in one statement, so both halves of a supplier-credit pair commit together and the
+  // database's end-of-transaction pair check (20260918120000) sees both.
   //
-  // Never for a supplier-credit row (S756 D11): its mode is what the database checks the pair by,
-  // so stripping it would only swap one refusal for another.
-  async function insertPayments(rows) {
-    let { error } = await scopedInsert('payable_payments', rows)
-    if (error?.code === 'PGRST204' && !rows.some(r => r.credit_link_id)) {
-      ;({ error } = await scopedInsert('payable_payments', rows.map(({ payment_mode, ...r }) => r)))
+  // Returns null when the payment landed, else { text, detail } for the caller's slot. A refusal the
+  // server raised rolled the whole transaction back, so it may say nothing was recorded; no answer
+  // (a timeout or a dropped connection) proves nothing either way (S619), so it says to reload first.
+  async function recordPayments(bills, rows, settleIds, date, paying) {
+    let res
+    try {
+      res = await withTimeout(supabase.rpc('record_payable_payments',
+        paymentRecordArgs(effectiveClientId, bills, rows, settleIds, date)), 30000, 'Recording the payment')
+    } catch (err) {
+      res = { error: err }
     }
-    return { error }
+    const err = res?.error
+    if (!err) return null
+    const many = bills.length !== 1
+    if (err.hint === 'payables_moved') {
+      const moved = await paymentsMovedCheck(bills, paying)
+      return moved || {
+        text: `Nothing was recorded. A payment on ${many ? 'these bills' : 'this bill'} was recorded or removed on another screen a moment ago. Reload the page to see what is owed now, then enter the payment again.`,
+        detail: 'record_payable_payments · payables_moved',
+      }
+    }
+    const { text, detail } = asActionError(err)
+    if (err.hint === 'payables_settle_short' || err.hint === 'payables_lines_unreadable') {
+      return { text: `Nothing was recorded. Crest could not mark every line of ${many ? 'these bills' : 'this bill'} as paid, and this login may not be allowed to change some of them. ${text}`, detail }
+    }
+    if (isTimeout(err) || isNetworkError(err) || !err.code) {
+      return { text: `The payment could not be confirmed as saved. Reload the page before trying again: if it reached the server before the connection dropped, it already shows against ${many ? 'these bills' : 'the bill'}, and saving again would record it twice. ${text}`, detail }
+    }
+    return { text: `The payment was not recorded, so ${many ? 'these bills still show' : 'this bill still shows'} what was owed before. ${text}`, detail }
   }
 
   // The second write of every pay/unpay sequence: stamp or clear purchase_entries.paid_at on the
@@ -490,26 +514,8 @@ export default function OutstandingPayables() {
     const moved = await paymentsMovedCheck([bill, ...sources], { [bill.key]: cash + creditAmt })
     if (moved) { setPayError(moved); setSavingPayment(false); return }
 
-    // ONE insert: every money row and both halves of every credit pair travel in one statement,
-    // so they commit together or not at all — which is also what lets the database's
-    // end-of-transaction pair check (20260918120000) see both halves.
-    const { error: insErr } = await insertPayments(rows)
-    if (insErr) {
-      const { text, detail } = asActionError(insErr)
-      // Not "nothing was saved": a dropped connection does not prove that (S619), and on a pair
-      // the retry would record the credit twice.
-      setPayError(creditAmt > 0
-        ? { text: `The payment could not be confirmed as saved. Reload the page before trying again — if it reached the server before the connection dropped, it is already in this bill's payment history, and saving again would use the supplier credit twice. ${text}`, detail }
-        : { text: `The payment was not recorded, so this bill still shows its full outstanding balance. ${text}`, detail })
-      setSavingPayment(false); return
-    }
-    if (settleIds.length > 0) {
-      const settleWarnText = await writePaidAt(settleIds, date)
-      if (settleWarnText) {
-        // The payment rows are committed; refusing is not available. Name the state instead.
-        setSettleWarn({ ...settleWarnText, text: `The payment was recorded, but the bill could not be marked as settled — it still shows under Outstanding with nothing remaining. Reload the page; if it is still listed there, send the detail below to support. ${settleWarnText.text}` })
-      }
-    }
+    const fail = await recordPayments([bill, ...sources], rows, settleIds, date, { [bill.key]: cash + creditAmt })
+    if (fail) { setPayError(fail); setSavingPayment(false); return }
     setSavingPayment(false)
     load(activeTab)
   }
@@ -558,7 +564,6 @@ export default function OutstandingPayables() {
     setLumpError('')
     setSettleWarn(null)
     const date = lumpForm.paid_at || todayIso()
-    const paidCount = plan.split.filter(s => s.pay > 0).length
 
     // Every bill this sum reaches, re-read before anything is written (S792, PURCHASES-10). The
     // oldest-first split was planned from what this page loaded; if another screen has paid one of
@@ -567,22 +572,9 @@ export default function OutstandingPayables() {
     const moved = await paymentsMovedCheck(reached.map(s => s.bill), Object.fromEntries(reached.map(s => [s.bill.key, s.pay])))
     if (moved) { setLumpError(moved); setLumpSaving(false); return }
 
-    // One insert for every bill's rows — atomic in itself. The paid_at stamps after it are a second
-    // write and are not, which the warning below names rather than hides. No RPC: the only thing an
-    // RPC would add is atomicity with those stamps, and a missing stamp is recoverable (the bill
-    // shows nothing remaining and the next load says so) where a half-written payment would not be.
-    const { error: insErr } = await insertPayments(plan.rows)
-    if (insErr) {
-      const { text, detail } = asActionError(insErr)
-      setLumpError({ text: `The payment could not be confirmed as saved. Reload the page before trying again — if it reached the server before the connection dropped, it already shows against ${paidCount === 1 ? 'the bill' : 'these bills'}, and saving again would record it twice. ${text}`, detail })
-      setLumpSaving(false); return
-    }
-    if (plan.settleIds.length > 0) {
-      const settleFail = await writePaidAt(plan.settleIds, date)
-      if (settleFail) {
-        setSettleWarn({ ...settleFail, text: `The ${fmt2(plan.amount)} payment to ${lumpVendor} was recorded against ${paidCount} bill${paidCount === 1 ? '' : 's'}, but not every fully paid bill could be marked as settled — some may still show under Outstanding with nothing remaining. Reload the page; if any are still listed there, send the detail below to support. ${settleFail.text}` })
-      }
-    }
+    const fail = await recordPayments(reached.map(s => s.bill), plan.rows, plan.settleIds, date,
+      Object.fromEntries(reached.map(s => [s.bill.key, s.pay])))
+    if (fail) { setLumpError(fail); setLumpSaving(false); return }
     setLumpSaving(false)
     setLumpVendor(null)
     load(activeTab)
@@ -840,18 +832,8 @@ export default function OutstandingPayables() {
     const moved = await paymentsMovedCheck(targets, Object.fromEntries(targets.map(b => [b.key, b.remaining])))
     if (moved) { setBulkError(moved); setBulkSaving(false); return }
 
-    const { error: insErr } = await insertPayments(rows)
-    if (insErr) {
-      const { text, detail } = asActionError(insErr)
-      setBulkError({ text: `The payments were not recorded, so every selected bill still shows its full outstanding balance. ${text}`, detail })
-      setBulkSaving(false); return
-    }
-    if (settleIds.length > 0) {
-      const settleFail = await writePaidAt(settleIds, date)
-      if (settleFail) {
-        setSettleWarn({ ...settleFail, text: `The payments were recorded, but ${targets.length === 1 ? 'the bill' : `the ${targets.length} bills`} could not be marked as settled — ${targets.length === 1 ? 'it still shows' : 'they may still show'} under Outstanding with nothing remaining. Reload the page; if ${targets.length === 1 ? 'it is' : 'any are'} still listed there, send the detail below to support. ${settleFail.text}` })
-      }
-    }
+    const fail = await recordPayments(targets, rows, settleIds, date, Object.fromEntries(targets.map(b => [b.key, b.remaining])))
+    if (fail) { setBulkError(fail); setBulkSaving(false); return }
     setBulkSaving(false)
     setBulkForm({ paid_at: todayIso(), note: '', payment_mode: 'Cash' })
     load(activeTab)

@@ -652,3 +652,39 @@ export function paymentsMovedText(stops, fmt = n => `NPR ${n.toFixed(2)}`) {
   const tail = anyMoved ? ' Reload the page to see what is owed now, then enter the payment again.' : ''
   return `${lead} ${perBill.join(' ')}${tail}`
 }
+
+/**
+ * The arguments for `record_payable_payments` (S877), the one server step that records a payment:
+ * it locks every line of `bills`, refuses (HINT payables_moved) when the payments on them are no
+ * longer the ones this page loaded, then inserts `rows` and stamps `paid_at` on `settleIds`, all in
+ * one transaction. `bills` is every bill the payment touches, the bills a supplier credit is taken
+ * from included, exactly the list paymentsMovedCheck re-reads. `p_seen` is what the page loaded on
+ * those lines, id and amount, the same pair paymentsMovedSince compares, so the server and the page
+ * judge "moved" by one rule.
+ */
+export function paymentRecordArgs(clientId, bills, rows, settleIds, paidAt) {
+  const lineIds = new Set()
+  const seen = new Map()
+  for (const bill of bills || []) {
+    const ids = new Set((bill.entries || []).map(e => e.id))
+    ids.forEach(id => lineIds.add(id))
+    for (const p of bill.payments || []) {
+      if (ids.has(p.purchase_entry_id) && p.id) seen.set(p.id, { id: p.id, amount: Number(p.amount) || 0 })
+    }
+  }
+  return {
+    p_client_id: clientId,
+    p_rows: (rows || []).map(r => ({
+      purchase_entry_id: r.purchase_entry_id,
+      amount: r.amount,
+      paid_at: r.paid_at || paidAt || null,
+      note: r.note ?? null,
+      payment_mode: r.payment_mode ?? null,
+      credit_link_id: r.credit_link_id ?? null,
+    })),
+    p_seen: [...seen.values()],
+    p_line_ids: [...lineIds],
+    p_settle_ids: [...new Set(settleIds || [])],
+    p_paid_at: paidAt || null,
+  }
+}
