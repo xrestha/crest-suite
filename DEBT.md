@@ -75,19 +75,7 @@ When an entry is paid off, delete it from this file and record the payoff in the
 
 ---
 
-## 5. Stock Count keeps an old backup way of saving a closing count
-
-**What it is.** A closing count saves through one database function that first checks whether someone else already counted that item, and asks Add / Replace / Keep theirs if so. The code still keeps the older plain save as a backup for when that function did not exist yet. It exists now, so the backup should never run, but one kind of unrelated failure can still set it off, and then a second counter's figure is replaced without the question. In detail: `saveClosingCounts()` in `Stock.js` falls back to a plain `closing_stock` upsert whenever `rpcMissing()` (`countConflict.js`) sees `PGRST202` or `42883`. `save_closing_counts` is live. A `42883` can also come from inside an applied function that calls something missing (`.claude/rules/supabase-sql.md`, S735). Sales Entry had the same fallback and lost it in S879.
-
-**Why it is left.** The owner decided the Sales Entry one in S879; this one was found the same day and not asked about.
-
-**Trigger:** When anyone next changes `saveClosingCounts` or `save_closing_counts`, delete the fallback and `rpcMissing`, update `countConflict.test.js`, and show the error instead (the S879 Sales Entry change is the model).
-
-**Where to look:** `grep -rn "rpcMissing" src`.
-
----
-
-## 6. The supplier delete check keeps two lists that nothing compares
+## 5. The supplier delete check keeps two lists that nothing compares
 
 **What it is.** Before a supplier can be deleted, both the Vendors page and the database count the records that still name it. The list of tables to count is written twice, once in JavaScript and once in SQL, and no test compares them. They agree today. In detail: `VENDOR_REF_TABLES` in `src/modules/ims/vendors/Vendors.js` and the body of `vendor_reference_counts()` (migration `20260909140000`, used by the `vendors_guard_referenced_delete` trigger). Items have the same pair with a guard: `src/modules/ims/items/itemRefTables.test.js` parses the migration and fails on a mismatch. Vendors have no such test (`.claude/rules/supabase-sql.md`).
 

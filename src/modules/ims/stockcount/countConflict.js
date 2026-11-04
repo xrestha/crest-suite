@@ -31,16 +31,6 @@ export class CountConflictError extends Error {
   }
 }
 
-// True when save_closing_counts is not in the schema yet — the migration is applied
-// by hand, so there is a window where this code runs before it exists. Only a missing function
-// falls back; every other error is returned as is. Sales Entry removed its own fallback of this
-// kind in S879; this one is in DEBT.md.
-export function rpcMissing(error) {
-  if (!error) return false
-  if (error.code === 'PGRST202' || error.code === '42883') return true
-  return /could not find the function/i.test(`${error.message || ''} ${error.details || ''} ${error.hint || ''}`)
-}
-
 // Rounds away float dust from an add (0.1 + 0.2) without inventing precision a count never had.
 export function addCounts(a, b) {
   return Math.round(((Number(a) || 0) + (Number(b) || 0)) * 1000) / 1000

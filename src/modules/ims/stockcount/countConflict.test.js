@@ -45,10 +45,14 @@ describe('countConflict (D37)', () => {
   })
 })
 
-test('rpcMissing falls back only for a function the schema does not have yet', () => {
-  const { rpcMissing } = require('./countConflict')
-  expect(rpcMissing({ code: 'PGRST202' })).toBe(true)
-  expect(rpcMissing({ code: '42883' })).toBe(true)
-  expect(rpcMissing({ code: '42501', message: 'closing_count_locked: counted by Ram' })).toBe(false)
-  expect(rpcMissing(null)).toBe(false)
+// S880 (owner decision): no second way to save a count. The plain upsert that ran for a missing
+// function skipped the "someone else counted this" check, and a 42883 raised inside the RPC would
+// have set it off without a word.
+test('a closing count saves only through save_closing_counts, with no fallback', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, 'Stock.js'), 'utf8')
+  const start = src.indexOf('async function saveClosingCounts(')
+  const fn = src.slice(start, src.indexOf('function applySavedClosing(', start))
+  expect(fn).toMatch(/supabase\.rpc\('save_closing_counts'/)
+  expect(fn).not.toMatch(/\.upsert\(/)
+  expect(src).not.toMatch(/rpcMissing/)
 })

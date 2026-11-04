@@ -64,7 +64,7 @@ Whether the price should say so is a decision for the owner. The figure itself i
 
 ## Origins
 
-*Rebuilt from the code history on 2026-11-04, not from memory; the owner has been asked to read and correct it. Where a reason was never written down, this says "the reason is not recorded".*
+*Rebuilt from the code history on 2026-11-04, not from memory, and read by the owner the same day: correct for now. Where a reason was never written down, this says "the reason is not recorded"; the gaps at the end are still open.*
 
 **What survives.** The first commit, "Initial commit - Crest Inventory v1", is dated 2026-06-10. The next one (2026-06-19, `deb836e`) bundles everything built since. The work log has short entries for S23 to S33 and full ones from S34 (2026-06-17); S1 to S22 are not recorded anywhere.
 

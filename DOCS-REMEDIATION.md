@@ -653,6 +653,8 @@ the `src/pages/` / `src/modules/` split, the `exhaustive-deps` sites, three POS 
 (judged from read-only `pg_indexes`, `pg_stats` and plain `EXPLAIN`), Sales Entry's legacy save fallback and the
 unpinned vendor delete lists. The "pages meant to move to `src/modules/`" premise below is not on record: S249
 left the shell and admin pages in `src/pages/` on purpose.
+Paid off since, and deleted from the file: Sales Entry's fallback (S879) and Stock Count's, which replaced it as
+entry 5 (S880).
 
 There is no written list of known technical debt anywhere. Create one. Seed it with:
 

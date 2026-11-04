@@ -25,7 +25,7 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import { isNetworkError } from '../../../shared/errorText'
 import { countSaveFailureText } from './countSaveFailure'
 import CountConflictModal from './CountConflictModal'
-import { CountConflictError, closingRpcRows, countedByLine, fmtQty, rpcMissing } from './countConflict'
+import { CountConflictError, closingRpcRows, countedByLine, fmtQty } from './countConflict'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import './Stock.css'
@@ -765,16 +765,10 @@ export default function Stock() {
   // Counted closing figures go through save_closing_counts (D37, migration 20260929100000): the
   // check against another person's count and the write are one statement per item, so a
   // read-then-upsert race cannot slip a second tablet's figure through, and an add is atomic.
-  // Until that migration is applied the RPC does not exist, and the old plain upsert runs instead
-  // (see DEBT.md) — every other error is thrown as it came.
+  // There is no second way to save a count (S880, owner decision): the plain-upsert fallback for a
+  // missing function skipped that check, and a 42883 raised inside the RPC would have set it off.
   async function saveClosingCounts(periodId, entries, by, mode = 'check') {
     const { data, error } = await supabase.rpc('save_closing_counts', { p_period_id: periodId, p_rows: closingRpcRows(entries, by, mode) })
-    if (error && rpcMissing(error)) {
-      fail((await supabase.from('closing_stock').upsert(
-        entries.map(e => ({ period_id: periodId, item_id: e.itemId, physical_qty: e.qty, counted_at: new Date().toISOString(), ...by })),
-        { onConflict: 'period_id,item_id' })).error)
-      return { saved: entries.map(e => ({ item_id: e.itemId, physical_qty: e.qty, counted_by_name: by?.counted_by_name || null })), conflicts: [] }
-    }
     fail(error)
     return { saved: data?.saved || [], conflicts: data?.conflicts || [] }
   }
