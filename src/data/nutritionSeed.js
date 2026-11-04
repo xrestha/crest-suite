@@ -1,19 +1,23 @@
-// Reference nutrition library for common Nepal F&B ingredients, multi-source.
+import { NUTRIENTS, defaultBasisUnit } from '../utils/nutrition'
+
+// The built-in nutrition library: three sources, one search.
 //
-// Each row carries a `source`: 'USDA' (US, FoodData Central), 'IFCT 2017' (Indian Food
-// Composition Tables, NIN Hyderabad), or 'DFTQC Nepal' (Food Composition Table for Nepal,
-// Dept. of Food Technology & Quality Control). Several staples appear under more than one
-// source — the same `match` keyword surfaces all variants so the user can pick the most
-// relevant (regional values are listed first in suggestions).
+// - 'DFTQC Nepal': the Food Composition Table for Nepal 2012 (Dept. of Food Technology & Quality
+//   Control), main table and supplementary table of packaged goods.
+// - 'IFCT 2017': the Indian Food Composition Tables 2017 (NIN Hyderabad).
+// - 'USDA': the hand-picked FoodData Central rows below.
 //
-// Values are per 100 g (raw, unless noted) and ROUNDED. They are ESTIMATES transcribed from
-// published tables — clients should verify/override for branded or prepared items.
+// The two regional tables are whole: 1,100+ rows in src/data/foodTables.json, built from the
+// reviewed extracts in scripts/food-tables/ (README there: sources, what was left out and why).
+// Never hand-edit that JSON; rebuild it. It loads on demand (loadLibrary), so the pages that
+// import this file do not carry it. Figures are per 100 g. The Nepal table measured no sugar or
+// sodium: a Nepal row carries the Indian table's figures for the same food when one exists
+// (`borrowed` names it) and null otherwise, never 0.
 //
-// Row: { name, match:[lowercase keywords], unit:'GM'|'ML', source,
-//        energy_kcal, protein_g, carbs_g, fat_g, sugar_g, sodium_mg, allergens }
-//
-// `allergens` uses the keys of src/shared/constants/allergens.js only (S870). Mustard oil carries
-// mustard because Nepali mustard oil is usually cold-pressed and keeps the seed's protein.
+// USDA row: { name, match:[lowercase keywords], unit:'GM'|'ML', source,
+//             energy_kcal, protein_g, carbs_g, fat_g, sugar_g, sodium_mg, allergens }
+// `allergens` uses the keys of src/shared/constants/allergens.js only (S870). A library pick adds
+// them to the form; it never marks an ingredient checked.
 
 export const NUTRITION_SEED = [
   // ════════════════════════ USDA (FoodData Central) ════════════════════════
@@ -130,98 +134,296 @@ export const NUTRITION_SEED = [
   { name: 'Cocoa powder',           match: ['cocoa', 'cacao'], unit: 'GM', source: 'USDA', energy_kcal: 228, protein_g: 20, carbs_g: 58, fat_g: 14, sugar_g: 1.8, sodium_mg: 21, allergens: '' },
   { name: 'Cola / soft drink',      match: ['cola', 'coke', 'soft drink', 'soda'], unit: 'ML', source: 'USDA', energy_kcal: 42, protein_g: 0, carbs_g: 11, fat_g: 0, sugar_g: 11, sodium_mg: 4, allergens: '' },
   { name: 'Orange juice',           match: ['orange juice', 'juice'], unit: 'ML', source: 'USDA', energy_kcal: 45, protein_g: 0.7, carbs_g: 10, fat_g: 0.2, sugar_g: 8.4, sodium_mg: 1, allergens: '' },
-
-  // ════════════════ IFCT 2017 (Indian Food Composition Tables, NIN) ════════════════
-  // Regionally accurate for South Asian staples; values per 100 g raw.
-  { name: 'Rice (milled, raw) — IFCT',   match: ['rice', 'chamal', 'basmati'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 356, protein_g: 7.9, carbs_g: 78, fat_g: 0.5, sugar_g: 0.1, sodium_mg: 1, allergens: '' },
-  { name: 'Wheat flour, whole (atta) — IFCT', match: ['atta', 'whole wheat', 'gahu'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 321, protein_g: 10.6, carbs_g: 64, fat_g: 1.5, sugar_g: 0, sodium_mg: 2, allergens: 'gluten' },
-  { name: 'Refined wheat flour (maida) — IFCT', match: ['maida', 'wheat flour', 'flour'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 348, protein_g: 11, carbs_g: 74, fat_g: 0.9, sugar_g: 0, sodium_mg: 2, allergens: 'gluten' },
-  { name: 'Maize flour — IFCT',          match: ['maize', 'corn flour', 'makai'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 334, protein_g: 8.8, carbs_g: 65, fat_g: 3.8, sugar_g: 0, sodium_mg: 5, allergens: '' },
-  { name: 'Lentil red (masoor dal) — IFCT', match: ['masoor', 'dal', 'daal', 'lentil'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 343, protein_g: 25, carbs_g: 59, fat_g: 1.5, sugar_g: 2, sodium_mg: 17, allergens: '' },
-  { name: 'Pigeon pea (rahar/toor dal) — IFCT', match: ['rahar', 'toor', 'arhar', 'tur dal'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 335, protein_g: 22, carbs_g: 58, fat_g: 1.7, sugar_g: 0, sodium_mg: 18, allergens: '' },
-  { name: 'Green gram (mung/moong) — IFCT', match: ['mung', 'moong', 'green gram'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 334, protein_g: 24, carbs_g: 56, fat_g: 1.2, sugar_g: 0, sodium_mg: 28, allergens: '' },
-  { name: 'Black gram (maas/urad) — IFCT', match: ['maas', 'urad', 'black gram'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 341, protein_g: 24, carbs_g: 59, fat_g: 1.6, sugar_g: 0, sodium_mg: 38, allergens: '' },
-  { name: 'Chickpea (chana) — IFCT',     match: ['chana', 'chickpea', 'kabuli'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 360, protein_g: 18, carbs_g: 60, fat_g: 5.3, sugar_g: 0, sodium_mg: 24, allergens: '' },
-  { name: 'Soybean (bhatmas) — IFCT',    match: ['soybean', 'soya', 'bhatmas'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 432, protein_g: 37, carbs_g: 21, fat_g: 19, sugar_g: 0, sodium_mg: 2, allergens: 'soy' },
-  { name: 'Paneer — IFCT',               match: ['paneer', 'chenna'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 290, protein_g: 18, carbs_g: 6, fat_g: 22, sugar_g: 6, sodium_mg: 22, allergens: 'milk' },
-  { name: 'Chicken (country/desi) — IFCT', match: ['chicken', 'kukhura'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 166, protein_g: 26, carbs_g: 0, fat_g: 6.6, sugar_g: 0, sodium_mg: 70, allergens: '' },
-  { name: 'Goat / mutton — IFCT',        match: ['mutton', 'goat', 'khasi', 'boka'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 122, protein_g: 21, carbs_g: 0, fat_g: 3.6, sugar_g: 0, sodium_mg: 82, allergens: '' },
-  { name: 'Hen egg, whole — IFCT',       match: ['egg', 'anda', 'phul'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 173, protein_g: 13, carbs_g: 1.2, fat_g: 13, sugar_g: 0, sodium_mg: 124, allergens: 'eggs' },
-  { name: 'Jaggery (gud) — IFCT',        match: ['jaggery', 'gud', 'sakhar', 'chaku'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 383, protein_g: 0.4, carbs_g: 95, fat_g: 0.1, sugar_g: 90, sodium_mg: 30, allergens: '' },
-  { name: 'Bamboo shoot (tama) — IFCT',  match: ['bamboo', 'tama'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 21, protein_g: 2.6, carbs_g: 3, fat_g: 0.3, sugar_g: 2, sodium_mg: 4, allergens: '' },
-  { name: 'Colocasia / taro root (pidalu) — IFCT', match: ['taro', 'colocasia', 'pidalu', 'karkalo'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 97, protein_g: 2.7, carbs_g: 21, fat_g: 0.1, sugar_g: 0, sodium_mg: 11, allergens: '' },
-  { name: 'Fenugreek leaves (methi) — IFCT', match: ['fenugreek', 'methi'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 49, protein_g: 4.4, carbs_g: 6, fat_g: 0.9, sugar_g: 0, sodium_mg: 76, allergens: '' },
-  { name: 'Mustard greens (rayo saag) — IFCT', match: ['mustard green', 'rayo', 'saag'], unit: 'GM', source: 'IFCT 2017', energy_kcal: 34, protein_g: 4, carbs_g: 3.4, fat_g: 0.6, sugar_g: 0, sodium_mg: 25, allergens: '' },
-
-  // ════════════════ DFTQC Nepal (Food Composition Table for Nepal) ════════════════
-  // Nepal-specific items & local processing; values per 100 g unless noted.
-  { name: 'Beaten rice (chiura) — Nepal', match: ['chiura', 'beaten rice', 'poha'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 346, protein_g: 6.6, carbs_g: 77, fat_g: 1.2, sugar_g: 0, sodium_mg: 5, allergens: '' },
-  { name: 'Buffalo milk — Nepal',        match: ['buffalo milk', 'milk', 'dudh'], unit: 'ML', source: 'DFTQC Nepal', energy_kcal: 117, protein_g: 4.3, carbs_g: 5, fat_g: 8.8, sugar_g: 5, sodium_mg: 40, allergens: 'milk' },
-  { name: 'Cow milk — Nepal',            match: ['cow milk', 'milk', 'dudh'], unit: 'ML', source: 'DFTQC Nepal', energy_kcal: 67, protein_g: 3.2, carbs_g: 4.4, fat_g: 4.1, sugar_g: 4.4, sodium_mg: 43, allergens: 'milk' },
-  { name: 'Curd, buffalo (dahi) — Nepal', match: ['dahi', 'curd', 'yogurt', 'yoghurt'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 100, protein_g: 3.7, carbs_g: 4, fat_g: 7.5, sugar_g: 4, sodium_mg: 45, allergens: 'milk' },
-  { name: 'Buffalo meat (buff) — Nepal', match: ['buff', 'buffalo', 'rango'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 131, protein_g: 19, carbs_g: 0, fat_g: 5.9, sugar_g: 0, sodium_mg: 70, allergens: '' },
-  { name: 'Dried meat (sukuti) — Nepal', match: ['sukuti', 'dried meat'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 313, protein_g: 55, carbs_g: 0, fat_g: 10, sugar_g: 0, sodium_mg: 600, allergens: '' },
-  { name: 'Hard cheese (chhurpi) — Nepal', match: ['chhurpi', 'churpi', 'hard cheese'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 360, protein_g: 56, carbs_g: 22, fat_g: 4, sugar_g: 0, sodium_mg: 70, allergens: 'milk' },
-  { name: 'Fermented dried greens (gundruk) — Nepal', match: ['gundruk', 'sinki'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 105, protein_g: 9, carbs_g: 15, fat_g: 1, sugar_g: 0, sodium_mg: 50, allergens: '' },
-  { name: 'Finger millet flour (kodo) — Nepal', match: ['kodo', 'millet', 'ragi', 'dhido'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 320, protein_g: 7.3, carbs_g: 72, fat_g: 1.3, sugar_g: 0, sodium_mg: 11, allergens: '' },
-  { name: 'Buckwheat flour (phapar) — Nepal', match: ['buckwheat', 'phapar'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 335, protein_g: 13, carbs_g: 71, fat_g: 3.4, sugar_g: 0, sodium_mg: 1, allergens: '' },
-  { name: 'Mustard oil — Nepal',         match: ['mustard oil', 'tori'], unit: 'ML', source: 'DFTQC Nepal', energy_kcal: 900, protein_g: 0, carbs_g: 0, fat_g: 100, sugar_g: 0, sodium_mg: 0, allergens: 'mustard' },
-  { name: 'Ghee (clarified butter) — Nepal', match: ['ghee', 'ghiu'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 900, protein_g: 0, carbs_g: 0, fat_g: 100, sugar_g: 0, sodium_mg: 0, allergens: 'milk' },
-  { name: 'Khuwa (mawa) — Nepal',        match: ['khuwa', 'mawa', 'khoa'], unit: 'GM', source: 'DFTQC Nepal', energy_kcal: 421, protein_g: 20, carbs_g: 25, fat_g: 26, sugar_g: 25, sodium_mg: 80, allergens: 'milk' },
 ]
 
-// Normalize an item name to lowercase words for matching.
-function normalize(name) {
-  return String(name || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\b(fresh|raw|dry|dried|powder|whole|local|imported|premium|grade|kg|gm|ltr|ml|pcs)\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-// Source display order — regional first (most relevant for Nepal).
+// The library picker's three sources, regional first (most relevant for Nepal).
+export const LIBRARY_SOURCES = ['DFTQC Nepal', 'IFCT 2017', 'USDA']
 const SOURCE_ORDER = { 'DFTQC Nepal': 0, 'IFCT 2017': 1, 'USDA': 2 }
 
-// All seed rows matching an item name, best keyword first, regional sources first on ties.
-// Returns up to `limit` candidates so the UI can show source options.
-export function suggestSeeds(itemName, limit = 6) {
-  const norm = normalize(itemName)
-  if (!norm) return []
-  const scored = []
-  NUTRITION_SEED.forEach(row => {
-    let best = 0
-    row.match.forEach(kw => { if (norm.includes(kw) && kw.length > best) best = kw.length })
-    if (best > 0) scored.push({ row, score: best })
-  })
-  if (!scored.length) return []
-  const top = Math.max(...scored.map(s => s.score))
-  return scored
-    .filter(s => s.score === top)
-    .sort((a, b) => (SOURCE_ORDER[a.row.source] ?? 9) - (SOURCE_ORDER[b.row.source] ?? 9))
-    .slice(0, limit)
-    .map(s => s.row)
+// ── Words ──────────────────────────────────────────────────────────────────────────────────────
+// Spellings of one food, rewritten before a name is split into words, in item names and food
+// names alike, so "Soya bean", "soyabean" and "soybean" are one word.
+const SPELLINGS = [
+  [/\bsoy[a]? ?beans?\b|\bsoyabeans?\b/g, 'soybean'], [/\bground ?nuts?\b/g, 'groundnut'],
+  [/\bpea ?nuts?\b/g, 'peanut'], [/\bbutter ?milk\b/g, 'buttermilk'],
+  [/\bwater ?melons?\b|\bmelon water\b/g, 'watermelon'], [/\blad(?:y|ies)(?: s)? ?fingers?\b/g, 'okra'],
+  [/\begg ?plants?\b/g, 'eggplant'], [/\bchick ?peas?\b/g, 'chickpea'], [/\bbeet ?roots?\b/g, 'beetroot'],
+  [/\bpine ?apples?\b/g, 'pineapple'], [/\bcotton ?seeds?\b/g, 'cottonseed'],
+  [/\bcorn ?flour\b/g, 'cornflour'], [/\bgingelly\b/g, 'sesame'], [/\bseasome\b/g, 'sesame'],
+]
+
+// Kitchen names for one food in Nepali, Hindi and English. An item name holding any phrase of a set
+// is also searched as every other phrase in it: "KUKHURA MASU" finds chicken, "BHINDI" finds okra.
+// Additive only, so a word never stops meaning itself.
+const SAME_FOOD = [
+  ['chicken', 'kukhura', 'murgi', 'murga'], ['goat', 'khasi', 'boka', 'mutton', 'chevon'],
+  ['buffalo', 'buff', 'rango', 'bhainsi', 'bhaisi'], ['pork', 'sungur', 'bangur'],
+  ['fish', 'machha', 'maachha', 'macha'], ['rohu', 'rahu'], ['prawn', 'shrimp', 'jhinge', 'jhinga'], ['egg', 'anda'],
+  ['duck', 'hans'], ['quail', 'battai'], ['meat', 'masu', 'mashu'],
+  ['milk', 'dudh', 'doodh', 'dudha'], ['curd', 'dahi', 'yogurt', 'yoghurt'], ['buttermilk', 'mohi', 'chhaas'],
+  ['ghee', 'ghiu', 'ghyu'], ['butter', 'makhan', 'nauni'], ['khuwa', 'khoa', 'mawa', 'khova'],
+  ['chhena', 'chenna'], ['paneer', 'cottage cheese'], ['cheese', 'chij'],
+  ['rice', 'chamal', 'chawal'], ['beaten rice', 'rice flakes', 'chiura', 'chiwra', 'poha'],
+  ['rice puff', 'puffed rice', 'bhuja', 'murai', 'murmura'], ['flour', 'pitho'],
+  ['atta', 'whole wheat flour', 'wheat flour whole'], ['maida', 'refined wheat flour', 'wheat flour refined'],
+  ['semolina', 'suji', 'sooji', 'rava'], ['gram flour', 'besan'], ['maize', 'corn', 'makai', 'makka', 'makkai'],
+  ['finger millet', 'kodo', 'ragi', 'mandua'], ['buckwheat', 'phapar', 'fapar', 'kuttu'],
+  ['barley', 'jau', 'jaun'], ['naked barley', 'uwa'], ['proso millet', 'chino', 'chinu'],
+  ['foxtail millet', 'kaguno'], ['vermicelli', 'sewai', 'sevai', 'seviyan'],
+  ['noodle', 'chowmein', 'chow mein', 'chau chau'], ['bread', 'pauroti', 'paurotti'],
+  ['lentil', 'masoor', 'masur', 'musuro'], ['green gram', 'mung', 'moong', 'mugi'],
+  ['black gram', 'maas', 'urad', 'urd'], ['red gram', 'pigeon pea', 'rahar', 'arhar', 'toor', 'tuvar'],
+  ['bengal gram', 'chickpea', 'chana', 'channa', 'kabuli', 'chole', 'chhole'],
+  ['rajma', 'rajmah', 'kidney bean'], ['soybean', 'bhatmas', 'soya', 'soy'],
+  ['nutrela', 'soya chunk', 'soy chunk'], ['pea', 'kerau', 'matar', 'mattar'], ['cowpea', 'bodi', 'lobia'],
+  ['french bean', 'green bean', 'simi'], ['potato', 'aalu', 'alu', 'aloo'],
+  ['sweet potato', 'sakhar khand', 'sakharkhand', 'shakarkand'], ['onion', 'pyaj', 'pyaaj', 'pyaz'],
+  ['spring onion', 'green onion', 'onion stalk', 'hariyo pyaj'], ['garlic', 'lasun', 'lahsun', 'lehsun'],
+  ['ginger', 'aduwa', 'adrak'], ['tomato', 'golbheda', 'golveda', 'tamatar'],
+  ['chilli', 'khursani', 'khorsani', 'mirch'], ['capsicum', 'bell pepper', 'bhede khursani', 'shimla mirch'],
+  ['brinjal', 'eggplant', 'aubergine', 'bhanta', 'baingan'], ['okra', 'bhindi', 'ramtoriya', 'bhendi'],
+  ['bitter gourd', 'karela', 'tite karela'], ['bottle gourd', 'lauka', 'lauki', 'ghiya'],
+  ['sponge gourd', 'ghiraula', 'ghiraunla'], ['pumpkin', 'pharsi', 'kaddu'], ['chayote', 'iskus', 'cho cho'],
+  ['cucumber', 'kakro', 'kheera', 'khira'], ['radish', 'mula', 'mooli'], ['carrot', 'gajar'],
+  ['cabbage', 'banda', 'bandakobi', 'band gobi', 'patta gobi'],
+  ['cauliflower', 'kauli', 'phul kobi', 'phulkobi', 'phool gobi', 'cauli'], ['spinach', 'palungo', 'palak'],
+  ['mustard leaf', 'mustard green', 'rayo', 'sarson'], ['fenugreek', 'methi'],
+  ['coriander', 'dhaniya', 'dhania', 'cilantro'], ['mint', 'pudina'], ['bamboo shoot', 'tama'],
+  ['colocasia', 'pidalu', 'karkalo', 'arbi', 'taro'], ['yam', 'tarul'], ['mushroom', 'chyau', 'chyaau'],
+  ['stinging nettle', 'sisnu', 'nettle'], ['asparagus', 'kurilo'], ['jackfruit', 'katahar', 'kathar'],
+  ['turmeric', 'besar', 'haldi'], ['cumin', 'jeera', 'jira'], ['black pepper', 'marich', 'kali mirch'],
+  ['cardamom', 'alaichi', 'elaichi', 'sukmel'], ['clove', 'lwang', 'laung'], ['cinnamon', 'dalchini'],
+  ['ajwain', 'jwano', 'omum', 'carom'], ['asafoetida', 'hing'], ['aniseed', 'saunf', 'sounf', 'fennel'],
+  ['sugar', 'chini', 'cheeni'], ['jaggery', 'gud', 'gur', 'sakhar'], ['honey', 'maha'],
+  ['sesame', 'til'], ['groundnut', 'peanut', 'badam', 'mungfali'], ['cashew', 'kaju'],
+  ['walnut', 'okhar', 'akhrot'], ['coconut', 'nariwal', 'nariyal'],
+  ['banana', 'kera', 'kela'], ['apple', 'syau', 'seb'], ['orange', 'suntala', 'santra'],
+  ['mango', 'aanp', 'aap', 'aam'], ['papaya', 'mewa', 'papita'], ['guava', 'amba', 'amrud'],
+  ['pineapple', 'bhuikatahar', 'ananas'], ['pomegranate', 'anar', 'anaar'], ['pear', 'naspati', 'nashpati'],
+  ['lemon', 'lime', 'kagati', 'nibuwa', 'nimbu'], ['grape', 'angur'], ['watermelon', 'tarbuja', 'tarbuj'],
+  ['litchi', 'lichi', 'lychee'], ['tea', 'chiya', 'chai'], ['oil', 'tel'],
+  ['jalebi', 'jeri'], ['pakoda', 'pakora', 'pakauda'], ['sel roti', 'sel'], ['dhindo', 'dhido'],
+  ['momo', 'dumpling'], ['samosa', 'singada'], ['papad', 'papadum', 'pappadam'],
+]
+
+// Units, pack sizes and shop words in an item name, never part of a food's identity.
+const NOISE = new Set(['kg', 'kgs', 'gm', 'gms', 'g', 'ltr', 'lt', 'l', 'litre', 'liter', 'ml', 'pcs', 'pc',
+  'pkt', 'pkts', 'packet', 'pack', 'btl', 'bottle', 'box', 'can', 'tin', 'jar', 'bag', 'sack', 'dozen', 'doz',
+  'nos', 'local', 'imported', 'premium', 'grade', 'quality', 'brand', 'best'])
+// Words with no meaning on their own in a food name.
+const STOP = new Set(['and', 'of', 'the', 'with', 'without', 'in', 'a', 'an', 'for', 'ko', 'ka', 'ki', 'mix'])
+// State and colour words rank one food above another but never make a food a match alone:
+// "FRESH CREAM" must not suggest "Apricot, fresh".
+const GENERIC = new Set(['raw', 'fresh', 'dry', 'whole', 'cooked', 'boiled', 'fried', 'roasted', 'ripe', 'meat', 'flesh', 'muscle',
+  'tender', 'green', 'red', 'white', 'black', 'brown', 'yellow', 'pink', 'big', 'small', 'large', 'medium',
+  'light', 'dark', 'pale', 'powder', 'flour', 'leaf', 'seed', 'stem', 'flower', 'juice', 'variety', 'india', 'thai'])
+// A single bracketed word that only qualifies the food ("(raw)", "(Thai)"); any other bracketed
+// word is another name for it ("(dahi)", "(iskus)") and is searched as one.
+const QUALIFIER = new Set([...GENERIC, 'dal', 'milled', 'refined', 'lean', 'korea', 'china', 'nes', 'skinless',
+  'boneless', 'coiled', 'snack', 'sliced', 'smoked'])
+const RESPELL = { dried: 'dry', leaves: 'leaf', chillies: 'chilli', chilly: 'chilli', chillie: 'chilli',
+  chili: 'chilli', yoghurt: 'yogurt', momos: 'momo' }
+
+function stem(w) {
+  if (RESPELL[w]) return RESPELL[w]
+  if (w.length > 4 && w.endsWith('ies')) return w.slice(0, -3) + 'y'
+  if (w.length > 4 && /(?:ches|shes|xes|oes)$/.test(w)) return w.slice(0, -2)
+  if (w.length > 3 && w.endsWith('s') && !/(?:ss|us|is)$/.test(w)) return w.slice(0, -1)
+  return w
 }
 
-// Single best seed match (backward compatible) — first of suggestSeeds, or null.
-export function suggestSeed(itemName) {
-  return suggestSeeds(itemName, 1)[0] || null
+// A food name or an item name → its words: lowercased, respelled, stemmed, without units.
+export function foodWords(text) {
+  let t = String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ')
+  SPELLINGS.forEach(([re, to]) => { t = t.replace(re, to) })
+  return t.split(' ').filter(w => w && !/^\d/.test(w) && !NOISE.has(w)).map(stem)
 }
 
-// Matches restricted to one specific source, best keyword match first — unlike suggestSeeds
-// (which only returns ties at the single best score across ALL sources, so a source with a
-// merely-good match gets silently dropped if another source has a longer one), this always
-// searches the chosen source on its own so a user who explicitly picks e.g. "DFTQC Nepal" sees
-// everything that source has, not just whichever source happened to win the cross-source tie.
-export function suggestSeedsForSource(itemName, source, limit = 6) {
-  const norm = normalize(itemName)
-  if (!norm) return []
-  const scored = []
-  NUTRITION_SEED.forEach(row => {
-    if (row.source !== source) return
-    let best = 0
-    row.match.forEach(kw => { if (norm.includes(kw) && kw.length > best) best = kw.length })
-    if (best > 0) scored.push({ row, score: best })
+const SAME_FOOD_WORDS = SAME_FOOD.map(set => set.map(p => foodWords(p)))
+
+function runAt(words, run) {
+  for (let i = 0; i + run.length <= words.length; i++) {
+    if (run.every((w, k) => words[i + k] === w)) return i
+  }
+  return -1
+}
+
+// An item name or a typed search → its words, every word with what it may also mean, and the set
+// of both together.
+function itemTerms(text) {
+  const base = foodWords(text).filter(w => !STOP.has(w))
+  const all = new Set(base)
+  const alts = new Map(base.map(w => [w, new Set([w])]))
+  // word → the typed words it stands for, so "chow mein" added for NOODLES still counts as one word
+  const owner = new Map()
+  SAME_FOOD_WORDS.forEach(set => {
+    for (const member of set) {
+      const at = runAt(base, member)
+      if (at < 0) continue
+      const added = set.flat()
+      added.forEach(w => all.add(w))
+      member.forEach((_, k) => added.forEach(w => alts.get(base[at + k]).add(w)))
+      break
+    }
   })
-  return scored.sort((a, b) => b.score - a.score).slice(0, limit).map(s => s.row)
+  alts.forEach((meant, b) => meant.forEach(w => owner.set(w, (owner.get(w) || new Set()).add(b))))
+  return { base, all, alts, owner }
+}
+
+// A food's names, for matching: its main name ("Buffalo meat" in "Buffalo meat (buff) (lean)") and
+// that name's last word are what it IS; a bracketed other name, a USDA keyword and an Indian
+// table's local name are what it is also called. Everything else qualifies it.
+function prepareRow(row) {
+  const name = String(row.name || '')
+  const main = foodWords(name.split(/[,(:]/)[0]).filter(w => !STOP.has(w))
+  const heads = []
+  const mods = new Set()
+  if (main.length) {
+    heads.push(main)
+    if (main.length > 1) heads.push([main[main.length - 1]])
+    main.slice(0, -1).forEach(w => mods.add(w))
+  }
+  for (const m of name.matchAll(/\(([^)]*)\)/g)) {
+    const ws = foodWords(m[1]).filter(w => !STOP.has(w))
+    if (ws.length === 1 && !QUALIFIER.has(ws[0])) heads.push(ws)
+    else ws.forEach(w => mods.add(w))
+  }
+  foodWords(name.replace(/\([^)]*\)/g, ' ').split(/[,:]/).slice(1).join(' '))
+    .filter(w => !STOP.has(w)).forEach(w => mods.add(w))
+  for (const phrase of [...(row.match || []), ...String(row.local || '').split(';')]) {
+    const ws = foodWords(phrase).filter(w => !STOP.has(w))
+    if (ws.length) heads.push(ws)
+  }
+  // The main name's own words stay qualifiers ("duck" in "Duck meat"); only a word that is a name
+  // of the food on its own ("chiura") leaves them, never one inside a longer name ("beaten rice").
+  const ownNames = new Set(heads.filter(h => h.length === 1).flat())
+  const modList = [...mods].filter(w => !ownNames.has(w))
+  const words = [...new Set([...heads.flat(), ...modList])]
+  return {
+    ...row, _heads: heads, _mods: modList, _words: words,
+    // "duck" in "Duck meat": a word of the main name that says WHICH food; missing it costs more.
+    _mainMods: new Set(main.slice(0, -1)),
+    // What the food is called or filed under, for "does it answer every food the item names".
+    _known: new Set([...words, ...foodWords(row.group)]),
+  }
+}
+
+// How well a food answers an item. A name of the food found whole in the item scores 10 for each
+// word the item typed that it covers. Each qualifier the item shares adds 4; each it lacks costs 1,
+// or 5 for a word of the food's main name ("Mango ginger", "Cooked rice" for RICE). Each food the
+// ITEM names that the food is not costs 6, so OAT MILK is not Buffalo milk. A match is STRONG
+// (good enough to fill without a person picking) only when a name matched and the score stays
+// above 5. A food sharing only a qualifier is a weak match, and only when that qualifier is not a
+// state or colour word.
+function scoreFood(row, terms, foodHeads) {
+  const { base, all, alts, owner } = terms
+  let head = 0
+  row._heads.forEach(h => {
+    if (!h.every(w => all.has(w))) return
+    const typed = new Set(h.flatMap(w => [...(owner.get(w) || [])]))
+    head = Math.max(head, 10 * typed.size)
+  })
+  let score = head
+  let real = 0
+  row._mods.forEach(m => {
+    if (all.has(m)) {
+      score += 4
+      if (!GENERIC.has(m)) real++
+    } else {
+      score -= row._mainMods.has(m) ? 5 : 1
+    }
+  })
+  if (!head && !real) return { score: 0, strong: false }
+  base.forEach(b => {
+    const meant = [...alts.get(b)]
+    if (meant.some(w => GENERIC.has(w)) || !meant.some(w => foodHeads.has(w))) return
+    if (!meant.some(w => row._known.has(w))) score -= 6
+  })
+  return { score: Math.max(1, score), strong: head > 0 && score > 5 }
+}
+
+function bySource(a, b) {
+  return (SOURCE_ORDER[a.row.source] ?? 9) - (SOURCE_ORDER[b.row.source] ?? 9)
+}
+
+// ── Loading ────────────────────────────────────────────────────────────────────────────────────
+let libraryPromise = null
+
+// The whole library (USDA rows + both regional tables), ready to search: { rows, heads }, where
+// heads is every word that names a food. The tables are their own chunk, fetched on first use and
+// kept; a failed fetch is not kept, so the next press retries.
+export function loadLibrary() {
+  if (!libraryPromise) {
+    libraryPromise = import(/* webpackChunkName: "food-tables" */ './foodTables.json')
+      .then(m => {
+        const rows = [...NUTRITION_SEED, ...(m.default || m)].map(prepareRow)
+        return { rows, heads: new Set(rows.flatMap(r => r._heads.flat())) }
+      })
+      .catch(err => { libraryPromise = null; throw err })
+  }
+  return libraryPromise
+}
+
+// ── Matching ───────────────────────────────────────────────────────────────────────────────────
+// Library foods for an ingredient's name, best first: strong matches, then score, then regional
+// sources first, then table order. `strongOnly` is for a fill nobody picks by hand (Recipes'
+// auto-fill): a food that shares only a qualifier with the name is never taken on a guess.
+export function suggestSeeds(library, itemName, { limit = 6, strongOnly = false, source = null } = {}) {
+  const terms = itemTerms(itemName)
+  if (!terms.all.size) return []
+  const scored = []
+  library.rows.forEach(row => {
+    if (source && row.source !== source) return
+    const s = scoreFood(row, terms, library.heads)
+    if (s.score && (s.strong || !strongOnly)) scored.push({ row, ...s })
+  })
+  scored.sort((a, b) => (b.strong - a.strong) || (b.score - a.score) || bySource(a, b))
+  return scored.slice(0, limit).map(s => s.row)
+}
+
+// The picker's search box: foods of one source whose names hold every typed word, where a word
+// may be the start of a name ("chick") or a kitchen name for it ("kukhura"). Falls back to the
+// looser suggestion match when nothing holds every word (an item name full of shop words).
+export function searchLibrary(library, query, source, limit = 12) {
+  const terms = itemTerms(query)
+  if (!terms.base.length) return []
+  const found = []
+  library.rows.forEach(row => {
+    if (source && row.source !== source) return
+    const every = terms.base.every(t => [...terms.alts.get(t)].some(a =>
+      a === t ? row._words.some(w => w.startsWith(t)) : row._words.includes(a)))
+    if (!every) return
+    const headStart = terms.base.some(t => row._heads.some(h => h.some(w => w.startsWith(t))))
+    found.push({ row, headStart, ...scoreFood(row, terms, library.heads) })
+  })
+  if (!found.length) return suggestSeeds(library, query, { limit, source })
+  found.sort((a, b) => (b.strong - a.strong) || (b.headStart - a.headStart) || (b.score - a.score)
+    || (a.row.name.length - b.row.name.length))
+  return found.slice(0, limit).map(s => s.row)
+}
+
+// ── Applying a pick ────────────────────────────────────────────────────────────────────────────
+// The basis a pick is saved on follows the INGREDIENT, not the food: per 100 g for an item
+// weighed in KG/GM, per 100 ml for one in LTR/ML (a per-100 g figure read as per 100 ml, as the
+// library always has for liquids), the food's own unit for a counted item, which then needs the
+// weight of one piece. A GM basis on a LTR item is never converted and reads as nearly nothing.
+export function basisUnitFor(uom, row) {
+  const unit = defaultBasisUnit(uom)
+  return unit === 'GM' || unit === 'ML' ? unit : (row?.unit || 'GM')
+}
+
+// A food's figures: null where its table has none (a Nepal food's sugar and sodium when the Indian
+// table has no same food), never 0.
+export function seedFigures(row) {
+  const out = {}
+  NUTRIENTS.forEach(d => { out[d.key] = row?.[d.key] ?? null })
+  return out
+}
+
+// What items.nutrition.source says about a pick: the table, the food and where it is printed.
+export function seedSourceText(row) {
+  if (!row) return ''
+  if (!row.ref) return row.source
+  return `${row.source}: ${row.name} (${row.ref})`
+    + (row.borrowed ? `; sugar and sodium from IFCT 2017: ${row.borrowed}` : '')
 }

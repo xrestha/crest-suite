@@ -1,0 +1,333 @@
+id,name
+NP-A2,Barley
+NP-A3,Buckwheat (whole)
+NP-A9,Proso millet (chino)
+NP-A12,"Maize, green (tender)"
+NP-A13,"Maize, dry"
+NP-A14,"Maize, dry (murali)"
+NP-A19,"Naked barley, white (uwa)"
+NP-A20,"Naked barley, black (uwa)"
+NP-A23,"Rice, parboiled (hand pounded)"
+NP-A24,"Rice, raw (milled)"
+NP-A25,"Rice, raw (hand pounded)"
+NP-A26,Rice flakes (chiura)
+NP-A27,"Rice, parboiled (milled)"
+NP-A28,Rice puff
+NP-A32,Sarbottam pitho (lito)
+NP-A33,Taichin beaten rice (chiura)
+NP-B1,"Bengal gram, big, white (whole)"
+NP-B2,Bengal gram dal (chickpea)
+NP-B4,"Bengal gram, dark brown, big"
+NP-B5,"Bengal gram, light brown, small"
+NP-B6,"Bengal gram, brown, small"
+NP-B7,"Bengal gram, small, white"
+NP-B8,Black gram (dal)
+NP-B9,Black gram (whole)
+NP-B14,Field bean dry (simi)
+NP-B15,Gram flour (besan)
+NP-B16,"Green gram dal, green"
+NP-B17,Green gram (whole)
+NP-B18,"Green peas, dry"
+NP-B19,Mung dal (yellow)
+NP-B23,Katike cowpea
+NP-B27,Moth beans (yellow)
+NP-B28,Moth beans (red)
+NP-B29,"Peas, dry"
+NP-B30,Rajma
+NP-B31,Red gram dal (rahar)
+NP-B32,Soybean (black)
+NP-B33,Soybean (brown)
+NP-B34,Soybean (white)
+NP-B35,Tarbare simi (red)
+NP-B39,Mung (titura)
+NP-B40,Tofu (soybean product)
+NP-B41,Nutrela (soya chunks)
+NP-C6,Bethe leaves
+NP-C10,Bottle gourd leaves
+NP-C12,Brussels sprouts
+NP-C17,Choisum saag
+NP-C22,Celery leaves
+NP-C23,"Colocasia leaves, black variety"
+NP-C24,"Colocasia leaves, green variety"
+NP-C25,"Colocasia leaves, dried"
+NP-C32,Garlic stem and leaves
+NP-C33,Gyanth kobi
+NP-C34,Gyanth kobi leaves
+NP-C35,Gothale saag
+NP-C36,Jaluka saag
+NP-C38,Koiralo saag
+NP-C40,Knol-khol greens
+NP-C41,Parsley (kitchen garden)
+NP-C42,Lettuce
+NP-C43,Love-lies-bleeding
+NP-C46,Nakore saag
+NP-C49,Poi saag
+NP-C50,Patua saag
+NP-C58,"Sim saag, fresh"
+NP-C60,Stinging nettle leaves (sisnu)
+NP-C63,Swiss chard
+NP-C65,Tanki saag
+NP-D1,Ash gourd (kubindo)
+NP-D3,Bitter gourd (karela)
+NP-D6,Brinjal (bhanta)
+NP-D8,Bamboo shoot (tama) (tender)
+NP-D11,Chayote (iskus)
+NP-D16,Colocasia stem
+NP-D17,"Capsicum, yellow"
+NP-D18,"Capsicum, red"
+NP-D19,"Capsicum, green"
+NP-D20,"Chillies, akbare, fresh"
+NP-D21,"Chillies, akbare, dry"
+NP-D22,Celery stalks
+NP-D29,Knol-khol
+NP-D30,"Karonda, fresh"
+NP-D31,Ladies finger (okra) (bhindi)
+NP-D33,"Lakooch (badahar), raw"
+NP-D34,"Lotus stem, dry"
+NP-D35,"Mushroom, button (gobre)"
+NP-D36,"Mushroom, oyster (kanne)"
+NP-D38,"Mango, green"
+NP-D39,Spring onion (onion stalk)
+NP-D41,Pumpkin (pharsi)
+NP-D43,"Plantain, green"
+NP-D46,Parwal
+NP-D50,"Rape, stem"
+NP-D52,Red beans (rato bodi)
+NP-D53,Red bean (simi)
+NP-D54,Spotted beans (chirke simi)
+NP-D56,Snake gourd
+NP-D57,Sponge gourd
+NP-D58,Sunnhemp flower
+NP-D60,Spinach stalk
+NP-D61,Sword beans
+NP-D62,"Soybean, tender"
+NP-D63,"Tomato, green"
+NP-D64,"Tomato, red"
+NP-D66,"Tinda, tender"
+NP-D67,Vegetable marrow
+NP-D68,"Water chestnut, fresh"
+NP-E1,Beetroot
+NP-E3,Colocasia (pidalu)
+NP-E7,Ghar tarul
+NP-E8,"Garlic, dry"
+NP-E9,Gittha
+NP-E12,"Onion, small"
+NP-E13,"Onion, big"
+NP-E15,"Potato, red"
+NP-E16,"Potato, boiled (without skin)"
+NP-E17,"Potato chips, fried"
+NP-E18,Rani vyakur
+NP-E19,"Radish, pink"
+NP-E21,"Radish, rat-tailed"
+NP-E22,"Sweet potato, white"
+NP-E23,"Sweet potato, red"
+NP-E24,"Sweet potato, boiled"
+NP-E25,"Turnip, red"
+NP-E26,Elephant yam
+NP-F2,Mulako sinki
+NP-F3,"Rape leaves, dried"
+NP-F4a,Maseura: black gram and colocasia tuber
+NP-F4b,"Maseura: black gram, colocasia tuber and gundruk"
+NP-F4c,Maseura: black gram and ash gourd (kubindo)
+NP-F4e,Maseura: black gram and cabbage
+NP-F4f,Maseura: black gram and garden cress (chamsur)
+NP-F4g,Maseura: black gram and radish
+NP-F4h,Maseura: black gram and cauliflower
+NP-G2,Amala (big)
+NP-G4,"Apricot, fresh"
+NP-G5,"Apricot, dried"
+NP-G8,Bael sherbet
+NP-G9,"Banana, ripe"
+NP-G13,"Dates, dried"
+NP-G14,"Dates, fresh"
+NP-G16,"Grapes, pale green variety"
+NP-G17,"Grapes, blue variety"
+NP-G18,Grapefruit (Marsh seedless)
+NP-G19,Grapefruit juice (Triumph)
+NP-G20,"Guava, hill"
+NP-G21,"Guava, country"
+NP-G23,"Jackfruit, ripe, seed"
+NP-G27,Lemon (nibuwa)
+NP-G28,"Lemon, sweet"
+NP-G29,Lemon juice
+NP-G30,Litchi
+NP-G31,"Litchi, bastard"
+NP-G33,"Lime, sweet (malta)"
+NP-G36,"Mango, ripe"
+NP-G37,"Mahua, ripe"
+NP-G40,Watermelon
+NP-G45,"Papaya, ripe"
+NP-G50,Pineapple
+NP-G57,Raspberry
+NP-G58,Red raspberry (kafal)
+NP-G60,Rose apple
+NP-G61,Sitaphal (custard apple)
+NP-H2,Aniseed (saunf)
+NP-H3,Long pepper (pipla)
+NP-H4,Betel nut (supari)
+NP-H7,"Chilli, dry"
+NP-H8,"Chilli, green"
+NP-H9,"Cloves, dry"
+NP-H10,"Coriander seed, dry"
+NP-H12,Fenugreek seed (methi)
+NP-H13,"Garlic, dry"
+NP-H14,"Ginger, fresh"
+NP-H17,Ajwain (omum)
+NP-H18,"Pepper, dry"
+NP-H19,"Pepper, green"
+NP-H24,"Lime, peel"
+NP-I3,"Coconut, dry"
+NP-I4,"Coconut, fresh"
+NP-I5,Chilgoza (pine nut)
+NP-I6,Filinge (jhuse til)
+NP-I8,"Groundnut, roasted"
+NP-I9,Linseed (flaxseed)
+NP-I12,Mustard seed
+NP-I15,Poppy seed
+NP-I16,Safflower seed
+NP-I17,Sunflower seed
+NP-I19,"Sesame seed, black (til)"
+NP-I20,"Sesame seed, white (til)"
+NP-I21,"Sesame seed, brown (til)"
+NP-I23,Hemp seed (bhang ko geda)
+NP-J1,Buffalo meat (buff) (lean)
+NP-J2,Buff sausage
+NP-J4,Chicken sausage
+NP-J6,Field rat meat
+NP-J8,Goat meat (khasi) (lean)
+NP-J9,"Liver, goat"
+NP-J10,"Liver, sheep"
+NP-J11,Mutton muscle
+NP-J12,Pork muscle
+NP-J14,Ham sliced (Barume)
+NP-J15,Ham (smoked)
+NP-J16,Pork bacon (Swiss Gourmet)
+NP-J17,Pork prime bacon
+NP-J18,Pork sausages
+NP-J20,"Snail, small"
+NP-J21,"Snail, big"
+NP-K1,Duck egg
+NP-K2,Hen egg
+NP-K3,Quail egg (battai)
+NP-L2,Hilsa
+NP-L7,Tengra fish
+NP-L9,"Crab, small"
+NP-L11,"Dry fish, sun dried"
+NP-L13,"Dry fish, salted"
+NP-L14,"Dry fish, smoked"
+NP-M3,Curd (dahi)
+NP-M10,Buttermilk (mohi)
+NP-M11,Khuwa (whole buffalo milk)
+NP-M12,Skimmed milk powder (cow milk)
+NP-M13,"Chhena, buffalo milk"
+NP-N2,"Ghee, cow"
+NP-N3,"Ghee, buffalo"
+NP-N4,"Ghee, vegetable (vanaspati)"
+NP-N8,Soybean oil
+NP-N12,Cottonseed oil
+NP-N14,Groundnut oil
+NP-N15,Sesame oil
+NP-O3,"Biscuit, salty"
+NP-O4,"Biscuit, sweet"
+NP-O5,"Bread, brown"
+NP-O6,"Bread, white"
+NP-O8,Cane sugar
+NP-O9,"Coconut, tender"
+NP-O10,Coconut water
+NP-O11,Groundnut cake
+NP-O13,"Jaggery, white"
+NP-O14,Chaku
+NP-O16,Jackfruit seeds
+NP-O17,"Jaggery, cane (sakhar)"
+NP-O19,Mahuwa flowers
+NP-O22,Pumpkin seed
+NP-O23,Sugarcane juice
+NP-O24,Sohan papdi
+NP-O25,Yarsagumba capsule
+NP-P1,Cooked rice (bhat)
+NP-P2,Dal (cooked)
+NP-P3,"Green vegetables, cooked"
+NP-P4,"Mixed vegetables, cooked"
+NP-P5,"Roti, whole wheat"
+NP-P6,Dhindo (maize dough)
+NP-P7,Bengal gram curry
+NP-P9,Aalu chop
+NP-P10,Pakoda
+NP-P11,Sel roti
+NP-P12,Jeri (jalebi)
+NP-P13,Buff momo
+NP-P14,Chicken momo
+NP-P15,Paneer momo
+NP-P16,Paneer and vegetable momo
+NP-P17,Vegetable momo
+NP-P19,"Naan, plain"
+NP-P20,"Naan, butter"
+NP-P22,"Naan, chicken"
+NP-P23,"Naan, vegetable"
+NP-Q1,"Weaning mix: maize, wheat and soybean"
+NP-Q3,"Weaning mix: maize, wheat and germinated green mung"
+NP-Q4,"Weaning mix: amaranth seed, barley and soybean"
+NP-Q5,"Weaning mix: germinated buckwheat, amaranth seed and soybean"
+NP-Q6,"Weaning mix: foxtail millet, maize and soybean"
+NP-Q7,"Weaning mix: germinated buckwheat, green mung and maize"
+NP-Q8,"Weaning mix: uwa, maize and soybean"
+NP-Q9,"Weaning mix: barley, maize and soybean"
+NP-Q10,"Weaning mix: proso millet, wheat and green mung"
+NP-Q11,Weaning mix: wheat and green mung (1:1)
+NP-Q12,Weaning mix: barley and black gram (1:1)
+NP-Q13,"Weaning mix: wheat, rice and green mung"
+NP-Q15,"Weaning mix: rice, maize and Bengal gram"
+NP-Q16,"Weaning mix: millet, rice and black gram"
+NP-Q17,Weaning mix: millet and black gram (1:1)
+NP-Q18,Weaning mix: rice and black gram (1:1)
+NP-Q19,"Weaning mix: rice, wheat and Bengal gram"
+NP-R2,"Asparagus, wild (kurilo)"
+NP-R6,Bethe saag
+NP-R17,"Ginare, dried"
+NP-R30,"Latte saag, green stem"
+NP-R31,"Latte saag, red stem"
+NP-R32,Lude saag
+NP-R39,Pudina (mint)
+NP-R42,Sisnu (stinging nettle)
+NP-R43,"Sisnu powder, dry"
+NP-R50,Timila pakche
+NP-R51,"Timila, wakche"
+NP-S-A1-3,New Ma Ma
+NP-S-A1-4,Hits noodle
+NP-S-A1-7,Yum Yum (snack noodle)
+NP-S-A2-4,Yeo's instant noodle
+NP-S-A2-5,Yeo's instant noodle (curry flavour)
+NP-S-A2-6,Yeo's instant noodle (spicy flavour)
+NP-S-A2-7,Yeo's instant noodle (mushroom flavour)
+NP-S-A2-8,"Ma Ma instant noodle (chicken flavour, Thai)"
+NP-S-A2-9,Ma Ma instant noodle
+NP-S-A2-10,Ma Ma instant noodle (sour shrimp flavour)
+NP-S-B-1,Tiger brand noodles
+NP-S-B-3,Tasty noodles
+NP-S-B-4,"Egg steam noodle (Tiger brand, coiled)"
+NP-S-B-5,Gauri Sankar noodle
+NP-S-B-7,San egg noodle
+NP-S-B-8,"Steam chau chau (Deer brand, coiled)"
+NP-S-B-10,Annapurna steam noodle
+NP-S-B-11,"Noodle, coiled (Singapore)"
+NP-S-B-12,Saugat noodle
+NP-S-B-13,Gimi spaghetti
+NP-S-C-1,Chicken cracker
+NP-S-C-2,Prawn cracker
+NP-S-C-3,Paprika cracker (Thai)
+NP-S-C-4,Shrimp cracker (Thai)
+NP-S-C-5,Shrimp cracker (Korea)
+NP-S-C-6,"Prawn cracker, raw (China)"
+NP-S-C-7,Cheese ball (Hello)
+NP-S-C-8,"Cheese ball (Hello, India)"
+NP-S-D-1,Gimi short macaroni
+NP-S-D-2,Bambino macaroni (India)
+NP-S-D-3,Ma Ma cut macaroni (India)
+NP-S-D-4,Rice vermicelli (Thai)
+NP-S-E-3,Pasta (Enrico Nepal)
+NP-S-G-2,"Biscuit, high energy, soya"
+NP-S-G-3,"Biscuit, high energy, khajuri"
+NP-S-G-4,Coffee with pulp
+NP-S-G-5,Coffee without pulp
+NP-S-G-6,"Coffee powder, refined"
+NP-S-G-7,Nutrimix

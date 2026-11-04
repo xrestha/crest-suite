@@ -5,13 +5,11 @@ import Modal from '../../../components/Modal'
 import AllergenTicks from '../../../components/AllergenTicks'
 import { NUTRIENTS, EMPTY_NUTRITION, buildNutritionPayload, defaultBasisUnit, pieceToBasisDim } from '../../../utils/nutrition'
 import { normaliseAllergens, allergenLabel } from '../../../shared/constants/allergens'
-import { suggestSeedsForSource } from '../../../data/nutritionSeed'
+import { LIBRARY_SOURCES, loadLibrary, searchLibrary, basisUnitFor, seedFigures, seedSourceText } from '../../../data/nutritionSeed'
 import { UNITS } from '../recipes/recipeCostCalc'
 import ActionError, { asActionError } from '../../../components/ActionError'
 import { searchUsdaFoods } from '../../../utils/usdaNutrition'
 import { withTimeout, settleWithin } from '../../../utils/withTimeout'
-
-const LIBRARIES = ['DFTQC Nepal', 'IFCT 2017', 'USDA']
 
 // The form keeps allergens as an array of words (the ticked keys, then any unmatched word).
 function allergenWords(raw) {
@@ -54,6 +52,10 @@ export default function NutritionEditorModal({ item, onClose, onSaved, initialAl
   const [nutriMatchSource, setNutriMatchSource] = useState('')
   const [nutriSaving, setNutriSaving] = useState(false)
   const [nutriError, setNutriError] = useState('')
+  // Built-in library: a search box over one table at a time (the tables load on first use)
+  const [libQuery, setLibQuery] = useState(() => item?.name || '')
+  const [libBusy, setLibBusy] = useState(false)
+  const [libError, setLibError] = useState('')
   // Online lookup: a name asks USDA and Open Food Facts together, a barcode asks Open Food Facts
   const [lookupQuery, setLookupQuery] = useState(() => item?.name || '')
   const [lookupResults, setLookupResults] = useState([])
@@ -63,25 +65,39 @@ export default function NutritionEditorModal({ item, onClose, onSaved, initialAl
 
   function setNF(val) { setNutriForm(prev => ({ ...prev, ...val })) }
 
-  function findNutriSeedsFor(source) {
-    const matches = suggestSeedsForSource(item?.name || '', source)
-    setNutriMatches(matches)
+  async function findNutriSeedsFor(source) {
+    const query = libQuery.trim() || item?.name || ''
     setNutriMatchSource(source)
-    setNutriError(matches.length === 0 ? `No ${source} entry for "${item?.name}". Try another library or enter manually.` : '')
+    setLibError('')
+    setLibBusy(true)
+    let library
+    try {
+      library = await withTimeout(loadLibrary(), 30000, 'Loading the food tables')
+    } catch (err) {
+      setLibBusy(false)
+      setNutriMatches([])
+      setLibError({ text: 'The food tables could not be downloaded. Check the internet connection and press the library again.', detail: String(err?.message || err) })
+      return
+    }
+    setLibBusy(false)
+    const matches = searchLibrary(library, query, source)
+    setNutriMatches(matches)
+    setLibError(matches.length === 0 ? `No ${source} food matches "${query}". Try a shorter word, another library, or type the figures in.` : '')
   }
 
+  // A pick replaces every figure, so a sugar or sodium the table does not have comes back empty
+  // rather than keeping the previous source's number beside the new one.
   function applyNutriSeed(seed) {
-    setNutriError('')
+    const figures = seedFigures(seed)
+    setLibError('')
     setNutriMatches([])
     setNutriMatchSource('')
-    setNutriForm(prev => ({
-      ...prev,
-      basis_qty: 100,
-      basis_unit: seed.unit || item?.uom || 'GM',
-      energy_kcal: seed.energy_kcal, protein_g: seed.protein_g, carbs_g: seed.carbs_g,
-      fat_g: seed.fat_g, sugar_g: seed.sugar_g, sodium_mg: seed.sodium_mg,
-      allergens: withAllergens(prev.allergens, seed.allergens), source: seed.source || '',
-    }))
+    setNutriForm(prev => {
+      const next = { ...prev, basis_qty: 100, basis_unit: basisUnitFor(item?.uom, seed), source: seedSourceText(seed),
+        allergens: withAllergens(prev.allergens, seed.allergens) }
+      NUTRIENTS.forEach(d => { next[d.key] = figures[d.key] ?? '' })
+      return next
+    })
   }
 
   // ── Open Food Facts lookup (per 100 g; branded/packaged products) ──
@@ -238,22 +254,6 @@ export default function NutritionEditorModal({ item, onClose, onSaved, initialAl
               aria-invalid={weightMissing || undefined} aria-describedby={weightMissing ? 'nutrit-gpu-note' : undefined} />
           </div>
         )}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
-          {LIBRARIES.map(lib => (
-            <button
-              key={lib}
-              className="btn btn-ghost"
-              style={{
-                fontSize: 12,
-                color: nutriMatchSource === lib ? 'var(--theme-text1)' : undefined,
-                borderColor: nutriMatchSource === lib ? 'currentColor' : undefined,
-              }}
-              onClick={() => findNutriSeedsFor(lib)}
-            >
-              {lib}
-            </button>
-          ))}
-        </div>
         {nutriForm.source && (
           <span style={{ fontSize: 11, color: 'var(--theme-text2)', marginBottom: 8 }}>Source: {nutriForm.source}</span>
         )}
@@ -265,23 +265,56 @@ export default function NutritionEditorModal({ item, onClose, onSaved, initialAl
         </p>
       )}
 
-      {nutriMatches.length > 0 && (
-        <div style={{ marginBottom: 16, padding: '10px 14px', background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)' }}>
-          <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
-            {nutriMatches.length} match{nutriMatches.length > 1 ? 'es' : ''} from {nutriMatchSource}
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {nutriMatches.map((s, i) => (
-              <button key={i} className="btn btn-ghost" style={{ fontSize: 12, textAlign: 'left', padding: '7px 11px', lineHeight: 1.35 }} onClick={() => applyNutriSeed(s)}>
-                <span style={{ display: 'block', color: 'var(--theme-text1)', fontWeight: 600 }}>{s.name}</span>
-                <span style={{ display: 'block', color: 'var(--theme-text2)', fontSize: 11 }}>
-                  {s.energy_kcal} kcal · P{s.protein_g} C{s.carbs_g} F{s.fat_g} /100{s.unit}
-                </span>
-              </button>
-            ))}
-          </div>
+      {/* Built-in library: the Nepal and Indian food tables in full, and a short USDA list */}
+      <div style={{ marginBottom: 16, padding: '12px 14px', background: 'color-mix(in srgb, var(--theme-text2) 6%, transparent)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)' }}>
+        <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+          <Tip width={320} text="Food tables built into Crest: DFTQC Nepal (Food Composition Table for Nepal 2012, about 575 foods, momos and packaged noodles included), IFCT 2017 (Indian Food Composition Tables, about 540 foods) and a short USDA list. Search in English or Nepali (kukhura, bhatmas, rayo saag), then press a table. Figures are per 100 g. The Nepal table never measured sugar or sodium: those come from the same food in the Indian table when it has one, and stay empty otherwise.">Built-in library</Tip>
         </div>
-      )}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input aria-label="Search the built-in food tables" className="form-input"
+            value={libQuery}
+            onChange={e => setLibQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); findNutriSeedsFor(nutriMatchSource || LIBRARY_SOURCES[0]) } }}
+            placeholder="Food name, in English or Nepali…"
+            style={{ flex: 1, minWidth: 180 }}
+          />
+          {LIBRARY_SOURCES.map(lib => (
+            <button key={lib} className="btn btn-ghost" style={{ fontSize: 12 }} aria-pressed={nutriMatchSource === lib}
+              disabled={libBusy} onClick={() => findNutriSeedsFor(lib)}>
+              {libBusy && nutriMatchSource === lib ? 'Loading…' : lib}
+            </button>
+          ))}
+        </div>
+        <ActionError error={libError} />
+        {nutriMatches.length > 0 && (
+          <>
+            <div style={{ fontSize: 11, color: 'var(--theme-text2)', margin: '10px 0 8px' }}>
+              {nutriMatches.length} match{nutriMatches.length > 1 ? 'es' : ''} from {nutriMatchSource}, per 100 g
+              {basisUnitFor(item.uom) === 'ML' && <>. This item is counted in {item.uom}, so the figures are saved per 100 ml</>}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {nutriMatches.map(s => (
+                <button key={s.id || s.name} className="btn btn-ghost" style={{ fontSize: 12, textAlign: 'left', padding: '7px 11px', lineHeight: 1.35 }} onClick={() => applyNutriSeed(s)}>
+                  <span style={{ display: 'block', color: 'var(--theme-text1)', fontWeight: 600 }}>{s.name}</span>
+                  <span style={{ display: 'block', color: 'var(--theme-text2)', fontSize: 11 }}>
+                    {s.energy_kcal} kcal · P{s.protein_g} C{s.carbs_g} F{s.fat_g}{s.group ? ` · ${s.group}` : ''}
+                  </span>
+                  {(s.local || s.borrowed || s.note || (s.source === 'DFTQC Nepal' && s.sugar_g == null)) && (
+                    <span style={{ display: 'block', color: 'var(--theme-text3)', fontSize: 11 }}>
+                      {[
+                        s.local && `Also: ${s.local}`,
+                        s.borrowed && 'Sugar and sodium from IFCT 2017',
+                        s.source === 'DFTQC Nepal' && !s.borrowed && 'No sugar or sodium figures',
+                        s.note && 'Calories worked out from its protein, fat and carbohydrate',
+                      ].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
 
       {/* Online lookup: USDA (raw ingredients) and Open Food Facts (packaged products) */}
       <div style={{ marginBottom: 16, padding: '12px 14px', background: 'color-mix(in srgb, var(--theme-green) 5%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 18%, transparent)', borderRadius: 'var(--radius-sm)' }}>

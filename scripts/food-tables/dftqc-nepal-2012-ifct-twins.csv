@@ -1,0 +1,226 @@
+nepal_id,ifct_id,nepal_name,ifct_name,moisture_gap,note
+NP-A1,IN-A002,Amaranth seed,"Amaranth seed, pale brown",1.4,seed colour not stated; pale brown chosen
+NP-A2,IN-A004,Barley,Barley,2.7,
+NP-A4,IN-A003,Bajra,Bajra,3.4,
+NP-A8,IN-A010,Finger millet(Ragi),Ragi,2.2,
+NP-A11,IN-A005,Jowar,Jowar,2.9,
+NP-A12,IN-A007,"Maize, green (tender)","Maize, tender, local",1.2,"tender local maize, not sweet corn"
+NP-A13,IN-A006,"Maize, dry","Maize, dry",5.6,
+NP-A14,IN-A006,"Maize, dry (murali)","Maize, dry",0.4,murali variety paired with generic dry maize
+NP-A15,IN-A006,Maize flour (yellow),"Maize, dry",2.7,wholemeal flour paired with whole grain
+NP-A16,IN-A006,Maize flour (white),"Maize, dry",2.7,wholemeal flour paired with whole grain
+NP-A19,IN-A004,"Naked barley, white (uwa)",Barley,1.1,naked (hull-less) barley paired with generic barley
+NP-A20,IN-A004,"Naked barley, black (uwa)",Barley,2.3,naked (hull-less) barley paired with generic barley
+NP-A24,IN-A015,"Rice, raw (milled)","Rice, raw, milled",3.8,
+NP-A26,IN-A011,Rice flakes (chiura),Rice flakes,1.8,
+NP-A27,IN-A014,"Rice, parboiled (milled)","Rice, parboiled, milled",3.2,
+NP-A28,IN-A012,Rice puff,Rice puffed,5.3,
+NP-A31,IN-A005,Sorghum,Jowar,5.3,sorghum = jowar
+NP-A33,IN-A011,Taichin beaten rice (chiura),Rice flakes,0.5,Taichin variety paired with generic rice flakes
+NP-A34,IN-A023,Vermicelli,"Wheat, vermicelli",2.1,uncooked wheat vermicelli
+NP-A35,IN-A017,Varagu,Varagu,1.3,"name match; IFCT scientific (Setaria italica) doubtful, composition fits kodo millet"
+NP-A37,IN-A019,Wheat flour (whole),"Wheat flour, atta",1.1,
+NP-A38,IN-A018,Wheat flour (refined),"Wheat flour, refined",2.0,
+NP-B1,IN-B002,"Bengal gram, big, white (whole)","Bengal gram, whole",2.3,kabuli variety paired with generic whole Bengal gram
+NP-B2,IN-B001,Bengal gram dal (chickpea),"Bengal gram, dal",0.7,
+NP-B3,IN-B002,"Bengal gram medium, white","Bengal gram, whole",2.5,variety paired with generic whole Bengal gram
+NP-B4,IN-B002,"Bengal gram, dark brown, big","Bengal gram, whole",1.2,variety paired with generic whole Bengal gram
+NP-B5,IN-B002,"Bengal gram, light brown, small","Bengal gram, whole",2.3,variety paired with generic whole Bengal gram
+NP-B6,IN-B002,"Bengal gram, brown, small","Bengal gram, whole",2.0,variety paired with generic whole Bengal gram
+NP-B7,IN-B002,"Bengal gram, small, white","Bengal gram, whole",2.5,variety paired with generic whole Bengal gram
+NP-B8,IN-B003,Black gram (dal),"Black gram, dal",1.7,
+NP-B9,IN-B004,Black gram (whole),"Black gram, whole",1.9,
+NP-B13,IN-B005,Cow Pea,"Cowpea, brown",4.0,colour not stated; brown cowpea chosen
+NP-B15,IN-B001,Gram flour (besan),"Bengal gram, dal",2.4,besan paired with the Bengal gram dal it is milled from
+NP-B16,IN-B011,"Green gram dal, green","Green gram, whole",0.2,split with husk (crude fibre 4.2) paired with whole green gram
+NP-B17,IN-B011,Green gram (whole),"Green gram, whole",0.5,
+NP-B18,IN-B017,"Green peas, dry","Peas, dry",0.8,
+NP-B19,IN-B010,Mung dal (yellow),"Green gram, dal",1.0,dehusked dal
+NP-B20,IN-B012,Horsegram black,"Horse gram, whole",2.5,black variety paired with generic horse gram
+NP-B21,IN-B012,Horsegram red,"Horse gram, whole",3.4,red variety paired with generic horse gram
+NP-B25,IN-B013,Lentil,Lentil dal,2.7,crude fibre 0.7 shows dehusked lentil; paired with lentil dal
+NP-B26,IN-B016,Moth beans,Moth bean,2.7,
+NP-B27,IN-B016,Moth beans (yellow),Moth bean,2.4,yellow variety paired with generic moth bean
+NP-B28,IN-B016,Moth beans (red),Moth bean,1.0,red variety paired with generic moth bean
+NP-B29,IN-B017,"Peas, dry","Peas, dry",6.7,
+NP-B30,IN-B020,Rajma,"Rajmah, red",2.1,colour not stated; red rajmah chosen
+NP-B31,IN-B021,Red gram dal (rahar),"Red gram, dal",4.2,
+NP-B32,IN-B024,Soybean (black),"Soya bean, brown",6.6,black soybean paired with brown soybean
+NP-B33,IN-B024,Soybean (brown),"Soya bean, brown",2.6,
+NP-B34,IN-B025,Soybean (white),"Soya bean, white",4.7,
+NP-B37,IN-B017,White peas big,"Peas, dry",3.0,big white dry peas paired with generic dry peas
+NP-B38,IN-B009,White bean,"Field bean, white",5.1,white Phaseolus bean = IFCT white field bean (P. vulgaris)
+NP-C1,IN-C005,Amaranth (spined),"Amaranth spinosus, leaves, green mix",1.5,Amaranthus spinosus
+NP-C2,IN-C002,Amaranth (tender),"Amaranth leaves, green",1.1,
+NP-C4,IN-C001,Agathi,Agathi leaves,1.3,
+NP-C6,IN-C008,Bethe leaves,Bathua leaves,0.8,Chenopodium album (bathua)
+NP-C7,IN-C009,Beet green,Beet greens,0.3,
+NP-C12,IN-C012,Brussels sprouts,Brussels sprouts,1.1,
+NP-C13,IN-C015,Cabbage green,"Cabbage, green",0.1,
+NP-C14,IN-C016,Cabbage purple,"Cabbage, violet",0.3,purple = violet
+NP-C15,IN-C017,"Cauliflower, Green",Cauliflower leaves,7.6,name ambiguous; leafy group and values = cauliflower greens (leaves)
+NP-C16,IN-D036,Cauliflower(flower only),Cauliflower,2.3,
+NP-C20,IN-G009,Coriander leaves,Coriander leaves,0.7,
+NP-C23,IN-C018,"Colocasia leaves, black variety","Colocasia leaves, green",4.8,black variety paired with green colocasia leaves
+NP-C24,IN-C018,"Colocasia leaves, green variety","Colocasia leaves, green",0.9,
+NP-C28,IN-C019,Drumstick leaves,Drumstick leaves,0.2,
+NP-C29,IN-C020,Fenugreek leaves,Fenugreek leaves,0.6,
+NP-C30,IN-C021,Garden cress,Garden cress,1.7,
+NP-C34,IN-C024,Gyanth kobi leaves,"Knol-Khol, leaves",0.2,
+NP-C40,IN-C024,Knol-khol greens,"Knol-Khol, leaves",0.5,
+NP-C42,IN-C025,Lettuce,Lettuce,1.1,
+NP-C44,IN-G016,Mint,Mint leaves,0.7,
+NP-C45,IN-C026,Mustard leaves,Mustard leaves,1.6,
+NP-C49,IN-C007,Poi saag,Basella leaves,1.9,poi = Basella alba
+NP-C52,IN-C030,Pumpkin leaves,"Pumpkin leaves, tender",3.9,
+NP-C55,IN-C031,Radish leaves,Radish leaves,0.4,
+NP-C59,IN-C033,Spinach,Spinach,1.8,
+NP-D1,IN-D001,Ash gourd (kubindo),Ash gourd,4.3,
+NP-D3,IN-D005,Bitter gourd (karela),"Bitter gourd, jagged, teeth ridges, short",0.8,variety not stated; nearest-moisture IFCT variety
+NP-D5,IN-D007,Bottle gourd,"Bottle gourd, elongate, pale green",0.9,variety not stated; nearest-moisture IFCT variety
+NP-D6,IN-D031,Brinjal (bhanta),Brinjal - all varieties,2.7,IFCT all-varieties average
+NP-D7,IN-D032,Broadbeans,Broad beans,1.2,
+NP-D8,IN-D002,Bamboo shoot (tama) (tender),"Bamboo shoot, tender",5.8,
+NP-D10,IN-D036,Cauliflower,Cauliflower,0.0,
+NP-D11,IN-D038,Chayote (iskus),Cho-cho-marrow,1.3,
+NP-D12,IN-D039,Cluster beans,Cluster beans,3.7,
+NP-D14,IN-D044,Cucumber,"Cucumber, green, short",2.8,variety not stated; nearest-moisture IFCT variety
+NP-D16,IN-D041,Colocasia stem,"Colocasia, stem, green",1.3,colour not stated; green stem chosen
+NP-D17,IN-D035,"Capsicum, yellow","Capsicum, yellow",4.7,
+NP-D18,IN-D034,"Capsicum, red","Capsicum, red",4.1,
+NP-D19,IN-D033,"Capsicum, green","Capsicum, green",0.9,
+NP-D22,IN-D037,Celery stalks,Celery stalk,0.6,
+NP-D25,IN-D046,Drumstick,Drumstick,1.5,
+NP-D26,IN-D050,French bean,"French beans, hybrid",1.3,variety not stated; nearest-moisture IFCT variety
+NP-D27,IN-D048,Field bean tender,"Field beans, tender, lean",0.5,sem pods by name; IFCT scientific says Vicia faba; nearest-moisture pod type
+NP-D28,IN-D051,Jack fruit tender,"Jack fruit, raw",1.5,
+NP-D29,IN-D053,Knol-khol,Knol - Khol,0.4,
+NP-D31,IN-D056,Ladies finger (okra) (bhindi),Ladies finger,0.5,
+NP-D35,IN-J001,"Mushroom, button (gobre)","Button mushroom, fresh",1.6,
+NP-D38,IN-D057,"Mango, green","Mango, green, raw",2.4,
+NP-D39,IN-D058,Spring onion (onion stalk),"Onion, stalk",0.8,
+NP-D41,IN-D066,Pumpkin (pharsi),"Pumpkin, orange, round",0.8,variety not stated; nearest-moisture IFCT variety
+NP-D42,IN-D062,Plantain flower,"Plantain, flower",0.8,
+NP-D43,IN-D063,"Plantain, green","Plantain, green",7.0,
+NP-D46,IN-D060,Parwal,Parwar,0.4,
+NP-D47,IN-D061,Peas,"Peas, fresh",1.3,
+NP-D48,IN-D059,Papaya green,"Papaya, raw",0.0,
+NP-D49,IN-D068,Ridge gourd,Ridge gourd,0.2,
+NP-D51,IN-D067,Redgram tender,"Red gram, tender, fresh",1.1,
+NP-D56,IN-D070,Snake gourd,"Snake gourd, long, pale green",0.2,variety not stated; nearest-moisture IFCT variety
+NP-D63,IN-D074,"Tomato, green","Tomato, green",0.1,
+NP-D64,IN-D076,"Tomato, red","Tomato, ripe, local",0.1,ripe local tomato
+NP-D66,IN-D073,"Tinda, tender","Tinda, tender",0.9,
+NP-E1,IN-F001,Beetroot,Beet root,0.8,
+NP-E3,IN-F004,Colocasia (pidalu),Colocasia,0.4,
+NP-E5,IN-F003,Carrot,"Carrot, red",0.1,colour not stated; nearest-moisture (red) carrot
+NP-E8,IN-G012,"Garlic, dry","Garlic, small clove",2.4,variety not stated; small-clove garlic chosen
+NP-E11,IN-G015,Mango ginger,Mango ginger,0.5,
+NP-E12,IN-G018,"Onion, small","Onion, small",0.4,
+NP-E13,IN-G017,"Onion, big","Onion, big",0.8,
+NP-E14,IN-F006,Potato,"Potato, brown skin, big",6.0,generic potato paired with brown-skin potato (red has its own row)
+NP-E15,IN-F008,"Potato, red","Potato, red skin",2.3,
+NP-E19,IN-F009,"Radish, pink","Radish, elongate, red skin",1.5,shape not stated; elongate red-skin radish chosen
+NP-E22,IN-F013,"Sweet potato, white","Sweet potato, brown skin",0.7,white sweet potato paired with brown-skin sweet potato
+NP-E23,IN-F014,"Sweet potato, red","Sweet potato, pink skin",2.0,red paired with pink-skin sweet potato
+NP-E26,IN-F017,Elephant yam,"Yam, elephant",4.3,
+NP-G1,IN-E001,Apple,"Apple, big",1.6,variety not stated; big apple chosen
+NP-G2,IN-E021,Amala (big),Goosberry,0.3,amla
+NP-G5,IN-E005,"Apricot, dried","Apricot, dried",2.7,
+NP-G7,IN-E008,Bael fruit,Bael fruit,0.1,
+NP-G9,IN-E012,"Banana, ripe","Banana, ripe, robusta",1.8,variety not stated; robusta (Cavendish) chosen
+NP-G13,IN-E018,"Dates, dried","Dates, dry, dark brown",2.2,nearest-moisture dried dates
+NP-G16,IN-E023,"Grapes, pale green variety","Grapes, seeded, round, green",5.9,pale green paired with green seeded grapes
+NP-G17,IN-E022,"Grapes, blue variety","Grapes, seeded, round, black",1.7,blue paired with black seeded grapes
+NP-G24,IN-E031,Jambu fruit,"Jambu fruit, ripe",0.4,
+NP-G30,IN-E035,Litchi,Litchi,1.5,
+NP-G36,IN-E042,"Mango, ripe","Mango, ripe, totapari",3.1,variety not stated; nearest-moisture IFCT ripe mango (totapari)
+NP-G36a,IN-E042,Mango: Bombay,"Mango, ripe, totapari",6.4,variety paired with nearest-moisture IFCT ripe mango (totapari)
+NP-G36b,IN-E042,Mango: Malda,"Mango, ripe, totapari",4.1,variety paired with nearest-moisture IFCT ripe mango (totapari)
+NP-G36c,IN-E042,Mango: Sukutara,"Mango, ripe, totapari",2.7,variety paired with nearest-moisture IFCT ripe mango (totapari)
+NP-G36d,IN-E042,Mango: Dashari,"Mango, ripe, totapari",3.3,variety paired with nearest-moisture IFCT ripe mango (totapari)
+NP-G36e,IN-E042,Mango: Jarda,"Mango, ripe, totapari",0.8,variety paired with nearest-moisture IFCT ripe mango (totapari)
+NP-G36f,IN-E042,Mango: Kalkatiya,"Mango, ripe, totapari",4.6,variety paired with nearest-moisture IFCT ripe mango (totapari)
+NP-G36g,IN-E042,Mango: Fajali,"Mango, ripe, totapari",0.6,variety paired with nearest-moisture IFCT ripe mango (totapari)
+NP-G36h,IN-E042,Mango: Amrapali,"Mango, ripe, totapari",1.6,variety paired with nearest-moisture IFCT ripe mango (totapari)
+NP-G36i,IN-E042,Mango: Chausa,"Mango, ripe, totapari",3.6,variety paired with nearest-moisture IFCT ripe mango (totapari)
+NP-G36j,IN-E042,Mango: Mallika,"Mango, ripe, totapari",2.7,variety paired with nearest-moisture IFCT ripe mango (totapari)
+NP-G40,IN-E066,Watermelon,"Water melon, pale green",0.5,nearest-moisture watermelon
+NP-G43,IN-E047,Orange,"Orange, pulp",2.0,IFCT orange is suntala
+NP-G45,IN-E049,"Papaya, ripe","Papaya, ripe",0.7,
+NP-G48,IN-E050,Peaches,Peach,2.3,IFCT scientific names of peach and pear are swapped; local names confirm
+NP-G49,IN-E052,Phalsa,Phalsa,3.3,
+NP-G50,IN-E053,Pineapple,Pineapple,1.7,
+NP-G52,IN-E054,Plums,Plum,2.5,
+NP-G53,IN-E055,Pomegranate,"Pomegranate, maroon seeds",5.5,
+NP-G54,IN-E056,Pummelo,Pummelo,1.0,
+NP-G55,IN-E051,Pear,Pear,0.5,IFCT scientific names of peach and pear are swapped; local names confirm
+NP-G61,IN-E016,Sitaphal (custard apple),Custard apple,1.0,
+NP-G62,IN-E063,Strawberry,Strawberry,4.2,
+NP-G63,IN-E060,Sapota,Sapota,0.1,
+NP-G65,IN-E068,Zizyphus,Zizyphus,2.8,
+NP-H1,IN-G019,Asafoetida,Asafoetida,6.6,
+NP-H3,IN-G030,Long pepper (pipla),Pippali,1.6,pipla = pippali
+NP-H4,IN-H002,Betel nut (supari),"Arecanut, dried, brown",4.9,colour not stated; dried brown arecanut chosen
+NP-H7,IN-G022,"Chilli, dry","Chillies, red",4.6,dry red chillies
+NP-H8,IN-G008,"Chilli, green","Chillies, green - all varieties",0.3,IFCT all-varieties average
+NP-H9,IN-G023,"Cloves, dry",Cloves,1.3,
+NP-H10,IN-G024,"Coriander seed, dry",Coriander seeds,2.5,
+NP-H11,IN-G025,Cumin seed,Cumin seeds,1.3,
+NP-H12,IN-G026,Fenugreek seed (methi),Fenugreek seeds,5.9,
+NP-H13,IN-G012,"Garlic, dry","Garlic, small clove",2.4,variety not stated; small-clove garlic chosen
+NP-H14,IN-G014,"Ginger, fresh","Ginger, fresh",0.4,
+NP-H15,IN-G027,Mace,Mace,4.2,
+NP-H16,IN-G028,Nutmeg,Nutmeg,1.2,
+NP-H17,IN-G029,Ajwain (omum),Omum,2.3,
+NP-H18,IN-G031,"Pepper, dry","Pepper, black",5.0,black pepper
+NP-H20,IN-E064,Tamarind pulp,"Tamarind, pulp",0.1,
+NP-H21,IN-G033,Turmeric,Turmeric powder,2.5,dried turmeric paired with turmeric powder
+NP-I1,IN-H001,Almond,Almond,0.8,
+NP-I2,IN-H005,Cashew nut,Cashew nut,1.5,
+NP-I3,IN-H006,"Coconut, dry","Coconut, kernal, dry",0.3,
+NP-I4,IN-H007,"Coconut, fresh","Coconut, kernel, fresh",0.2,
+NP-I5,IN-H017,Chilgoza (pine nut),Pine seed,1.3,
+NP-I6,IN-H015,Filinge (jhuse til),"Niger seeds, black",2.5,filinge (jhuse til) = niger seed; black chosen
+NP-I7,IN-H012,Groundnut,Ground nut,4.0,raw groundnut
+NP-I9,IN-H014,Linseed (flaxseed),Linseeds,1.0,
+NP-I10,IN-H021,Walnut,Walnut,0.9,
+NP-I12,IN-H013,Mustard seed,Mustard seeds,2.8,
+NP-I13,IN-H015,Niger seed,"Niger seeds, black",0.5,colour not stated; black niger seed chosen
+NP-I14,IN-H018,Pistachio nut,Pistachio nuts,0.9,
+NP-I15,IN-G032,Poppy seed,Poppy seeds,0.7,
+NP-I16,IN-H019,Safflower seed,Safflower seeds,0.3,
+NP-I17,IN-H020,Sunflower seed,Sunflower seeds,2.0,
+NP-I18,IN-H021,Walnut,Walnut,0.9,
+NP-I19,IN-H009,"Sesame seed, black (til)","Gingelly seeds, black",1.9,
+NP-I20,IN-H011,"Sesame seed, white (til)","Gingelly seeds, white",1.0,
+NP-I21,IN-H010,"Sesame seed, brown (til)","Gingelly seeds, brown",2.3,
+NP-J5,IN-N011,Duck meat,"Duck, meat, with skin",1.2,IFCT duck is with skin
+NP-J8,IN-O002,Goat meat (khasi) (lean),"Goat, chops",1.7,leanest IFCT goat cut (chops)
+NP-J9,IN-O008,"Liver, goat","Goat, liver",2.9,
+NP-J10,IN-O021,"Liver, sheep","Sheep, liver",0.7,
+NP-J13,IN-N014,Pigeon meat,"Pigeon, meat, with skin",4.2,IFCT pigeon is with skin
+NP-K1,IN-M012,Duck egg,"Egg, duck, whole, raw",0.5,raw whole egg
+NP-K2,IN-M008,Hen egg,"Egg, country hen, whole, raw",0.7,"moisture and fat match country-hen egg, raw whole"
+NP-K3,IN-M014,Quail egg (battai),"Egg, quial, whole, raw",0.8,raw whole egg
+NP-L2,IN-P017,Hilsa,Hilsa,6.4,
+NP-L3,IN-S002,Katla,Catla,4.7,
+NP-L10,IN-S006,Rahu,Rohu,0.4,rahu = rohu
+NP-M1,IN-L001,Buffalo milk,"Milk, whole, Buffalo",0.3,
+NP-M2,IN-L002,Cow milk,"Milk, whole, Cow",0.9,IFCT sugar 4.89 exceeds Nepal carbs 4.4; cap sugar at carbs
+NP-N2,IN-T013,"Ghee, cow",Ghee,,"Nepal moisture not given (dash); pure fat paired, gap not computed"
+NP-N3,IN-T013,"Ghee, buffalo",Ghee,,"Nepal moisture not given (dash); pure fat paired, gap not computed"
+NP-N4,IN-T014,"Ghee, vegetable (vanaspati)",Vanaspati,,"Nepal moisture not given (dash); pure fat paired, gap not computed"
+NP-N6,IN-T014,Hydrogenated oil,Vanaspati,,"Nepal moisture not given (dash); pure fat paired, gap not computed; hydrogenated oil = vanaspati"
+NP-N7,IN-T012,Sunflower oil,Sunflower oil,,"Nepal moisture not given (dash); pure fat paired, gap not computed"
+NP-N8,IN-T011,Soybean oil,Soyabean oil,,"Nepal moisture not given (dash); pure fat paired, gap not computed"
+NP-N10,IN-T002,Corn oil,Corn oil,,"Nepal moisture not given (dash); pure fat paired, gap not computed"
+NP-N11,IN-T001,Coconut oil,Coconut oil,,"Nepal moisture not given (dash); pure fat paired, gap not computed"
+NP-N12,IN-T003,Cottonseed oil,Cotton seed oil,,"Nepal moisture not given (dash); pure fat paired, gap not computed"
+NP-N14,IN-T005,Groundnut oil,Groundnut oil,,"Nepal moisture not given (dash); pure fat paired, gap not computed"
+NP-N15,IN-T004,Sesame oil,Gingelly oil,,"Nepal moisture not given (dash); pure fat paired, gap not computed; sesame = gingelly"
+NP-O1,IN-H004,Areca nut,"Arecanut, fresh",6.4,"W31 fits fresh arecanut, not dried"
+NP-O2,IN-C010,Betel leaves,"Betel leaves, big (kolkata)",0.5,nearest-moisture betel leaf (big)
+NP-O10,IN-K002,Coconut water,Coconut Water,2.0,
+NP-O16,IN-D052,Jackfruit seeds,"Jack fruit, seed, mature",7.8,mature jackfruit seed
+NP-O17,IN-I001,"Jaggery, cane (sakhar)","Jaggery, cane",7.3,sakhar = cane jaggery
