@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -117,11 +117,20 @@ export default function PeriodComparison() {
 
   useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load re-runs init, a failed range re-reads the range on screen.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || periods.length === 0) init()
+    else loadRange(periods, limit)
+  }
+
   async function init() {
     // A client switch starts from nothing (S792, FIGURES-7/11). Claiming the page supersedes a range
     // load still in flight for the previous outlet; clearing `periods` means no range is read from
     // the last client's period ids.
     const initKey = limitReq.begin(`${effectiveClientId}:periods`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     setStats({})
@@ -139,7 +148,7 @@ export default function PeriodComparison() {
     })
     if (out.superseded) return   // a newer client switch or range pick owns the page
     // It used to set the error and leave `loading` wherever it was.
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     // A load kept from the guessed list is run again when the fresh list moved a month in it.
     if (out.chosen && limitReq.isCurrent(out.chosen.id) && listSig(builtFrom) !== listSig(list)) {
       await fetchData(list, lim)
@@ -158,6 +167,7 @@ export default function PeriodComparison() {
   }
 
   async function loadRange(list, lim) {
+    initFailed.current = false
     setLoading(true)
     await fetchData(list, lim)
     // Only the load that still owns the page may clear the flag: a superseded one returned early.
@@ -538,7 +548,7 @@ export default function PeriodComparison() {
         </div>
       </div>
 
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       {/* D6 (S756): which periods' COGS counts uncounted stock as used. Not no-print — a printed
           comparison carries the caveat too. */}

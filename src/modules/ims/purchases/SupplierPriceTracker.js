@@ -527,7 +527,7 @@ export default function SupplierPriceTracker() {
         <div className="page-header">
           <h1 className="page-title">Price Tracker</h1>
         </div>
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={() => init()} />
       </div>
     )
   }

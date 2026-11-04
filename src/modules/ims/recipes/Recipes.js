@@ -1705,7 +1705,9 @@ Check the recipe list before saving again — if it timed out after the recipe w
 
       {/* A failed read replaces the page rather than sitting above a list of zero-cost recipes —
           "your menu costs nothing" is a worse thing to render than nothing at all (S711). */}
-      {loadError && <ReportLoadError error={loadError} />}
+      {/* Try again (S876, PERF-11) clears the card first: init only clears it once every read has
+          landed, so without this the press would show nothing until then. */}
+      {loadError && <ReportLoadError error={loadError} onRetry={() => { setLoadError(null); init() }} />}
 
       {/* ── LIST VIEW ── */}
       {!loadError && view === 'list' && (

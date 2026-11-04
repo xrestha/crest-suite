@@ -209,8 +209,7 @@ The asset is still on the register as active.`, detail })
         <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
       ) : loadError ? (
         <div style={{ marginBottom: 20 }}>
-          <ReportLoadError error={loadError} />
-          <button className="btn btn-ghost" style={{ marginTop: 10 }} onClick={load}>Try again</button>
+          <ReportLoadError error={loadError} onRetry={load} />
         </div>
       ) : schedule.length === 0 ? (
         <div className="empty-state">

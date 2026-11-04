@@ -62,6 +62,14 @@ export default function ShrinkageReport() {
   // A window picked on the page; the first load is init's, started from the month list (S855).
   useEffect(() => { if (periods.length) loadWindow(periods, periodCount) }, [periodCount]) // eslint-disable-line
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load (the month list or the categories) re-runs init, a failed window re-reads it.
+  const initLoadFailed = useRef(false)
+  function retryLoad() {
+    if (initLoadFailed.current || !periods.length) init()
+    else loadWindow(periods, periodCount)
+  }
+
   async function init() {
     // The page stays mounted across an admin's view-as switch and a group Owner's outlet switch, so
     // the previous client's init can land after this one's and hand its periods to the new client
@@ -70,6 +78,8 @@ export default function ShrinkageReport() {
     // And retire the previous client's report load NOW, not only when this client's first one
     // starts after the periods read: until then its key was still the current one.
     windowReq.begin(`${effectiveClientId}:init`)
+    initLoadFailed.current = false
+    setLoading(true)
     setLoadError(null)
     // The closed months come from the shared list (S855, periodList.js). This page loads a WINDOW
     // of them, not one month, so it applies initPeriodLoad's rule itself: the window guessed from
@@ -89,6 +99,7 @@ export default function ShrinkageReport() {
     const initFailed = firstError(initResults)
     if (initFailed) {
       windowReq.begin(`${effectiveClientId}:failed`)   // a guessed window must not paint over the error
+      initLoadFailed.current = true
       setLoadError(initFailed); setLoading(false); return
     }
     const [{ data: all }, { data: c }] = initResults
@@ -108,6 +119,7 @@ export default function ShrinkageReport() {
   }
 
   async function loadWindow(list, count) {
+    initLoadFailed.current = false
     const key = await buildReport(list, count)
     if (windowReq.isCurrent(key)) setLoading(false)
   }
@@ -267,7 +279,7 @@ export default function ShrinkageReport() {
         </select>
       </div>
 
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       {!loadError && <>
       <div className="note-banner">

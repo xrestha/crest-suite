@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -54,8 +54,17 @@ export default function PaymentReport() {
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load re-runs init, a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     // The month list is the shared one, and the first load starts beside it (S855, src/shared/periodList.js).
@@ -69,7 +78,7 @@ export default function PaymentReport() {
       setPeriods, select: setSelectedPeriod, load: loadData,
     })
     if (out.superseded) return   // a newer client switch or period pick owns the page
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     // Only the load that still owns the page may un-gate it (S792, TAX-4). A period picked while
     // this first load was in flight leaves `loadData(chosen)` returning early; clearing `loading`
     // here anyway drew the previous month's figures under the new month's chip and filename.
@@ -78,6 +87,7 @@ export default function PaymentReport() {
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initFailed.current = false
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setLoading(true)
@@ -273,7 +283,7 @@ export default function PaymentReport() {
         </p>
       )}
 
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       {/* The VAT/Non-VAT banner's shape, with this page's own consequence: here the rows ARE counted. */}
       {!loadError && !loading && unlinked.count > 0 && (

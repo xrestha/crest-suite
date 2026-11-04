@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { vatModeOf } from '../recipes/menuPriceVat'
@@ -52,8 +52,17 @@ export default function VatReport() {
 
   useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load re-runs init, a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     // The month list is the shared one, and the first load starts beside it (S855, src/shared/periodList.js).
@@ -64,12 +73,13 @@ export default function VatReport() {
     if (out.superseded) return   // a newer client switch or period pick owns the page
     // A statutory report must never mistake a failed read for "no periods yet" — the figures
     // on this page are what gets filed with the IRD (S612, the silent-NPR-0 class).
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await (S601)
+    initFailed.current = false
     setSelected(periods.find(p => p.id === periodId))
     setLoading(true)
     await fetchData(periodId)
@@ -384,7 +394,7 @@ export default function VatReport() {
         </div>
       </div>
 
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       {biz.error && !loadError && (
         <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>

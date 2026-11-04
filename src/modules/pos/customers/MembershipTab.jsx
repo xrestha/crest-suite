@@ -246,7 +246,8 @@ function writeFailure(err, lead) {
   return info
 }
 
-export default function MembershipTab({ book, typesState, canManage = false, onCustomerSaved }) {
+// `onRetryBook` (S876, PERF-11) is the page's re-read of the customer book, for its Try again.
+export default function MembershipTab({ book, typesState, canManage = false, onCustomerSaved, onRetryBook }) {
   const { isAdmin, adminViewClientName, profile } = useAuth()
   const { scopedInsert, scopedUpdate, scopedDelete } = useScopedDb()
   const { ask: askConfirm, confirmEl } = useConfirm()
@@ -422,7 +423,7 @@ export default function MembershipTab({ book, typesState, canManage = false, onC
       {typesState.loading ? (
         <p role="status" style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>Loading card types…</p>
       ) : typesState.error ? (
-        <ReportLoadError error={typesState.error} />
+        <ReportLoadError error={typesState.error} onRetry={() => typesState.reload()} />
       ) : (
         <>
           {typesState.stale && (() => {
@@ -502,7 +503,7 @@ export default function MembershipTab({ book, typesState, canManage = false, onC
       {bookLoading ? (
         <p role="status" style={{ fontSize: 13, color: 'var(--theme-text2)' }}>Loading the customer book…</p>
       ) : bookError ? (
-        <ReportLoadError error={bookError} />
+        <ReportLoadError error={bookError} onRetry={onRetryBook} />
       ) : (
         <>
           {book.stale && (() => {

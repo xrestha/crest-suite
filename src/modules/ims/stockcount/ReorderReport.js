@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, Navigate, Link } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
@@ -96,8 +96,17 @@ export default function ReorderReport() {
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load (the month list or the categories) re-runs init, a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     recipeBook()   // start it now, so it lands alongside the period list rather than after it
@@ -113,15 +122,16 @@ export default function ReorderReport() {
       scopedFrom('categories').order('sort_order'),
     ])
     // A failed read must not wear NoPeriodState (S612 silent-zero rule).
-    if (cats.error) { setLoadError(cats.error); setLoading(false); return }
+    if (cats.error) { initFailed.current = true; setLoadError(cats.error); setLoading(false); return }
     setCategories(cats.data || [])
     if (out.superseded) return   // a period picked meanwhile owns the page and its loading flag
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initFailed.current = false
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setLoading(true)
@@ -554,7 +564,7 @@ export default function ReorderReport() {
       {/* A failed read renders as a failure — Book Stock is ordered against (S612). */}
       <ActionError error={actionError} className="no-print" />
       {confirmEl}
-      {loadError ? <ReportLoadError error={loadError} /> : <>
+      {loadError ? <ReportLoadError error={loadError} onRetry={retryLoad} /> : <>
 
       {/* The strip, the no-par tip and the filter count wait for the load (S756). They sat under
           the error branch with no `!loading`, so a period change painted the PREVIOUS period's

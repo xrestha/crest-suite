@@ -40,9 +40,11 @@ export default function GroupItemPrices({ bsYear, bsMonth, readGroupId = null, r
   const [state, setState] = useState({ loading: true, error: null, rows: [] })
   const [showAll, setShowAll] = useState(false)
   const latest = useLatestRequest()
+  // Try again on the could-not-load card (S876, PERF-11) re-runs the read below.
+  const [retryRun, setRetryRun] = useState(0)
 
   useEffect(() => {
-    const key = `${bsYear}-${bsMonth}-${readGroupId || 'own'}-${refreshKey}`
+    const key = `${bsYear}-${bsMonth}-${readGroupId || 'own'}-${refreshKey}-${retryRun}`
     latest.begin(key)
     setState(s => ({ ...s, loading: true, error: null }))
     setShowAll(false)
@@ -55,7 +57,7 @@ export default function GroupItemPrices({ bsYear, bsMonth, readGroupId = null, r
       if (res.error) setState({ loading: false, error: res.error, rows: [] })
       else setState({ loading: false, error: null, rows: res.data || [] })
     })()
-  }, [bsYear, bsMonth, readGroupId, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bsYear, bsMonth, readGroupId, refreshKey, retryRun]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const cmp = useMemo(() => compareItemPrices(state.rows), [state.rows])
   // One column per outlet that bought any compared item, in name order.
@@ -84,7 +86,7 @@ export default function GroupItemPrices({ bsYear, bsMonth, readGroupId = null, r
       {state.loading ? (
         <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>Comparing prices…</p>
       ) : state.error ? (
-        <ReportLoadError error={state.error} />
+        <ReportLoadError error={state.error} onRetry={() => setRetryRun(n => n + 1)} />
       ) : cmp.items.length === 0 ? (
         <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: 0 }}>
           No linked item was bought by two or more outlets in {monthLabel}. Items are linked when your HQ pushes its items to a branch with Push master data below; until then there is nothing to compare.

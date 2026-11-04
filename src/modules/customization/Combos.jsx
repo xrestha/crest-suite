@@ -258,7 +258,7 @@ export default function Combos() {
       {loading ? (
         <div className="loading-state">Loading…</div>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={() => load()} />
       ) : combos.length === 0 ? (
         <div className="empty-state">
           <p style={{ margin: '0 0 8px' }}>No combos yet.</p>

@@ -500,6 +500,15 @@ export default function KotLog() {
   // The ACTIVE tab's own failure only — another tab's stale error must not paint over this one.
   const loadError = loadErrors[tab] || null
   const isEmpty = TAB_STATE[tab]?.empty ?? true
+  // Try again on the could-not-load card (S876, PERF-11) reloads the active tab through its own
+  // loader. One entry per tab, like TAB_STATE: a tab with none keeps the card's reload text.
+  const TAB_LOAD = {
+    register:       loadRegister,
+    reconciliation: loadReconciliation,
+    trail:          loadBillTrail,
+    pulled:         loadPulled,
+    moves:          loadMoves,
+  }
 
   return (
     <div>
@@ -547,7 +556,7 @@ export default function KotLog() {
       </LetterheadError>
       {/* S612: a failed read renders as a failure — never as the empty state or a zero table. */}
       {loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={TAB_LOAD[tab]} />
       ) : loading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : isEmpty ? (

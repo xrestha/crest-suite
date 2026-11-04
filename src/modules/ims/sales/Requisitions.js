@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
@@ -121,10 +121,19 @@ export default function Requisitions() {
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load (the month list or the item list) re-runs init, a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     setLoading(true)
     setLoadError(null)
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     // The month comes from the shared list, the slips read beside it (S855, periodList.js). On this
     // entry page the guess only starts the reads: the dropdown, the lock and every save take the
     // fresh list, applied below once it has landed. useLatestRequest's contract: anything that
@@ -141,12 +150,12 @@ export default function Requisitions() {
       profileNamesRpc(supabase, effectiveClientId),
     ])
     // A failed read is not an empty period and must not render as one (S612 silent-zero rule).
-    if (itemsRes.error) { setLoadError(itemsRes.error); setLoading(false); return }
+    if (itemsRes.error) { initFailed.current = true; setLoadError(itemsRes.error); setLoading(false); return }
     setNamesFailed(!!namesRes.error)
     setNames(namesMapOf(namesRes.data))
     setItems(itemsRes.data || [])
     if (out.superseded) return   // a newer claim owns the page
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     setPeriods(list)
     if (out.chosen) setSelectedPeriod(out.chosen)
     if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
@@ -166,6 +175,7 @@ export default function Requisitions() {
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initFailed.current = false
     setLoadError(null)          // a new period is a new attempt — let it recover
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
@@ -736,7 +746,7 @@ ${text}`, detail })
       {loading ? (
         <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={retryLoad} />
       ) : mode === 'new' ? (
         /* ── New Requisition Form ─────────────────────────────────────────── */
         <div>

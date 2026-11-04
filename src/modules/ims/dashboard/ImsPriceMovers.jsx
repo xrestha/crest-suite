@@ -109,7 +109,7 @@ export default function ImsPriceMovers({ activePeriod }) {
       {state === null
         ? <div><span className="skeleton" style={{ display: 'inline-block', width: '70%', height: '1.2em' }} /></div>
         : state.error
-          ? <ReportLoadError error={state.error} />
+          ? <ReportLoadError error={state.error} onRetry={() => { setState(null); load() }} />
           : state.rows.length === 0
             ? <p style={{ margin: 0, fontSize: 13, color: 'var(--theme-text2)' }}>
                 {state.beforeLabel ? `No item's price moved against ${state.beforeLabel} yet.` : 'No earlier month to compare with yet.'}

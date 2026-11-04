@@ -1,5 +1,5 @@
 import { npr } from '../../../shared/nepalMoney'
-import { useState, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -63,11 +63,20 @@ export default function PurchaseOneLakhAboveReport() {
   // previous client's read must not land on the new one's page (the S721 rule).
   const fyKeyOf = fy => `${effectiveClientId}:${fy}`
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load re-runs init, a failed fiscal year re-reads that year.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedFy) init()
+    else changeFy(selectedFy)
+  }
+
   async function init() {
     // Claim the page for this client before any await, so a fiscal-year load still in flight for
     // the client just left can no longer set anything (TAX-6) — and drop that client's periods,
     // year and rows rather than leave them on screen under the new client's name meanwhile.
     const initKey = fyReq.begin(`${effectiveClientId}:periods`)
+    initFailed.current = false
     setPeriods([]); setFyOptions([]); setSelectedFy('')
     setVendors([]); setUnlinked({ count: 0, value: 0, examples: [], more: 0 })
     setPeriodsLoaded(false); setLoadError(null); setLoading(true)
@@ -82,7 +91,7 @@ export default function PurchaseOneLakhAboveReport() {
       load: () => { builtFrom = list; return load(fy, list) },
     })
     if (out.superseded) return   // a newer client switch or FY pick owns the page
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     setPeriodsLoaded(true)
     // A fiscal year reaches past one month, so a load kept from the guessed list is run again when
     // the fresh list moved a month in it (a close or a new month on another device).
@@ -93,6 +102,7 @@ export default function PurchaseOneLakhAboveReport() {
   }
 
   async function changeFy(fy) {
+    initFailed.current = false
     setSelectedFy(fy)
     setLoading(true)
     await load(fy, periods)
@@ -284,7 +294,7 @@ export default function PurchaseOneLakhAboveReport() {
         )}
       </div>
 
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       {biz.error && !loadError && (
         <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>

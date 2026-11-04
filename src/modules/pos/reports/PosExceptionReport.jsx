@@ -381,7 +381,7 @@ export default function PosExceptionReport() {
       </LetterheadError>
       {/* S612: a failed read renders as a failure — never as zero stat cards or a quiet report. */}
       {loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={load} />
       ) : loading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : (

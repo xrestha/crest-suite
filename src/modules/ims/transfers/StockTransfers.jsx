@@ -366,7 +366,9 @@ export default function StockTransfers() {
       {loading && !data ? (
         <p role="status" style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        // Try again (S876, PERF-11) clears the card first: the read keeps it until it lands, so the
+        // press would otherwise show nothing (a first read then shows Loading, a re-read the lists).
+        <ReportLoadError error={loadError} onRetry={() => { setLoadError(null); load() }} />
       ) : tab === 'send' ? (
         receivers.length === 0 ? (
           <div className="card"><div className="empty-state">

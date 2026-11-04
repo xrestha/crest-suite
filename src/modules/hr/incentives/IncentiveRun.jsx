@@ -213,6 +213,13 @@ export default function IncentiveRun() {
   const commitLabel = () => setRunLabel(labelInput.trim())
   const pickRun = label => { setLabelInput(label); setRunLabel(label) }
   const reloadRun = () => loadRun(current.current.year, current.current.label, { quiet: true })
+  // Try again on the could-not-load card (S876, PERF-11) repeats whichever read failed. Its error
+  // is cleared first, so the page shows Loading… while it runs, as on the first load.
+  function retryLoad() {
+    if (configsError) { setConfigsError(null); loadConfigs() }
+    if (baseError) { setBaseError(null); loadBase() }
+    if (runError) { setRunError(null); loadRun(bsYear, runLabel) }
+  }
 
   // ── Derived ────────────────────────────────────────────────────────────────────────────────
   const employees = base?.employees || NONE
@@ -839,7 +846,7 @@ export default function IncentiveRun() {
       )}
 
       {loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={retryLoad} />
       ) : loading ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)' }}>Loading…</div>
       ) : !runLabel ? (

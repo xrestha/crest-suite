@@ -170,9 +170,19 @@ export default function Overheads() {
   // by loadPeriods (S855), so a month already loaded with the same inputs is skipped here.
   useEffect(() => { if (periodId && loadedFor.current !== loadSig(periodId)) loadAll(periodId) }, [periodId, hrOn, payrollFenced, assetsOn]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // month list re-runs loadPeriods, a failed month re-reads that month through loadAll (not
+  // handlePeriodChange, which only moves `periodId` and so would not reload the month on screen).
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !periodId) loadPeriods(effectiveClientId)
+    else loadAll(periodId)
+  }
+
   async function loadPeriods(cid) {
     clientReq.begin(cid)
     const initKey = periodReq.begin(`init:${cid}`)
+    initFailed.current = false
     // An admin switching client: the previous client's period and rows leave the screen before
     // anything else happens. Left up, Save would delete-and-insert that old period's figures under
     // the NEW client's scope while the new client's period list was still loading.
@@ -190,7 +200,7 @@ export default function Overheads() {
     })
     if (!clientReq.isCurrent(cid) || out.superseded) return
     // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     // The carry-forward reads the months before this one, so a load kept from the guessed list is
     // run again when the fresh list moved a month (a close, a rename or a new month elsewhere).
     if (out.chosen && periodReq.isCurrent(out.chosen.id) && listSig(builtFrom) !== listSig(list)) {
@@ -208,6 +218,7 @@ export default function Overheads() {
 
   async function loadAll(pid) {
     periodReq.begin(pid)
+    initFailed.current = false
     setLoading(true)
     await loadPeriod(pid, periods)
     if (!periodReq.isCurrent(pid)) return
@@ -747,7 +758,7 @@ export default function Overheads() {
 
       {/* A failed read blocks the whole form: on a data-entry page, saving over rows the page
           could not read is a data-loss shape, not just a wrong figure (S612). */}
-      {loadError ? <ReportLoadError error={loadError} /> : <>
+      {loadError ? <ReportLoadError error={loadError} onRetry={retryLoad} /> : <>
 
       {/* A failed save is announced where the Save button is, not swallowed. role="alert" comes
           from ActionError: someone who pressed Save and heard nothing has been told it worked. */}

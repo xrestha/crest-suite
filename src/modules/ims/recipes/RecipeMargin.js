@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { supabase } from '../../../supabaseClient'
@@ -48,8 +48,17 @@ export default function RecipeMargin() {
 
   useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load re-runs init, a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     // The month comes from the shared list, the report starting beside it (S855, periodList.js):
@@ -61,12 +70,13 @@ export default function RecipeMargin() {
     })
     if (out.superseded) return   // a period picked meanwhile owns the page and its loading flag
     // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await (S601)
+    initFailed.current = false
     setSelected(periods.find(p => p.id === periodId))
     setLoading(true)
     await fetchData(periodId)
@@ -418,7 +428,7 @@ export default function RecipeMargin() {
       {loading ? (
         <div className="loading-state">Loading...</div>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={retryLoad} />
       ) : display.length === 0 ? (
         <div className="empty-state">
           No recipes found.{onlyWithSales ? ' Try unchecking "Only recipes with sales".' : ''}

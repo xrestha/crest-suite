@@ -75,6 +75,9 @@ export default function ComboBuilder() {
   // Aashish, 2026-09-10: the feature is sold in the Growth IMS list and removing it would take it
   // off a plan people already bought); the page says what it needs instead of blaming the data.
 
+  // Try again on the menu's could-not-load card (S876, PERF-11) re-runs the read below.
+  const [menuRun, setMenuRun] = useState(0)
+
   useEffect(() => {
     if (!clientId) return
     let cancelled = false
@@ -121,7 +124,7 @@ export default function ComboBuilder() {
     })()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId])
+  }, [clientId, menuRun])
 
   const loadPairs = useCallback(async () => {
     if (!clientId || !anchorId) { setPairs([]); setAnchorBills(0); return }
@@ -208,7 +211,7 @@ export default function ComboBuilder() {
         </p>
       </div>
 
-      {menuError && <ReportLoadError error={menuError} />}
+      {menuError && <ReportLoadError error={menuError} onRetry={() => setMenuRun(n => n + 1)} />}
       {saveError && <ActionError error={saveError} />}
 
       {/* DESIGN.md's tint pattern — alpha fill, full-opacity signal text, uniform 1px border —
@@ -263,7 +266,7 @@ export default function ComboBuilder() {
           No POS-enabled items yet — toggle items on in Menu Pricing first.
         </div>
       ) : pairsError ? (
-        <ReportLoadError error={pairsError} />
+        <ReportLoadError error={pairsError} onRetry={loadPairs} />
       ) : pairsLoading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading pairings…</p>
       ) : rows.length === 0 ? (

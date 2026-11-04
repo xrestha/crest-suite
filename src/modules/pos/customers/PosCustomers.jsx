@@ -57,10 +57,10 @@ const NO_ROWS = []
 
 // The customer book's table (S842). Memoized and fed the DEFERRED search, so a keystroke repaints the
 // box at once and the rows only when React has a moment: every character used to redraw the whole book.
-// `onToggle` is a stable callback, so a keystroke changes none of these props.
+// `onToggle` and `onRetryHistory` are stable callbacks, so a keystroke changes none of these props.
 // S843: each row also carries its membership card (as the till sees it today), a 🎂 when a birthday or
 // anniversary falls in the next 7 days (Nepal's today), and Edit for the card, credit limit and dates.
-const CustomerBookTable = memo(function CustomerBookTable({ rows, expandedId, historyMap, noShowByPhone, vatReg, prefix, onToggle, typesById, onEdit }) {
+const CustomerBookTable = memo(function CustomerBookTable({ rows, expandedId, historyMap, noShowByPhone, vatReg, prefix, onToggle, onRetryHistory, typesById, onEdit }) {
   const today = todayNepalIso()
   const soon = useMemo(() => customerIdsWithOccasion(rows, 7), [rows, today]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
@@ -126,7 +126,7 @@ const CustomerBookTable = memo(function CustomerBookTable({ rows, expandedId, hi
                     {historyMap[c.id] === 'loading' || !historyMap[c.id] ? (
                       <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Loading order history…</span>
                     ) : historyMap[c.id].error ? (
-                      <ReportLoadError error={historyMap[c.id].error} />
+                      <ReportLoadError error={historyMap[c.id].error} onRetry={() => onRetryHistory(c)} />
                     ) : historyMap[c.id].length === 0 ? (
                       <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>No billed orders found for this phone number.</span>
                     ) : (
@@ -191,6 +191,9 @@ export default function PosCustomers() {
   // The memoized table's row toggle: stable, reading the newest toggleHistory (set before the return).
   const toggleRef = useRef(null)
   const onToggleHistory = useCallback(c => toggleRef.current?.(c), [])
+  // The same for a row's Try again (S876, PERF-11): stable, reading the newest loadHistory.
+  const historyRetryRef = useRef(null)
+  const onRetryHistory = useCallback(c => historyRetryRef.current?.(c), [])
 
   // S843: membership card types (for the book's badges, the Membership tab and the edit dialog), and the
   // customer whose card, credit limit and dates are open for editing from the book.
@@ -281,11 +284,24 @@ export default function PosCustomers() {
     }
   }
 
+  // Try again on the customer book's card (S876, PERF-11), here and on the Membership tab: the book
+  // is emptied first, so both show Loading… until the read lands, as on the first visit (a failed
+  // first read holds no rows to keep).
+  function retryBook() {
+    setBook({ clientId: null, rows: null, error: null, stale: null })
+    loadCustomers()
+  }
+
   async function toggleHistory(cust) {
     if (expandedId === cust.id) { setExpandedId(null); return }
     setExpandedId(cust.id)
     // A cached failure is not a result — re-expanding retries it (S754).
     if (historyMap[cust.id] && !historyMap[cust.id].error) return
+    await loadHistory(cust)
+  }
+
+  // One customer's billed orders, for the expanded row; also its Try again (S876, PERF-11).
+  async function loadHistory(cust) {
     setHistoryMap(m => ({ ...m, [cust.id]: 'loading' }))
     // S815 4g: the stored phone and the number it is, so a bill an older till stored as typed
     // ("+977 98…") is listed beside the ones stored as the number since S809 3k.
@@ -322,6 +338,7 @@ export default function PosCustomers() {
   const custLoading = !clientId || book.clientId !== clientId
   const custError = book.error
   toggleRef.current = toggleHistory
+  historyRetryRef.current = loadHistory
 
   return (
     <div>
@@ -407,7 +424,7 @@ export default function PosCustomers() {
           {custLoading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
           ) : custError ? (
-            <ReportLoadError error={custError} />
+            <ReportLoadError error={custError} onRetry={retryBook} />
           ) : filteredCustomers.length === 0 ? (
             <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
               {customers.length === 0
@@ -423,7 +440,7 @@ export default function PosCustomers() {
                 </p>
               )}
               <CustomerBookTable rows={filteredCustomers} expandedId={expandedId} historyMap={historyMap}
-                noShowByPhone={noShowByPhone} vatReg={vatReg} prefix={prefix} onToggle={onToggleHistory}
+                noShowByPhone={noShowByPhone} vatReg={vatReg} prefix={prefix} onToggle={onToggleHistory} onRetryHistory={onRetryHistory}
                 typesById={typesState.byId} onEdit={onEditCustomer} />
             </>
           )}
@@ -435,6 +452,7 @@ export default function PosCustomers() {
         <MembershipTab
           book={{ rows: book.rows, loading: custLoading, error: custError, stale: custLoading ? null : book.stale }}
           typesState={typesState}
+          onRetryBook={retryBook}
           // hasPosAccess resolves admin and the Owner to manager: the database's card and type rank.
           canManage={hasPosAccess('manager')}
           onCustomerSaved={onCustomerSaved}

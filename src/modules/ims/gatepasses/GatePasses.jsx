@@ -317,7 +317,7 @@ export default function GatePasses() {
       {loading ? (
         <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={load} />
       ) : visible.length === 0 ? (
         <div className="card">
           <div className="empty-state">

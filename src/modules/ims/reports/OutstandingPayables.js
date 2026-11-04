@@ -937,7 +937,7 @@ export default function OutstandingPayables() {
       {settleWarn && <ActionError error={settleWarn} className="action-error--top" />}
 
       {/* A failed read renders as a failure — an empty payables list claims nothing is owed (S612). */}
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={() => load(activeTab)} />}
 
       {setupNeeded && (
         <div style={{ background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 30%, transparent)', borderRadius: 'var(--radius-sm)', padding: '16px 20px', marginBottom: 24, fontSize: 13 }}>

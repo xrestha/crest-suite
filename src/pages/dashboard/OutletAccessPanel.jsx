@@ -229,7 +229,9 @@ export default function OutletAccessPanel({ outlets, readGroupId = null, readOnl
           Loading access…
         </p>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        // Try again (S876, PERF-11) shows "Loading access…" while it reads: load clears the error
+        // first, and the matrix behind it would otherwise flash as empty. Unsaved ticks are kept.
+        <ReportLoadError error={loadError} onRetry={() => { setLoaded(false); load() }} />
       ) : rows.length === 0 ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>No staff accounts in this group yet.</p>
       ) : (

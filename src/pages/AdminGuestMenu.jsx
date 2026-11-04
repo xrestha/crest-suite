@@ -65,6 +65,9 @@ export default function AdminGuestMenu() {
 
   useEffect(() => () => clearTimeout(copyTimer.current), [])
 
+  // Try again on the could-not-load card (S876, PERF-11) re-runs the read below.
+  const [loadRun, setLoadRun] = useState(0)
+
   useEffect(() => {
     if (!adminViewClientId) { setTables([]); setClient(null); setLoading(false); return }
     let cancelled = false
@@ -121,7 +124,7 @@ export default function AdminGuestMenu() {
       setLoading(false)
     })
     return () => { cancelled = true }
-  }, [adminViewClientId])
+  }, [adminViewClientId, loadRun])
 
   if (!adminViewClientId) {
     return (
@@ -147,7 +150,7 @@ export default function AdminGuestMenu() {
     return (
       <div>
         <Header />
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={() => setLoadRun(n => n + 1)} />
       </div>
     )
   }

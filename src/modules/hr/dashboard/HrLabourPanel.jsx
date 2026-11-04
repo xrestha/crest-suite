@@ -130,7 +130,7 @@ export default function HrLabourPanel() {
       </div>
     )
   }
-  if (error) return <div className="dash-section"><ReportLoadError error={error} /></div>
+  if (error) return <div className="dash-section"><ReportLoadError error={error} onRetry={load} /></div>
   if (months === null) return <div className="card card--compact dash-section"><span className="skeleton" style={{ display: 'inline-block', width: '50%', height: '1.2em' }} /></div>
   if (months.length === 0) return null // the page already says "No finalized payroll yet"
 

@@ -252,6 +252,15 @@ export default function PayrollRun() {
     return () => { current = false }
   }, [clientId])
 
+  // Try again on the could-not-load card (S876, PERF-11). A failed month list leaves no month on
+  // screen, so it re-runs the first load below (bumping `initRun`); a failed month re-reads that
+  // month and stays on it.
+  const [initRun, setInitRun] = useState(0)
+  function retryLoad() {
+    if (!period) setInitRun(n => n + 1)
+    else handlePeriodChange(period.id)
+  }
+
   useEffect(() => {
     if (!clientId) return
     async function init() {
@@ -294,7 +303,7 @@ export default function PayrollRun() {
       if (periodReq.isCurrent(open.id)) setLoading(false)
     }
     init()
-  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, initRun]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Everything a month's payslips are computed from, read together. Used by the page load AND by
   // Generate, Regenerate and Finalize, so every write is computed from data read for that write — not
@@ -1271,7 +1280,7 @@ export default function PayrollRun() {
         ) : loadError ? (
           // Before every empty state, deliberately: a failed read leaves the lists empty, and this page
           // used to answer that by telling an owner to go and add the employees they already have.
-          <ReportLoadError error={loadError} />
+          <ReportLoadError error={loadError} onRetry={retryLoad} />
         ) : !period ? (
           <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>
             {/* Only Crest creates a month from nothing (Periods' '+ New Period' is admin-only), so a

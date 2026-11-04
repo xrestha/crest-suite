@@ -626,7 +626,7 @@ export default function AdminClients() {
       {loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p></div>
       ) : listError ? (
-        <ReportLoadError error={listError} />
+        <ReportLoadError error={listError} onRetry={() => loadClients()} />
       ) : clients.length === 0 ? (
         <div className="card">
           <div className="empty-state">

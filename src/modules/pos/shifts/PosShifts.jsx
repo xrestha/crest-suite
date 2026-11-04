@@ -824,6 +824,11 @@ export default function PosShifts() {
     if (expandedId === shift.id) { setExpandedId(null); return }
     setExpandedId(shift.id)
     if (reportsMap[shift.id]) return
+    await loadClosedReport(shift)
+  }
+
+  // One closed shift's report, for its expanded row; also the row's Try again (S876, PERF-11).
+  async function loadClosedReport(shift) {
     setReportErrorsMap(m => ({ ...m, [shift.id]: null }))
     // Prefer the snapshot frozen at close — recomputing live is what let a reprinted Z-report
     // disagree with the signed one. Only shifts closed before S573 have no snapshot and fall
@@ -1219,7 +1224,7 @@ export default function PosShifts() {
                   {reportLoading ? 'Loading totals…' : 'The totals have not been read yet — press Refresh.'}
                 </p>
               ) : reportError ? (
-                <ReportLoadError error={reportError} />
+                <ReportLoadError error={reportError} onRetry={() => loadOpenShift()} />
               ) : (
                 <ReportBody report={currentReport} opening={openShift.opening_cash} closing={null} variance={0} />
               )}
@@ -1234,7 +1239,7 @@ export default function PosShifts() {
           {historyLoading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
           ) : historyError ? (
-            <ReportLoadError error={historyError} />
+            <ReportLoadError error={historyError} onRetry={loadHistory} />
           ) : history.length === 0 ? (
             <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
               No closed shifts yet.
@@ -1302,7 +1307,7 @@ export default function PosShifts() {
                           <tr>
                             <td colSpan={6} style={{ background: 'var(--theme-bg)', padding: '16px 18px' }}>
                               {reportErrorsMap[s.id] ? (
-                                <ReportLoadError error={reportErrorsMap[s.id]} />
+                                <ReportLoadError error={reportErrorsMap[s.id]} onRetry={() => loadClosedReport(s)} />
                               ) : !reportsMap[s.id] ? (
                                 <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>Loading…</span>
                               ) : (

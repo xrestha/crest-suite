@@ -606,7 +606,7 @@ export default function AuditLog() {
             <tbody>
               {!loading && loadError && (
                 <tr>
-                  <td colSpan={6} style={{ padding: 0 }}><ReportLoadError error={loadError} /></td>
+                  <td colSpan={6} style={{ padding: 0 }}><ReportLoadError error={loadError} onRetry={() => fetchLogs(filterClient, filterArea, filterTime)} /></td>
                 </tr>
               )}
               {!loading && !loadError && visibleLogs.length === 0 && (

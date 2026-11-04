@@ -458,7 +458,9 @@ export default function LoyaltyTab({ pointValue, pointValueError = null, onPoint
       {loading ? (
         <p role="status" aria-live="polite" style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading loyalty…</p>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        // Try again (S876, PERF-11): the book is emptied first, so the tab shows "Loading loyalty…"
+        // until the read lands, as on the first visit (a failed first read holds no rows to keep).
+        <ReportLoadError error={loadError} onRetry={() => { setBook({ clientId: null, rows: null, error: null, stale: null }); load() }} />
       ) : (
         <>
           {/* S834: a reload that failed keeps what was on screen, and says so. */}

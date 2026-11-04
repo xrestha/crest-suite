@@ -1129,7 +1129,7 @@ export default function Periods() {
         {loading ? (
           <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
         ) : loadError ? (
-          <ReportLoadError error={loadError} />
+          <ReportLoadError error={loadError} onRetry={() => loadPeriods()} />
         ) : periods.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">◷</div>

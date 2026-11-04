@@ -1,5 +1,5 @@
 import { npr } from '../../../shared/nepalMoney'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
@@ -105,8 +105,17 @@ export default function StockAgeing() {
     setRows([]); setTotals(null); setWindowDays(0); setWindowLabel(''); setHadBatches(false); setLastCountByItem({})
   }
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load (the month list or the categories) re-runs init, a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     // The month list is the shared one, and the first build starts beside it and the categories read
@@ -124,12 +133,12 @@ export default function StockAgeing() {
     ])
     if (catRead.error) {
       periodReq.begin(`${initKey}:failed`)
-      setLoadError(catRead.error); setPeriods([]); setSelectedPeriod(null); setLoading(false)
+      initFailed.current = true; setLoadError(catRead.error); setPeriods([]); setSelectedPeriod(null); setLoading(false)
       return
     }
     setCategories(catRead.data || [])
     if (out.superseded) return   // a newer client switch or period pick owns the page
-    if (out.error) { setLoadError(out.error); setPeriods([]); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setPeriods([]); setLoading(false); return }
     // The window reaches back past the picked month, so a build kept from the guessed list is run
     // again when the fresh list moved a month (a close or a new month on another device).
     if (out.chosen && periodReq.isCurrent(out.chosen.id) && listSig(builtFrom) !== listSig(list)) {
@@ -140,6 +149,7 @@ export default function StockAgeing() {
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initFailed.current = false
     setSelectedPeriod(periods.find(p => p.id === periodId) || null)
     setLoading(true)
     await buildReport(periodId, periods)
@@ -512,6 +522,7 @@ export default function StockAgeing() {
       noPeriodWhat="the stock ageing report"
       loading={loading}
       error={loadError}
+      onRetry={retryLoad}
       empty={filtered.length === 0}
       emptyIcon="◷"
       emptyText={rows.length > 0

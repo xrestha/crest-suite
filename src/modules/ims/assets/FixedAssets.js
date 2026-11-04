@@ -130,10 +130,7 @@ export default function FixedAssets() {
       {loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Loading…</p></div>
       ) : loadError ? (
-        <>
-          <ReportLoadError error={loadError} />
-          <button className="btn btn-ghost" style={{ marginTop: 12 }} onClick={load}>Try again</button>
-        </>
+        <ReportLoadError error={loadError} onRetry={load} />
       ) : (
         <>
           {activeTab === 'register' && (

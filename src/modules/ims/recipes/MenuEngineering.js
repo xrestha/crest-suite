@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -125,6 +125,14 @@ export default function MenuEngineering() {
 
   useEffect(() => { if (!authLoading && clientId) init() }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load re-runs init, a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !periodId) init()
+    else handlePeriodChange(periodId)
+  }
+
   async function init() {
     // `init` auto-selects a period, so it claims the page too (S601's own contract: anything that
     // sets the period must call begin()). An admin switching clients re-runs this, and without the
@@ -132,6 +140,7 @@ export default function MenuEngineering() {
     // month over another outlet's figures. The month comes from the shared list, the report
     // starting beside it (S855, periodList.js): the open one, else the latest.
     const initKey = periodReq.begin(`periods:${clientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     const built = {}
@@ -144,7 +153,7 @@ export default function MenuEngineering() {
     if (out.superseded) return   // a period picked meanwhile owns the page and its loading flag
     setPeriodsLoaded(true)
     // A failed read must not impersonate "no periods yet" (S612 silent-zero rule).
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     if (out.chosen && !periodReq.isCurrent(out.chosen.id)) return
     setLoading(false)
     // The month opened on is the live one by construction (the open one, else the latest), and the
@@ -153,6 +162,7 @@ export default function MenuEngineering() {
   }
 
   async function handlePeriodChange(id) {
+    initFailed.current = false
     setPeriodId(id)
     setLoading(true)
     const rows = await loadData(id)   // claims the page before its first await (S601)
@@ -535,7 +545,7 @@ export default function MenuEngineering() {
       {loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p></div>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={retryLoad} />
       ) : items.length === 0 ? (
         <div className="card">
           <div className="empty-state">

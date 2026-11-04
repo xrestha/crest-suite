@@ -14,7 +14,7 @@
 // • Wastage and staff meals are deliberately excluded — this is the cost of what was SOLD.
 // • Every period-scoped read is fetchAllRows-paged. On a busy period a bare .select() truncates at
 //   1000 rows with no error, and a truncated purchase set silently reassigns supplier shares.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -84,6 +84,14 @@ export default function SupplierContribution() {
   // while auth is still resolving, the guard fails once, and nothing re-fires (S594).
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load re-runs init, a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     // `init()` claims the page too (S721) — the fifth instance after S698/S709/S718/S721, and
     // fixed on Vendor Report in S725 while this sibling was left. Once `handlePeriodChange` has
@@ -93,6 +101,7 @@ export default function SupplierContribution() {
     // tenant reads the old one's supplier figures, in the table and in the Excel export. The
     // month it picks is claimed inside `initPeriodLoad`.
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     // The month list is the shared one, and the first load starts beside it (S855, src/shared/periodList.js).
@@ -104,7 +113,7 @@ export default function SupplierContribution() {
       setPeriods, select: setSelectedPeriod, load: loadReport,
     })
     if (out.superseded) return   // a newer client switch or period pick owns the page
-    if (out.error) { setLoadError(out.error); setPeriods([]); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setPeriods([]); setLoading(false); return }
     // Only the load that still owns the page may un-gate it. Without this a superseded load
     // clears `loading`, so one period's rows render — and Export re-enables — under another
     // period's label, subtitle, print title, scopeLine and filename (S601).
@@ -113,6 +122,7 @@ export default function SupplierContribution() {
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initFailed.current = false
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setExpanded(null)
@@ -478,6 +488,7 @@ export default function SupplierContribution() {
       loading={loading}
       loadingText="Tracing suppliers…"
       error={loadError}
+      onRetry={retryLoad}
       empty={rows.length === 0}
       emptyIcon="🚚"
       emptyText={`No sales or purchases recorded for ${periodLabel}.`}

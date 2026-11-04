@@ -285,7 +285,7 @@ export default function CreditNotes() {
           {candLoading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
           ) : candError ? (
-            <ReportLoadError error={candError} />
+            <ReportLoadError error={candError} onRetry={loadCandidates} />
           ) : candidates.length === 0 ? (
             <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
               No un-credited bills in this range.
@@ -344,7 +344,7 @@ export default function CreditNotes() {
           {notesLoading ? (
             <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
           ) : notesError ? (
-            <ReportLoadError error={notesError} />
+            <ReportLoadError error={notesError} onRetry={loadNotes} />
           ) : notes.length === 0 ? (
             <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
               No Credit Notes issued in this range.

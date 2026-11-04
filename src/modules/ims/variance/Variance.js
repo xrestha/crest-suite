@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -87,8 +87,18 @@ export default function Variance() {
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11). A failed
+  // first load re-runs init: the categories read beside the month list is one a month switch
+  // never re-reads. A failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     recipeBook()   // start it now, so it lands alongside the period list rather than after it
@@ -107,16 +117,17 @@ export default function Variance() {
       scopedFrom('categories').order('sort_order'),
     ])
     // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
-    if (cats.error) { setLoadError(cats.error); setLoading(false); return }
+    if (cats.error) { initFailed.current = true; setLoadError(cats.error); setLoading(false); return }
     setCategories(cats.data || [])
     if (out.superseded) return   // a period picked meanwhile owns the page and its loading flag
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     // A period picked mid-load owns the loading flag now; only it may clear it.
     if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initFailed.current = false
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setLoading(true)
@@ -409,7 +420,7 @@ export default function Variance() {
         </div>
       </div>
 
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       {!loadError && <>
       {!loading && selectedPeriod && !hasClosing && (

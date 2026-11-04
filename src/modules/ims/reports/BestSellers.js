@@ -1,5 +1,5 @@
 import { npr } from '../../../shared/nepalMoney'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -84,8 +84,17 @@ export default function BestSellers() {
 
   useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load re-runs init, a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     // The month list is the shared one, and the first load starts beside it (S855, src/shared/periodList.js).
@@ -94,12 +103,13 @@ export default function BestSellers() {
       setPeriods, select: setSelected, load: fetchData,
     })
     if (out.superseded) return   // a newer client switch or period pick owns the page
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await (S601)
+    initFailed.current = false
     setSelected(periods.find(p => p.id === periodId))
     setCategoryFilter('all')
     setLoading(true)
@@ -294,7 +304,7 @@ export default function BestSellers() {
         </div>
       </div>
 
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       {/* Filters */}
       <div style={{ display: 'flex', gap: 20, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>

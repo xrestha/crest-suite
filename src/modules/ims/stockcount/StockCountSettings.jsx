@@ -200,7 +200,7 @@ export default function StockCountSettings({ clientId, categories, uncategorised
       .catch(() => setNotice(`Copy this by hand: ${countUrl}`))
   }
 
-  if (loadError) return <ReportLoadError error={loadError} />
+  if (loadError) return <ReportLoadError error={loadError} onRetry={load} />
   if (loading) return <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p></div>
 
   const scopeOn = !!settings?.ims_count_scope_enforced

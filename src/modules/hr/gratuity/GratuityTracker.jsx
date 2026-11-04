@@ -167,7 +167,7 @@ export default function GratuityTracker() {
       {loading ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={() => load(clientId)} />
       ) : employees.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>No active employees found.</div>
       ) : (

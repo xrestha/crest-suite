@@ -1053,6 +1053,25 @@ export default function Sales() {
     if (periodReq.isCurrent(periodId)) setLoading(false)
   }
 
+  // Try again on the could-not-load card (S876, PERF-11) repeats the reads that failed, and only
+  // those: `loadErrors` is kept per loader, and handlePeriodChange would blank every grid, Daily
+  // figures typed included, to reload a month already on screen (and, the month being the same
+  // object, would not re-run the Daily or Breakdown effect at all). A failed menu or month list
+  // re-runs init. The month on screen claims the page again first, as every load here must.
+  async function retryLoad() {
+    if (loadErrors.init || !selectedPeriod) { init(); return }
+    const p = selectedPeriod
+    periodReq.begin(p.id)
+    const reads = []
+    if (loadErrors.allDay) reads.push(loadAllDaySums(p.id, p))
+    if (loadErrors.sales) reads.push(loadSales(p.id, p))
+    if (loadErrors.daily) reads.push(loadDailySales(p.id, selectedDay))
+    if (loadErrors.monthly) reads.push(loadMonthlyEntries(p.id))
+    setLoading(true)
+    await Promise.all(reads)
+    if (periodReq.isCurrent(p.id)) setLoading(false)
+  }
+
   function getQty(recipeId) {
     if (bulkForm[recipeId] !== undefined) return bulkForm[recipeId]
     const saved = sales[recipeId]
@@ -1482,7 +1501,7 @@ export default function Sales() {
       ) : (
         <>
           {/* BULK ENTRY */}
-          {loadError && <ReportLoadError error={loadError} />}
+          {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
           {!loadError && viewMode === 'bulk' && (
             <>
               <div className="no-print note-banner">

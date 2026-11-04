@@ -103,6 +103,10 @@ Three rules came out of it:
   the loader that SUCCEEDED cleared the one that FAILED — **a shared error slot with concurrent
   writers is a guard that switches itself off.** It is a per-loader record now, resolved per tab,
   so a failed read on one tab also stops blanking the other three.
+- **The error card offers Try again (S876, PERF-11, 76 files).** Pass `onRetry` to `ReportLoadError` /
+  `ReportPage`, through a function that calls `begin()` (a direct `buildReport(id)` after a failed month
+  list is a dead button), and retry what FAILED: `init()` when the month list or a list only `init` reads
+  failed, else the month's own loader. A page with no single right retry keeps the reload text.
 - **Refusing to render the figure is half the job; the sentence you show instead is the other half
   (S619).** `firstError`/`ReportLoadError` decide *that* something failed. `errorText(err,
   'operator')` (`src/shared/errorText.js`) decides what the reader is told — one table, two

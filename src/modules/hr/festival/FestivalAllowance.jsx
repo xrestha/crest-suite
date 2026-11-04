@@ -204,6 +204,12 @@ export default function FestivalAllowance() {
   const commitName = () => setFestival(nameInput.trim())
   const pickRun = name => { setNameInput(name); setFestival(name) }
   const reloadRun = () => loadRun(current.current.year, current.current.name, { quiet: true })
+  // Try again on the could-not-load card (S876, PERF-11) repeats whichever read failed. Its error
+  // is cleared first, so the page shows Loading… while it runs, as on the first load.
+  function retryLoad() {
+    if (baseError) { setBaseError(null); loadBase() }
+    if (runError) { setRunError(null); loadRun(bsYear, festival) }
+  }
 
   // ── Derived ────────────────────────────────────────────────────────────────────────────────
   const employees = base?.employees || NONE
@@ -842,7 +848,7 @@ export default function FestivalAllowance() {
       )}
 
       {loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={retryLoad} />
       ) : loading ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>
       ) : !festival ? (

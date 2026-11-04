@@ -85,6 +85,9 @@ export default function GuestMenuSetup({ clientId, tables = [] }) {
   const [orderMsg, setOrderMsg] = useState('')
   const [orderError, setOrderError] = useState('')
 
+  // Try again on the could-not-load card (S876, PERF-11) re-runs the read below.
+  const [loadRun, setLoadRun] = useState(0)
+
   useEffect(() => {
     if (!clientId) return undefined
     let cancelled = false
@@ -118,7 +121,7 @@ export default function GuestMenuSetup({ clientId, tables = [] }) {
       setLoading(false)
     })
     return () => { cancelled = true }
-  }, [clientId])
+  }, [clientId, loadRun])
 
   // A settings write as a PATCH of exactly the columns this card owns (settings-row.md). A failed
   // existing-row read never falls through into INSERT (S613), and a refused RLS update — 0 rows and
@@ -343,7 +346,7 @@ export default function GuestMenuSetup({ clientId, tables = [] }) {
   if (loading) {
     return <div className="card" style={{ padding: 24, color: 'var(--theme-text2)' }}>Loading the guest menu settings…</div>
   }
-  if (loadError) return <ReportLoadError error={loadError} />
+  if (loadError) return <ReportLoadError error={loadError} onRetry={() => setLoadRun(n => n + 1)} />
 
   const previewTable = tables.find(t => t.status !== 'inactive') || tables[0]
   const previewUrl = previewTable ? `${window.location.origin}/pos/menu/${previewTable.id}` : null

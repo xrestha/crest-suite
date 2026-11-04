@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsParallel } from '../../../shared/fetchAllRows'
@@ -40,12 +40,21 @@ export default function MonthlySummary() {
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load re-runs init, a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     // Claimed for THIS client before the periods read, and the previous one's month cleared (S792):
     // a period load still in flight for the outlet just switched away from would otherwise land,
     // clear `loading` and leave its figures on screen — and in the Excel export — under this
     // outlet's letterhead. Period ids never repeat across clients, so the key cannot collide.
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     setReport(null)
@@ -60,12 +69,13 @@ export default function MonthlySummary() {
       setPeriods, select: setSelectedPeriod, load: buildReport,
     })
     if (out.superseded) return   // a newer client switch or period pick owns the page
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initFailed.current = false
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setLoading(true)
@@ -297,7 +307,7 @@ export default function MonthlySummary() {
         </div>
       </div>
 
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       {loadError ? null : loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Building report…</p></div>

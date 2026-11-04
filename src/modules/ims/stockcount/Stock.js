@@ -337,19 +337,31 @@ export default function Stock() {
   }, [])
 
   useEffect(() => {
-    if (!authLoading && effectiveClientId) {
-      // init() is async and nothing awaits it, so a throw inside it used to be an unhandled
-      // rejection: setLoading(false) never ran and the page sat on "Loading…" forever with no
-      // error anywhere. Every IndexedDB call it makes can reject — Firefox private browsing
-      // refuses indexedDB.open outright, and an evicted or blocked store does the same — and
-      // since flushQueue() is the FIRST thing init() does, that took the ONLINE path down too:
-      // an unusable local cache bricked a page that did not need it.
-      init().catch(err => {
-        setLoadError(err?.supabase || err || new Error('Stock Count could not be loaded.'))
-        setLoading(false)
-      })
-    }
+    if (!authLoading && effectiveClientId) startInit()
   }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load (the months, the item book, the categories) re-runs init, a failed month re-reads
+  // that month and stays on it. Only a failed READ reaches the card, and a failed read has already
+  // cleared the grid, so retrying loses nothing typed.
+  const initLoadFailed = useRef(false)
+  function startInit() {
+    // init() is async and nothing awaits it, so a throw inside it used to be an unhandled
+    // rejection: setLoading(false) never ran and the page sat on "Loading…" forever with no
+    // error anywhere. Every IndexedDB call it makes can reject — Firefox private browsing
+    // refuses indexedDB.open outright, and an evicted or blocked store does the same — and
+    // since flushQueue() is the FIRST thing init() does, that took the ONLINE path down too:
+    // an unusable local cache bricked a page that did not need it.
+    init().catch(err => {
+      initLoadFailed.current = true
+      setLoadError(err?.supabase || err || new Error('Stock Count could not be loaded.'))
+      setLoading(false)
+    })
+  }
+  function retryLoad() {
+    if (initLoadFailed.current || !selectedPeriod) startInit()
+    else handlePeriodChange(selectedPeriod.id)
+  }
 
   // The day the Daily Wastage tab opens on. Today's day-of-month is right for the current period
   // and can be past the end of a shorter or earlier one (day 32 of a 29-day month), so it is
@@ -361,6 +373,7 @@ export default function Stock() {
   }
 
   async function init() {
+    initLoadFailed.current = false
     setLoading(true)
     // `loading` covers the page from here; a month switch this load supersedes can no longer
     // clear its own flag (it is not the current request any more), so it is cleared here.
@@ -380,6 +393,7 @@ export default function Stock() {
           getCachedPeriods(effectiveClientId),
         ])
       } catch (err) {
+        initLoadFailed.current = true
         setLoadError(err instanceof Error ? err : new Error(String(err)))
         setLoading(false)
         return
@@ -457,7 +471,7 @@ export default function Stock() {
     // assignment read is in this check on purpose: dropping its error would leave myCategoryIds
     // null, which renders as "nothing is yours" — a claim, not an absence.
     const initFailed = firstError(initResults)
-    if (initFailed) { setLoadError(initFailed); setLoading(false); return }
+    if (initFailed) { initLoadFailed.current = true; setLoadError(initFailed); setLoading(false); return }
     const [{ data: p }, { data: i }, { data: c }, { data: assigned }, { data: hidden }] = initResults
     setMyCategoryIds(new Set((assigned || []).map(a => a.category_id)))
     setPeriods(p || [])
@@ -636,6 +650,7 @@ export default function Stock() {
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initLoadFailed.current = false
     setPeriodLoading(true)      // with the label, in the same render (STOCK-6)
     try {
       await switchPeriod(periodId)
@@ -1854,7 +1869,7 @@ export default function Stock() {
         </div>
       )}
 
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       {/* Section scope (S737). Says WHY the list is short, because a counter given three of nine
           categories otherwise reads a two-thirds-empty item book as items missing from the system.

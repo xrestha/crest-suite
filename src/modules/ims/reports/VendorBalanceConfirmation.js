@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams, Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
@@ -37,7 +37,16 @@ export default function VendorBalanceConfirmation() {
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [effectiveClientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load (vendors, months, business name) re-runs init, a failed letter recomputes it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current) init()
+    else load()
+  }
+
   async function init() {
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     const results = await Promise.all([
@@ -53,7 +62,7 @@ export default function VendorBalanceConfirmation() {
     ])
     // A failed read must not render as "no vendors / no periods" (S612 silent-zero rule).
     const failed = firstError(results)
-    if (failed) { setLoadError(failed); setLoading(false); return }
+    if (failed) { initFailed.current = true; setLoadError(failed); setLoading(false); return }
     const [{ data: v }, { data: p }, { data: client }] = results
     setVendors(v || [])
     setPeriods(p || [])
@@ -230,7 +239,7 @@ export default function VendorBalanceConfirmation() {
         )}
       </div>
 
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       <div className="card no-print" style={{ marginBottom: 20 }}>
         <div className="form-grid form-grid-3">

@@ -1446,7 +1446,7 @@ export default function SalesReport() {
       )}
       {/* S612: a failed read renders as a failure — never as the empty state or a zero table. */}
       {loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={tab === 'onelakh' ? loadOneLakh : loadRange} />
       ) : loading ? (
         <p style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : isEmpty ? (

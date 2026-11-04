@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { vatModeOf } from '../recipes/menuPriceVat'
@@ -73,8 +73,17 @@ export default function VendorReport() {
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load (the month list or the vendors) re-runs init, a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     // The month list is the shared one, and the first load starts beside it and the vendor read
@@ -107,12 +116,12 @@ export default function VendorReport() {
     // any load in flight is cancelled and no month is left to pick.
     if (vendorRead.error) {
       periodReq.begin(`${initKey}:failed`)
-      setLoadError(vendorRead.error); setPeriods([]); setSelectedPeriod(null); setLoading(false)
+      initFailed.current = true; setLoadError(vendorRead.error); setPeriods([]); setSelectedPeriod(null); setLoading(false)
       return
     }
     setVendors(vendorRead.data || [])
     if (out.superseded) return   // a newer client switch or period pick owns the page
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     // Only the load that still owns the page may un-gate it (S792, TAX-4). A period picked while
     // this first load was in flight leaves its `loadData` returning early; clearing `loading`
     // here anyway re-enabled the KPI strip, the tables and the loading-gated Export over the
@@ -122,6 +131,7 @@ export default function VendorReport() {
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initFailed.current = false
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setLoading(true)
@@ -760,7 +770,7 @@ export default function VendorReport() {
           "Gross Purchases NPR 0 / Net Spend NPR 0" above a card reading "Loading…", and on
           every period change they held the PREVIOUS month’s money under the new month’s
           chip until the reads landed. A number the page has not computed is not a number. */}
-      {loadError ? <ReportLoadError error={loadError} /> : <>
+      {loadError ? <ReportLoadError error={loadError} onRetry={retryLoad} /> : <>
 
       {/* The KPI strip and the split chart below it render only once there are real figures
           (S616). They used to sit inside a gate testing `loadError` alone, so first paint printed

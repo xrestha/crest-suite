@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
@@ -106,12 +106,24 @@ export default function Purchases() {
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load (the month list, items or vendors) re-runs init; a failed month re-reads that month
+  // and stays on it, under `loading` so the strip and the table do not show the rows from before.
+  const initFailed = useRef(false)
+  async function retryLoad() {
+    if (initFailed.current || !selectedPeriod) { init(); return }
+    setLoading(true)
+    await handlePeriodChange(selectedPeriod.id)
+    setLoading(false)
+  }
+
   async function init() {
     // Only show "Loading…" when there's nothing cached to display yet — a revisit within the
     // cache window keeps showing last-known data while this reloads quietly underneath.
     if (periods.length === 0) setLoading(true)
     setLoadError(null)
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     // The month comes from the shared list, the bills read beside it (S855, periodList.js). On this
     // entry page the guess only starts the reads: the dropdown, the lock and every save take the
     // fresh list, applied below once it has landed, so nothing is entered against a month read
@@ -133,7 +145,7 @@ export default function Purchases() {
     ])
     // A failed read is not an empty month, and must never be cached as one (S612/S631).
     const failed = firstError(refs)
-    if (failed) { setLoadError(failed); setLoading(false); return }
+    if (failed) { initFailed.current = true; setLoadError(failed); setLoading(false); return }
     const [{ data: i }, { data: v }] = refs
     setAndCache(setItems, 'items', i || [])
     setAndCache(setVendors, 'vendors', v || [])
@@ -149,7 +161,7 @@ export default function Purchases() {
       }
       return
     }
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     setAndCache(setPeriods, 'periods', list)
     if (out.chosen) setSelectedPeriod(out.chosen)
     else if (selectedPeriod) {
@@ -196,6 +208,7 @@ export default function Purchases() {
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initFailed.current = false
     setLoadError(null)          // a new period is a new attempt — let it recover
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
@@ -684,7 +697,7 @@ export default function Purchases() {
       </div>
 
       {/* ── PURCHASES TAB ── */}
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       {!loadError && activeTab === 'purchases' && (
         <>

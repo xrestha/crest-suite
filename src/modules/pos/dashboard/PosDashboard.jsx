@@ -286,7 +286,7 @@ export default function PosDashboard() {
           ? <div role="alert" className="note-banner dash-row">
               <strong>Could not refresh.</strong> The figures below are from {nepalTime(updatedAt)}; it will try again within a minute.
             </div>
-          : <ReportLoadError error={error} />
+          : <ReportLoadError error={error} onRetry={() => { setError(null); load() }} />
       )}
 
       {!ready && !error && (

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
@@ -52,8 +52,17 @@ export default function StockReport() {
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load (the month list or the categories) re-runs init, a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     recipeBook()   // start it now, so it lands alongside the period list rather than after it
@@ -67,15 +76,16 @@ export default function StockReport() {
       scopedFrom('categories').order('sort_order'),
     ])
     // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
-    if (cats.error) { setLoadError(cats.error); setLoading(false); return }
+    if (cats.error) { initFailed.current = true; setLoadError(cats.error); setLoading(false); return }
     setCategories(cats.data || [])
     if (out.superseded) return   // a period picked meanwhile owns the page and its loading flag
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initFailed.current = false
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setLoading(true)
@@ -297,7 +307,7 @@ export default function StockReport() {
         </p>
       )}
 
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       {!loadError && <>
       {/* KPI strip waits for the load — an unloaded valuation is NPR 0 in confident type (S594) */}

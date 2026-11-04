@@ -190,6 +190,18 @@ export default function PosParkingSlips() {
   }, [filter, rangeFrom, rangeTo, loadMeta, loadOpen, loadAll])
 
   useEffect(() => { loadMeta(); loadOpen() }, [loadMeta, loadOpen])
+  // Try again on the could-not-load cards (S876, PERF-11). Only a failed FIRST read reaches a card
+  // (a later one keeps its list), so there is nothing to keep: the error is cleared and the page or
+  // the All tab shows Loading… until the read lands, as on the first visit.
+  function retryLists() {
+    setMetaError(null)
+    setOpen(prev => (prev.rows ? prev : { rows: null, error: null, stale: false }))
+    reloadLists()
+  }
+  function retryAll() {
+    setAll({ key: null, range: null, rows: null, error: null, stale: false })
+    loadAll({ from: rangeFrom, to: rangeTo })
+  }
   // The All tab reads only while it is open, and again whenever its range moves.
   useEffect(() => {
     if (filter === 'all') loadAll({ from: rangeFrom, to: rangeTo })
@@ -365,7 +377,7 @@ export default function PosParkingSlips() {
   if (loading) {
     body = <p className="parking-note">Loading…</p>
   } else if (loadError) {
-    body = <ReportLoadError error={loadError} />
+    body = <ReportLoadError error={loadError} onRetry={retryLists} />
   } else if (filter === 'open') {
     body = (
       <>
@@ -397,7 +409,7 @@ export default function PosParkingSlips() {
         {!allShown ? (
           <p className="parking-note">Loading…</p>
         ) : allShown.rows === null ? (
-          <ReportLoadError error={allShown.error} />
+          <ReportLoadError error={allShown.error} onRetry={retryAll} />
         ) : (
           <>
             {allShown.stale && staleNote}

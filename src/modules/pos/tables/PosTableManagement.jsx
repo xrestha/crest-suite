@@ -1461,7 +1461,7 @@ export default function PosTableManagement() {
           {loading ? (
             <p style={{ color: 'var(--theme-text3)' }}>Loading…</p>
           ) : tablesError ? (
-            <ReportLoadError error={tablesError} />
+            <ReportLoadError error={tablesError} onRetry={load} />
           ) : visible.length === 0 && tables.length > 0 ? (
             <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--theme-text3)' }}>
               No tables in this section.

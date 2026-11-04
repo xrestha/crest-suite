@@ -242,10 +242,9 @@ export default function MasterPushPanel({ outlets, groupId, readOnly = false }) 
         {subtitle && <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: 0 }}>{subtitle}</p>}
         {hqError && (
           <div style={{ marginTop: 8 }}>
-            <ReportLoadError error={hqError} />
+            <ReportLoadError error={hqError} onRetry={loadHq} />
             <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '6px 0 0' }}>
-              Could not read which outlet is the HQ, so nothing can be pushed yet.{' '}
-              <button type="button" className="btn btn-ghost btn-sm" onClick={loadHq}>Try again</button>
+              Could not read which outlet is the HQ, so nothing can be pushed yet.
             </p>
           </div>
         )}
@@ -323,7 +322,9 @@ export default function MasterPushPanel({ outlets, groupId, readOnly = false }) 
 
           {previewError && (
             <div style={{ marginTop: 14 }}>
-              <ReportLoadError error={previewError} />
+              {/* Try again (S876, PERF-11) builds the preview again from the choices on screen; a
+                  preview never writes. Not offered once those choices can no longer be previewed. */}
+              <ReportLoadError error={previewError} onRetry={ready && !busy ? preview : undefined} />
               <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '6px 0 0' }}>The preview could not be built, so nothing was pushed.</p>
             </div>
           )}

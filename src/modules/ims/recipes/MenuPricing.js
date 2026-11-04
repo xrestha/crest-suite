@@ -712,7 +712,7 @@ export default function MenuPricing() {
       {loading ? (
         <div className="loading-state">Loading…</div>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={() => load()} />
       ) : display.length === 0 ? (
         <div className="empty-state">
           <p className="empty-state-text">
@@ -1114,7 +1114,7 @@ export default function MenuPricing() {
         // A failed read is not an empty menu (S594). This branch had no loadError case at all,
         // so a refused or dropped query rendered as "No menu items found. Use + Add Item" — an
         // invitation to re-enter a menu that is already there.
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={() => load()} />
       ) : display.length === 0 ? (
         <div className="empty-state">
           <p className="empty-state-text">

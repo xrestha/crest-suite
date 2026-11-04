@@ -54,8 +54,18 @@ export default function TheoreticalVariance() {
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11). The base
+  // (items, categories, the recipe book) is read only by init, and every month reuses its promise,
+  // so a failed base re-runs init; a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     const base = loadBase().catch(error => ({ error }))
@@ -71,9 +81,9 @@ export default function TheoreticalVariance() {
     })
     const b = await base
     // A failed read is not "no periods yet" — surface it instead of rendering empty (S612 silent-zero rule).
-    if (b.error) { setLoadError(b.error); setLoading(false); return }
+    if (b.error) { initFailed.current = true; setLoadError(b.error); setLoading(false); return }
     setCategories(b.categories)
-    if (!out.superseded && out.error) { setLoadError(out.error); setLoading(false); return }
+    if (!out.superseded && out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     // Unconditional on purpose: a period picked mid-init runs under its own `computing` flag, and
     // the table shows "Computing variance…" until THAT load clears it.
     setLoading(false)
@@ -152,6 +162,7 @@ export default function TheoreticalVariance() {
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initFailed.current = false
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setComputing(true)
@@ -220,7 +231,7 @@ export default function TheoreticalVariance() {
     ])
     const [results, b] = await Promise.all([reads, base])
     if (!periodReq.isCurrent(periodId)) return   // stale load — its failure must not clobber the current view
-    if (b.error) { setLoadError(b.error); setRows([]); return }
+    if (b.error) { initFailed.current = true; setLoadError(b.error); setRows([]); return }
     const { itemList, allRecipes } = b
     // A failed read must never flow through the `|| []`s below into a confident NPR-0 report (S612 silent-zero rule).
     const failed = firstError(results)
@@ -484,7 +495,7 @@ export default function TheoreticalVariance() {
         </select>
       </div>
 
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       {!loadError && <>
       {!loading && !computing && selectedPeriod && !hasClosing && (

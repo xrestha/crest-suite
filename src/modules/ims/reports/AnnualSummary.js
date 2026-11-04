@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -72,11 +72,20 @@ export default function AnnualSummary() {
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load re-runs init, a failed year re-reads that year in the mode on screen.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || selectedYear == null) init()
+    else loadYear(selectedYear, fiscalMode, allPeriods)
+  }
+
   async function init() {
     // A client switch starts from nothing (S792, FIGURES-7/11). Claiming the page supersedes a year
     // load still in flight for the previous outlet, and clearing the periods means no year is built
     // from the last client's list.
     const initKey = yearReq.begin(`${effectiveClientId}:init`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     setReport(null)
@@ -99,7 +108,7 @@ export default function AnnualSummary() {
       load: () => { builtFrom = list; return buildReport(year, fiscal, list) },
     })
     if (out.superseded) return   // a newer client switch, year or mode owns the page
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     // A year reaches past one month, so a build kept from the guessed list is run again when the
     // fresh list moved a month in it (a close or a new month on another device).
     if (out.chosen && yearReq.isCurrent(out.chosen.id) && listSig(builtFrom) !== listSig(list)) {
@@ -129,6 +138,7 @@ export default function AnnualSummary() {
   }
 
   async function loadYear(year, fiscal, list) {
+    initFailed.current = false
     setLoading(true)
     await buildReport(year, fiscal, list)
     // Only the load that still owns the page may clear the flag: a superseded one returned early.
@@ -432,7 +442,7 @@ export default function AnnualSummary() {
         </div>
       </div>
 
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       {/* D6 (S756): the months whose COGS counts uncounted stock as used, each with its items behind a
           disclosure. Months are marked in the table below; only their own verdicts are withheld. */}

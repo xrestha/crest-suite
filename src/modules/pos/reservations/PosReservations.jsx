@@ -780,7 +780,7 @@ export default function PosReservations() {
       {loading ? (
         <p role="status" style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={() => load()} />
       ) : (
         <>
           {filter !== 'activity' && <div className="stat-grid" style={{ marginBottom: 16 }}>

@@ -44,11 +44,20 @@ export default function BudgetVsActual() {
 
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load (the month list or the categories) re-runs init, a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     // init() claims the page too (S756), or an admin client switch after any period change leaves
     // the ref on the old client's period and loadData skips every setter. The month it picks is
     // claimed inside `initPeriodLoad`.
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     // The month list is the shared one, and the first load starts beside it and the categories read
@@ -70,12 +79,12 @@ export default function BudgetVsActual() {
     // Without the categories no actual can be split, so any load in flight is cancelled too.
     if (cats.error) {
       periodReq.begin(`${initKey}:failed`)
-      setLoadError(cats.error); setPeriods([]); setSelectedPeriod(null); setLoading(false)
+      initFailed.current = true; setLoadError(cats.error); setPeriods([]); setSelectedPeriod(null); setLoading(false)
       return
     }
     setCategories(cats.data || [])
     if (out.superseded) return   // a newer client switch or period pick owns the page
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     if (!out.chosen || periodReq.isCurrent(out.chosen.id)) setLoading(false)
   }
 
@@ -134,6 +143,7 @@ export default function BudgetVsActual() {
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initFailed.current = false
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setSaveError(null)
@@ -266,7 +276,7 @@ export default function BudgetVsActual() {
       {loading ? (
         <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={retryLoad} />
       ) : noCategories ? (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="empty-state">

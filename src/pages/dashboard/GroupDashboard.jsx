@@ -502,7 +502,7 @@ export default function GroupDashboard() {
         <button className="btn btn-ghost" onClick={refresh} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
       </div>
 
-      {error && <div style={{ marginBottom: 16 }}><ReportLoadError error={error} /></div>}
+      {error && <div style={{ marginBottom: 16 }}><ReportLoadError error={error} onRetry={load} /></div>}
 
       {/* Coverage first, not as a footnote. A group total that silently omits an outlet is
           worse than no total, so the reader is told what this figure covers before they

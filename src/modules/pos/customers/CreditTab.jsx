@@ -438,7 +438,7 @@ export default function CreditTab({ vatReg = true, prefix = '', deliveryPartners
   const owedView = owed.loading ? (
     <p role="status" style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
   ) : owed.error ? (
-    <ReportLoadError error={owed.error} />
+    <ReportLoadError error={owed.error} onRetry={() => { void loadOwed() }} />
   ) : (
     <>
       <div className="stat-grid" style={{ marginBottom: 16 }}>
@@ -564,7 +564,7 @@ export default function CreditTab({ vatReg = true, prefix = '', deliveryPartners
   const ageView = owed.loading ? (
     <p role="status" style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
   ) : owed.error ? (
-    <ReportLoadError error={owed.error} />
+    <ReportLoadError error={owed.error} onRetry={() => { void loadOwed() }} />
   ) : (
     <>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -676,7 +676,7 @@ export default function CreditTab({ vatReg = true, prefix = '', deliveryPartners
       {collected.loading ? (
         <p role="status" style={{ color: 'var(--theme-text3)', fontSize: 13 }}>Loading…</p>
       ) : collected.error ? (
-        <ReportLoadError error={collected.error} />
+        <ReportLoadError error={collected.error} onRetry={() => { void loadCollected(range) }} />
       ) : collected.loaded && (
         <>
           <div className="stat-grid" style={{ marginBottom: 16 }}>

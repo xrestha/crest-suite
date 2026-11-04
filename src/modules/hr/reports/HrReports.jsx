@@ -111,6 +111,17 @@ export default function HrReports() {
   const empMap = Object.fromEntries(employees.map(e => [e.id, e]))
   const nameById = Object.fromEntries(employees.map(e => [e.id, e.full_name]))
 
+  // Try again on the could-not-load cards (S876, PERF-11). A failed month list or employee read
+  // leaves no month on screen, so it re-runs the first load below (bumping `initRun`); a failed
+  // month re-reads that month and stays on it. The TDS certificate's card re-runs both of its
+  // reads (the employer's name and PAN, and the year's records), bumping `certRun`.
+  const [initRun, setInitRun] = useState(0)
+  const [certRun, setCertRun] = useState(0)
+  function retryLoad() {
+    if (!period) setInitRun(n => n + 1)
+    else handlePeriodChange(period.id)
+  }
+
   useEffect(() => {
     if (!clientId) return
     async function init() {
@@ -158,7 +169,7 @@ export default function HrReports() {
       setLoading(false)
     }
     init()
-  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, initRun]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Company name and PAN for the TDS certificate header. settings.vat_number IS Nepal's PAN (same
   // field the Tax Invoice and the payslip letterhead already print). Both are RESET on a client
@@ -180,7 +191,7 @@ export default function HrReports() {
       setClientPan(results[1].data?.vat_number || '')
     })
     return () => { cancelled = true }
-  }, [clientId])
+  }, [clientId, certRun])
 
   // Fetch finalized payslips AND finalized festival allowances / incentives for the selected FY +
   // employee (TDS Certificate tab). A bonus is income the employer withheld tax on exactly like a
@@ -225,7 +236,7 @@ export default function HrReports() {
         setCertLoading(false)
       })
     return () => { cancelled = true }
-  }, [tab, certFy, certEmpId, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tab, certFy, certEmpId, clientId, certRun]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // `knownRun`: the month's run row when init has just read it with the month list; omitted (a month
   // switch), it is read here.
@@ -513,7 +524,7 @@ export default function HrReports() {
       {loading ? (
         <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={retryLoad} />
       ) : (
         <>
           <Tabs idBase="hr-reports" label="HR reports" className="no-print" style={{ marginBottom: 18 }}
@@ -558,7 +569,7 @@ export default function HrReports() {
               ) : certError || clientInfoError ? (
                 // The employer's name and PAN are on the certificate: a failed read of them is a failed
                 // certificate, not one with a blank PAN line.
-                <ReportLoadError error={certError || clientInfoError} />
+                <ReportLoadError error={certError || clientInfoError} onRetry={() => setCertRun(n => n + 1)} />
               ) : certLoading ? (
                 <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--theme-text2)' }}>Loading…</div>
               ) : certSlips.length === 0 && certBonuses.length === 0 && certSettlements.length === 0 ? (

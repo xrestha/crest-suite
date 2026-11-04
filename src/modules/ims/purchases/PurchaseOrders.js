@@ -121,10 +121,23 @@ export default function PurchaseOrders() {
     return () => clearTimeout(t)
   }, [printPo])
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load (the month list, vendors or items) re-runs init; a failed month re-reads that month
+  // and stays on it. A month switch keeps the old error until its read lands, so the retry holds
+  // the page on `loading` meanwhile: the press is seen, and no other month's orders show under it.
+  const initFailed = useRef(false)
+  async function retryLoad() {
+    if (initFailed.current || !selectedPeriod) { init(); return }
+    setLoading(true)
+    await handlePeriodChange(selectedPeriod.id)
+    setLoading(false)
+  }
+
   async function init() {
     setLoading(true)
     setLoadError(null)
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     // The month comes from the shared list, the orders read beside it (S855, periodList.js). On this
     // entry page the guess only starts the reads: the month, its lock and the prefilled order take
     // the fresh row, applied below once it has landed. The open period, else the latest one (S792,
@@ -145,12 +158,12 @@ export default function PurchaseOrders() {
       scopedFrom('items', 'id, name, uom, per_uom_rate').eq('is_active', true).eq('is_sub_recipe', false).order('name'),
     ])
     const failed = firstError(refs)
-    if (failed) { setLoadError(failed); setLoading(false); return }
+    if (failed) { initFailed.current = true; setLoadError(failed); setLoading(false); return }
     const [{ data: v }, { data: i }] = refs
     setVendors(v || [])
     setItems(i || [])
     if (out.superseded) return   // a newer claim owns the page
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     setPeriods(list)
     const start = out.chosen
     if (start) setSelectedPeriod(start)
@@ -222,6 +235,7 @@ export default function PurchaseOrders() {
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initFailed.current = false
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setView('list')
@@ -1148,7 +1162,7 @@ Reopen PO ${receivingPo.po_number} before entering this delivery again — what 
       )}
 
       {/* A failed read replaces the table below rather than rendering as a period with no orders. */}
-      {loadError && <ReportLoadError error={loadError} />}
+      {loadError && <ReportLoadError error={loadError} onRetry={retryLoad} />}
 
       {/* Status filter pills */}
       <FilterChips

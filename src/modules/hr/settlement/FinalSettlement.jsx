@@ -388,6 +388,14 @@ export default function FinalSettlement() {
 
   const currentKey = clientId && empId ? `${clientId}:${empId}:${lastDate.year}-${lastDate.month}` : null
 
+  // Try again on the settlement's could-not-load card (S876, PERF-11) repeats whichever half
+  // failed: the client's reads (loadClientData) and, for the leaver on screen, the per-employee
+  // reads below, which re-run on `reloadTick`.
+  function retrySettlementLoad() {
+    if (clientData.status === 'failed') loadClientData(clientId)
+    if (empId && empData.status === 'failed') setReloadTick(t => t + 1)
+  }
+
   // Everything that depends on WHO leaves and in WHICH month.
   useEffect(() => {
     if (!currentKey) { setEmpData({ key: null, status: 'idle', error: null }); return }
@@ -882,7 +890,7 @@ export default function FinalSettlement() {
 
       {empListError && (
         <div className="no-print" style={{ marginBottom: 12 }}>
-          <ReportLoadError error={empListError} />
+          <ReportLoadError error={empListError} onRetry={() => loadEmployees()} />
         </div>
       )}
 
@@ -1013,10 +1021,10 @@ export default function FinalSettlement() {
       {/* A failed read is not a smaller settlement: nothing below is shown or saved until it loads. */}
       {loadFailure && !stored && (
         <div className="no-print" style={{ marginBottom: 16 }}>
-          <ReportLoadError error={loadFailure} />
+          <ReportLoadError error={loadFailure} onRetry={retrySettlementLoad} />
           <p style={{ fontSize: 12, color: 'var(--theme-text2)', margin: '8px 0 0' }}>
             Until this loads the settlement cannot be calculated, saved or finalized — a missing salary component, advance,
-            leave record or SSF contribution would change what the leaver is paid. Reload the page to try again.
+            leave record or SSF contribution would change what the leaver is paid.
           </p>
         </div>
       )}

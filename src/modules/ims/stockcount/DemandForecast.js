@@ -629,7 +629,7 @@ function DemandForecastBody() {
       {loading ? (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Loading…</p></div>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={loadStored} />
       ) : forecast.length === 0 ? (
         <div className="card">
           <div className="empty-state">
@@ -797,7 +797,9 @@ function DemandForecastBody() {
           {ingredients.loading ? (
             <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Working out ingredients…</p></div>
           ) : ingredients.error ? (
-            <ReportLoadError error={ingredients.error} />
+            // Try again reloads the whole page (S876, PERF-11): the buying list is built from the
+            // reads loadStored starts beside the forecast, so it has no load of its own to repeat.
+            <ReportLoadError error={ingredients.error} onRetry={loadStored} />
           ) : buy.rows.length === 0 ? (
             <div className="card" style={{ padding: 24, textAlign: 'center', color: 'var(--theme-text3)', fontSize: 13 }}>
               {forecastHasDishes

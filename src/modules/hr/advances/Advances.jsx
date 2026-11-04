@@ -541,10 +541,12 @@ export default function Advances() {
     </div>
   )
 
+  // Try again (S876, PERF-11): the error is cleared first so the page shows its first-load
+  // "Loading…" (a failed read left `loadedFor` empty) rather than the card it is replacing.
   if (loadError) return (
     <div>
       {header}
-      <ReportLoadError error={loadError} />
+      <ReportLoadError error={loadError} onRetry={() => { setLoadError(null); load() }} />
     </div>
   )
 

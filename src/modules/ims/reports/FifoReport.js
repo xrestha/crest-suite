@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -87,8 +87,17 @@ export default function FifoReport() {
   // with [clientId] alone the guard fails once and nothing re-fires (S594).
   useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
+  // first load (the month list or the categories) re-runs init, a failed month re-reads that month and stays on it.
+  const initFailed = useRef(false)
+  function retryLoad() {
+    if (initFailed.current || !selectedPeriod) init()
+    else handlePeriodChange(selectedPeriod.id)
+  }
+
   async function init() {
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
+    initFailed.current = false
     setLoading(true)
     setLoadError(null)
     // The month list is the shared one, and the first build starts beside it and the categories read
@@ -109,12 +118,12 @@ export default function FifoReport() {
     // A failed read must never render as NoPeriodState or an empty report (S612 silent-zero rule).
     if (catRead.error) {
       periodReq.begin(`${initKey}:failed`)
-      setLoadError(catRead.error); setPeriods([]); setSelectedPeriod(null); setLoading(false)
+      initFailed.current = true; setLoadError(catRead.error); setPeriods([]); setSelectedPeriod(null); setLoading(false)
       return
     }
     setCategories(catRead.data || [])
     if (out.superseded) return   // a newer client switch or period pick owns the page
-    if (out.error) { setLoadError(out.error); setLoading(false); return }
+    if (out.error) { initFailed.current = true; setLoadError(out.error); setLoading(false); return }
     // The window reaches back past the picked month, so a build kept from the guessed list is run
     // again when the fresh list moved a month (a close or a new month on another device).
     if (out.chosen && periodReq.isCurrent(out.chosen.id) && listSig(builtFrom) !== listSig(list)) {
@@ -125,6 +134,7 @@ export default function FifoReport() {
 
   async function handlePeriodChange(periodId) {
     periodReq.begin(periodId)   // claim the page before any await
+    initFailed.current = false
     const p = periods.find(x => x.id === periodId)
     setSelectedPeriod(p)
     setLoading(true)
@@ -469,7 +479,7 @@ export default function FifoReport() {
       )}
 
       {/* A failed read renders as a failure — never as a quiet expiry report (S612). */}
-      {loadError ? <ReportLoadError error={loadError} /> : <>
+      {loadError ? <ReportLoadError error={loadError} onRetry={retryLoad} /> : <>
 
       {/* The KPI strip waits for the load: an uncomputed report is four confident zeroes, three of
           them green, and "nothing is expiring" is the most reassuring thing this page can say (S594/S616). */}

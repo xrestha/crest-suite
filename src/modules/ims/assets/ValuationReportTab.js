@@ -76,7 +76,7 @@ export default function ValuationReportTab({ assets }) {
       {loading ? (
         <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
       ) : loadError ? (
-        <ReportLoadError error={loadError} />
+        <ReportLoadError error={loadError} onRetry={load} />
       ) : !valuation ? (
         <div className="card"><div className="empty-state"><p className="empty-state-text">No posted depreciation runs yet — post a run on the Depreciation Runs tab first.</p></div></div>
       ) : (

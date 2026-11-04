@@ -38,6 +38,12 @@ export default function CreditStatementModal({ party, vatReg, prefix, outlet, on
   const [toIso, setToIso] = useState(todayNepalAdIso)
   const [data, setData] = useState({ loading: true, events: [], bills: [], vatById: {}, error: null })
   const [printMsg, setPrintMsg] = useState(null)
+  // Try again on the could-not-load card (S876, PERF-11) re-runs the read below.
+  const [readRun, setReadRun] = useState(0)
+  function retryRead() {
+    setData({ loading: true, events: [], bills: [], vatById: {}, error: null })
+    setReadRun(n => n + 1)
+  }
 
   useEffect(() => {
     let gone = false
@@ -62,7 +68,7 @@ export default function CreditStatementModal({ party, vatReg, prefix, outlet, on
       setData({ loading: false, events: events || [], bills: bills || [], vatById, error: null })
     })()
     return () => { gone = true }
-  }, [party.key]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [party.key, readRun]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const badRange = fromIso && toIso && fromIso > toIso
   const statement = useMemo(() => (data.loading || data.error || badRange ? null
@@ -108,7 +114,7 @@ export default function CreditStatementModal({ party, vatReg, prefix, outlet, on
       {data.loading ? (
         <p role="status" style={{ fontSize: 13, color: 'var(--theme-text3)' }}>Reading the account…</p>
       ) : data.error ? (
-        <ReportLoadError error={data.error} />
+        <ReportLoadError error={data.error} onRetry={retryRead} />
       ) : statement && (
         <>
           <div className="table-wrap" style={{ marginBottom: 16 }}>
