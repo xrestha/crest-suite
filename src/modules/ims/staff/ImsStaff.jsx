@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -14,6 +14,7 @@ import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../../../utils/weakPasswords'
 import { chipKeys } from '../../../shared/rovingFocus'
 import { nepalBsLong, nepalDateLong, nepalTime } from '../../../shared/nepalTime'
+import { HAS_RECORDS_CODE, READY_REFUSAL_CODES, imsRowState, blockOutcomeNotice, readEdgeBody } from './imsStaffRows'
 
 // Mirrors src/modules/pos/staff/PosStaff.jsx structurally — same role model, same custom-role
 // mapping, same Edge Function call pattern — adapted for real email+password login instead of a
@@ -63,6 +64,7 @@ export default function ImsStaff() {
   const [saving,      setSaving]      = useState({})
   const [msg,         setMsg]         = useState('')     // string or { text, detail } — ActionError takes both
   const [notice,      setNotice]      = useState('')     // a completed action, so a closed dialog is not the only evidence
+  const [rowMsg,      setRowMsg]      = useState(null)   // { id, error }: a refusal about one login, under its row (S875, the POS Staff S842 shape)
   const [search,      setSearch]      = useState('')
 
   // Custom roles
@@ -86,6 +88,12 @@ export default function ImsStaff() {
   const [pwMsg,       setPwMsg]       = useState('')
 
   const selfId = session?.user?.id || null
+
+  // A row action clears every message slot; a refusal about one login goes under its row, where the
+  // press was, as on POS Staff (S842). A completed action still reports in `notice` at the top.
+  function clearMsgs() { setMsg(''); setNotice(''); setRowMsg(null) }
+  function rowRefusal(id, error) { setMsg(''); setNotice(''); setRowMsg({ id, error }) }
+  const nameOf = p => p.full_name || p.email || 'this person'
   const businessName = profile?.clients?.name || adminViewClientName || ''
 
   const effectiveRoles = customRoles.length > 0 ? customRoles : DEFAULT_ROLES
@@ -112,7 +120,7 @@ export default function ImsStaff() {
     if (!clientId) return
     loadedClientRef.current = clientId
     setStaff([]); setEmployees([]); setEligibleUsers([]); setCustomRoles([])
-    setLoadError(null); setPartialWarn(''); setMsg(''); setNotice('')
+    setLoadError(null); setPartialWarn(''); clearMsgs()
     init(clientId)
   }, [clientId]) // eslint-disable-line
 
@@ -183,7 +191,7 @@ export default function ImsStaff() {
         </div>
       ),
       run: async () => {
-        setMsg(''); setNotice('')
+        clearMsgs()
         const outcomes = await Promise.all(list.map(async p => {
           const level = levelOf(p)
           const { data, error } = await supabase.functions.invoke('admin-user-ops', {
@@ -406,29 +414,126 @@ export default function ImsStaff() {
 
   // ── Delete staff ───────────────────────────────────────────────────────────
   // Deleting a login is irreversible, so the ask is the product's own dialog (S682).
+  // S875 (owner decision 2026-11-04, "Block, keep the name"): Delete is only for a login that recorded
+  // nothing. A deleted login's id is wiped from every count, gate pass, requisition and transfer it is
+  // on, which this confirm used to promise the opposite of ("nothing they entered is touched"). The
+  // server decides (admin-user-ops, staff_login_has_records) and refuses with the way out, Block, which
+  // this page then offers: the POS Staff shape (S809 3i).
   function deleteStaff(p) {
+    const name = nameOf(p)
     askConfirm({
-      title: `Delete ${p.full_name}'s IMS login?`,
+      title: `Delete the IMS login of ${name}?`,
       confirmLabel: 'Delete Login', danger: true, busyLabel: 'Deleting…',
       body: (
         <p style={{ margin: 0 }}>
-          {p.full_name} can no longer sign in to Crest IMS. The login and its role are removed; nothing they entered —
-          purchases, counts, sales — is touched. To give them access again later you will create a new login. This
-          cannot be undone.
+          Delete is only for a login that has not recorded anything. If {name} has entered a stock count, a gate
+          pass, a requisition, a transfer or anything else in IMS, deleting would take their name off those records,
+          so you will be offered Block instead, which keeps it. A deleted login cannot be brought back: giving them
+          access again means a new login{p.has_pin ? ' with a new PIN' : ''}.
         </p>
       ),
       run: async () => {
-        setMsg(''); setNotice('')
+        clearMsgs()
         const { data, error } = await supabase.functions.invoke('admin-user-ops', {
           body: { action: 'delete_ims_staff', client_id: clientId, userId: p.id },
         })
         if (error || data?.error) {
-          setMsg(await edgeFunctionFailure(data, error, `${p.full_name}'s login was not deleted — it still works.`)); return
+          const body = await readEdgeBody(error, data)
+          const row = imsRowState(p, selfId)
+          // The login has recorded something: nothing was deleted, and Block is the way out, unless it is
+          // blocked already (here or by a Final Settlement), when there is nothing more to do.
+          if (body?.code === HAS_RECORDS_CODE) {
+            if (row.settlementBlocked || row.staffBlocked) {
+              rowRefusal(p.id, `The login of ${name} stays: it has recorded work in IMS, so deleting it would take their name off those records. It is already blocked, so it cannot sign in.`)
+            } else {
+              offerBlockInstead(p, body.error)
+            }
+            return
+          }
+          rowRefusal(p.id, await edgeFunctionFailure(body || data, error,
+            `The login of ${name} was not deleted. ${row.settlementBlocked || row.staffBlocked ? 'It stays blocked.' : 'It still signs in.'}`))
+          return
         }
-        setNotice(`${p.full_name}'s IMS login was deleted.`)
+        setNotice(`The IMS login of ${name} was deleted.`)
         load()
       },
     })
+  }
+
+  // ── Block / Unblock (S875, owner decision 2026-11-04) ─────────────────────
+  // Removing a leaver blocks the login: it stops signing in (a counting PIN stops working on the
+  // tablet too), and the login stays so its name stays on everything it recorded. Unblock is for a block
+  // made by mistake. Same rows as Delete: never your own login, and the server refuses a peer manager.
+  // A Final Settlement block is HR's, so this page offers neither on it.
+  function blockBody(p) {
+    const name = nameOf(p)
+    return (
+      <p style={{ margin: 0 }}>
+        {name} can no longer sign in to Crest IMS{p.has_pin ? ', and their counting PIN stops working on the stock-count tablet' : ''}.
+        A session already open ends within the hour. The login is kept, so their name stays on every count, gate
+        pass, requisition and transfer they recorded. If this is a mistake, Unblock gives the login back as it was.
+      </p>
+    )
+  }
+  function blockStaff(p) {
+    askConfirm({
+      title: `Block the IMS login of ${nameOf(p)}?`,
+      confirmLabel: 'Block Login', danger: true, busyLabel: 'Blocking…',
+      body: blockBody(p),
+      run: () => setBlocked(p, true),
+    })
+  }
+  function offerBlockInstead(p, why) {
+    const name = nameOf(p)
+    askConfirm({
+      title: `Block the login of ${name} instead?`,
+      confirmLabel: 'Block Login', danger: true, busyLabel: 'Blocking…',
+      body: (
+        <div>
+          <p style={{ margin: '0 0 8px' }}>{why || `${name} has recorded work in IMS, so their login cannot be deleted.`}</p>
+          {blockBody(p)}
+        </div>
+      ),
+      run: () => setBlocked(p, true),
+    })
+  }
+  function unblockStaff(p) {
+    const name = nameOf(p)
+    const credential = p.has_pin ? 'PIN' : 'password'
+    askConfirm({
+      title: `Unblock the IMS login of ${name}?`,
+      confirmLabel: 'Unblock Login', busyLabel: 'Unblocking…',
+      body: (
+        <p style={{ margin: 0 }}>
+          {name} can sign in again straight away, with the same {credential}, role and access level as before.
+          Unblock a login blocked by mistake; for someone who left and is coming back, check their role and{' '}
+          {credential} first.
+        </p>
+      ),
+      run: () => setBlocked(p, false),
+    })
+  }
+  async function setBlocked(p, blocking) {
+    clearMsgs()
+    const name = nameOf(p)
+    const { data, error } = await supabase.functions.invoke('admin-user-ops', {
+      body: { action: blocking ? 'block_ims_staff' : 'unblock_ims_staff', client_id: clientId, userId: p.id },
+    })
+    if (error || data?.error) {
+      const body = await readEdgeBody(error, data)
+      // A refusal the function words for this page (a settlement block, a leaver, a till login) is
+      // shown as written; anything else leads with what did not happen. No answer at all claims nothing.
+      if (READY_REFUSAL_CODES.has(body?.code) && typeof body.error === 'string' && body.error) {
+        rowRefusal(p.id, { text: body.error, detail: body.code })
+      } else {
+        rowRefusal(p.id, await edgeFunctionFailure(body || data, error, blocking
+          ? `The login of ${name} was not blocked, so it still signs in.`
+          : `The login of ${name} was not unblocked, so it still cannot sign in.`))
+      }
+      return
+    }
+    setNotice(blockOutcomeNotice(data?.outcome, name, blocking))
+    load()
   }
 
   // ── Reset password ────────────────────────────────────────────────────────
@@ -472,13 +577,13 @@ export default function ImsStaff() {
   async function updateRole(profileId, jobTitle) {
     const role = effectiveRoles.find(r => r.label === jobTitle)
     // Never send "no role": a login with no marker reads as the Owner (S752). Removing someone's
-    // IMS access means deleting the login.
+    // IMS access means blocking the login (S875), or deleting one that recorded nothing.
     if (!role) { setMsg(`“${jobTitle}” is not a role in this team's scheme any more — pick one from the list.`); return }
     const current = staff.find(p => p.id === profileId)
     if (role.level === 'manager' && current?.ims_role !== 'manager' && !privileged) {
       setMsg('Only the account owner can give a login Manager access.'); return
     }
-    setSaving(s => ({ ...s, [profileId]: true })); setMsg(''); setNotice('')
+    setSaving(s => ({ ...s, [profileId]: true })); clearMsgs()
     const { data, error } = await supabase.functions.invoke('admin-user-ops', {
       body: {
         action:        'update_ims_role',
@@ -579,7 +684,7 @@ export default function ImsStaff() {
                 <th><Tip text="Custom role name defined for this team (e.g. Store Keeper, Purchasing Clerk).">Role</Tip></th>
                 <th><Tip text="Permission level this role maps to — controls which pages they can access.">Access Level</Tip></th>
                 <th><Tip text="Last time this user was active in the app">Last Seen</Tip></th>
-                <th style={{ width: 200 }}>Actions</th>
+                <th style={{ width: 260 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -594,15 +699,25 @@ export default function ImsStaff() {
                 // to share the level, which would name a role this login was never given.
                 const currentTitle = p.ims_job_title || (p.ims_role ? `${cap(p.ims_role)} (no role name)` : '')
                 const orphan = !!currentTitle && !effectiveRoles.some(r => r.label === currentTitle)
-                const isSelf = p.id === selfId
+                // S875: what this row offers, from its blocked state (settlement or Block) and whose it is.
+                const row = imsRowState(p, selfId)
+                const isSelf = row.isSelf
+                const blockedOn = row.staffBlocked ? (nepalBsLong(p.staff_blocked_at) || nepalDateLong(p.staff_blocked_at)) : ''
                 return (
-                  <tr key={p.id}>
+                  <Fragment key={p.id}>
+                  <tr>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{p.full_name || '—'}{isSelf && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> (you)</span>}</div>
                       {/* S798 3b (PEOPLE-ACCESS-4): as POS Staff shows it, so a refused sign-in has a visible reason. */}
                       {p.settlement_blocked === true && (
                         <Tip text="This person's Final Settlement blocked their logins, so this one no longer signs in. It is kept so everything they recorded keeps their name. Taking them back in Employees with a new join date unblocks it.">
                           <span className="badge badge-gray" style={{ fontSize: 10, marginRight: 6 }}>Blocked at settlement</span>
+                        </Tip>
+                      )}
+                      {/* S875: blocked from this page (Block), not by a settlement. Unblock is offered. */}
+                      {row.staffBlocked && (
+                        <Tip text={`Blocked here${blockedOn ? ` on ${blockedOn}` : ''}: this login no longer signs in${p.has_pin ? ', and its PIN no longer works on the counting tablet' : ''}. It is kept so every count, gate pass, requisition and transfer they recorded keeps their name. Unblock it if it was blocked by mistake.`}>
+                          <span className="badge badge-gray" style={{ fontSize: 10, marginRight: 6 }}>Login blocked</span>
                         </Tip>
                       )}
                       {p.hr_employee_id && (
@@ -668,11 +783,28 @@ export default function ImsStaff() {
                         {/* A count PIN account has no password to reset and no email to sign in
                             with, so the two are mutually exclusive (S737). get_ims_staff_list
                             returns has_pin for exactly this. */}
-                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openReset(p)}>
+                        {/* A blocked login (settlement or Block) cannot sign in whatever its password
+                            or PIN, so a new one would only look like access restored: aria-disabled,
+                            so a press says why (S875, as POS Staff since S809 3i; the S759 pattern). */}
+                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }}
+                          onClick={() => { if (row.resetReason) { rowRefusal(p.id, row.resetReason); return } openReset(p) }}
+                          aria-disabled={row.resetReason ? true : undefined}
+                          title={row.resetReason || undefined}>
                           {p.has_pin ? 'Reset PIN' : 'Reset Password'}
                         </button>
+                        {/* S875: Block keeps the login and its name on every record; Unblock undoes a
+                            block made here. A settlement block is HR's, so neither is offered on it. */}
+                        {row.blockAction && (
+                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }}
+                            onClick={() => { if (row.blockAction === 'unblock') unblockStaff(p); else blockStaff(p) }}
+                            title={row.blockAction === 'unblock'
+                              ? 'Let this login sign in again, for a login blocked by mistake.'
+                              : 'Stop this login signing in, and keep their name on every count, gate pass, requisition and transfer they recorded.'}>
+                            {row.blockAction === 'unblock' ? 'Unblock' : 'Block'}
+                          </button>
+                        )}
                         {isSelf ? (
-                          <Tip text="You cannot delete or re-rank your own login from here — the account owner or an administrator can.">
+                          <Tip text="You cannot block, delete or re-rank your own login from here. The account owner or an administrator can.">
                             <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>your login</span>
                           </Tip>
                         ) : (
@@ -680,6 +812,7 @@ export default function ImsStaff() {
                             className="btn btn-ghost"
                             style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
                             onClick={() => deleteStaff(p)}
+                            title="Only for a login that has not recorded anything in IMS; otherwise you are offered Block."
                           >
                             Delete
                           </button>
@@ -687,6 +820,18 @@ export default function ImsStaff() {
                       </div>
                     </td>
                   </tr>
+                  {/* S875: this login's refusal, under its own row (the POS Staff S842 shape). Sticky at
+                      the left edge, so a table scrolled sideways still shows all of it. */}
+                  {rowMsg?.id === p.id && (
+                    <tr className="detail-row">
+                      <td colSpan={6} style={{ paddingTop: 0 }}>
+                        <div style={{ position: 'sticky', left: 0, maxWidth: 'min(640px, calc(100vw - 64px))' }}>
+                          <ActionError error={rowMsg.error} />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 )
               })}
             </tbody>

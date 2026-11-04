@@ -49,8 +49,16 @@ describe('canEditWeatherCity', () => {
     expect(who({ ...blocked, pos_role: 'manager', hr_role: 'manager' })).toBe(true)
     expect(who({ ...blocked, pos_role: 'manager', ims_role: 'manager', ims_email: null })).toBe(true)
   })
+  // S875: hr_caller_has_rank and ims_caller_has_rank refuse a login IMS Staff or HR Staff blocked.
+  test('a login IMS Staff or HR Staff blocked loses its IMS and HR rank, not its POS one', () => {
+    const blocked = { staff_blocked_at: '2026-11-04T08:00:00Z' }
+    expect(who({ ...blocked, hr_role: 'manager' })).toBe(false)
+    expect(who({ ...blocked, ims_role: 'manager', ims_email: null })).toBe(false)
+    expect(who({ ...blocked, hr_role: 'manager', pos_role: 'manager' })).toBe(true)
+  })
   test('cleared blocks (NULL) leave the rank as it was', () => {
     expect(who({ pos_role: 'manager', settlement_blocked_by: null, pos_blocked_at: null })).toBe(true)
+    expect(who({ hr_role: 'manager', staff_blocked_at: null })).toBe(true)
   })
   test('the Owner and admin are exempt whatever the profile row says, as in the guard', () => {
     expect(canEditWeatherCity({ isAdmin: false, isOwner: true, profile: { settlement_blocked_by: 'x' } })).toBe(true)

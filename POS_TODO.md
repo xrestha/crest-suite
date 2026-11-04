@@ -690,8 +690,11 @@ table is refused, and `pos_payment_confirmations.matched_order_id` is ON DELETE 
     gets "Invalid credentials" (shown as a wrong PIN), and each try counts toward the lockout. Filter
     `pos_blocked_at` and `settlement_blocked_by` in its staff lookup, or give its own answer (3i).~~
     Fixed in 3h: its own 403 (`switched_off`, "This login is switched off"), not counted.
-  - Deleting an IMS or HR staff login (`delete_ims_staff` / `delete_hr_staff`) also SET NULLs its name
-    on counts, requisitions, gate passes and approvals: the ACCESS-5 shape outside POS (3i). Deferred by the owner (S834, D36) to the shared HR job: it needs a switch-off for IMS and HR logins.
+  - ~~Deleting an IMS or HR staff login (`delete_ims_staff` / `delete_hr_staff`) also SET NULLs its name
+    on counts, requisitions, gate passes and approvals: the ACCESS-5 shape outside POS (3i). Deferred by the owner (S834, D36) to the shared HR job: it needs a switch-off for IMS and HR logins.~~
+    Fixed S875 (`20261104100000`, owner "Block, keep the name"): IMS Staff and HR Staff block a leaver
+    (`staff_set_login_blocked`, `profiles.staff_blocked_at`), and every Delete refuses a login with rows
+    in `login_recorded_rows`.
   - ~~Live `pos_parking_slips_guard` still lets any operator INSERT through unchanged; its comment says 1l
     narrowed it to a restore, the body does not (3i).~~ Fixed in 4k (S819): the restore only.
   - ~~Clear IMS also deletes the Fixed Assets register and categories, which neither its confirm nor the
@@ -926,11 +929,14 @@ table is refused, and `pos_payment_confirmations.matched_order_id` is ON DELETE 
   - ~~A2's "Remove the legacy shared device key" (🔵) is already done: the code and functions went in 3h
     and S812 (`04ebdb0e`); close it when 5e drops the columns.~~ Closed in 5e (S829).
 - **Found while building stage 5, slice 5e (2026-10-13, not fixed):**
-  - **The HR manager's hour after a settlement, on the other HR pages** (owner 2026-10-13: its own job,
+  - ~~**The HR manager's hour after a settlement, on the other HR pages** (owner 2026-10-13: its own job,
     shared with hss-suite; filed in this repo's `docs/CROSS-REPO.md`, and still to file in hss's once
     hss-suite is set up on this machine). `hr_is_manager_rank()` and the HR
     rank policies test the raw `hr_role`, so a settled HR manager keeps manager reach on payroll,
-    attendance and the rest for the hour their token lives. 5e closed only the settings screen.
+    attendance and the rest for the hour their token lives. 5e closed only the settings screen.~~
+    Fixed S875 (`20261104100000`, owner: same release as D36): `hr_caller_has_rank(level)` refuses a
+    settled or blocked login, and the 66 HR rank policies and `hr_is_manager_rank()` call it. Filed in
+    both repos' `docs/CROSS-REPO.md` for hss to follow.
   - ~~`register_trial`'s two rate-limit counts drop their read error (`ipCount ?? 0`), so a failed count
     lets a signup through the limit (CLAUDE.md's vacuous-guard rule).~~ Fixed in S834: a failed count refuses (503); admin-user-ops deployed with migration `20261014100000`.
   - ~~`check_pos_pin_lock` is now dead (no caller since `pos-staff-login` v11); drop it with a later

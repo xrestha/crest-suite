@@ -106,8 +106,10 @@ Deno.serve(async (req) => {
       .eq('id', staff_id).eq('client_id', client_id)
       .not('ims_role', 'is', null).not('ims_email', 'is', null)
       // A leaver whose Final Settlement blocked their logins is off the picker (S756, as S754 did
-      // for POS) and must not sign in by a remembered staff_id either.
+      // for POS) and must not sign in by a remembered staff_id either. Nor one IMS Staff blocked
+      // (S875): GoTrue refuses its ban anyway, and this refusal is uncounted.
       .is('settlement_blocked_by', null)
+      .is('staff_blocked_at', null)
       .maybeSingle()
 
     // Generic message shared with the wrong-PIN path below, and deliberately no counted attempt (this

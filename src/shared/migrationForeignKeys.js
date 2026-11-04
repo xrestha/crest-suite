@@ -1,6 +1,6 @@
 // Every foreign key the migrations leave in place, read from supabase/migrations (S809 3i). For tests
-// only: the restore order (restoreClientData.test.js) and the till-login record words
-// (posLoginRecords.test.js) are each a list that must follow the schema, and a test that reads the
+// only: the restore order (restoreClientData.test.js) and the login record words
+// (loginRecords.test.js, S875) are each a list that must follow the schema, and a test that reads the
 // migrations is the only thing that can hold them to it (the itemRefTables.test.js technique). Node
 // only (fs); no app code imports this, so it never reaches the bundle.
 //

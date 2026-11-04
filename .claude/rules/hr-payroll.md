@@ -732,7 +732,7 @@ History: #s660-status-colours-and-labour-band, #s692-labor-forecast, #s693-labou
 
 ## Rank, approvals and your own records
 
-- **Rank is a database fence.** RESTRICTIVE supervisor-rank INSERT/UPDATE/DELETE policies on
+- **Rank is a database fence** (`hr_caller_has_rank`, S875). RESTRICTIVE supervisor-rank INSERT/UPDATE/DELETE policies on
   `hr_attendance`, `hr_leave_requests`, `hr_leave_types`, `hr_overtime_entries`, `hr_roster`,
   `hr_shift_types`, `hr_shift_swap_requests`, `hr_roster_publish_state` and the Holiday Calendar
   (S748–S749). Manager-rank WRITES on runs, payslips, components, settlements, salary payments,

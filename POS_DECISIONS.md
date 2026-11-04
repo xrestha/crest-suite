@@ -336,7 +336,8 @@ same ground is not re-walked; full detail in README S652/S653/S654.
   printed with (`pos_orders.invoice_prefix` at the close, `pos_credit_notes.invoice_prefix` at issue;
   `invoiceCodeOf`); rows from before follow today's code. **D36 (owner):** deleting an IMS or HR staff
   login still blanks its name on past records; the fix (a switch-off for those logins) waits for the
-  shared HR job. Also: an order on a deleted table shows as its own card; a failed comp food-cost read
+  shared HR job. **Closed S875** (owner 2026-11-04, "Block, keep the name"): IMS Staff and HR Staff
+  block a leaver, Delete only a login that recorded nothing (`20261104100000`). Also: an order on a deleted table shows as its own card; a failed comp food-cost read
   shows "—"; passed booking requests are counted nowhere and closed when Reservations opens; register_trial
   refuses an unread rate-limit count; the HR and IMS PIN logins' dead fallback and `check_pos_pin_lock`
   are gone. Record: CHANGELOG S834.

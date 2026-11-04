@@ -154,13 +154,13 @@ const POS_SALES_SOURCES = ['pos', 'pos_comp', 'pos_credit', 'pos_credit_restock'
 const IMS_MOVEMENT_SOURCES = ['manual']
 const POS_MOVEMENT_SOURCES = ['pos_sale', 'pos_comp', 'pos_credit_restock']
 
-// What each column that keeps a till login's name means, for the sentence that refuses a Delete
-// (S809 ACCESS-5). Which columns count is the database's: pos_login_reference_columns() reads every
-// foreign key to a login that does not go with it, plus pos_orders.opened_by and
-// pos_order_items.comped_by, so a new one is counted the day its key exists. This map only words
-// them; one it does not know reads as "other records". posLoginRecords.test.js holds it to the POS
-// keys in the migrations.
-const POS_RECORD_WORDS: Record<string, [string, string]> = {
+// What each column that keeps a login's name means, for the sentence that refuses a Delete (S809
+// ACCESS-5 for the till, S875 for IMS and HR). Which columns count is the database's:
+// login_reference_columns() reads every foreign key to a login that does not go with it, plus the
+// columns that hold a login's id with no key, so a new one is counted the day its key exists. This
+// map only words them; one it does not know reads as "other records". loginRecords.test.js holds it
+// to the keys in the migrations.
+const LOGIN_RECORD_WORDS: Record<string, [string, string]> = {
   'pos_orders.closed_by':               ['closed 1 bill', 'closed {n} bills'],
   'pos_orders.opened_by':               ['opened 1 order', 'opened {n} orders'],
   'pos_orders.credit_settled_by':       ['settled 1 credit bill', 'settled {n} credit bills'],
@@ -194,20 +194,58 @@ const POS_RECORD_WORDS: Record<string, [string, string]> = {
   // their birthday and anniversary.
   'pos_membership_types.created_by':    ['added 1 membership type', 'added {n} membership types'],
   'pos_customers.consent_by':           ['recorded consent for 1 customer', 'recorded consent for {n} customers'],
+  // S875: IMS. Each follows "has", as the till's do.
+  'closing_stock.counted_by':           ['counted 1 stock line', 'counted {n} stock lines'],
+  'requisitions.requested_by':          ['asked for 1 requisition', 'asked for {n} requisitions'],
+  'requisitions.issued_by':             ['issued 1 requisition', 'issued {n} requisitions'],
+  'requisitions.rejected_by':           ['rejected 1 requisition', 'rejected {n} requisitions'],
+  'ims_gate_passes.issued_by':          ['issued 1 gate pass', 'issued {n} gate passes'],
+  'ims_gate_passes.exited_by':          ['marked 1 gate pass as gone out', 'marked {n} gate passes as gone out'],
+  'ims_gate_passes.voided_by':          ['voided 1 gate pass', 'voided {n} gate passes'],
+  'ims_stock_transfers.sent_by':        ['sent 1 stock transfer', 'sent {n} stock transfers'],
+  'ims_stock_transfers.ended_by':       ['received or cancelled 1 stock transfer', 'received or cancelled {n} stock transfers'],
+  'ims_stock_transfer_lines.created_by': ['recorded 1 stock transfer line', 'recorded {n} stock transfer lines'],
+  'demand_forecast_run_log.run_by':     ['run the demand forecast 1 time', 'run the demand forecast {n} times'],
+  'assets_register.created_by':         ['added 1 fixed asset', 'added {n} fixed assets'],
+  'assets_register.custodian_user_id':  ['been given 1 fixed asset to look after', 'been given {n} fixed assets to look after'],
+  'assets_repair_expenses.created_by':  ['recorded 1 asset repair', 'recorded {n} asset repairs'],
+  'assets_depreciation_runs.created_by': ['prepared 1 depreciation run', 'prepared {n} depreciation runs'],
+  'assets_depreciation_runs.posted_by': ['posted 1 depreciation run', 'posted {n} depreciation runs'],
+  'assets_tax_pool_runs.created_by':    ['prepared 1 tax pool run', 'prepared {n} tax pool runs'],
+  'assets_tax_pool_runs.posted_by':     ['posted 1 tax pool run', 'posted {n} tax pool runs'],
+  'assets_tax_pool_openings.created_by': ['entered 1 tax pool opening', 'entered {n} tax pool openings'],
+  'assets_tax_pool_opening_corrections.corrected_by': ['corrected 1 tax pool opening', 'corrected {n} tax pool openings'],
+  'monthly_owner_reports.generated_by': ['made 1 Owner Report', 'made {n} Owner Reports'],
+  // S875: HR.
+  'hr_leave_requests.decided_by':       ['decided 1 leave request', 'decided {n} leave requests'],
+  'hr_salary_payments.paid_by':         ['marked 1 salary as paid', 'marked {n} salaries as paid'],
+  'hr_salary_payments.voided_by':       ['cancelled 1 salary payment', 'cancelled {n} salary payments'],
+  'hr_tada_claims.submitted_by':        ['submitted 1 travel claim', 'submitted {n} travel claims'],
+  'hr_tada_claims.approved_by':         ['approved 1 travel claim', 'approved {n} travel claims'],
+  'hr_roster_publish_state.published_by': ['published 1 roster week', 'published {n} roster weeks'],
+  'hr_shift_swap_requests.admin_decided_by': ['decided 1 shift swap', 'decided {n} shift swaps'],
+  'hr_advances.written_off_by':         ['written off 1 advance', 'written off {n} advances'],
+  'hr_final_settlements.reopened_by':   ['reopened 1 final settlement', 'reopened {n} final settlements'],
+  // Across modules: legal acceptance, outlet ticks, employee links and blocks.
+  'legal_acceptances.user_id':          ['accepted 1 legal document', 'accepted {n} legal documents'],
+  'legal_acceptances.recorded_by':      ['recorded 1 legal acceptance', 'recorded {n} legal acceptances'],
+  'profile_outlet_access.granted_by':   ['ticked 1 outlet for a login', 'ticked {n} outlets for logins'],
+  'profile_employee_links.linked_by':   ['linked 1 login to an employee record', 'linked {n} logins to employee records'],
   'profiles.pos_blocked_by':            ['blocked 1 login', 'blocked {n} logins'],
+  'profiles.staff_blocked_by':          ['blocked 1 staff login', 'blocked {n} staff logins'],
 }
 
-// "closed 14 bills, opened 3 shifts and sent 120 kitchen tickets" from pos_login_recorded_rows' rows,
-// in POS_RECORD_WORDS' order, at most four named and the rest summed as other records.
-function describePosLoginRecords(rows: Array<{ table_name: string; column_name: string; n: number | string }>): string {
-  const order = Object.keys(POS_RECORD_WORDS)
+// "closed 14 bills, opened 3 shifts and sent 120 kitchen tickets" from login_recorded_rows' rows,
+// in LOGIN_RECORD_WORDS' order, at most four named and the rest summed as other records.
+function describeLoginRecords(rows: Array<{ table_name: string; column_name: string; n: number | string }>): string {
+  const order = Object.keys(LOGIN_RECORD_WORDS)
   const named: Array<{ at: number; n: number; words: [string, string] }> = []
   let other = 0
   for (const r of rows) {
     const n = Number(r.n) || 0
     if (n <= 0) continue
     const key = `${r.table_name}.${r.column_name}`
-    const words = POS_RECORD_WORDS[key]
+    const words = LOGIN_RECORD_WORDS[key]
     if (words) named.push({ at: order.indexOf(key), n, words })
     else other += n
   }
@@ -833,7 +871,7 @@ Deno.serve(async (req) => {
     // Use service-role client to fetch profile — RLS on profiles can block anon+JWT reads;
     // identity is already verified above via caller.auth.getUser()
     const { data: profile } = await admin
-      .from('profiles').select('role, full_name, pos_role, pos_email, ims_role, hr_self_service, hr_role, client_id, active_client_id, pos_discount_limit, pos_allow_void, pos_blocked_at, settlement_blocked_by').eq('id', user.id).single()
+      .from('profiles').select('role, full_name, pos_role, pos_email, ims_role, hr_self_service, hr_role, client_id, active_client_id, pos_discount_limit, pos_allow_void, pos_blocked_at, staff_blocked_at, settlement_blocked_by').eq('id', user.id).single()
 
     // ── POS/IMS/HR manager-accessible actions (before admin-only guard) ──────
     // isCallerOwner must exclude every staff-account marker (pos_role, pos_email, ims_role,
@@ -846,8 +884,10 @@ Deno.serve(async (req) => {
     // pos_caller_has_rank refuses it every rank. Its sessions are ended by the block, so this is the
     // second line, for a token still alive.
     const isCallerPosManager = profile?.pos_role === 'manager' && !profile?.pos_blocked_at && !profile?.settlement_blocked_by
-    const isCallerImsManager = profile?.ims_role === 'manager'
-    const isCallerHrManager  = profile?.hr_role === 'manager'
+    // S875: the same for an IMS or HR manager that IMS Staff, HR Staff or a Final Settlement blocked,
+    // as ims_caller_has_rank and hr_caller_has_rank refuse it every rank.
+    const isCallerImsManager = profile?.ims_role === 'manager' && !profile?.staff_blocked_at && !profile?.settlement_blocked_by
+    const isCallerHrManager  = profile?.hr_role === 'manager' && !profile?.staff_blocked_at && !profile?.settlement_blocked_by
     const isCallerOwner      = profile?.role === 'client' && !profile?.pos_role && !profile?.pos_email && !profile?.ims_role && !profile?.hr_self_service && !profile?.hr_role
     const isPosPrivileged    = isCallerAdmin || isCallerPosManager || isCallerOwner
     const isImsPrivileged    = isCallerAdmin || isCallerImsManager || isCallerOwner
@@ -1005,10 +1045,12 @@ Deno.serve(async (req) => {
       if (!isPosPrivileged) return json({ error: 'Forbidden' }, 403)
     }
     if (action === 'create_ims_staff' || action === 'reset_ims_password' || action === 'delete_ims_staff' || action === 'update_ims_role'
-        || action === 'create_ims_pin_staff' || action === 'reset_ims_pin') {
+        || action === 'create_ims_pin_staff' || action === 'reset_ims_pin'
+        || action === 'block_ims_staff' || action === 'unblock_ims_staff') {
       if (!isImsPrivileged) return json({ error: 'Forbidden' }, 403)
     }
-    if (action === 'create_hr_staff' || action === 'reset_hr_password' || action === 'delete_hr_staff' || action === 'update_hr_role') {
+    if (action === 'create_hr_staff' || action === 'reset_hr_password' || action === 'delete_hr_staff' || action === 'update_hr_role'
+        || action === 'block_hr_staff' || action === 'unblock_hr_staff') {
       if (!isHrPrivileged) return json({ error: 'Forbidden' }, 403)
     }
 
@@ -1055,12 +1097,12 @@ Deno.serve(async (req) => {
 
     // The POS powers and lock stamp are read for reset_pos_pin (S809 1f): its power check compares the
     // target's discount limit and Void against the caller's, and its audit row says whether the reset
-    // ended a lockout. The two block stamps are read for Block / Unblock (S809 3i). The IMS lock stamp
+    // ended a lockout. The block stamps are read for Block / Unblock (S809 3i, S875). The IMS lock stamp
     // is read for reset_ims_pin the same way (S874).
     async function loadTarget(userId: string) {
       const { data } = await admin
         .from('profiles')
-        .select('id, role, client_id, full_name, pos_role, pos_email, pos_discount_limit, pos_allow_void, pos_pin_locked_until, pos_blocked_at, settlement_blocked_by, ims_role, ims_email, ims_pin_locked_until, hr_role, hr_self_service')
+        .select('id, role, client_id, full_name, pos_role, pos_email, pos_discount_limit, pos_allow_void, pos_pin_locked_until, pos_blocked_at, staff_blocked_at, settlement_blocked_by, ims_role, ims_email, ims_pin_locked_until, hr_role, hr_self_service')
         .eq('id', userId).single()
       return data as Record<string, unknown> | null
     }
@@ -1191,6 +1233,28 @@ Deno.serve(async (req) => {
     function possessive(target: Record<string, unknown>) {
       const n = typeof target.full_name === 'string' ? target.full_name.trim() : ''
       return n ? `${n}'s` : 'their'
+    }
+
+    // S875 (D36, owner decision 2026-11-04): an IMS or HR login that recorded anything is blocked,
+    // never deleted, as a till login is (S809 3i). Deleting the auth user deletes the profile, and
+    // every key to it is ON DELETE SET NULL, so the counts, gate passes, leave decisions and payments
+    // it recorded would lose the name. Decided here from the database's own list
+    // (login_recorded_rows), never by the page. A failed read refuses: an unread history is not an
+    // empty one. Returns a ready-to-send refusal, or null when the login recorded nothing.
+    async function staffRecordsRefusal(target: Record<string, unknown>, label: string) {
+      const who = whoOf(target)
+      const { data, error } = await admin.rpc('login_recorded_rows', { p_profile_id: target.id })
+      if (error) {
+        console.error(`[admin-user-ops] delete (${label}): could not read what the login recorded — refusing:`, error.code, error.message)
+        return json({ error: `Could not check whether ${who} has recorded anything in Crest, so the login was not deleted and it still signs in. Try again in a moment.` }, 503)
+      }
+      const rows = (data || []) as Array<{ table_name: string; column_name: string; n: number }>
+      if (rows.length === 0) return null
+      return json({
+        error: `${who} has ${describeLoginRecords(rows)}, so this ${label} login is kept rather than deleted. Block it instead: it can no longer sign in, and their name stays on every record.`,
+        code: 'staff_login_has_records',
+        records: rows,
+      }, 409)
     }
 
     // ── Create a POS staff member — name + PIN, auto-generated email ──────────
@@ -1403,6 +1467,8 @@ Deno.serve(async (req) => {
             ims_role:      p.ims_role || 'staff',
             ims_job_title: p.ims_job_title || null,
             ims_email:     email,
+            // A counting PIN IMS Staff blocked comes back blocked (S875); the ban follows below.
+            ...(p.staff_blocked_at ? { staff_blocked_at: p.staff_blocked_at } : {}),
           }),
           // hr_employee_id points at the restored hr_employees row, which keeps its original id
           // because restoreClientData inserts rows verbatim.
@@ -1449,9 +1515,21 @@ Deno.serve(async (req) => {
           }
           posBlocked = true
         }
+        // S875: the same for a counting PIN IMS Staff blocked.
+        let staffBlocked = false
+        if (!blocked && isImsCount && p.staff_blocked_at) {
+          const { error: banErr } = await admin.auth.admin.updateUserById(authData.user.id, { ban_duration: LEAVER_BAN })
+          if (banErr) {
+            await admin.auth.admin.deleteUser(authData.user.id)
+            manual.push({ full_name: p.full_name, kind: kindLabel, reason: `left out — IMS Staff had blocked this login, and the block could not be re-applied (${banErr.message})` })
+            continue
+          }
+          staffBlocked = true
+        }
         restored.push({
           full_name: p.full_name,
-          kind: blocked ? `${kindLabel}, blocked (settled leaver)` : posBlocked ? `${kindLabel}, blocked (POS Staff)` : kindLabel,
+          kind: blocked ? `${kindLabel}, blocked (settled leaver)` : posBlocked ? `${kindLabel}, blocked (POS Staff)`
+            : staffBlocked ? `${kindLabel}, blocked (IMS Staff)` : kindLabel,
         })
       }
 
@@ -1485,7 +1563,7 @@ Deno.serve(async (req) => {
 
       const [liveRes, empRes, finRes] = await Promise.all([
         admin.from('profiles')
-          .select('id, full_name, hr_employee_id, settlement_blocked_by, pos_blocked_at, pos_email, hr_self_service, ims_role, hr_role')
+          .select('id, full_name, hr_employee_id, settlement_blocked_by, pos_blocked_at, staff_blocked_at, pos_email, hr_self_service, ims_role, hr_role')
           .eq('client_id', client_id),
         admin.from('hr_employees').select('id, join_date').eq('client_id', client_id),
         admin.from('hr_final_settlements').select('id, employee_id, last_working_date')
@@ -1495,7 +1573,8 @@ Deno.serve(async (req) => {
       if (readErr) return json({ error: `could not read the restored client: ${readErr.message}` }, 500)
 
       type Live = { id: string; full_name: string | null; hr_employee_id: string | null; settlement_blocked_by: string | null;
-        pos_blocked_at: string | null; pos_email: string | null; hr_self_service: boolean | null; ims_role: string | null; hr_role: string | null }
+        pos_blocked_at: string | null; staff_blocked_at: string | null; pos_email: string | null; hr_self_service: boolean | null;
+        ims_role: string | null; hr_role: string | null }
       const live = (liveRes.data || []) as Live[]
       const liveById = new Map(live.map(p => [p.id, p]))
       const joinOf = new Map((empRes.data || []).map((e: { id: string; join_date: string | null }) => [e.id, e.join_date]))
@@ -1554,7 +1633,8 @@ Deno.serve(async (req) => {
         let blockBy: string | null = null
         // A login POS Staff blocked keeps that block as its own (S809 3i): its ban is POS Staff's, and
         // a settlement stamp on top would let a Reopen lift it. Finalize leaves such a login alone too.
-        if (!p.settlement_blocked_by && !p.pos_blocked_at && blocksLogins) {
+        // The same for one IMS Staff or HR Staff blocked (S875).
+        if (!p.settlement_blocked_by && !p.pos_blocked_at && !p.staff_blocked_at && blocksLogins) {
           if (r.settlement_blocked_by) {
             if (finalizedIds.has(r.settlement_blocked_by)) blockBy = r.settlement_blocked_by
           } else if (!('settlement_blocked_by' in r) && employeeId) {
@@ -1761,10 +1841,10 @@ Deno.serve(async (req) => {
       // DELETE SET NULL: the bills, shifts, cash entries, tickets and credit notes it recorded kept
       // their rows and lost the name, while the confirm said the names stayed. A login with any such
       // row is refused with the way out the owner chose, Block. Decided here, from the database's
-      // own list of those columns (pos_login_recorded_rows), never by the page. A failed read refuses:
-      // an unread history is not an empty one.
+      // own list of those columns (login_recorded_rows, S875; pos_login_recorded_rows before), never by
+      // the page. A failed read refuses: an unread history is not an empty one.
       const posWho = whoOf(posTarget!)
-      const { data: recorded, error: recErr } = await admin.rpc('pos_login_recorded_rows', { p_profile_id: userId })
+      const { data: recorded, error: recErr } = await admin.rpc('login_recorded_rows', { p_profile_id: userId })
       if (recErr) {
         console.error('[admin-user-ops] delete_pos_staff: could not read what the login recorded — refusing:', recErr.code, recErr.message)
         return json({ error: `Could not check whether ${posWho} has recorded anything at the till, so the login was not deleted and their PIN still works. Try again in a moment.` }, 503)
@@ -1772,7 +1852,7 @@ Deno.serve(async (req) => {
       const recordedRows = (recorded || []) as Array<{ table_name: string; column_name: string; n: number }>
       if (recordedRows.length > 0) {
         return json({
-          error: `${posWho} has ${describePosLoginRecords(recordedRows)} at the till, so deleting this login would take their name off those records. Block the login instead: it can no longer sign in, and the name stays on every record.`,
+          error: `${posWho} has ${describeLoginRecords(recordedRows)} at the till, so deleting this login would take their name off those records. Block the login instead: it can no longer sign in, and the name stays on every record.`,
           code: 'pos_login_has_records',
           records: recordedRows,
         }, 409)
@@ -2356,10 +2436,68 @@ Deno.serve(async (req) => {
       if (imsDenied) return imsDenied
       const imsManageDenied = requireManageableTarget(imsTarget!, 'ims')
       if (imsManageDenied) return imsManageDenied
+      // S875: Delete only a login that recorded nothing; otherwise Block (below).
+      const imsRecordsDenied = await staffRecordsRefusal(imsTarget!, 'IMS')
+      if (imsRecordsDenied) return imsRecordsDenied
 
       const { error: delErr } = await admin.auth.admin.deleteUser(userId)
       if (delErr) return json({ error: delErr.message }, 400)
       return json({ success: true })
+    }
+
+    // ── Block / Unblock an IMS or HR login (S875; D36, owner decision 2026-11-04) ────────────
+    // Removing a leaver's IMS or HR login BLOCKS it: they can no longer sign in, every session is
+    // ended, and the profile stays, so their name stays on everything they recorded. The till's shape
+    // (block_pos_staff, S809 3i). Unblock is for a block made by mistake. Whoever may delete the login
+    // may block or unblock it, on the same rules: requireStaffTarget, then requireManageableTarget
+    // (never a peer manager, never your own). The block itself is staff_set_login_blocked (service
+    // role only): the stamp, the ban and the session end in one transaction. A ban is the whole
+    // login's, so a login holding both an IMS and an HR rank is blocked from either page.
+    if (action === 'block_ims_staff' || action === 'unblock_ims_staff' || action === 'block_hr_staff' || action === 'unblock_hr_staff') {
+      const blocking = action.startsWith('block_')
+      const module = action.includes('_ims_') ? 'ims' : 'hr'
+      const label = MODULE_LABEL[module]
+      const { userId } = params
+      if (!userId) return json({ error: 'userId is required' }, 400)
+
+      const staffTarget = await loadTarget(userId)
+      const staffDenied = requireStaffTarget(staffTarget, module)
+      if (staffDenied) return staffDenied
+      // The operator skips requireStaffTarget's marker test; a till PIN login is POS Staff's to block.
+      if (staffTarget!.pos_email) {
+        return json({ error: 'This is a till (PIN) login, so it is blocked from POS Staff, not here.', code: 'staff_login_is_till' }, 400)
+      }
+      const staffManageDenied = requireManageableTarget(staffTarget!, module)
+      if (staffManageDenied) return staffManageDenied
+
+      const who = whoOf(staffTarget!)
+      const settlementSentence = `${who}'s logins were blocked by their Final Settlement in HR, so this one is unblocked there, not here: reopen the settlement, or rehire them in HR → Employees.`
+      // Said before the call, in words: the database refuses the same (staff_login_settlement_blocked).
+      if (staffTarget!.settlement_blocked_by) {
+        return json({ error: blocking ? `${who}'s login is already blocked by their Final Settlement in HR.` : settlementSentence, code: 'staff_login_settlement_blocked' }, 409)
+      }
+
+      const { data: outcome, error: blockErr } = await admin.rpc('staff_set_login_blocked', {
+        p_profile_id: userId, p_blocked: blocking, p_actor: user.id,
+      })
+      if (blockErr) {
+        if (blockErr.hint === 'staff_unblock_leaver') {
+          return json({ error: `HR shows ${who} as no longer working here, so the login stays blocked. If they are coming back, rehire them in HR → Employees first, then unblock it.`, code: 'staff_unblock_leaver' }, 409)
+        }
+        if (blockErr.hint === 'staff_login_settlement_blocked') {
+          return json({ error: settlementSentence, code: 'staff_login_settlement_blocked' }, 409)
+        }
+        if (blockErr.hint === 'staff_login_not_found') {
+          return json({ error: `This is not an ${label} staff login, so it cannot be blocked from ${label} Staff.`, code: 'staff_login_not_found' }, 400)
+        }
+        console.error(`[admin-user-ops] ${action}: staff_set_login_blocked failed:`, blockErr.code, blockErr.message)
+        // An answer from the database (it carries a code) means its one transaction rolled back, so
+        // nothing changed. No answer at all proves nothing either way.
+        return blockErr.code
+          ? json({ error: `${who}'s login was not ${blocking ? 'blocked' : 'unblocked'}: the server could not finish, and nothing was changed. Try again in a moment.` }, 500)
+          : json({ error: `It is not known whether ${who}'s login was ${blocking ? 'blocked' : 'unblocked'}: the answer was lost on the way. Reload the page to see, then try again.` }, 503)
+      }
+      return json({ success: true, outcome })
     }
 
     // ── Reset an IMS staff member's password ──────────────────────────────────
@@ -2511,6 +2649,9 @@ Deno.serve(async (req) => {
       if (hrDenied) return hrDenied
       const hrManageDenied = requireManageableTarget(hrTarget!, 'hr')
       if (hrManageDenied) return hrManageDenied
+      // S875: Delete only a login that recorded nothing; otherwise Block (block_hr_staff).
+      const hrRecordsDenied = await staffRecordsRefusal(hrTarget!, 'HR')
+      if (hrRecordsDenied) return hrRecordsDenied
 
       const { error: delErr } = await admin.auth.admin.deleteUser(userId)
       if (delErr) return json({ error: delErr.message }, 400)

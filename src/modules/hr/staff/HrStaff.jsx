@@ -15,6 +15,7 @@ import { edgeFunctionFailure, failedMovesMessage } from '../../../shared/edgeFun
 import { nepalBsLong, nepalDateLong } from '../../../shared/nepalTime'
 import { useConfirm, CONFIRM_TIMEOUT_MS, CONFIRM_TIMEOUT_TEXT } from '../../../shared/hooks/useConfirm'
 import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../../../utils/weakPasswords'
+import { blockStateOf, nameOf, resetLockReason, readEdgeAnswer, staffActionFailure, deleteRefusal, blockNotice } from './hrLoginBlock'
 
 // Mirrors src/modules/ims/staff/ImsStaff.jsx structurally — same role model, same custom-role
 // mapping, same Edge Function call pattern — adapted for HR staff (S430). Distinct from HR
@@ -24,7 +25,8 @@ import { MIN_PASSWORD_LENGTH, weakPasswordReason } from '../../../utils/weakPass
 //
 // S752 brought it level with ImsStaff's S729 sweep and then past it:
 //   - there is no "No Access" choice: clearing a login's rank made it look like the Owner (Owner is
-//     the absence of staff markers), so removing access means deleting the login;
+//     the absence of staff markers), so removing access means blocking the login (S875; Delete is
+//     only for a login that recorded nothing);
 //   - the page no longer re-ranks anyone on load. A login whose level no longer matches its role is
 //     SHOWN, and moved only when someone presses Apply and confirms who moves;
 //   - only the Owner (or a Crest admin) can give a login Manager rank. admin-user-ops refuses it
@@ -116,8 +118,9 @@ export default function HrStaff() {
     () => employees.filter(e => !linkedEmployeeIds.has(e.id)), [employees, linkedEmployeeIds])
   // Supervisor and manager logins Crest cannot tie to a person: the own-record rule does not reach them
   // and Final Settlement does not find them. An email tie covers the first half only, so it counts here.
+  // A blocked login decides nothing while it stays blocked (S875), so it is not listed.
   const unlinkedRanked = useMemo(
-    () => staff.filter(p => !p.hr_employee_id && (p.hr_role === 'supervisor' || p.hr_role === 'manager')), [staff])
+    () => staff.filter(p => !p.hr_employee_id && !blockStateOf(p) && (p.hr_role === 'supervisor' || p.hr_role === 'manager')), [staff])
 
   // One filter pass per keystroke, not two that can disagree about what "no matches" means.
   const visibleStaff = useMemo(() => {
@@ -437,15 +440,23 @@ export default function HrStaff() {
 
   // ── Delete staff ───────────────────────────────────────────────────────────
   // Deleting a login is irreversible, so the ask is the product's own dialog with the consequence
-  // named (S682; was window.confirm). It is also the only way to remove someone's HR access.
+  // named (S682; was window.confirm). S875 (owner decision, "Block, keep the name"): Delete is only for
+  // a login that recorded nothing. A deleted login's id is wiped from every leave decision, salary
+  // payment, travel claim and roster it is on, which this confirm used to say nothing about. The server
+  // decides (admin-user-ops, staff_login_has_records) and refuses with the way out, Block, which this
+  // page then offers: the POS Staff shape (S809 3i).
   function deleteStaff(p) {
+    const name = nameOf(p)
     askConfirm({
-      title: `Delete ${p.full_name}'s HR login?`,
+      title: `Delete the HR login of ${name}?`,
       confirmLabel: 'Delete Login', danger: true, busyLabel: 'Deleting…',
       body: (
         <p style={{ margin: 0 }}>
-          {p.full_name} can no longer sign in to Crest HR. The login and its role are removed; the employee record, payslips
-          and attendance are untouched. To give them access again later you will create a new login. This cannot be undone.
+          Delete is only for a login that has not recorded anything. If {name} has decided a leave request or a travel
+          claim, recorded a salary payment, published a roster or recorded anything else in HR, deleting would take their
+          name off those records, so you will be offered Block instead, which keeps it. Their employee record is not
+          touched either way. A deleted login cannot be brought back: giving them access again means a new login with a
+          new password.
         </p>
       ),
       run: async () => {
@@ -454,12 +465,90 @@ export default function HrStaff() {
           body: { action: 'delete_hr_staff', client_id: clientId, userId: p.id },
         })
         if (error || data?.error) {
-          setMsg(await edgeFunctionFailure(data, error, `${p.full_name}'s login was not deleted — it still works.`)); return
+          const answer = await readEdgeAnswer(data, error)
+          // The login has recorded something: nothing was deleted, and Block is the way out, unless it
+          // is blocked already (here or by a Final Settlement), when there is nothing more to do.
+          const refusal = deleteRefusal(answer, p)
+          if (refusal?.offerBlock) { offerBlockInstead(p, refusal.why); return }
+          if (refusal) { setMsg(refusal.text); return }
+          const failure = staffActionFailure(answer, { name, verbed: 'deleted' })
+          setMsg({ text: failure.text, detail: failure.detail })
+          if (failure.reload) load()
+          return
         }
-        setNotice(`${p.full_name}'s HR login was deleted.`)
+        setNotice(`The HR login of ${name} was deleted.`)
         load()
       },
     })
+  }
+
+  // ── Block / Unblock (S875, owner decision 2026-11-04) ───────────────────────
+  // Removing a leaver's HR login blocks it: it stops signing in, loses its HR rank at once, and stays,
+  // so its name stays on everything it recorded. Final Settlement's shape, for a login HR Staff
+  // removes by hand. Unblock is for a block made by mistake. Offered where Delete is (never on your own
+  // row, a peer manager's only to the Owner or admin; the server checks both again), and never on a
+  // settlement's block, which HR undoes by Reopen or a rehire.
+  function blockStaff(p) {
+    askConfirm({
+      title: `Block the HR login of ${nameOf(p)}?`,
+      confirmLabel: 'Block Login', danger: true, busyLabel: 'Blocking…',
+      body: blockBody(p),
+      run: () => setBlocked(p, true),
+    })
+  }
+  function offerBlockInstead(p, why) {
+    askConfirm({
+      title: `Block the login of ${nameOf(p)} instead?`,
+      confirmLabel: 'Block Login', danger: true, busyLabel: 'Blocking…',
+      body: (
+        <div>
+          <p style={{ margin: '0 0 8px' }}>{why}</p>
+          {blockBody(p)}
+        </div>
+      ),
+      run: () => setBlocked(p, true),
+    })
+  }
+  function blockBody(p) {
+    const name = nameOf(p)
+    return (
+      <p style={{ margin: 0 }}>
+        {name} can no longer sign in, and a window they still have open stops being able to approve or record
+        anything in HR straight away. Their name stays on every leave decision, salary payment, travel claim and roster
+        they recorded. If this is a mistake, Unblock gives the login back as it was.
+      </p>
+    )
+  }
+  function unblockStaff(p) {
+    const name = nameOf(p)
+    askConfirm({
+      title: `Unblock the HR login of ${name}?`,
+      confirmLabel: 'Unblock Login', busyLabel: 'Unblocking…',
+      body: (
+        <p style={{ margin: 0 }}>
+          {name} signs in again straight away, with the same role and access level as before. Unblock a login blocked
+          by mistake; for someone who left and is coming back, check their role first.
+        </p>
+      ),
+      run: () => setBlocked(p, false),
+    })
+  }
+  async function setBlocked(p, blocking) {
+    setMsg(''); setNotice('')
+    const name = nameOf(p)
+    const { data, error } = await supabase.functions.invoke('admin-user-ops', {
+      body: { action: blocking ? 'block_hr_staff' : 'unblock_hr_staff', client_id: clientId, userId: p.id },
+    })
+    if (error || data?.error) {
+      // The function writes its refusal as a sentence that says what happened; a lost answer proves
+      // nothing either way, so the list is read again.
+      const failure = staffActionFailure(await readEdgeAnswer(data, error), { name, verbed: blocking ? 'blocked' : 'unblocked' })
+      setMsg({ text: failure.text, detail: failure.detail })
+      if (failure.reload) load()
+      return
+    }
+    setNotice(blockNotice(data?.outcome, name, blocking))
+    load()
   }
 
   // ── Reset password ────────────────────────────────────────────────────────
@@ -678,7 +767,7 @@ export default function HrStaff() {
               <tr>
                 <th>Name</th>
                 <th>Email</th>
-                <th><Tip text="Custom role name defined for this team (e.g. Payroll Officer, HR Coordinator). To take someone's HR access away, delete their login.">Role</Tip></th>
+                <th><Tip text="Custom role name defined for this team (e.g. Payroll Officer, HR Coordinator). To take HR access away from someone who left, block their login: it stops signing in and their name stays on what they recorded.">Role</Tip></th>
                 <th><Tip text="Permission level this role maps to — controls which pages they can access.">Access Level</Tip></th>
                 <th><Tip text="Last time this user was active in the app">Last Seen</Tip></th>
                 <th style={{ width: 200 }}>Actions</th>
@@ -701,21 +790,33 @@ export default function HrStaff() {
                 const lockReason = isSelf
                   ? 'Your own login can only be changed by the account owner or an administrator'
                   : 'A manager’s login can only be changed by the account owner or an administrator'
+                // S875: 'settlement' (a Final Settlement blocked it), 'here' (Block on this page) or null.
+                const blockState = blockStateOf(p)
+                const resetReason = resetLockReason(p)
+                const rowName = nameOf(p)
+                const blockedHereOn = blockState === 'here' ? nepalBsLong(p.staff_blocked_at) : ''
                 return (
                   <tr key={p.id}>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--theme-text1)' }}>{p.full_name || '—'}{isSelf && <span style={{ fontWeight: 400, color: 'var(--theme-text3)' }}> (you)</span>}</div>
                       {/* S798 3b (PEOPLE-ACCESS-4): as POS Staff shows it, so a refused sign-in has a visible reason. */}
-                      {p.settlement_blocked === true && (
+                      {blockState === 'settlement' && (
                         <Tip text="This person's Final Settlement blocked their logins, so this one no longer signs in. It is kept so everything they recorded keeps their name. Taking them back in Employees with a new join date unblocks it (an HR Manager login only when the Owner saves the record).">
                           <span className="badge badge-gray" style={{ fontSize: 10, marginRight: 6 }}>Blocked at settlement</span>
                         </Tip>
                       )}
+                      {/* S875: blocked from this page (Block), not by a settlement. Unblock is offered. */}
+                      {blockState === 'here' && (
+                        <Tip text={`Blocked here${blockedHereOn ? ` on ${blockedHereOn}` : ''}: this login no longer signs in and holds no HR access while it stays blocked. It is kept so every leave decision, salary payment, travel claim and roster they recorded keeps their name. Unblock it if it was blocked by mistake.`}>
+                          <span className="badge badge-gray" style={{ fontSize: 10, marginRight: 6 }}>Login blocked</span>
+                        </Tip>
+                      )}
+                      {/* A blocked login decides nothing, so the two own-record warnings are left off its row. */}
                       {p.hr_employee_id ? (
                         <Tip text={`This login belongs to ${p.employee_name || 'this employee'}. Crest never lets it decide their own leave, travel claims, overtime, advances, pay or settlement, and Final Settlement blocks it when they leave.`}>
                           <span style={{ fontSize: 10, color: 'var(--theme-text3)' }}>🔗 {p.employee_name || 'HR'}{p.employee_code ? ` · ${p.employee_code}` : ''}</span>
                         </Tip>
-                      ) : p.email_employee_name ? (
+                      ) : blockState ? null : p.email_employee_name ? (
                         <Tip text={`${p.email_employee_name}'s record carries this login's email, so Crest stops it deciding their own leave, claims and overtime. Final Settlement does not look at emails, though, so it would not block this login when they leave. Link it to cover both.`}>
                           <span style={{ fontSize: 10, color: 'var(--theme-amber-text)' }}>△ Email only · {p.email_employee_name}</span>
                         </Tip>
@@ -777,7 +878,13 @@ export default function HrStaff() {
                         </Tip>
                       ) : (
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => openReset(p)}>
+                          {/* A blocked login (settlement or Block) cannot sign in whatever its password, so a
+                              new one would only look like access given back. aria-disabled, so a press says
+                              why (the S759 pattern, as POS Staff). */}
+                          <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }}
+                            onClick={() => { if (resetReason) { setNotice(''); setMsg(resetReason); return } openReset(p) }}
+                            aria-disabled={resetReason ? true : undefined}
+                            title={resetReason || undefined}>
                             Reset Password
                           </button>
                           {privileged && (p.hr_employee_id ? (
@@ -791,11 +898,26 @@ export default function HrStaff() {
                               Link…
                             </button>
                           ))}
+                          {/* S875: Block keeps the login and its name on every record; Unblock undoes a
+                              block made here. A settlement's block is HR's (Reopen or a rehire), so
+                              neither is offered on it. */}
+                          {!isSelf && blockState !== 'settlement' && (
+                            <button className="btn btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }}
+                              onClick={() => { if (blockState === 'here') unblockStaff(p); else blockStaff(p) }}
+                              aria-label={`${blockState === 'here' ? 'Unblock' : 'Block'} the HR login of ${rowName}`}
+                              title={blockState === 'here'
+                                ? 'Let this login sign in again, for a login blocked by mistake.'
+                                : 'Stop this login signing in, and keep their name on every leave decision, salary payment, travel claim and roster they recorded.'}>
+                              {blockState === 'here' ? 'Unblock' : 'Block'}
+                            </button>
+                          )}
                           {!isSelf && (
                             <button
                               className="btn btn-ghost"
                               style={{ fontSize: 12, padding: '4px 10px', color: 'var(--theme-red-text)', borderColor: 'var(--theme-red)' }}
                               onClick={() => deleteStaff(p)}
+                              aria-label={`Delete the HR login of ${rowName}`}
+                              title="Only for a login that has not recorded anything in HR; otherwise you are offered Block."
                             >
                               Delete
                             </button>

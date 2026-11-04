@@ -331,7 +331,8 @@ export function AuthProvider({ children }) {
         // every page an IMS staff login does.
         // settlement_blocked_by and pos_blocked_at (S834): canEditWeatherCity matches the server's
         // effective-rank rule (S829) on them, and read nothing until they were in this list.
-        .select('id, full_name, role, client_id, active_client_id, pos_role, pos_email, pos_team, pos_discount_limit, pos_allow_void, hr_employee_id, hr_self_service, ims_role, ims_email, ims_job_title, hr_role, hr_job_title, settlement_blocked_by, pos_blocked_at')
+        // staff_blocked_at (S875) likewise, for the IMS and HR axes.
+        .select('id, full_name, role, client_id, active_client_id, pos_role, pos_email, pos_team, pos_discount_limit, pos_allow_void, hr_employee_id, hr_self_service, ims_role, ims_email, ims_job_title, hr_role, hr_job_title, settlement_blocked_by, pos_blocked_at, staff_blocked_at')
         .eq('id', userId)
         .single()
 

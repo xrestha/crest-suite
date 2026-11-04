@@ -28,11 +28,13 @@ export const weatherEntitled = ({ growthWeather, posEnabled, hrEnabled }) =>
 // ims_caller_has_rank and the inline HR test — so a settled login (settlement_blocked_by) holds no
 // manager rank on any axis, and a login POS Staff blocked (pos_blocked_at) none on POS. Testing the
 // raw roles offered such a manager the picker and then the database refused the save.
+// S875: the HR test is hr_caller_has_rank now, and it and ims_caller_has_rank refuse a login IMS
+// Staff or HR Staff blocked (staff_blocked_at), which holds no IMS or HR rank.
 export function canEditWeatherCity({ isAdmin, isOwner, profile }) {
   if (isAdmin || isOwner) return true
   if (!profile) return false
   if (profile.settlement_blocked_by) return false
   return (profile.pos_role === 'manager' && !profile.pos_blocked_at)
-    || (profile.ims_role === 'manager' && !profile.ims_email)
-    || profile.hr_role === 'manager'
+    || (profile.ims_role === 'manager' && !profile.ims_email && !profile.staff_blocked_at)
+    || (profile.hr_role === 'manager' && !profile.staff_blocked_at)
 }
