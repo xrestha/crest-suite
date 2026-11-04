@@ -7,10 +7,9 @@ them sits the S793 load-time backlog (PERF-n), from measuring the module on a sl
 **When an item here ships, strike it in the same commit and move it to the CHANGELOG entry.**
 
 **S870–S871 (2026-11-03) allergens, left open on purpose** (rules: `.claude/rules/nutrition-allergens.md`):
-- A choice's allergens ("+ cheese") do not feed the guest menu's dish filter; only its own line shows them.
-- `push_master_data` copies HQ's `items.nutrition` whole, so HQ's checked state overwrites a branch's own check.
-- The Check allergens guess reads words exactly, so a misspelling goes unguessed ("ICE CREAN" gave tree nuts and
-  no milk). A person still confirms every row; add a spelling to `allergenSuggest.js` when one turns up.
+- ✅ S877 (owner: hide the choice, not the dish; `guestAllergenChoices.js`) — ~~A choice's allergens ("+ cheese") do not feed the guest menu's dish filter~~.
+- ✅ S877 (`20261104150000`, owner: the branch keeps its own) — ~~`push_master_data` copies HQ's `items.nutrition` whole, so HQ's checked state overwrites a branch's own check~~.
+- ✅ S877 (owner: a near miss is Check the label, nothing ticked) — ~~The Check allergens guess reads words exactly, so a misspelling goes unguessed~~: a 5+ letter word one edit from an allergen word is a near miss, never a key; `REAL_WORDS` (bitter, floor…) are exempt.
 - Owner follow-up, not code: check BLOOM CAFE's and CASA's ingredients in Check allergens, enter piece weights on
   the 11 piece-counted items, and tick Mustard on mustard oil ingredients filled before S870.
 
@@ -236,12 +235,12 @@ VAT-status rule and `ims_first_till_bill_at` (D35 for IMS-rank logins).
   - ✅ `Overheads.js` says Purchases / Spend %, not Food Cost.
 
 **Still open after stage 3** (found while building it):
-- No SERVER guard against paying a bill twice: Outstanding Payables re-reads payments just before recording one (PURCHASES-10), but two payments in the same second both land. A BEFORE INSERT trigger on `payable_payments` or a pay RPC with a row lock would close it.
+- ✅ S877 (`20261104140000`, `record_payable_payments`) — ~~No SERVER guard against paying a bill twice~~: the three Pay paths go through one INVOKER step that locks the bill lines, refuses (`payables_moved`) when a payment on them moved since the page loaded them, and writes the rows and the `paid_at` stamps in one transaction.
 - ✅ S798 stage 4c (crest-v386) — The HR Staff page's Last Seen was still an AD `toLocaleDateString` (the ImsStaff/PosStaff fix, `nepalBsLong`). HR is shared with hss-suite: fixed here and filed in `docs/CROSS-REPO.md` there.
-- `PosOrders.jsx` (`writeSalesEntries`) and `IssueCreditNoteModal.jsx` date "today" with `getBsToday()` (the device's clock zone) while the backfills now use the Nepal date (SALES-6). Fine on a till in Nepal; `nepalBs(new Date())` would make them agree.
+- ✅ Found done S877 — ~~`PosOrders.jsx` and `IssueCreditNoteModal.jsx` date "today" with `getBsToday()`~~: both use the Nepal date now (`nepalBs(new Date())`, the device date only as a fallback).
 - `ClosedPeriodBanner` could take a prop to drop its "regenerate the snapshot" clause, so Requisitions can use the component too.
 - ✅ S849 (GROUP-5, crest-v465) — `get_group_summary` — the Group Console's Spend % — still values a PAN outlet's purchases ex-VAT (D32 covered `get_group_pnl` only). Fixed: the summary now adds the unclaimable 13% for a PAN-only outlet, as its own dashboard does.
-- (stage 4) On a bill line, ticking VAT after the rate was prefilled from Item Master does not re-divide it by 1.13; the Item Master VAT review banner looks back 3 months of bills.
+- ✅ S877 (`withMasterRate` / `withLineVat` in `billLineVat.js`) — ~~(stage 4) On a bill line, ticking VAT after the rate was prefilled from Item Master does not re-divide it by 1.13~~: a prefilled Rate nobody typed over follows the tick. Left as is: the Item Master VAT review banner looks back 3 months of bills.
 
 ## S792.5 Stage 4 — design first, shown before building — ✅ built S792 stage 4
 

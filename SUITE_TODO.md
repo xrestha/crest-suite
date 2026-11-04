@@ -24,9 +24,9 @@ profit figure is **Net Margin** on every owner page; the upgrade screen shows th
   Assets date is BS; the Tax pool Post and the disposal Confirm explain themselves; Demand Forecast lost its
   ~180 Tab stops.
 - **Open:** a browser pass on a phone (the Group Console cards, the four-column Financial Summary at 375px) and
-  a re-run of `/impeccable critique` to score the fixes; Print and Export that wait for the business name still
-  use `disabled` (Tax pool tab and several report pages); a keyboard user gets one explanation per forecast day,
-  not each dish average.
+  a re-run of `/impeccable critique` to score the fixes. ✅ S877: ~~Print and Export that wait for the business
+  name still use `disabled`~~ (`LetterheadButton`, 32 pages: aria-disabled and a press that says why); ~~a
+  keyboard user gets one explanation per forecast day, not each dish average~~ (Demand Forecast's Show averages).
 
 **S855 (2026-10-21, crest-v470):** the Owner Report supplier table now splits Net Spend into Cash, Credit and FonePay
 after discount (schema version 19). **Owner decision: once crest-v470 is live, Crest support presses Regenerate Snapshot

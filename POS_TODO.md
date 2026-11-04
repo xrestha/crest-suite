@@ -93,26 +93,27 @@ charge, sizes included.
 
 **Found while fixing, not fixed (S862):**
 
-- [ ] `nepalMoney.nprInt(-0.3)` prints "-0" (`Math.round` gives −0, Intl prints it). Any sub-rupee
-  negative figure product-wide can show it; the S862 choice sentences avoid it with `belowZeroAmount`.
-- [ ] `GuestMenu.jsx` rounds the guest "From" with `Math.round` (~:1629), so a sub-rupee negative From
-  could print −0; the server already takes such a dish off the guest page.
-- [ ] Menu Pricing's IMS branch reads the option catalog twice (`loadChoiceNames` and
-  `useBuildCostRanges`); one read could serve both.
-- [ ] Customization Report: after a failed or timed-out read the range pickers (ReportPage `filters`)
-  are hidden and there is no Retry, so the only way out is a reload.
-- [ ] `viewPosBill.js` decides build-your-own costing from `client.customization_enabled`, not
-  `customizationState(client).live`; a past bill is costed by the current switch either way.
+- [x] ✅ S877 (`unsignedZero` in `nepalMoney.js`): ~~`nepalMoney.nprInt(-0.3)` prints "-0" (`Math.round` gives −0, Intl prints it). Any sub-rupee
+  negative figure product-wide can show it; the S862 choice sentences avoid it with `belowZeroAmount`.~~
+- [x] ✅ S877 (covered by `npr`): ~~`GuestMenu.jsx` rounds the guest "From" with `Math.round` (~:1629), so a sub-rupee negative From
+  could print −0; the server already takes such a dish off the guest page.~~
+- [x] ✅ S877 (`useBuildCostRanges({ catalogRead })`): ~~Menu Pricing's IMS branch reads the option catalog twice (`loadChoiceNames` and
+  `useBuildCostRanges`); one read could serve both.~~
+- [x] ~~Customization Report: after a failed or timed-out read the range pickers (ReportPage `filters`)
+  are hidden and there is no Retry, so the only way out is a reload.~~ Done S863 (found S877): Try again
+  on the error card, the range controls stay in the header.
+- [x] ✅ S877 (owner: a past bill is costed by what it holds; `viewPosBill.js`, and the Sales Report and Sales Exceptions comp cost with it): ~~`viewPosBill.js` decides build-your-own costing from `client.customization_enabled`, not
+  `customizationState(client).live`; a past bill is costed by the current switch either way.~~
 - [ ] A month regenerated after Customization lapsed costs a build-your-own comp at its typed cost
   (the client flags are read at generation time, by design).
-- [ ] Guest review sheet: when a refusal drops its only dish, the sheet says "Nothing in your order yet"
-  and the note naming the dish sits behind it (predates S862).
-- [ ] Till: a sent combo dish in a single-dish pick still shows the combo Change button (a pull and
-  remake) while its mark says take the combo off; wording only.
-- [ ] Option Groups: on a VAT outlet Save stays off while the VAT basis is unknown, even for an
-  untouched price, which since SETUP-1 sends no price; it could be relaxed.
-- [ ] A choice stock line on a recipe no longer in the Sub-Recipe category (rows from before the
-  recategorise guard) still opens as a blank box.
+- [x] ✅ S877: ~~Guest review sheet: when a refusal drops its only dish, the sheet says "Nothing in your order yet"
+  and the note naming the dish sits behind it (predates S862).~~ The empty sheet shows the note above it.
+- [x] ✅ S877 (`comboWayOut`): ~~Till: a sent combo dish in a single-dish pick still shows the combo Change button (a pull and
+  remake) while its mark says take the combo off; wording only.~~ The mark now offers Change too.
+- [x] ✅ S877 (`priceNeedsVat` in `OptionModal.jsx`): ~~Option Groups: on a VAT outlet Save stays off while the VAT basis is unknown, even for an
+  untouched price, which since SETUP-1 sends no price; it could be relaxed.~~
+- [x] ✅ S877 (OptionGroups names it "no longer a sub-recipe", OptionModal shows it and keeps Remove): ~~A choice stock line on a recipe no longer in the Sub-Recipe category (rows from before the
+  recategorise guard) still opens as a blank box.~~
 - [ ] Owner decision, if wanted: offer Hide (not only recategorise) for a sub-recipe used by choices,
   now that a hidden one stays visible on its line.
 
@@ -472,8 +473,9 @@ Wave 1 (app only, no shared code region): 4a, 4b, 4c — all shipped 2026-10-12.
   reload; a self-ended session drops the unsent cart; offline tickets with null `order_no`; 5xx read as a
   refusal; KDS error wording; "Discard unsaved" copy during a send; unbounded reads (PosCustomers,
   `placeOrder` re-read); 30 s queue after one no-answer; note change on a partly sent line; B3 live clicks.
-  Polish found in 4c: the credit note prints its figures with `toFixed` (no comma grouping) where the
-  bill uses `npr2`; the Credit Note Book's Date cell shows day and month only, with no year.
+  ~~Polish found in 4c: the credit note prints its figures with `toFixed` (no comma grouping) where the
+  bill uses `npr2`; the Credit Note Book's Date cell shows day and month only, with no year.~~ Both done
+  in S833 (found S877: `creditNoteHtml.js` prints through `npr2`, the Book's Date carries its year).
 - **Stage 7, new builds (owner ranking, section A):** ~~table move/merge/split~~ (shipped S836, see
   `POS_DECISIONS.md` A); ~~kitchen and bar printers~~ (shipped S837, see `POS_DECISIONS.md` A);
   ~~Customization follow-ups~~ (code shipped S838; browser checks and combos left in section A).
