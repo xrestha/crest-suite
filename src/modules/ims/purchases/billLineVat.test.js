@@ -2,7 +2,7 @@
 // ticking or unticking VAT changes the Rate, never the Total — in either order, and from the
 // header's toggle-all too.
 import {
-  rateFromLineTotal, withLineTotal, withLineVat, withAllLinesVat,
+  rateFromLineTotal, withLineTotal, withLineVat, withAllLinesVat, withMasterRate,
   TOTALS_AFTER_VAT, TOTALS_BEFORE_VAT, totalsBasisOf, withHeaderTotalsBasis, withTotalsBasis,
 } from './billLineVat'
 import { calcBillTotals, invoiceMismatch } from './purchasesHelpers'
@@ -169,5 +169,49 @@ describe("the bill's choice in its header", () => {
     expect(before.totals_basis).toBe(TOTALS_BEFORE_VAT)
     const back = withHeaderTotalsBasis(before, TOTALS_AFTER_VAT)
     expect(JSON.stringify(back)).toBe(JSON.stringify(opened))
+  })
+})
+
+// S877: on a PAN-bill outlet Item Master holds the price PAID (VAT included, D32), so a VAT-ticked
+// line's prefilled Rate is that price ÷ 1.13. Ticking VAT after picking the item used to leave the
+// undivided price in the box, and the line charged the 13% twice.
+describe('a Rate Item Master filled in follows the VAT tick until someone types over it', () => {
+  const panFactor = l => (l.vat_inclusive ? 1.13 : 1) // a VAT-cost bill's paidFactor
+  const vatRegFactor = () => 1                        // a VAT-registered outlet: master is ex-VAT
+
+  test('pick the item, then tick VAT: the Rate comes off the paid price, the Amount is the paid price', () => {
+    const picked = withMasterRate(line(), 113, panFactor)
+    expect(picked.rate).toBe('113')
+    const ticked = withLineVat(picked, true, TOTALS_AFTER_VAT, panFactor)
+    expect(ticked.rate).toBe('100')
+    expect(amount(ticked)).toBeCloseTo(1130, 5)
+    const unticked = withLineVat(ticked, false, TOTALS_AFTER_VAT, panFactor)
+    expect(unticked.rate).toBe('113')
+  })
+
+  test('the toggle-all moves every untouched prefilled Rate the same way', () => {
+    const lines = [withMasterRate(line({ _key: 1 }), 113, panFactor), withMasterRate(line({ _key: 2 }), 226, panFactor)]
+    expect(withAllLinesVat(lines, TOTALS_AFTER_VAT, panFactor).map(l => l.rate)).toEqual(['100', '200'])
+  })
+
+  test('a Rate typed over the prefill stays exactly as typed', () => {
+    const typedOver = { ...withMasterRate(line(), 113, panFactor), rate: '95' }
+    expect(withLineVat(typedOver, true, TOTALS_AFTER_VAT, panFactor).rate).toBe('95')
+  })
+
+  test('a typed Total still wins over the prefill', () => {
+    const withTotal = withLineTotal(withMasterRate(line(), 113, panFactor), '1130')
+    expect(parseFloat(withLineVat(withTotal, true, TOTALS_AFTER_VAT, panFactor).rate)).toBe(100)
+  })
+
+  test('on a VAT-registered outlet the tick leaves the prefilled Rate alone', () => {
+    const picked = withMasterRate(line(), 100, vatRegFactor)
+    expect(withLineVat(picked, true, TOTALS_AFTER_VAT, vatRegFactor).rate).toBe('100')
+  })
+
+  test('an item with no master price prefills nothing and remembers nothing', () => {
+    const picked = withMasterRate(line({ rate: '7' }), 0, panFactor)
+    expect(picked.rate).toBe('7')
+    expect(withLineVat(picked, true, TOTALS_AFTER_VAT, panFactor).rate).toBe('7')
   })
 })

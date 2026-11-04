@@ -19,7 +19,7 @@ import {
   billDraftId, billDraftSignature, readBillDraft, saveBillDraft, clearBillDraft, draftBaseMoved,
 } from './purchaseBillDraft'
 import {
-  withLineTotal, withLineVat, withAllLinesVat, withTotalsBasis, withHeaderTotalsBasis, totalsBasisOf,
+  withLineTotal, withLineVat, withAllLinesVat, withMasterRate, withTotalsBasis, withHeaderTotalsBasis, totalsBasisOf,
   TOTALS_AFTER_VAT, TOTALS_BEFORE_VAT,
 } from './billLineVat'
 import { linesWithUnlistedItems, unlistedItemsText } from './purchaseLines'
@@ -225,8 +225,9 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
         const cf = getCf(item)
         const per = parseFloat(item?.per_uom_rate)
         // The rate box is ex-VAT; on a VAT-cost bill the master holds the VAT-inclusive paid price
-        // (S792, D32), so a VAT-ticked line takes it back off.
-        if (per > 0) updated.rate = String(parseFloat((per * cf / paidFactor(updated)).toFixed(5)))
+        // (S792, D32), so a VAT-ticked line takes it back off. The line remembers the master price
+        // so a VAT tick made after the pick moves a Rate nobody typed over (S877, withLineVat).
+        Object.assign(updated, withMasterRate(updated, per > 0 ? per * cf : 0, paidFactor))
         updated._amtDraft = ''
       }
       // The Total box is a DRAFT that back-computes the rate; once any input to that arithmetic
@@ -253,7 +254,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
   }
 
   function setLineVat(key, vatInclusive) {
-    setBillLines(prev => prev.map(l => (l._key === key ? withLineVat(l, vatInclusive, totalsBasis) : l)))
+    setBillLines(prev => prev.map(l => (l._key === key ? withLineVat(l, vatInclusive, totalsBasis, paidFactor) : l)))
   }
 
   // Switching keeps every typed Total and re-works its Rate, as a VAT tick does.
@@ -598,7 +599,7 @@ export default function PurchaseBillForm({ period, items, itemOptions, vendors, 
                 type="button"
                 aria-label="Apply 13% VAT to all line items"
                 aria-pressed={allVat ? true : someVat ? 'mixed' : false}
-                onClick={() => setBillLines(prev => withAllLinesVat(prev, totalsBasis))}
+                onClick={() => setBillLines(prev => withAllLinesVat(prev, totalsBasis, paidFactor))}
                 style={{ cursor: 'pointer', background: 'none', border: 'none', padding: '8px 4px', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}
               >
                 <div style={{ width: 34, height: 18, borderRadius: 'var(--radius-md)', background: knobBg, opacity: knobOpacity, position: 'relative', transition: 'background 0.2s, opacity 0.2s', flexShrink: 0 }}>

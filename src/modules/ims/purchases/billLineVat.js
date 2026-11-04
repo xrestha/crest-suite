@@ -74,22 +74,49 @@ export function withLineTotal(line, amtStr, basis = TOTALS_AFTER_VAT) {
  * The line after its VAT tick is set to `vatInclusive`. A typed Total stays exactly as typed and
  * the Rate is re-derived from it on the new basis; with no typed Total the Rate is untouched. On a
  * before-VAT bill the re-derived Rate is the same one, so the tick only adds or removes the 13%.
+ *
+ * One exception (S877): a Rate Item Master filled in and nobody has typed over. On a PAN-bill
+ * outlet the master holds the price PAID, VAT included (D32), so the prefill divides by the line's
+ * paid factor (withMasterRate); ticking VAT after picking the item left that undivided rate in the
+ * box and the line then charged the 13% twice. `paidFactorOf(line)` is the form's paidFactor; when
+ * it is given and the Rate is still the prefill, the Rate follows the tick.
  */
-export function withLineVat(line, vatInclusive, basis = TOTALS_AFTER_VAT) {
+export function withLineVat(line, vatInclusive, basis = TOTALS_AFTER_VAT, paidFactorOf = null) {
   const next = { ...line, vat_inclusive: vatInclusive }
-  if (!typed(line._amtDraft)) return next
+  if (!typed(line._amtDraft)) {
+    if (!paidFactorOf || !(line._masterPaid > 0) || line._prefillRate == null || line.rate !== line._prefillRate) return next
+    const rate = prefillRateOf(line._masterPaid, paidFactorOf(next))
+    return { ...next, rate, _prefillRate: rate }
+  }
   const rate = rateFromLineTotal(line.qty, line._amtDraft, vatInclusive, basis)
   return rate == null ? next : { ...next, rate }
+}
+
+/** The Rate box's prefill from the master price for the box's unit, on the line's paid basis. */
+export function prefillRateOf(masterPaid, factor) {
+  return String(parseFloat((masterPaid / (factor || 1)).toFixed(5)))
+}
+
+/**
+ * A line after its item is picked: the Rate box takes the master price for whatever unit the Qty
+ * box counts (`masterPaid` is per_uom_rate × the item's conversion factor), divided by the paid
+ * factor; the line remembers both so a later VAT tick can move a Rate nobody typed over. With no
+ * master price nothing is prefilled and nothing is remembered.
+ */
+export function withMasterRate(line, masterPaid, paidFactorOf) {
+  if (!(masterPaid > 0)) return { ...line, _masterPaid: null, _prefillRate: null }
+  const rate = prefillRateOf(masterPaid, paidFactorOf(line))
+  return { ...line, rate, _masterPaid: masterPaid, _prefillRate: rate }
 }
 
 /**
  * The header's VAT toggle-all: every line ticked unless every line already is, in which case every
  * line is unticked — each through withLineVat, so a typed Total survives it the same way.
  */
-export function withAllLinesVat(lines, basis = TOTALS_AFTER_VAT) {
+export function withAllLinesVat(lines, basis = TOTALS_AFTER_VAT, paidFactorOf = null) {
   const list = lines || []
   const allVat = list.length > 0 && list.every(l => l.vat_inclusive)
-  return list.map(l => withLineVat(l, !allVat, basis))
+  return list.map(l => withLineVat(l, !allVat, basis, paidFactorOf))
 }
 
 /**
