@@ -8,6 +8,8 @@ import { normaliseAllergens, allergenLabel } from '../../../shared/constants/all
 import { suggestSeedsForSource } from '../../../data/nutritionSeed'
 import { UNITS } from '../recipes/recipeCostCalc'
 import ActionError, { asActionError } from '../../../components/ActionError'
+import { searchUsdaFoods } from '../../../utils/usdaNutrition'
+import { withTimeout, settleWithin } from '../../../utils/withTimeout'
 
 const LIBRARIES = ['DFTQC Nepal', 'IFCT 2017', 'USDA']
 
@@ -16,7 +18,7 @@ function allergenWords(raw) {
   const { keys, other } = normaliseAllergens(raw)
   return [...keys, ...other]
 }
-// A library or Open Food Facts pick adds its allergens to what is already ticked, never replaces it.
+// A library or online lookup pick adds its allergens to what is already ticked, never replaces it.
 function withAllergens(current, added) {
   return allergenWords([...(current || []), ...allergenWords(added)])
 }
@@ -40,7 +42,7 @@ function initFormFromItem(item, initialAllergens) {
 }
 
 // Per-ingredient nutrition and allergen editor — saves to items.nutrition. Self-contained: owns its
-// form + library-suggestion + Open Food Facts lookup state; the parent passes the item being
+// form + library-suggestion + online lookup state; the parent passes the item being
 // edited and gets onSaved(itemId, payload) so it can update its local items/recipes caches.
 // Opened from a recipe's ingredient row and, since S870, from Item Master. Saving marks the
 // ingredient checked for allergens (buildNutritionPayload), even with nothing ticked.
@@ -52,11 +54,12 @@ export default function NutritionEditorModal({ item, onClose, onSaved, initialAl
   const [nutriMatchSource, setNutriMatchSource] = useState('')
   const [nutriSaving, setNutriSaving] = useState(false)
   const [nutriError, setNutriError] = useState('')
-  // Open Food Facts lookup (branded/packaged products)
-  const [offQuery, setOffQuery] = useState('')
-  const [offResults, setOffResults] = useState([])
-  const [offBusy, setOffBusy] = useState(false)
-  const [offError, setOffError] = useState('')
+  // Online lookup: a name asks USDA and Open Food Facts together, a barcode asks Open Food Facts
+  const [lookupQuery, setLookupQuery] = useState(() => item?.name || '')
+  const [lookupResults, setLookupResults] = useState([])
+  const [lookupBusy, setLookupBusy] = useState(false)
+  const [lookupError, setLookupError] = useState('')
+  const [lookupNote, setLookupNote] = useState('')
 
   function setNF(val) { setNutriForm(prev => ({ ...prev, ...val })) }
 
@@ -109,41 +112,66 @@ export default function NutritionEditorModal({ item, onClose, onSaved, initialAl
     return { name, code: p.code, unit: 'GM', source: 'Open Food Facts', allergens, ...vals }
   }
 
-  async function fetchFromOFF() {
-    const q = offQuery.trim()
-    if (!q) return
-    setOffBusy(true); setOffError(''); setOffResults([])
+  // S883: a name search was one browser call to Open Food Facts' legacy search, which at busy times
+  // answers the public with a 503 page carrying no CORS header, so every refusal read as "could not
+  // reach". A name now asks USDA FoodData Central (raw ingredients, browser-callable) and Open Food
+  // Facts through the `off-search` server function, side by side; a barcode still asks Open Food
+  // Facts' product endpoint directly, which answers. Each source reports its own trouble, and one
+  // failing never hides the other's results.
+  async function offByBarcode(code) {
     const FIELDS = 'product_name,brands,code,nutriments,allergens_tags'
     try {
-      const isBarcode = /^\d{6,14}$/.test(q)
-      let products = []
-      if (isBarcode) {
-        const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${q}.json?fields=${FIELDS}`)
-        const j = await res.json()
-        if (j.status === 1 && j.product) products = [j.product]
-      } else {
-        const url = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=6&fields=${FIELDS}`
-        const res = await fetch(url)
-        const j = await res.json()
-        products = j.products || []
-      }
-      const mapped = products.map(mapOffProduct).filter(Boolean)
-      setOffResults(mapped)
-      if (mapped.length === 0) setOffError('No products with usable nutrition found on Open Food Facts.')
-    } catch (e) {
-      setOffError('Could not reach Open Food Facts — check the connection and try again.')
+      const res = await withTimeout(fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=${FIELDS}`), 12000, 'Open Food Facts')
+      const j = await res.json().catch(() => null)
+      if (!j) return { rows: [], trouble: 'Open Food Facts did not answer for this barcode. Try again in a minute.' }
+      return { rows: j.status === 1 && j.product ? [mapOffProduct(j.product)].filter(Boolean) : [], trouble: '' }
+    } catch {
+      return { rows: [], trouble: 'Open Food Facts did not answer for this barcode. Check the connection and try again.' }
     }
-    setOffBusy(false)
+  }
+  async function offByName(q) {
+    const { data, error } = await settleWithin(supabase.functions.invoke('off-search', { body: { q } }), 15000, 'Open Food Facts')
+    if (error || !data) return { rows: [], trouble: 'Open Food Facts could not be searched just now. Try again in a minute.' }
+    if (data.reason === 'unavailable') return { rows: [], trouble: 'Open Food Facts is busy and did not answer. Try again in a minute.' }
+    return { rows: (data.products || []).map(mapOffProduct).filter(Boolean).slice(0, 6), trouble: '' }
+  }
+  async function usdaByName(q) {
+    const { foods, error } = await withTimeout(searchUsdaFoods(q), 12000, 'USDA')
+      .catch(() => ({ foods: [], error: 'unreachable' }))
+    const trouble =
+      error === 'rate_limit' ? 'USDA: the free lookups for this hour are used up on this network. Try again later.'
+      : error ? 'USDA did not answer. Check the connection and try again.'
+      : ''
+    return { rows: foods, trouble }
   }
 
-  function applyOffResult(row) {
-    setOffError(''); setOffResults([])
+  async function runLookup() {
+    const q = lookupQuery.trim()
+    if (!q || lookupBusy) return
+    setLookupBusy(true); setLookupError(''); setLookupNote(''); setLookupResults([])
+    const isBarcode = /^\d{6,14}$/.test(q)
+    const parts = isBarcode ? [await offByBarcode(q)] : await Promise.all([usdaByName(q), offByName(q)])
+    const rows = parts.flatMap(p => p.rows)
+    const trouble = parts.map(p => p.trouble).filter(Boolean).join(' ')
+    setLookupResults(rows)
+    if (rows.length === 0) {
+      setLookupError(trouble || (isBarcode
+        ? 'No product with usable nutrition for this barcode on Open Food Facts.'
+        : 'No match with usable nutrition on USDA or Open Food Facts. Try a shorter name (KIWI rather than KIWI GREEN 1KG), or type the figures in.'))
+    } else {
+      setLookupNote(trouble)
+    }
+    setLookupBusy(false)
+  }
+
+  function applyLookupResult(row) {
+    setLookupError(''); setLookupNote(''); setLookupResults([])
     setNutriForm(prev => ({
       ...prev,
       basis_qty: 100, basis_unit: 'GM',
       energy_kcal: row.energy_kcal ?? '', protein_g: row.protein_g ?? '', carbs_g: row.carbs_g ?? '',
       fat_g: row.fat_g ?? '', sugar_g: row.sugar_g ?? '', sodium_mg: row.sodium_mg ?? '',
-      allergens: withAllergens(prev.allergens, row.allergens), source: 'Open Food Facts',
+      allergens: withAllergens(prev.allergens, row.allergens), source: row.source,
     }))
   }
 
@@ -255,36 +283,39 @@ export default function NutritionEditorModal({ item, onClose, onSaved, initialAl
         </div>
       )}
 
-      {/* Open Food Facts — branded / packaged products */}
+      {/* Online lookup: USDA (raw ingredients) and Open Food Facts (packaged products) */}
       <div style={{ marginBottom: 16, padding: '12px 14px', background: 'color-mix(in srgb, var(--theme-green) 5%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-green) 18%, transparent)', borderRadius: 'var(--radius-sm)' }}>
         <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
-          <Tip width={280} text="For branded / packaged goods (sauces, drinks, snacks). Search by product name or paste a barcode. Pulls nutrition per 100 g from the Open Food Facts database.">Fetch from Open Food Facts</Tip>
+          <Tip width={300} text="A name searches USDA FoodData Central (raw ingredients: fruit, flour, meat, dairy) and Open Food Facts (branded and packaged goods: sauces, drinks, snacks) together. A barcode searches Open Food Facts only. Every result is per 100 g; pick the closest one.">Fetch online</Tip>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <input aria-label="Search Open Food Facts"
-            value={offQuery}
-            onChange={e => setOffQuery(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); fetchFromOFF() } }}
-            placeholder="Product name or barcode…"
+          <input aria-label="Search USDA and Open Food Facts"
+            value={lookupQuery}
+            onChange={e => setLookupQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); runLookup() } }}
+            placeholder="Ingredient name or barcode…"
             style={{ flex: 1, minWidth: 180, background: 'var(--theme-bg)', border: '1px solid var(--theme-border)', borderRadius: 'var(--radius-sm)', padding: '7px 10px', fontSize: 13, color: 'var(--theme-text1)', outline: 'none' }}
           />
-          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={fetchFromOFF} disabled={offBusy || !offQuery.trim()}>
-            {offBusy ? 'Searching…' : '🔍 Fetch'}
+          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={runLookup} disabled={lookupBusy || !lookupQuery.trim()}>
+            {lookupBusy ? 'Searching…' : '🔍 Fetch'}
           </button>
         </div>
-        {offError && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 12, margin: '8px 0 0' }}>{offError}</p>}
-        {offResults.length > 0 && (
+        {lookupError && <p role="alert" style={{ color: 'var(--theme-red-text)', fontSize: 12, margin: '8px 0 0' }}>{lookupError}</p>}
+        {lookupNote && <p role="status" style={{ color: 'var(--theme-text2)', fontSize: 12, margin: '8px 0 0' }}>{lookupNote}</p>}
+        {lookupResults.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
-            {offResults.map((r, i) => (
-              <button key={i} className="btn btn-ghost" style={{ fontSize: 12, textAlign: 'left', padding: '7px 11px', lineHeight: 1.35 }} onClick={() => applyOffResult(r)}>
+            {lookupResults.map((r, i) => (
+              <button key={`${r.source}-${r.code || i}`} className="btn btn-ghost" style={{ fontSize: 12, textAlign: 'left', padding: '7px 11px', lineHeight: 1.35 }} onClick={() => applyLookupResult(r)}>
                 <span style={{ display: 'block', color: 'var(--theme-text1)', fontWeight: 600 }}>{r.name}</span>
                 <span style={{ display: 'block', color: 'var(--theme-text2)', fontSize: 11 }}>
-                  {r.energy_kcal ?? '–'} kcal · P{r.protein_g ?? '–'} C{r.carbs_g ?? '–'} F{r.fat_g ?? '–'} /100g
+                  {r.source === 'USDA FDC' ? 'USDA' : 'Open Food Facts'} · {r.energy_kcal ?? '–'} kcal · P{r.protein_g ?? '–'} C{r.carbs_g ?? '–'} F{r.fat_g ?? '–'} /100g
                   {r.allergens ? ` · ${allergenWords(r.allergens).map(allergenLabel).join(', ')}` : ''}
                 </span>
               </button>
             ))}
-            <span style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 2 }}>Data from Open Food Facts (ODbL). Crowd-sourced — verify before relying on it.</span>
+            <span style={{ fontSize: 10, color: 'var(--theme-text2)', marginTop: 2 }}>
+              USDA FoodData Central (public domain) and Open Food Facts (ODbL, crowd-sourced). Verify before relying on either.
+            </span>
           </div>
         )}
       </div>
