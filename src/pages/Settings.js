@@ -39,18 +39,18 @@ const SAVE_TIMEOUT_MS = 20000
 const SAVE_TIMED_OUT = 'The server took too long to answer, so this may have saved or may not. Saving again is safe, because it writes the same values. Or reload the page to check what was saved.'
 
 // The logo and the code runs have limits too (S852). An upload carries up to 2 MB, so it gets
-// longer than a save. A code run is many requests in a row and can rightly take minutes, so each
-// REQUEST is bounded, never the run: a step that runs out of time stops the run where it is.
+// longer than a save. A renumber is one request since S876 (the server's own limit is 8 s); Product
+// Codes is still many requests in a row, so each of its REQUESTS is bounded, never the run.
 const LOGO_UPLOAD_TIMEOUT_MS = 60000
 const CODE_READ_TIMEOUT_MS = 30000
-// Whether a code run may simply be pressed again after a timeout. Items and vendors are numbered
-// from their sorted order, so a second run gives every row the code the first one was writing.
-// Product codes only fill blanks, and recipe_code is unique per client, so a repeat cannot hand one
-// code to two dishes. Sub-recipes are NOT safe: pass 1 clears codes, and a clear that lands late,
-// after a second run has written that row, leaves it with no code.
+const CODE_RUN_TIMEOUT_MS = 30000
+// Whether a code run may simply be pressed again after a timeout. A renumber is one transaction
+// numbered from the sorted order, so a second run gives every row the code the first one was
+// writing, sub-recipes included. Product codes only fill blanks, and recipe_code is unique per
+// client, so a repeat cannot hand one code to two dishes.
 const CODE_RETRY_SAFE = 'Running it again is safe: it gives each row the same code again.'
+const RENUMBER_TIMED_OUT = 'The codes either all changed or none did, so reload the page to see which. ' + CODE_RETRY_SAFE
 const PRODUCT_RETRY_SAFE = 'Running it again is safe: it only fills the codes that are still blank.'
-const SUB_RECIPE_RETRY_WAIT = 'Wait a minute, then reload the page and check the sub-recipe codes before running this again. Running it straight away could leave a sub-recipe with no code.'
 
 const ALL_TABS = ['Branding', 'Property', 'Thresholds', 'Item Codes', 'Vendor Codes', 'Sub-Recipe Codes', 'Product Codes', 'Recipe Categories', 'Weather', 'Support', 'Plan Pricing', 'Data', 'Theme', 'Guides']
 
@@ -814,12 +814,11 @@ export default function Settings() {
     })
   }
 
-  // One write per row, stopping at the first failure and saying how far it got. Every row's
-  // result used to be dropped (`await scopedUpdate(...)` with nothing read back), so a refused
-  // write — and on sub-recipes a unique-index collision, see below — reported "✓ Renumbered".
-  // Each row's request is bounded (S852). A row that runs out of time stops the run with a
-  // TimeoutError naming that row, because its write may still land; the caller says whether
-  // running it again is safe.
+  // Product Codes' writes: one per row, stopping at the first failure and saying how far it got.
+  // Every row's result used to be dropped (`await scopedUpdate(...)` with nothing read back), so a
+  // refused write reported success. Each row's request is bounded (S852). A row that runs out of
+  // time stops the run with a TimeoutError naming that row, because its write may still land; the
+  // caller says whether running it again is safe.
   async function writeCodes(rows, write) {
     let done = 0
     for (const row of rows) {
@@ -836,6 +835,23 @@ export default function Settings() {
       done++
     }
     return done
+  }
+
+  // One request, all or nothing (S876, PERF-10): `renumber_codes` numbers the rows in the order this
+  // page always used (name, then id), writes only the codes that move, and runs under the caller's
+  // own RLS and rank guards. It was one PATCH per row, 300 waits for 300 items, and a dropped
+  // connection left the list half renumbered. A refusal changes nothing, so the message says so.
+  // A timeout cannot say which: the run either landed whole or not at all.
+  async function renumberCodes(kind, prefix) {
+    const { data, error: err } = await settleWithin(
+      supabase.rpc('renumber_codes', { p_client_id: clientId, p_kind: kind, p_prefix: prefix }),
+      CODE_RUN_TIMEOUT_MS, 'Renumbering')
+    if (isTimeout(err)) throw err
+    if (err) {
+      const a = asActionError(err)
+      throw new Error(`Nothing was renumbered: ${a.text}${a.detail ? ` (${a.detail})` : ''}`)
+    }
+    return { total: data?.total ?? 0, changed: data?.changed ?? 0 }
   }
 
   async function regenerateAllCodes() {
@@ -866,25 +882,17 @@ export default function Settings() {
       // edits as a side effect of pressing Renumber, and wrote the whole stale row (PAGE_FIELDS).
       if (prefix !== (settings.item_code_prefix || '')) await withTimeout(saveSettings({ item_code_prefix: prefix }), SAVE_TIMEOUT_MS, 'Saving the item code prefix')
 
-      // Real items only. A sub-recipe's mirror row in `items` carries the sub-recipe's OWN code
-      // (SRC-nnn, written by Recipes.js) and is hidden from Item Master — so renumbering it here
-      // stamped an ITM code over the SRC one that the ingredient rows print, and left the hidden
-      // gaps this button exists to close.
-      //
-      // Paged (S792, MASTER-8). A bare select stops at 1000 rows with no error, so a larger item book
-      // renumbered its first 1000 as ITM-001… while every item past the cap kept its old code — and
-      // the new sequence re-issued codes those items already held, under "✓ Renumbered 1000 items".
-      // Duplicate codes matter since MASTER-5: Recipe Import resolves an ingredient by code first.
-      const { data: items, error: fetchErr } = await settleWithin(fetchAllRows(() => scopedFrom('items', 'id, name')
-        .eq('is_sub_recipe', false)
-        .order('name').order('id')), CODE_READ_TIMEOUT_MS, 'Reading the items')
-      if (fetchErr) throw isTimeout(fetchErr) ? fetchErr : new Error(asActionError(fetchErr).text)
-
-      const rows = (items || []).map((it, i) => ({ ...it, code: `${prefix}-${pad3(i + 1)}` }))
-      const done = await writeCodes(rows, r => scopedUpdate('items', { item_code: r.code }).eq('id', r.id))
-      setRegenerateMsg(`✓ Renumbered ${done} item${done === 1 ? '' : 's'} as ${prefix}-001 through ${prefix}-${pad3(done)}. Sub-recipes keep their own codes.`)
+      // Real items only (the server filters is_sub_recipe = false). A sub-recipe's mirror row in
+      // `items` carries the sub-recipe's OWN code (SRC-nnn, written by Recipes.js) and is hidden from
+      // Item Master — so renumbering it here stamped an ITM code over the SRC one that the ingredient
+      // rows print, and left the hidden gaps this button exists to close. Every item is numbered, past
+      // 1000 too (S792, MASTER-8): duplicate codes matter since Recipe Import resolves by code first.
+      const { total, changed } = await renumberCodes('items', prefix)
+      setRegenerateMsg(total === 0
+        ? 'No items to renumber.'
+        : `✓ Renumbered ${total} item${total === 1 ? '' : 's'} as ${prefix}-001 through ${prefix}-${pad3(total)} (${changed} changed, ${total - changed} already correct). Sub-recipes keep their own codes.`)
     } catch (e) {
-      setRegenerateMsg(`Error: ${e.message}${isTimeout(e) ? ` ${CODE_RETRY_SAFE}` : ''}`)
+      setRegenerateMsg(`Error: ${e.message}${isTimeout(e) ? ` ${RENUMBER_TIMED_OUT}` : ''}`)
     }
     setRegenerating(false)
   }
@@ -915,19 +923,15 @@ export default function Settings() {
     try {
       if (prefix !== (settings.vendor_code_prefix || '')) await withTimeout(saveSettings({ vendor_code_prefix: prefix }), SAVE_TIMEOUT_MS, 'Saving the vendor code prefix')
 
-      // Archived vendors are included on purpose: `vendor_code` has no unique index, so leaving an
-      // archived vendor on VND-003 while an active one is renumbered onto VND-003 would give two
-      // suppliers one code the moment the archived one is restored.
-      // Paged for the same reason as the items renumber above (S792, MASTER-8).
-      const { data: vendors, error: fetchErr } = await settleWithin(fetchAllRows(() => scopedFrom('vendors', 'id, name')
-        .order('name').order('id')), CODE_READ_TIMEOUT_MS, 'Reading the vendors')
-      if (fetchErr) throw isTimeout(fetchErr) ? fetchErr : new Error(asActionError(fetchErr).text)
-
-      const rows = (vendors || []).map((v, i) => ({ ...v, code: `${prefix}-${pad3(i + 1)}` }))
-      const done = await writeCodes(rows, r => scopedUpdate('vendors', { vendor_code: r.code }).eq('id', r.id))
-      setRegenerateMsgVnd(`✓ Renumbered ${done} vendor${done === 1 ? '' : 's'} as ${prefix}-001 through ${prefix}-${pad3(done)} (archived vendors included, so no two suppliers share a code).`)
+      // Archived vendors are included on purpose (the server reads every vendor): `vendor_code` has no
+      // unique index, so leaving an archived vendor on VND-003 while an active one is renumbered onto
+      // VND-003 would give two suppliers one code the moment the archived one is restored.
+      const { total, changed } = await renumberCodes('vendors', prefix)
+      setRegenerateMsgVnd(total === 0
+        ? 'No vendors to renumber.'
+        : `✓ Renumbered ${total} vendor${total === 1 ? '' : 's'} as ${prefix}-001 through ${prefix}-${pad3(total)} (${changed} changed; archived vendors included, so no two suppliers share a code).`)
     } catch (e) {
-      setRegenerateMsgVnd(`Error: ${e.message}${isTimeout(e) ? ` ${CODE_RETRY_SAFE}` : ''}`)
+      setRegenerateMsgVnd(`Error: ${e.message}${isTimeout(e) ? ` ${RENUMBER_TIMED_OUT}` : ''}`)
     }
     setRegeneratingVnd(false)
   }
@@ -958,41 +962,17 @@ export default function Settings() {
     try {
       if (prefix !== (settings.sub_recipe_code_prefix || '')) await withTimeout(saveSettings({ sub_recipe_code_prefix: prefix }), SAVE_TIMEOUT_MS, 'Saving the sub-recipe code prefix')
 
-      // Paged (S792, MASTER-8): past 1000 rows the rest kept their old codes while the new
-      // sequence re-issued SRC-001… over them, under a message counting only the first page.
-      const { data: subRecipes, error: fetchErr } = await settleWithin(fetchAllRows(() => scopedFrom('recipes', 'id, name, recipe_code, linked_item_id')
-        .eq('category', SUB_RECIPE_CATEGORY)
-        .order('name').order('id')), CODE_READ_TIMEOUT_MS, 'Reading the sub-recipes')
-      if (fetchErr) throw isTimeout(fetchErr) ? fetchErr : new Error(asActionError(fetchErr).text)
-
-      const targets = (subRecipes || []).map((r, i) => ({ ...r, code: `${prefix}-${pad3(i + 1)}` }))
-      const changing = targets.filter(r => (r.recipe_code || '') !== r.code)
-
-      // TWO passes, because `recipes.recipe_code` is unique per client (recipes_client_recipe_code_key)
-      // and a one-pass renumber collides with itself: giving the first row SRC-001 while a row
-      // further down still holds SRC-001 is refused by the index. With the per-row error dropped,
-      // that refusal was silent and the page reported "✓ Renumbered" over a half-renumbered list.
-      // Pass 1 clears every code that is about to move (the index is partial, NULLs are free);
-      // pass 2 writes the new ones. A failure in pass 2 leaves the remaining rows with no code,
-      // which the message says, and running this again completes it.
-      await writeCodes(changing, r => scopedUpdate('recipes', { recipe_code: null }).eq('id', r.id))
-      const done = await writeCodes(changing, async r => {
-        const { error: err } = await scopedUpdate('recipes', { recipe_code: r.code }).eq('id', r.id)
-        if (err) return { error: err }
-        // The mirror row in `items` prints this code in every ingredient row that uses the
-        // sub-recipe (Recipes.js writes it at insert and nothing else ever updates it), so it
-        // moves with the recipe or the two disagree until someone re-saves the sub-recipe.
-        if (r.linked_item_id) return scopedUpdate('items', { item_code: r.code }).eq('id', r.linked_item_id)
-        return { error: null }
-      })
-      const total = targets.length
+      // `recipes.recipe_code` is unique per client (recipes_client_recipe_code_key), so the server
+      // clears every code that is about to move before writing the new ones, then moves each
+      // sub-recipe's mirror row in `items` with it (that row prints the code on every ingredient line
+      // using the sub-recipe). All in one transaction: a refusal anywhere leaves every code as it was,
+      // where the old per-row passes could leave a sub-recipe with no code at all.
+      const { total, changed } = await renumberCodes('sub_recipes', prefix)
       setRegenerateMsgSrc(total === 0
         ? 'No sub-recipes to renumber.'
-        : `✓ ${total} sub-recipe${total === 1 ? '' : 's'} now run ${prefix}-001 through ${prefix}-${pad3(total)} (${done} changed, ${total - done} already correct). Their stock-count items carry the same codes.`)
+        : `✓ ${total} sub-recipe${total === 1 ? '' : 's'} now run ${prefix}-001 through ${prefix}-${pad3(total)} (${changed} changed, ${total - changed} already correct). Their stock-count items carry the same codes.`)
     } catch (e) {
-      setRegenerateMsgSrc(isTimeout(e)
-        ? `Error: ${e.message} ${SUB_RECIPE_RETRY_WAIT}`
-        : `Error: ${e.message} Any sub-recipe left without a code gets one when this is run again.`)
+      setRegenerateMsgSrc(`Error: ${e.message}${isTimeout(e) ? ` ${RENUMBER_TIMED_OUT}` : ''}`)
     }
     setRegeneratingSrc(false)
   }

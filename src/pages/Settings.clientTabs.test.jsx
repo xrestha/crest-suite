@@ -33,8 +33,15 @@ let mockRow = { ...ROW }
 // next render — the reseed path the real context takes after every save.
 mockSaveSettings.mockImplementation(async patch => { mockRow = { ...mockRow, ...patch } })
 
+// Renumber All is one database call since S876 (`renumber_codes`). Its answer is set inside the test:
+// CRA's resetMocks clears a module-level implementation before each one.
+const mockRpc = jest.fn()
+
 jest.mock('../supabaseClient', () => ({
-  supabase: { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null }) }) }) }) },
+  supabase: {
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null }) }) }) }),
+    rpc: (...a) => mockRpc(...a),
+  },
 }))
 
 jest.mock('../context/AuthContext', () => ({
@@ -205,19 +212,22 @@ describe('the tabs that save on their own', () => {
 
 describe('Regenerate All Item Codes', () => {
   it('renumbers real items only, and saves the prefix alone', async () => {
+    mockRpc.mockResolvedValue({ data: { total: 1, changed: 1 }, error: null })
     renderSettings()
     tab('Item Codes')
     fireEvent.change(screen.getByLabelText(/Code Prefix/i), { target: { value: 'ING' } })
     fireEvent.click(screen.getByRole('button', { name: /Regenerate All Item Codes/i }))
     fireEvent.click(await screen.findByRole('button', { name: /Renumber All/i }))
-    await screen.findByText(/Renumbered 1 item as ING-001 through ING-001/)
+    await screen.findByText(/Renumbered 1 item as ING-001 through ING-001 \(1 changed, 0 already correct\)/)
 
     // The prefix, and only the prefix — not the whole form.
     expect(mockSaveSettings).toHaveBeenCalledTimes(1)
     expect(mockSaveSettings.mock.calls[0][0]).toEqual({ item_code_prefix: 'ING' })
-    // Sub-recipe mirror rows carry the sub-recipe's own SRC code and must be left alone.
-    const read = mockScopedFromCalls.find(c => c.table === 'items')
-    expect(read.eq).toContainEqual(['is_sub_recipe', false])
-    expect(mockScopedUpdateCalls).toEqual([{ table: 'items', patch: { item_code: 'ING-001' }, eq: ['id', 'i1'] }])
+    // One call, all or nothing (S876). The server skips sub-recipe mirror rows, which carry the
+    // sub-recipe's own SRC code (renumber_codes: is_sub_recipe = false); nothing is written per row.
+    expect(mockRpc).toHaveBeenCalledTimes(1)
+    expect(mockRpc).toHaveBeenCalledWith('renumber_codes', { p_client_id: 'client-1', p_kind: 'items', p_prefix: 'ING' })
+    expect(mockScopedUpdateCalls).toEqual([])
+    expect(mockScopedFromCalls.find(c => c.table === 'items')).toBeUndefined()
   })
 })

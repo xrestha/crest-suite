@@ -2,7 +2,7 @@
 // what was SPENT, under its own name. Every expected figure is worked by hand.
 import {
   FOOD_COST_LABEL, SPEND_SO_FAR_LABEL, fcBasisOf, periodCostRatio,
-  cogsOfGroupPnlRow, withGroupCogs, groupCostRatio,
+  cogsOfGroupPnlRow, withGroupCogs, groupCostRatio, costTrendPoint,
 } from './foodCostBasis'
 
 describe('fcBasisOf / periodCostRatio', () => {
@@ -78,5 +78,38 @@ describe('the Group Console on get_group_pnl components', () => {
     const noPeriod = { is_included: true, has_period: false, period_status: null, revenue: '0' }
     expect(groupCostRatio([closedA, unpaid, noPeriod]).basis).toBe('cogs')
     expect(groupCostRatio([]).pct).toBeNull()
+  })
+})
+
+// S876 (PERF-7): the Dashboard's trend takes each closed month as one get_ims_cost_trend row.
+describe('costTrendPoint', () => {
+  // COGS = 2,000 + 6,000 − 500 − 300 − 200 − 2,500 = 4,500 on 15,000 of sales: 30.0%.
+  const row = {
+    revenue: '15000', opening_val: '2000', purchases_val: '6000', returns_val: '500',
+    wastage_val: '300', staff_meals_val: '200', closing_val: '2500',
+    stock_items: 40, uncounted_count: 0, uncounted_val: '0',
+  }
+
+  it('is COGS over revenue, rounded to one place, with the figures the tooltip shows', () => {
+    expect(costTrendPoint(row)).toEqual({
+      fc: 30, basis: 'cogs', cogs: 4500, revenue: 15000, open: false,
+      unjudged: false, uncountedValue: 0, uncountedCount: 0,
+    })
+  })
+
+  it('has no figure for a month with no sales', () => {
+    expect(costTrendPoint({ ...row, revenue: '0' }).fc).toBeNull()
+  })
+
+  it('judges the uncounted gap against its own COGS, as valuePeriods did', () => {
+    // 1 of 40 items (2.5%) worth 100 on 4,500 of COGS (2.2%): under 5% both ways, so still judged.
+    expect(costTrendPoint({ ...row, uncounted_count: 1, uncounted_val: '100' }).unjudged).toBe(false)
+    // 2 of 40 items (5%): material by count.
+    expect(costTrendPoint({ ...row, uncounted_count: 2, uncounted_val: '100' }).unjudged).toBe(true)
+    // 1 of 40, worth 300 (6.7% of COGS): material by value, and the range it could hide is carried.
+    const p = costTrendPoint({ ...row, uncounted_count: 1, uncounted_val: '300.4' })
+    expect(p.unjudged).toBe(true)
+    expect(p.uncountedValue).toBe(300)
+    expect(p.uncountedCount).toBe(1)
   })
 })

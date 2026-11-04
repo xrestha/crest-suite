@@ -1252,6 +1252,28 @@ const rules = [
     staff: 'A received quantity is recorded only by receiving the delivery. Nothing was changed.',
     operator: 'Received quantities and the received status are recorded only by Receive on the order, which books the bill at the same time — so this change was refused and the order is as it was.',
   },
+  // S876 (migrations 20261104120000, 20261104130000), by hint, above the generic 42501 rule.
+  // renumber_codes runs in one transaction, so a refusal leaves every code as it was and may say so.
+  {
+    test: e => hasCode(e, 'renumber_refused'),
+    staff: 'Some of these codes could not be changed with this login, so none of them were. Ask your manager.',
+    operator: 'Some rows could not be changed with this login, so no code was changed at all. An inventory supervisor, a manager or the account owner can run it.',
+  },
+  {
+    test: e => hasCode(e, 'renumber_wrong_outlet'),
+    staff: 'These codes belong to another outlet than the one you are signed in to. Nothing was changed.',
+    operator: 'These codes belong to a different outlet than the one you are signed in to, so nothing was changed. Switch to that outlet first, then renumber.',
+  },
+  {
+    test: e => hasCode(e, 'renumber_no_prefix', 'renumber_bad_kind'),
+    staff: 'The codes could not be renumbered as asked. Nothing was changed. Ask your manager.',
+    operator: 'The renumber request was incomplete (a code prefix is needed), so nothing was changed. Type a prefix and run it again.',
+  },
+  {
+    test: e => hasCode(e, 'trend_wrong_outlet'),
+    staff: 'This chart is for another outlet than the one you are signed in to.',
+    operator: 'This chart is for a different outlet than the one you are signed in to, so it was not read. Reload the page to see this outlet.',
+  },
   {
     test: e => hasCode(e, 'snapshot_frozen'),
     staff: 'This month\'s target is already set. Nothing was changed.',

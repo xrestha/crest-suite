@@ -53,8 +53,8 @@ import { explodeRecipeIngredients, getSuggestedPrice, loadRecipeBook } from '../
 import { buildStockRows } from '../../modules/ims/stockcount/stockReportCalc'
 import { loadDeltaExplosion, bookCoversDeltas } from '../../utils/orderLineIngredients'
 import { allocateBillDiscounts, returnCostValue } from '../../modules/ims/reports/supplierAttribution'
-import { valuePeriods, periodWastageValue, WASTAGE_VALUE_SELECT } from '../../modules/ims/reports/periodCost'
-import { FOOD_COST_LABEL, SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../../modules/ims/reports/foodCostBasis'
+import { periodWastageValue, WASTAGE_VALUE_SELECT } from '../../modules/ims/reports/periodCost'
+import { FOOD_COST_LABEL, SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP, costTrendPoint } from '../../modules/ims/reports/foodCostBasis'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
 import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
 import SalesPivot from '../../modules/dashboard/SalesPivot'
@@ -1565,140 +1565,62 @@ export default function ClientDashboard({ scope = 'home' }) {
     }
   }
 
-  // `openMonth` is the open period, or loadStats' promise of it: the closed months are read beside
-  // that read rather than after it (PERF-5). A Retry passes the period itself.
+  // `openMonth` is the open period, or loadStats' promise of it. The closed months come from ONE
+  // server read (S876, PERF-7, `get_ims_cost_trend`) that goes out beside the open-month read: each
+  // month's raw sums, get_group_pnl's own expressions, judged here by `costTrendPoint` (COGS by
+  // cogsOfGroupPnlRow, ÷ revenue, the uncounted gap by isMaterialGap). It replaced ten reads spanning
+  // eleven months, whose later pages made a third level, and ~180 KB of rows valued in the browser.
+  // The open month keeps its own reads, narrowed to that one period: Spend % so far counts its
+  // finished days (mtdClock), which needs the rows. A Retry passes the period itself.
   async function loadFcTrend(openMonth, myId) {
     // Time-limited like every read here (S852): a hung read is a failed one, which draws nothing.
-    const [{ data: closedPeriods, error: closedErr }, currentPeriod] = await Promise.all([
-      read(scopedFrom('monthly_periods', 'id, bs_year, bs_month')
-        .eq('status', 'closed')
-        .order('bs_year', { ascending: false })
-        .order('bs_month', { ascending: false })
-        .limit(11), 'Closed months'),
+    const [{ data: trendRows, error: trendErr }, currentPeriod] = await Promise.all([
+      read(supabase.rpc('get_ims_cost_trend', { p_client_id: clientId, p_limit: 11 }), 'Food cost trend'),
       openMonth,
     ])
 
-    const closed = closedPeriods || []
-    // The open period's own id is folded into the same query batch (rather than this function
-    // being handed a Food Cost % that loadStats' own, much heavier pipeline had to finish
-    // computing first) so this whole function can run concurrently with loadStats instead of
-    // waiting on it — see the call site's comment. Costs one extra period's worth of duplicate
-    // purchase/sales rows (loadStats' own Promise.all fetches the open period too); worth it to
-    // decouple the two pipelines.
-    const periodIds = [...closed.map(p => p.id), ...(currentPeriod ? [currentPeriod.id] : [])]
-    const closedIds = closed.map(p => p.id)
-
-    // Every read spanning the months is paged with the pages after the first asked at once
-    // (fetchAllRowsParallel, PERF-5): twelve months of sales or stock rows is several pages, and
-    // each used to wait for the one before it. Master data (items, recipes) stays on fetchAllRows.
-    const trendResults = await Promise.all([
-      // Bill-key columns + `discount_amount` for allocateBillDiscounts(), as in loadStats — this
-      // chart's open-period point must equal the Spend % so far tile, and every closed month must
-      // equal the Food Cost % Consolidated P&L / Monthly Summary charge for it. `item_id` because
-      // a closed month is valued per item (below), over Monthly Summary's item set.
-      periodIds.length ? fetchAllRowsParallel(opts => supabase.from('purchase_entries').select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost', opts).in('period_id', periodIds).order('id')) : { data: [] },
-      periodIds.length ? fetchAllRowsParallel(opts => supabase.from('vendor_returns').select('period_id, item_id, qty, rate, bs_day, purchase_entries(vat_inclusive, vat_is_cost)', opts).in('period_id', periodIds).order('id')) : { data: [] },
-      // Revenue excludes comps (source='pos_comp') — a comped dish was never paid for — but the
-      // filter is applied in JS below, NOT as `.neq('source','pos_comp')`. `sales_entries.source`
-      // is nullable (DEFAULT 'manual', no NOT NULL), and in SQL `NULL <> 'pos_comp'` is NULL, so
-      // the server-side form silently dropped every null-source row from REVENUE ONLY — leaving
-      // this chart's denominator short against a full numerator, and disagreeing with loadStats'
-      // own revenue for the very same month, which has always filtered client-side.
-      //
-      // fetchAllRows for the same reason: this is ~12 periods of one row per recipe per day, so a
-      // bare .select() truncates at PostgREST's 1000-row cap with no error — and because only the
-      // denominator was truncated, every Food Cost % on the chart failed HIGH. A believable wrong
-      // number, on the figure the product is sold on.
-      periodIds.length ? fetchAllRowsParallel(opts => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount, source, bs_day', opts).in('period_id', periodIds).order('id')) : { data: [] },
-      // Paged (S734): this map is the price fallback for any sales row with no `unit_price`, so
-      // a recipe past the cut prices its sales at 0 — and this chart's whole subject is the
-      // RATIO, so a short denominator makes every month's Food Cost % fail HIGH. Exactly the
-      // failure the comment two entries above describes for the `.neq` that used to sit there.
+    // The open month's own rows: bill-key columns + `discount_amount` for allocateBillDiscounts(), as in
+    // loadStats, because this point must equal the Spend % so far tile. Revenue leaves comps out in JS,
+    // never `.neq('source','pos_comp')`: `source` is nullable and the server form drops the NULL rows
+    // from REVENUE only (S699). The recipes are the price fallback for a sales row with no `unit_price`.
+    const openId = currentPeriod?.id
+    const openResults = openId ? await Promise.all([
+      fetchAllRows(() => supabase.from('purchase_entries').select('period_id, item_id, qty, rate, discount_amount, purchase_group_id, vendor_id, invoice_ref, bs_day, vat_inclusive, vat_is_cost').eq('period_id', openId).order('id')),
+      fetchAllRows(() => supabase.from('vendor_returns').select('period_id, item_id, qty, rate, bs_day, purchase_entries(vat_inclusive, vat_is_cost)').eq('period_id', openId).order('id')),
+      fetchAllRowsParallel(opts => supabase.from('sales_entries').select('period_id, recipe_id, qty_sold, unit_price, discount, source, bs_day', opts).eq('period_id', openId).order('id')),
       fetchAllRows(() => scopedFrom('recipes', 'id, selling_price').order('id')),
-      // A CLOSED month plots Food Cost % = what was USED ÷ sales (S792, owner decision D30), the
-      // figure Monthly Summary and the P&L give the same month; it used to plot purchases ÷ sales
-      // under the same title, so the two charts named "Food Cost % … Trend" disagreed about every
-      // closed month. That needs the stock side for the closed months only — the open month has no
-      // count and plots Spend % so far. One row per item per period (per item per DAY for wastage
-      // and staff meals) across up to eleven months, so every read is paged (S720's multiplier).
-      // Items: every non-sub-recipe item, hidden ones included (D29), Monthly Summary's set.
-      closedIds.length ? fetchAllRows(() => scopedFrom('items', 'id, name, per_uom_rate, is_active').eq('is_sub_recipe', false).order('id')) : { data: [] },
-      closedIds.length ? fetchAllRowsParallel(opts => supabase.from('opening_stock').select('period_id, item_id, qty', opts).in('period_id', closedIds).order('id')) : { data: [] },
-      closedIds.length ? fetchAllRowsParallel(opts => supabase.from('closing_stock').select('period_id, item_id, physical_qty', opts).in('period_id', closedIds).order('id')) : { data: [] },
-      closedIds.length ? fetchAllRowsParallel(opts => supabase.from('wastages').select('period_id, item_id, qty', opts).in('period_id', closedIds).order('id')) : { data: [] },
-      closedIds.length ? fetchAllRowsParallel(opts => supabase.from('staff_meals').select('period_id, item_id, qty', opts).in('period_id', closedIds).order('id')) : { data: [] },
       // Stock moved between the group's outlets (S849, PNL-8): in adds like a purchase, out comes off
-      // like a return, in a closed month's COGS (valuePeriods) and the open month's spend alike.
-      readPeriodTransfers(scopedFrom, periodIds),
-    ].map(p => read(p, 'Food cost trend')))
-    const [
-      { data: allPurch }, { data: allRet }, { data: allSales }, { data: recipeData },
-      { data: trendItems }, { data: allOpening }, { data: allClosing }, { data: allWaste }, { data: allStaff },
-      { data: allTransfers },
-    ] = trendResults
+      // like a return.
+      readPeriodTransfers(scopedFrom, [openId]),
+    ].map(p => read(p, 'Food cost trend'))) : []
     if (loadIdRef.current !== myId) return // superseded by a newer client switch
 
-    const hadRealError = closedErr || trendResults.some(r => r.error)
+    const hadRealError = trendErr || openResults.some(r => r.error)
     setLoadErrors(prev => ({ ...prev, fcTrend: hadRealError ? 'Food Cost % trend failed to load.' : '' }))
-    // A failed read draws nothing (S792). With the stock side in the arithmetic, a closed month
-    // whose closing read failed would plot every shelf as used — a believable, alarming Food Cost %
-    // — and the banner above cannot say which point is wrong. Not cached, so a reload retries.
+    // A failed read draws nothing (S792). A closed month whose closing sum failed would plot every
+    // shelf as used — a believable, alarming Food Cost % — and the banner above cannot say which point
+    // is wrong. Not cached, so a reload retries.
     if (hadRealError) { setFcTrend([]); return }
 
-    const priceMap = {}
-    ;(recipeData || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price || 0) })
-
-    // Grouped by period_id in one pass each, instead of re-filtering the full purchases/returns/
-    // sales arrays once per period below (O(periods × rows) → O(rows)) — bounded by the .limit(11)
-    // above so it never ran away, but scales with purchase/sales volume across those 11 months.
-    const revMap = {}
-    // The open month's purchases, by period: its spend is allocated over its own bills (netSpendOf).
-    // Closed months are valued through valuePeriods below, which groups by period itself.
-    const purchByPeriod = {}
-    ;(allPurch || []).forEach(e => { (purchByPeriod[e.period_id] = purchByPeriod[e.period_id] || []).push(e) })
-    // unit_price captured on the row when present, else falls back to the recipe's current
-    // price — this 11-month trend is exactly where always using today's price hurt most,
-    // since a single menu price change would retroactively distort every past month's Food
-    // Cost % line on the chart.
-    ;(allSales || []).forEach(e => {
-      if (e.source === 'pos_comp') return
-      const price = e.unit_price != null ? parseFloat(e.unit_price) : (priceMap[e.recipe_id] || 0)
-      revMap[e.period_id] = (revMap[e.period_id] || 0) + parseFloat(e.qty_sold) * price - (parseFloat(e.discount) || 0)
-    })
-
-    // Closed months: Food Cost % = COGS ÷ revenue, through periodCost.js's valuePeriods() — the same
-    // valuePeriodItems() Monthly Summary and the P&L call, over the same items, each month's bill
-    // discounts allocated on their own. `unjudged` is S756's D6 rule: a month closed with a material
-    // share of its stock uncounted plots its figure without a verdict colour, and takes no part in
-    // Best / Highest month, as on Monthly Summary, Annual Summary and Period Comparison.
-    // (The purchase and return rows include the open month's too; valuePeriods reads only the ids
-    // it is given.)
-    const valued = valuePeriods({
-      periodIds: closedIds, items: trendItems, opening: allOpening, closing: allClosing,
-      purchases: allPurch, returns: allRet, wastages: allWaste, staffMeals: allStaff, transfers: allTransfers,
-    })
-    const points = closed.map(p => {
-      const v = valued[p.id]
-      const rev = revMap[p.id] || 0
-      const fc  = rev > 0 && v ? parseFloat(((v.cogsVal / rev) * 100).toFixed(1)) : null
-      return {
-        label: `${BS_MONTHS_SHORT[p.bs_month - 1]} ${p.bs_year}`, fc, basis: 'cogs',
-        cogs: v ? Math.round(v.cogsVal) : null, revenue: Math.round(rev), open: false,
-        unjudged: !!v?.gap?.material,
-        // What the missing count could be hiding (S826): the uncounted items' opening + purchase
-        // value, which COGS reads as used. fcTrendMath turns it into the grey month's range.
-        uncountedValue: v?.gap ? Math.round(v.gap.uncountedValue) : null,
-        uncountedCount: v?.gap?.uncountedCount ?? null,
-      }
-    }).reverse()
+    // Closed months: Food Cost % = COGS ÷ revenue (S792, owner decision D30), the figure Monthly
+    // Summary and the P&L give the same month. `unjudged` is S756's D6 rule: a month closed with a
+    // material share of its stock uncounted plots its figure without a verdict colour, and takes no
+    // part in Best / Highest month. `uncountedValue` is what the missing count could be hiding (S826);
+    // fcTrendMath turns it into the grey month's range. The rows come newest first.
+    const points = (trendRows || []).map(r => ({
+      label: `${BS_MONTHS_SHORT[r.bs_month - 1]} ${r.bs_year}`,
+      ...costTrendPoint(r),
+    })).reverse()
 
     if (currentPeriod) {
       // The open month's point is the Spend % so far tile's own figure (S849): the same helpers, the
       // same finished days, stock transfers included.
+      const [{ data: openPurch }, { data: openRet }, { data: openSales }, { data: recipeData }, { data: openTransfers }] = openResults
+      const priceMap = {}
+      ;(recipeData || []).forEach(r => { priceMap[r.id] = parseFloat(r.selling_price || 0) })
       const clock = mtdClock(currentPeriod)
-      const inOpen = rows => (rows || []).filter(r => r.period_id === currentPeriod.id)
-      const net = netSpendOf({ purchases: purchByPeriod[currentPeriod.id] || [], returns: inOpen(allRet), transfers: inOpen(allTransfers), clock }).counted
-      const rev = revenueOf(inOpen(allSales), priceMap, clock).counted
+      const net = netSpendOf({ purchases: openPurch || [], returns: openRet || [], transfers: openTransfers || [], clock }).counted
+      const rev = revenueOf(openSales || [], priceMap, clock).counted
       const fc  = rev > 0 && !clock.firstDay ? parseFloat(((net / rev) * 100).toFixed(1)) : null
       if (fc != null) {
         // Purchases/revenue were withheld here (null) so the tooltip would omit them, which left

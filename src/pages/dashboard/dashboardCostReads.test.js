@@ -152,9 +152,10 @@ describe('Overheads upsells name the plan it is sold on', () => {
 })
 
 // PERF-5: the Dashboard's slowest reads. The recipe walk reads the book from memory (it fetched one
-// sub-recipe level per round trip), the Food Cost trend's closed-months read goes out beside the
-// open-month read (it waited for it), and the reads spanning months ask every page after the first
-// at once (each page waited for the one before it).
+// sub-recipe level per round trip), and the Food Cost trend goes out beside the open-month read (it
+// waited for it). Since S876 (PERF-7) the trend's closed months are one server read,
+// get_ims_cost_trend, where ten reads spanning eleven months used to page; the open month keeps its
+// own reads, narrowed to that one period.
 describe('ClientDashboard starts its slow reads early (PERF-5)', () => {
   const flat = flatten('ClientDashboard.jsx')
   const trend = flat.slice(flat.indexOf('async function loadFcTrend'))
@@ -169,12 +170,21 @@ describe('ClientDashboard starts its slow reads early (PERF-5)', () => {
     const start = flat.indexOf('loadFcTrend(periodRead.then(')
     expect(start).toBeGreaterThan(-1)
     expect(flat.indexOf('await periodRead')).toBeGreaterThan(start)
-    expect(trend).toMatch(/await Promise\.all\(\[ read\(scopedFrom\('monthly_periods'/)
+    expect(trend).toMatch(/await Promise\.all\(\[ read\(supabase\.rpc\('get_ims_cost_trend', \{ p_client_id: clientId, p_limit: 11 \}\), 'Food cost trend'\), openMonth, \]\)/)
   })
 
-  test.each(['purchase_entries', 'vendor_returns', 'sales_entries', 'opening_stock', 'closing_stock', 'wastages', 'staff_meals'])(
-    "the trend's %s read asks every page after the first at once", table => {
-      expect(trend).toMatch(new RegExp(`fetchAllRowsParallel\\(opts => supabase\\.from\\('${table}'\\)\\.select\\('[^']*', opts\\)\\.in\\('period_id', \\w+\\)\\.order\\('id'\\)\\)`))
+  test("the trend's closed months come from the server read, never from month-spanning reads", () => {
+    const loader = trend.slice(0, trend.indexOf('const bsToday'))
+    expect(loader).toMatch(/costTrendPoint\(r\)/)
+    expect(loader).not.toMatch(/\.in\('period_id'/)
+    for (const table of ['opening_stock', 'closing_stock', 'wastages', 'staff_meals', 'items']) {
+      expect(loader).not.toMatch(new RegExp(`'${table}'`))
+    }
+  })
+
+  test.each(['purchase_entries', 'vendor_returns', 'sales_entries'])(
+    "the trend's open-month %s read is that one period's, paged", table => {
+      expect(trend).toMatch(new RegExp(`fetchAllRows(Parallel)?\\((opts )?(=> |\\(\\) => )supabase\\.from\\('${table}'\\)\\.select\\('[^']*'(, opts)?\\)\\.eq\\('period_id', openId\\)\\.order\\('id'\\)\\)`))
     })
 
   test("the month's sales read asks every page after the first at once", () => {

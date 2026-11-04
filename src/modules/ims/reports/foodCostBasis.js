@@ -15,6 +15,7 @@
 // This file holds the rule, the two names and their tips, so a page cannot pick one without the
 // other. The arithmetic of COGS itself stays in periodCost.js / imsFormulas.js.
 import { computeUsed } from '../../../shared/imsFormulas'
+import { isMaterialGap } from '../../../shared/uncountedItems'
 
 export const FOOD_COST_LABEL = 'Food Cost %'
 export const SPEND_SO_FAR_LABEL = 'Spend % so far'
@@ -70,6 +71,31 @@ export function cogsOfGroupPnlRow(r) {
     opening: num(r.opening_val) || 0, purchases: num(r.purchases_val) || 0, returns: num(r.returns_val) || 0,
     wastage: num(r.wastage_val) || 0, staffMeals: num(r.staff_meals_val) || 0, closing: num(r.closing_val) || 0,
   })
+}
+
+/**
+ * One `get_ims_cost_trend` row (S876, PERF-7) → a closed month's Food Cost trend point. The row
+ * carries `get_group_pnl`'s raw sums for one month, so COGS is `cogsOfGroupPnlRow`, and the
+ * uncounted-items verdict is `isMaterialGap` against that COGS, as `valuePeriods` judged it when the
+ * Dashboard read the rows itself. `fc` is null with no revenue.
+ */
+export function costTrendPoint(row) {
+  const cogs = cogsOfGroupPnlRow(row)
+  const revenue = num(row?.revenue) || 0
+  const uncountedCount = Number(row?.uncounted_count) || 0
+  const uncountedValue = num(row?.uncounted_val) || 0
+  const material = uncountedCount > 0 &&
+    isMaterialGap({ presentCount: Number(row?.stock_items) || 0, uncountedCount, uncountedValue, cogs: cogs || 0 })
+  return {
+    fc: revenue > 0 && cogs != null ? parseFloat(((cogs / revenue) * 100).toFixed(1)) : null,
+    basis: 'cogs',
+    cogs: cogs != null ? Math.round(cogs) : null,
+    revenue: Math.round(revenue),
+    open: false,
+    unjudged: material,
+    uncountedValue: Math.round(uncountedValue),
+    uncountedCount,
+  }
 }
 
 /**
