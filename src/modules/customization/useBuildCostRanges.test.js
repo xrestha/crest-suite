@@ -113,3 +113,69 @@ test('asks for the rates and the recent orders while the stock-line walk is stil
   expect(fetchAllRowsChunked).toHaveBeenCalledTimes(1)
   expect(fetchAllRowsChunked.mock.calls[0][0]).toEqual(['bowl'])
 })
+
+// S877: Menu Pricing reads the catalog once, for its choice labels and price check, and hands that
+// read in; the hook then reads no catalog of its own. A failed read is still the failed state, never
+// "no choices", and an answer for another client is treated as one still on its way.
+describe('a catalog read handed in by the page (catalogRead)', () => {
+  const costed = () => {
+    loadDeltaExplosion.mockResolvedValue({ subPerUnit: {} })
+    fetchAllRows.mockResolvedValue({ data: [{ id: 'i1', per_uom_rate: 2 }], error: null })
+    fetchAllRowsChunked.mockResolvedValue({ data: [], error: null })
+    require('../../shared/buildCost').typicalSelections.mockReturnValue({})
+  }
+
+  test('costs from the read it was given and reads no catalog itself', async () => {
+    costed()
+    const { result } = renderHook(() => useBuildCostRanges({ enabled: true, recipes: [bowl], fixedCostOf, catalogRead: { clientId: 'c1', catalog: CATALOG } }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(loadOptionCatalog).not.toHaveBeenCalled()
+    expect(result.current.catalog).toBe(CATALOG)
+    expect(result.current.error).toBeNull()
+    expect(result.current.byRecipe.bowl).toBeDefined()
+    expect(buildCostRange).toHaveBeenCalled()
+  })
+
+  test('waits while the read is on its way, or is for another client', async () => {
+    const { result, rerender } = renderHook(props => useBuildCostRanges({ enabled: true, recipes: [bowl], fixedCostOf, ...props }),
+      { initialProps: { catalogRead: null } })
+    expect(result.current.loading).toBe(true)
+    expect(result.current.catalogLoading).toBe(true)
+    rerender({ catalogRead: { clientId: 'other', catalog: CATALOG } })
+    expect(result.current.loading).toBe(true)
+    expect(result.current.catalog).toBeNull()
+    expect(loadOptionCatalog).not.toHaveBeenCalled()
+    expect(loadDeltaExplosion).not.toHaveBeenCalled()
+  })
+
+  test('a failed read handed in is the failed state, with its reason', async () => {
+    const { result } = renderHook(() => useBuildCostRanges({ enabled: true, recipes: [bowl], fixedCostOf, catalogRead: { clientId: 'c1', error: 'permission denied for table pos_options' } }))
+    await waitFor(() => expect(result.current.catalogFailed).toBe(true))
+    expect(result.current.error).toMatch(/permission denied/)
+    expect(result.current.catalog).toBeNull()
+    expect(result.current.catalogLoading).toBe(false)
+    expect(loadOptionCatalog).not.toHaveBeenCalled()
+  })
+
+  test('a new answer (after groups are attached) is costed again', async () => {
+    costed()
+    const { result, rerender } = renderHook(props => useBuildCostRanges({ enabled: true, recipes: [bowl], fixedCostOf, ...props }),
+      { initialProps: { catalogRead: { clientId: 'c1', catalog: CATALOG } } })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    const next = { ...CATALOG, attachments: [...CATALOG.attachments] }
+    rerender({ catalogRead: { clientId: 'c1', catalog: next } })
+    await waitFor(() => expect(result.current.catalog).toBe(next))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(loadDeltaExplosion).toHaveBeenCalledTimes(2)
+    expect(loadOptionCatalog).not.toHaveBeenCalled()
+  })
+
+  test('Menu Pricing reads the option catalog once and hands it to the hook', () => {
+    const fs = require('fs')
+    const path = require('path')
+    const src = fs.readFileSync(path.join(__dirname, '../ims/recipes/MenuPricing.js'), 'utf8')
+    expect(src.match(/loadOptionCatalog\(/g)).toHaveLength(1)
+    expect(src).toMatch(/useBuildCostRanges\(\{[^}]*catalogRead[^}]*\}\)/)
+    expect(src).toMatch(/loadOptionCatalog\(scopedFrom, \{ withIngredients: byoEnabled \}\)/)
+  })
+})

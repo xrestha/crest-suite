@@ -260,22 +260,39 @@ it('S867: with no client picked, the page says so instead of loading for good, a
   expect(screen.getByText('No client selected. Pick a client in the top-left switcher to see its choice groups.')).toBeInTheDocument()
   expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
   expect(screen.queryByText(/Crest Customization is off/)).not.toBeInTheDocument()
-  expect(screen.queryByText(/cannot be saved right now/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/cannot be changed right now/)).not.toBeInTheDocument()
   expect(mockCatalog).not.toHaveBeenCalled()
 })
 
-it('S867: "Choices cannot be saved" waits for this client’s settings, and shows when that read failed', async () => {
+it('S867: "Choice prices cannot be changed" waits for this client’s settings, and shows when that read failed', async () => {
   mockCatalog.mockResolvedValue(catalogOf([opt('o1', 'First', 0)]))
   // A client switch: the row on hand is still the previous client's, so the mode is not known yet.
   mockSettings = { ...SETTLED, settingsClientId: 'c0' }
   const { rerender } = render(<OptionGroups />)
   await screen.findByRole('button', { name: 'Edit First' })
-  expect(screen.queryByText(/cannot be saved right now/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/cannot be changed right now/)).not.toBeInTheDocument()
 
   // This client's read came back as a failure: now it is a fact worth a banner.
   mockSettings = { ...SETTLED, settingsLoadError: { message: 'boom' } }
   rerender(<OptionGroups />)
-  expect(screen.getByText('Choices cannot be saved right now.')).toBeInTheDocument()
+  expect(screen.getByText('Choice prices cannot be changed right now.')).toBeInTheDocument()
+  expect(screen.getByText(/A choice whose price is left as it is still saves\./)).toBeInTheDocument()
+})
+
+// S877: a choice stock line on a recipe moved out of Sub-Recipe (before the recategorise guard) opens
+// showing that recipe, labelled, instead of a blank box; it is not offered for a new line.
+it('S877: a stock line on a recipe no longer a sub-recipe opens showing it, and only on that line', async () => {
+  mockAuth = { ...mockAuth, clientModules: { ims: true, customization: true } }
+  const dough = { id: 'dough', name: 'Pizza Dough', category: 'Bakery', selling_price: 0, vat_rate: 0.13, pos_enabled: false, yield_uom: 'kg', is_active: true }
+  mockRecipes = [momo, dough]
+  mockCatalog.mockResolvedValue({
+    ...catalogOf([opt('o1', 'Thin base', 0)]),
+    ingredients: [{ id: 'l1', option_id: 'o1', item_id: null, sub_recipe_id: 'dough', qty_per_portion: 0.2 }],
+  })
+  render(<OptionGroups />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Thin base' }))
+  expect(await screen.findByText('Pizza Dough (kg) — no longer a sub-recipe')).toBeInTheDocument()
+  expect(screen.getByText(/Pizza Dough is no longer a sub-recipe, so it is not offered for a new line, but this line still adds 0\.2 kg of it on every plate sold\./)).toBeInTheDocument()
 })
 
 it('S867: a new Size group is told to go on its dishes first, and the one + New Group is the empty state’s', async () => {

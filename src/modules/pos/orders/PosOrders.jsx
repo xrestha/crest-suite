@@ -6937,8 +6937,13 @@ Every occupied table now holds an EMPTY open order. Press Clear again, or open e
     return t.text.replace(/Tap (Change|Choices)/, `Tap ${comboSwapLabel(item) || 'Swap'}`)
   }
   // A dish already made inside a combo is not taken off alone (combo_incomplete): it is swapped, or the combo goes.
+  // S877: in a pick of one dish with choices of its own the button is Change, which pulls the dish
+  // with a reason and has it made again with the new choices, so the sentence names that way out too.
   const comboWayOut = (text, item) => {
-    const way = comboSwapLabel(item) === 'Swap' ? 'swap it, or take the combo off' : 'take the combo off'
+    const label = comboSwapLabel(item)
+    const way = label === 'Swap' ? 'swap it, or take the combo off'
+      : label === 'Change' ? 'tap Change to have it made again with other choices, or take the combo off'
+        : 'take the combo off'
     return text.replace(/(t)ake the dish off/i, (_, c) => (c === 'T' ? way[0].toUpperCase() + way.slice(1) : way))
   }
 

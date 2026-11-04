@@ -53,9 +53,9 @@ export async function viewPosBill(clientId, row) {
   const [{ data: order, error: orderErr }, { data: settings, error: settingsErr }, { data: client, error: clientErr }] = await Promise.all([
     within(scopedFrom('pos_orders', clientId).eq('id', orderId).single(), 'Reading the bill'),
     within(supabase.from('settings').select('is_vat_registered, invoice_prefix, vat_number, property_address, property_phone').eq('client_id', clientId).maybeSingle(), 'Reading the billing settings'),
-    // The module switches too: whether a comp is costed with its choices' stock (the outlet has Crest
-    // IMS) and which dishes are costed by their build (Customization on) — as AuthContext reads them.
-    within(supabase.from('clients').select('name, ims_enabled, pos_enabled, customization_enabled').eq('id', clientId).single(), 'Reading the outlet'),
+    // The Inventory switch too: whether a comp is costed with its choices' stock (the outlet has Crest
+    // IMS), as AuthContext reads it. Customization is deliberately not read (S877): see slipCosts.
+    within(supabase.from('clients').select('name, ims_enabled').eq('id', clientId).single(), 'Reading the outlet'),
   ])
   // The settings decide the document itself — TAX INVOICE or BILL, the seller's VAT/PAN number, the
   // prefix, the address — so a failed read of them is a failed read of the bill (S809 2a, CHECKOUT-9).
@@ -101,12 +101,16 @@ export async function viewPosBill(clientId, row) {
   // above, the Owner and the operator; a Staff login (Parking's View bill) is refused and told so.
   // It THROWS on a failed read, which used to leave the tab on "Loading…" with an unhandled
   // rejection. A slip valued at zero would be a wrong document. Each dish is costed with its choices
-  // (posLineCosts), as the till's own slip is: the client's switches, not the viewer's, decide how.
+  // (posLineCosts), as the till's own slip is: the client's Inventory switch, not the viewer's, decides.
+  // A past bill is costed by what it holds, never by today's Customization switch (S877, owner
+  // decision): a line whose dish is marked build-your-own was rung with its build, so it is its fixed
+  // part plus its choices' stock lines (on the bill's own snapshot) even after Customization is off.
+  // The mark read is a plain recipes read and the book is not gated on Customization, so both answer
+  // with the switch off; a dish that was never marked costs exactly as before.
   const inventory = client?.ims_enabled !== false
-  const customization = !!client?.pos_enabled && !!client?.customization_enabled
   const slipCosts = async lines => {
     try {
-      const buildYourOwn = inventory && customization
+      const buildYourOwn = inventory
         ? buildYourOwnAmong((t, sel) => scopedFrom(t, clientId, sel), lines.map(i => i.recipe_id)) : []
       return await withTimeout(posLineCosts(supabase, clientId, lines, { inventory, buildYourOwn }), REPRINT_READ_MS, 'Reading food costs')
     } catch (e) {

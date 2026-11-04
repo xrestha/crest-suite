@@ -30,6 +30,8 @@ import { loadOptionCatalog, CUSTOMIZATION_READ_MS } from './customizationData'
 // S862 SETUP-2: the option catalog is returned too (`catalog`, with `catalogLoading` and
 // `catalogFailed`), so Recipe Costing's price box checks the dish's sizes from this read rather
 // than a second one. It is kept when a later read fails: the price check needs only the catalog.
+// S877: a page that reads the catalog itself (Menu Pricing, for its choice labels and price check)
+// hands that read in as `catalogRead`, so one request serves both. Left out, the hook reads its own.
 
 export const TYPICAL_WINDOW_DAYS = 30
 export const TYPICAL_MIN_PLATES = 10
@@ -41,12 +43,23 @@ const EMPTY = { loading: false, error: null, catalog: null, explosion: null, rat
  * @param {boolean} args.enabled                         Customization is live for this client
  * @param {object[]} args.recipes                        the page's dish rows ({ id, selling_price, category })
  * @param {(r: object) => number} args.fixedCostOf       the dish's own ingredient cost per plate
+ * @param {null|{ clientId: string, catalog?: object, error?: any }} [args.catalogRead]  S877: the
+ *   caller's own read of loadOptionCatalog(scopedFrom, { withIngredients: true }), tagged with the
+ *   client it was read for: null (or another client's) while it is on its way, `error` for a failed
+ *   or timed-out read, `catalog` for the answer. Each new answer is costed again. Left out
+ *   (undefined), the hook reads the catalog itself, as Recipe Costing has it.
  * @returns {{ byRecipe: Record<string, object>, buildYourOwn: Set<string>, loading: boolean, error: string|null,
  *            catalog: object|null, catalogLoading: boolean, catalogFailed: boolean }}
  */
-export function useBuildCostRanges({ enabled, recipes, fixedCostOf }) {
+export function useBuildCostRanges({ enabled, recipes, fixedCostOf, catalogRead }) {
   const { scopedFrom, clientId } = useScopedDb()
   const [state, setState] = useState(EMPTY)
+  const supplied = catalogRead !== undefined
+  // Only an answer for THIS client counts; anything else is still on its way. Keyed on the answer
+  // itself, not the wrapper, so a caller building a fresh wrapper per render does not re-read.
+  const given = supplied && catalogRead && catalogRead.clientId === clientId ? catalogRead : null
+  const givenCatalog = given?.catalog || null
+  const givenError = given?.error || null
 
   useEffect(() => {
     if (!enabled || !clientId) { setState(EMPTY); return }
@@ -54,10 +67,13 @@ export function useBuildCostRanges({ enabled, recipes, fixedCostOf }) {
     // A re-run is a new client (scopedFrom follows it): nothing read for the last one is kept, or a
     // catalog that lands first would be costed against the last client's rates.
     setState({ ...EMPTY, loading: true })
+    if (supplied && !givenCatalog && !givenError) return
     ;(async () => {
       let catalog = null
       try {
-        const read = await settleWithin(loadOptionCatalog(scopedFrom, { withIngredients: true }), CUSTOMIZATION_READ_MS, 'Loading the choices')
+        const read = supplied
+          ? (givenError ? { error: givenError } : givenCatalog)
+          : await settleWithin(loadOptionCatalog(scopedFrom, { withIngredients: true }), CUSTOMIZATION_READ_MS, 'Loading the choices')
         if (read.error) throw read.error instanceof Error ? read.error : new Error(read.error)
         catalog = read
         if (!catalog.buildYourOwn.length) {
@@ -97,7 +113,7 @@ export function useBuildCostRanges({ enabled, recipes, fixedCostOf }) {
       }
     })()
     return () => { cancelled = true }
-  }, [enabled, clientId, scopedFrom])
+  }, [enabled, clientId, scopedFrom, supplied, givenCatalog, givenError])
 
   const buildYourOwn = useMemo(() => new Set(state.catalog?.buildYourOwn || []), [state.catalog])
 

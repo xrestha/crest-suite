@@ -115,6 +115,36 @@ it('SETUP-7: a stock line on a hidden item shows that item, labelled, with its u
   expect(screen.getByText('GM')).toBeInTheDocument()
 })
 
+// S877: a recipe moved out of Sub-Recipe before the recategorise guard still takes stock through
+// its line, so the line names it and says what it takes, and it can still be removed.
+const doughLine = [{ id: 'i2', option_id: 'o1', item_id: null, sub_recipe_id: 'dough', qty_per_portion: -0.2 }]
+const movedChoices = [
+  ...choices,
+  { value: 'sub:dough', label: 'Pizza Dough (kg) — no longer a sub-recipe', unit: 'kg', hidden: true, movedOut: true, name: 'Pizza Dough' },
+]
+
+it('S877: a stock line on a recipe no longer a sub-recipe shows it and what it takes, not a blank box, and can be removed', async () => {
+  const { onSaved } = renderOption({ group: extras, option: extraShot, catalog: extrasCatalog, ingredients: doughLine, itemChoices: movedChoices, imsEnabled: true })
+  expect(screen.getByText('Pizza Dough (kg) — no longer a sub-recipe')).toBeInTheDocument()
+  expect(screen.getByText(/Pizza Dough is no longer a sub-recipe, so it is not offered for a new line, but this line still takes off 0\.2 kg of it on every plate sold\./)).toBeInTheDocument()
+  expect(screen.getByText('kg')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Remove line 1' }))
+  expect(screen.queryByText(/no longer a sub-recipe, so it is not offered/)).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Save choice' }))
+  await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  expect(mockWrites.some(w => w.op === 'delete' && w.table === 'pos_option_ingredients')).toBe(true)
+})
+
+it('S877: an untouched line on a moved recipe saves back unchanged', async () => {
+  const { onSaved } = renderOption({ group: extras, option: extraShot, catalog: extrasCatalog, ingredients: doughLine, itemChoices: movedChoices, imsEnabled: true })
+  mockAnswer.pos_option_ingredients = { data: [{ id: 'i2' }], error: null }
+  fireEvent.click(screen.getByRole('button', { name: 'Save choice' }))
+  await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  const line = mockWrites.find(w => w.table === 'pos_option_ingredients')
+  expect(line.row).toMatchObject({ item_id: null, sub_recipe_id: 'dough', qty_per_portion: -0.2 })
+  expect(onSaved.mock.calls[0][1]).toBeUndefined()
+})
+
 it('SETUP-10: a stock line changed on another device is reported, not said to be saved', async () => {
   mockAnswer.pos_option_ingredients = { data: [], error: null }
   const { onSaved } = renderOption({ group: extras, option: extraShot, catalog: extrasCatalog, ingredients: butterLine, itemChoices: choices, imsEnabled: true })
@@ -139,15 +169,48 @@ it('Save stays pressable while it writes, and a second press sends nothing more'
   expect(mockWrites.filter(w => w.table === 'pos_options')).toHaveLength(1)
 })
 
-it('while the VAT basis is unknown, Save is aria-disabled and its press goes to the note that says why', () => {
-  renderOption({ group: extras, option: extraShot, catalog: extrasCatalog, vatUnknown: true })
+it('S877: while the VAT basis is unknown, a choice whose price is untouched still saves, without a price', async () => {
+  const { onSaved } = renderOption({ group: extras, option: extraShot, catalog: extrasCatalog, vatUnknown: true })
   const save = screen.getByRole('button', { name: 'Save choice' })
+  expect(save).not.toHaveAttribute('aria-disabled')
+  expect(screen.getByRole('note')).toHaveTextContent(/Leave the price as it is for now/)
+  expect(screen.getByLabelText(/Extra charge/)).toHaveAccessibleDescription(/Leave the price as it is/)
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Double Shot' } })
+  fireEvent.click(save)
+  await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  expect(mockWrites[0].row.name).toBe('Double Shot')
+  expect(mockWrites[0].row).not.toHaveProperty('price_delta')
+})
+
+it('S877: while the VAT basis is unknown, a changed price makes Save aria-disabled, and its press goes to the note that says why', async () => {
+  const { onSaved } = renderOption({ group: extras, option: extraShot, catalog: extrasCatalog, vatUnknown: true })
+  const save = screen.getByRole('button', { name: 'Save choice' })
+  fireEvent.change(screen.getByLabelText(/Extra charge/), { target: { value: '80' } })
   expect(save).not.toBeDisabled()
   expect(save).toHaveAttribute('aria-disabled', 'true')
-  expect(save).toHaveAccessibleDescription(/Nothing can be saved here yet/)
+  expect(save).toHaveAccessibleDescription(/The new price cannot be saved yet/)
   fireEvent.click(save)
   expect(screen.getByRole('note')).toHaveFocus()
   expect(mockWrites).toHaveLength(0)
+  // Put back as it was, the rest saves.
+  fireEvent.change(screen.getByLabelText(/Extra charge/), { target: { value: '68' } })
+  expect(save).not.toHaveAttribute('aria-disabled')
+  fireEvent.click(save)
+  await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  expect(mockWrites[0].row).not.toHaveProperty('price_delta')
+})
+
+it('S877: a new choice left free saves while the VAT basis is unknown; one given a price waits', async () => {
+  const { onSaved } = renderOption({ group: extras, option: null, catalog: extrasCatalog, vatUnknown: true })
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Oat milk' } })
+  const add = screen.getByRole('button', { name: 'Add choice' })
+  fireEvent.change(screen.getByLabelText(/Extra charge/), { target: { value: '40' } })
+  expect(add).toHaveAttribute('aria-disabled', 'true')
+  fireEvent.change(screen.getByLabelText(/Extra charge/), { target: { value: '' } })
+  expect(add).not.toHaveAttribute('aria-disabled')
+  fireEvent.click(add)
+  await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  expect(mockWrites[0]).toMatchObject({ op: 'insert', row: { name: 'Oat milk', price_delta: 0 } })
 })
 
 it('adds / takes off is one radio group: one Tab stop, arrow keys move and pick', () => {

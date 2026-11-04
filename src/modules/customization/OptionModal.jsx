@@ -38,7 +38,8 @@ import { npr } from '../../shared/nepalMoney'
 const newKey = () => Math.random().toString(36).slice(2)
 
 // `vatUnknown` (S809 2h, CUSTOMIZATION-1): the page could not confirm whether the outlet charges VAT
-// (settings loading, failed, or another client's row), so `vat` is a guess and nothing is saved.
+// (settings loading, failed, or another client's row), so `vat` is a guess and no typed price is
+// saved. S877: only a price this save converts waits for it; an untouched one sends none (SETUP-1).
 // `catalog` (S835): the page's { groups, options, attachments }, so the below-zero check prices each
 // dish over every group it offers, not this option alone.
 // `initialError` (S852): the message a previous instance of this dialog left. Saving a NEW option
@@ -93,9 +94,15 @@ export default function OptionModal({
   const [actionError, setActionError] = useState(initialError)
   const set = patch => setForm(f => ({ ...f, ...patch }))
 
-  const { deltaIncl, priceDelta, savedDelta } = priceEntry({
+  const { changed: priceChanged, deltaIncl, priceDelta, savedDelta } = priceEntry({
     option, seed: seed.price, price: form.price, isRemoval: form.is_removal, wasRemoval: seed.is_removal, base: basePrice, vat,
   })
+  // S877: the VAT basis matters only to a price this save converts through `vat`. An untouched box
+  // sends no price (SETUP-1) and a new choice left at its seed sends 0, as do a “No …” and a typed 0
+  // that is not measured from the dish price; none of those waits for the basis. A full price is
+  // measured from the dish price, which itself depends on VAT, so any change to it waits.
+  const priceNeedsVat = priceChanged && !form.is_removal && (fullPriceMode || deltaIncl !== 0)
+  const vatBlocks = vatUnknown && priceNeedsVat
   // S809 4h (CUSTOMIZATION-6): a result below zero reads as one, never as NPR 0. Both server
   // pricers add the difference as it is, and since 4h refuse a line that ends below zero. S863: in
   // the page's own form ("NPR −20", belowZeroAmount), so a few paisa under reads in words, never as
@@ -177,13 +184,13 @@ export default function OptionModal({
   }
 
   function save() {
-    // A typed price is converted through `vat`, so nothing is saved while the VAT basis is unknown
+    // A typed price is converted through `vat`, so it is not saved while the VAT basis is unknown
     // (S809 2h). Since S862 (SETUP-1) an untouched price box sends no price_delta at all, so a
-    // rename or a stock-line edit keeps the stored price exactly.
+    // rename or a stock-line edit keeps the stored price exactly, and since S877 it saves then too.
     if (busyRef.current || saving) return
     // A precondition, not a write in flight: the button stays pressable and the press takes the
     // reader to the note that says why, which a disabled button could never point at.
-    if (vatUnknown) {
+    if (vatBlocks) {
       vatNoteRef.current?.scrollIntoView?.({ block: 'nearest' })
       vatNoteRef.current?.focus()
       return
@@ -325,7 +332,8 @@ export default function OptionModal({
         ? `Price difference from the dish${vat > 0 ? ' (incl. VAT)' : ''}`
         : `Extra charge${vat > 0 ? ' (incl. VAT)' : ''}`
   const priceAria = fieldAria('opt-price', errors.price)
-  const priceDescribedBy = [priceAria['aria-describedby'], unattachedSize ? 'opt-price-hint' : null].filter(Boolean).join(' ') || undefined
+  const priceDescribedBy = [priceAria['aria-describedby'], unattachedSize ? 'opt-price-hint' : null, vatUnknown ? 'opt-vat-unknown' : null]
+    .filter(Boolean).join(' ') || undefined
 
   // S867: Portion only where a size scales something: a build-your-own dish, or a group set to scale
   // with the size. It stays when this size already has a portion, so a saved value is never out of
@@ -552,6 +560,15 @@ export default function OptionModal({
                       <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove line ${i + 1}`}
                         onClick={() => setLines(ls => ls.filter(x => x.key !== l.key))}>Remove</button>
                     </div>
+                    {/* S877: a recipe moved out of Sub-Recipe before the recategorise guard still takes
+                        stock through this line, so the line says what it does instead of sitting blank. */}
+                    {choice?.movedOut && (
+                      <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+                        △ {choice.name} is no longer a sub-recipe, so it is not offered for a new line, but this line
+                        still {l.direction === 'remove' ? 'takes off' : 'adds'} {l.qty || 0}{choice.unit ? ` ${choice.unit}` : ''} of it
+                        on every plate sold. Remove the line if it should not.
+                      </p>
+                    )}
                     {(itemError || qtyError) && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
                         <FieldError id={itemId} message={itemError} />
@@ -574,16 +591,18 @@ export default function OptionModal({
 
         <ActionError error={actionError} />
         {confirmEl}
-        {vatUnknown && (
+        {vatUnknown && !form.is_removal && (
           <p role="note" id="opt-vat-unknown" ref={vatNoteRef} tabIndex={-1} style={{ margin: 0, fontSize: 12, color: 'var(--theme-amber-text)' }}>
-            △ Nothing can be saved here yet. {VAT_MODE_UNKNOWN_TEXT}
+            {vatBlocks
+              ? <>△ The new price cannot be saved yet. {VAT_MODE_UNKNOWN_TEXT} To save your other changes now, put the price back as it was.</>
+              : <>△ Leave the price as it is for now. {VAT_MODE_UNKNOWN_TEXT} Everything else on this choice saves as usual.</>}
           </p>
         )}
       </div>
       <div className="form-actions form-actions--split">
         <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-        <button type="button" className="btn btn-primary" onClick={save} aria-disabled={vatUnknown || undefined} aria-busy={saving || undefined}
-          aria-describedby={vatUnknown ? 'opt-vat-unknown' : undefined}>
+        <button type="button" className="btn btn-primary" onClick={save} aria-disabled={vatBlocks || undefined} aria-busy={saving || undefined}
+          aria-describedby={vatBlocks ? 'opt-vat-unknown' : undefined}>
           {saving ? 'Saving…' : option ? 'Save choice' : 'Add choice'}
         </button>
       </div>

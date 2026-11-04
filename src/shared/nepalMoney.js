@@ -29,14 +29,23 @@ export const NPR_LOCALE = 'en-IN'
 const int0 = new Intl.NumberFormat(NPR_LOCALE, { maximumFractionDigits: 0 })
 const dec2 = new Intl.NumberFormat(NPR_LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+/**
+ * A figure that rounds to zero prints as zero, never "-0" (S877). `Math.round(-0.3)` is -0 and Intl
+ * prints that as "-0"; a tiny negative such as -0.001 prints as "-0.00". Only the sign of an
+ * all-zero result is dropped, so no rounding changes and a real negative ("-0.01") keeps its minus.
+ */
+function unsignedZero(s) {
+  return s.charCodeAt(0) === 45 && /^-[0.,]+$/.test(s) ? s.slice(1) : s
+}
+
 /** `12,48,650` — Math.round, no prefix. The HR and asset tables' `fmt`. */
 export function nprInt(n) {
-  return int0.format(Math.round(n || 0))
+  return unsignedZero(int0.format(Math.round(n || 0)))
 }
 
 /** `3,42,500.00` — two decimals, no prefix. Bill lines, purchase totals, VAT figures. */
 export function npr2(n) {
-  return dec2.format(Number(n) || 0)
+  return unsignedZero(dec2.format(Number(n) || 0))
 }
 
 /**

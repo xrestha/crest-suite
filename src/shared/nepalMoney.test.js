@@ -28,6 +28,26 @@ describe('nepalMoney groups in lakh and crore', () => {
     expect(nprPaisa(null)).toBe('0')
   })
 
+  test('a figure that rounds to zero has no minus sign (S877)', () => {
+    expect(nprInt(-0.3)).toBe('0')             // Math.round gives -0, Intl printed "-0"
+    expect(nprInt(-0)).toBe('0')
+    expect(npr2(-0.001)).toBe('0.00')          // Intl printed "-0.00"
+    expect(npr2(-0.004)).toBe('0.00')
+    expect(npr(-0.4)).toBe('NPR 0')
+    expect(nprExact(-0.002)).toBe('NPR 0.00')
+    expect(nprPaisa(-0.001)).toBe('0')
+    expect(nprOrDash(-0.2)).toBe('NPR 0')
+    // A real negative keeps its sign, and the rounding is unchanged.
+    expect(nprInt(-0.5)).toBe('0')             // Math.round(-0.5) is -0: rounds to zero
+    expect(nprInt(-0.6)).toBe('-1')
+    expect(npr(-1234.4)).toBe('NPR -1,234')
+    expect(npr2(-0.005)).toBe('-0.01')         // Intl rounds half away from zero, as before
+    expect(npr2(-0.01)).toBe('-0.01')
+    expect(npr2(-1500)).toBe('-1,500.00')
+    expect(nprPaisa(-500.5)).toBe('-500.50')
+    expect(nprInt(-100000)).toBe('-1,00,000')
+  })
+
   test('a missing figure is a dash, not a zero', () => {
     expect(nprOrDash(null)).toBe('—')
     expect(nprOrDash(undefined)).toBe('—')

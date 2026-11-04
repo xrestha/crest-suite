@@ -206,6 +206,10 @@ export default function OptionGroups() {
       inclPrice: (Number(r.selling_price) || 0) * (1 + (vatReg ? vatOf(r) : 0)),
     })))
     // `hidden` ones are offered only on a line that already holds them (OptionModal).
+    // S877: so is a recipe a choice line names that is no longer in the Sub-Recipe category (moved
+    // before the S838 recategorise guard). It still takes stock on every sale, so its line shows the
+    // recipe and says it moved, instead of a blank box; it is never offered for a new line.
+    const lineSubIds = new Set((cat.ingredients || []).map(i => i.sub_recipe_id).filter(Boolean))
     setItemChoices([
       ...(items || []).map(i => ({
         value: `item:${i.id}`, label: `${i.name} (${i.uom})${shown(i) ? '' : ' — hidden in Item Master'}`, unit: i.uom, hidden: !shown(i),
@@ -215,6 +219,14 @@ export default function OptionGroups() {
         label: `Sub-recipe: ${r.name}${r.yield_uom ? ` (${r.yield_uom})` : ''}${shown(r) ? '' : ' — hidden in Recipe Costing'}`,
         unit: r.yield_uom || '',
         hidden: !shown(r),
+      })),
+      ...all.filter(r => r.category !== 'Sub-Recipe' && lineSubIds.has(r.id)).map(r => ({
+        value: `sub:${r.id}`,
+        label: `${r.name}${r.yield_uom ? ` (${r.yield_uom})` : ''} — no longer a sub-recipe`,
+        unit: r.yield_uom || '',
+        hidden: true,
+        movedOut: true,
+        name: r.name,
       })),
     ])
     setLoading(false)
@@ -555,8 +567,8 @@ export default function OptionGroups() {
 
       {settingsSettled && vatMode == null && (
         <div role="status" className="amber-banner">
-          <strong>Choices cannot be saved right now.</strong>{' '}
-          {VAT_MODE_UNKNOWN_TEXT}
+          <strong>Choice prices cannot be changed right now.</strong>{' '}
+          {VAT_MODE_UNKNOWN_TEXT} A choice whose price is left as it is still saves.
         </div>
       )}
 
