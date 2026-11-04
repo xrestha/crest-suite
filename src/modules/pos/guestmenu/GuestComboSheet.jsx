@@ -12,6 +12,7 @@ import { tidyName, matchesSearch } from './guestMenuHelpers'
 import { useLeaveConfirm, LeaveConfirm } from './GuestOptionSheet'
 import GuestOptionGroup, { FOCUSABLE_CHIP, signedNpr } from './GuestOptionGroup'
 import DietMark, { dietOfDish } from './DietMark'
+import { safeDishGroups, HIDDEN_CHOICES_NOTE } from './guestAllergenChoices'
 
 // Combos on the QR menu (S839, docs/pos-combos.md): the sheet a guest builds one combo in. A combo is
 // sold at one price ("Momo Combo, NPR 350") and made of picks ("Pick a momo", "Pick a drink"), each
@@ -165,10 +166,13 @@ export function comboCartWithout(cart, sentLines) {
  * none of them, and its allergen information is complete. A dish whose ingredients nobody checked
  * is never offered under a filter, the same rule as the menu's own dishes. The dish's allergens are
  * its own (get_guest_menu_options) together with the menu row's (`allergensOf(recipeId)`).
+ * S877: nor a dish that cannot be ordered without one of its own choices that carries a hidden
+ * allergen (`choicesBlocked(recipeId)`, from safeDishGroups' `orderable`).
  */
-export function comboDishAllowed(it, { excludedAllergens = [], allergensOf = () => [], isIncomplete = () => false } = {}) {
+export function comboDishAllowed(it, { excludedAllergens = [], allergensOf = () => [], isIncomplete = () => false, choicesBlocked = () => false } = {}) {
   if (excludedAllergens.length === 0) return true
   if (it.allergens_complete === false || isIncomplete(it.recipe_id)) return false
+  if (choicesBlocked(it.recipe_id)) return false
   const own = Array.isArray(it.allergens) ? it.allergens : []
   return ![...own, ...(allergensOf(it.recipe_id) || [])].some(a => excludedAllergens.includes(a))
 }
@@ -179,15 +183,27 @@ export function comboDishAllowed(it, { excludedAllergens = [], allergensOf = () 
  * offers a dish free of it with complete allergen information (`comboDishAllowed`). The search
  * reads the combo's name and description and its dishes' names.
  */
-export function comboMatches(combo, { query = '', vegOnly = false, excludedAllergens = [], allergensOf = () => [], isIncomplete = () => false } = {}) {
+export function comboMatches(combo, { query = '', vegOnly = false, excludedAllergens = [], allergensOf = () => [], isIncomplete = () => false, choicesBlocked = () => false } = {}) {
   const picks = comboPicksOf(combo)
   // Egg is not vegetarian: an egg dish has is_veg false, so it never satisfies a pick here.
   if (vegOnly && !picks.every(g => g.items.some(it => it.is_veg === true))) return false
   if (excludedAllergens.length > 0
-    && !picks.every(g => g.items.some(it => comboDishAllowed(it, { excludedAllergens, allergensOf, isIncomplete })))) return false
+    && !picks.every(g => g.items.some(it => comboDishAllowed(it, { excludedAllergens, allergensOf, isIncomplete, choicesBlocked })))) return false
   if (!String(query || '').trim()) return true
   return matchesSearch({ name: tidyName(combo.name), description: combo.description, category: 'Combos' }, query)
     || picks.some(g => g.items.some(it => matchesSearch({ name: tidyName(it.name) }, query)))
+}
+
+const NO_ALLERGENS = []
+
+/**
+ * One pick's dish's choices as this guest is offered them (S877, safeDishGroups), keyed by pick AND
+ * dish: an edit keeps visible only the choices its own pick already holds.
+ */
+function pickGroups(dishGroupsByRecipe, excludedAllergens, initialPicks, gid, rid) {
+  const given = (initialPicks || []).find(p => p.group_id === gid)
+  const keep = given && given.recipe_id === rid ? (given.option_ids || []) : []
+  return safeDishGroups(dishGroupsByRecipe?.[rid] || [], excludedAllergens, { keep })
 }
 
 /**
@@ -200,12 +216,17 @@ export function comboMatches(combo, { query = '', vegOnly = false, excludedAller
  * @param {boolean} [props.editing]  opens on Review and says Update
  * @param {(picks: Array<{ group_id, recipe_id, option_ids }>) => void} props.onConfirm
  * @param {{ current: { back: () => boolean } | null }} [props.backRef]  GuestMenu's handle for the phone's Back (S842)
+ * @param {string[]} [props.excludedAllergens]  the guest's allergen filter (S877)
  */
 // `dishAllowed(item)` (S870): under the guest's allergen filter, a pick lists only the dishes it may
 // offer (comboDishAllowed), and never pre-selects one it may not. A dish already chosen stays listed.
-export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, vatOf, initialPicks, editing = false, onConfirm, onClose, backRef, dishAllowed = () => true }) {
+// S877: a picked dish's own choices that carry a hidden allergen are taken out too (safeDishGroups),
+// except the ones already on the line being changed, and none of them is picked by default.
+export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, vatOf, initialPicks, editing = false, onConfirm, onClose, backRef, dishAllowed = () => true, excludedAllergens = NO_ALLERGENS }) {
   const picks = useMemo(() => comboPicksOf(combo), [combo])
-  const groupsOf = rid => dishGroupsByRecipe?.[rid] || []
+  const safeOf = (gid, rid) => pickGroups(dishGroupsByRecipe, excludedAllergens, initialPicks, gid, rid)
+  const groupsOf = (gid, rid) => safeOf(gid, rid).groups
+  // Pricing reads the dish's own groups: they only order the summary, and a kept pick needs its group.
   const ctx = { optionMaps: catalog, dishGroupsByRecipe, vatOf }
   const comboName = tidyName(combo.name)
 
@@ -223,7 +244,7 @@ export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, va
       if (rid) {
         opts[`${g.id}|${rid}`] = given && given.recipe_id === rid
           ? [...(given.option_ids || [])]
-          : defaultSelection(dishGroupsByRecipe?.[rid] || [])
+          : defaultSelection(groupsOf(g.id, rid))
       }
     }
     return { chosen, opts }
@@ -231,7 +252,7 @@ export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, va
   const [chosen, setChosen] = useState(initial.chosen)
   // A dish's choices are kept per pick AND dish, so going back to a dish brings its choices back.
   const [opts, setOpts] = useState(initial.opts)
-  const optsFor = (gid, rid) => opts[`${gid}|${rid}`] ?? defaultSelection(groupsOf(rid))
+  const optsFor = (gid, rid) => opts[`${gid}|${rid}`] ?? defaultSelection(groupsOf(gid, rid))
 
   const current = picks.map(g => ({
     group_id: g.id, recipe_id: chosen[g.id] || null, option_ids: chosen[g.id] ? optsFor(g.id, chosen[g.id]) : [],
@@ -245,8 +266,9 @@ export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, va
 
   // A pick asks a question when it offers more than one dish, or its one dish has choices of its own.
   const steps = useMemo(
-    () => picks.filter(g => g.items.length > 1 || (dishGroupsByRecipe?.[g.items[0]?.recipe_id] || []).length > 0),
-    [picks, dishGroupsByRecipe],
+    () => picks.filter(g => g.items.length > 1
+      || pickGroups(dishGroupsByRecipe, excludedAllergens, initialPicks, g.id, g.items[0]?.recipe_id).groups.length > 0),
+    [picks, dishGroupsByRecipe, excludedAllergens, initialPicks],
   )
   // An edit, and a set meal that asks nothing, open on Review.
   const startStep = editing ? steps.length : 0
@@ -270,7 +292,7 @@ export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, va
   function problemOf(g) {
     const rid = chosen[g.id]
     if (!rid) return { group: g, kind: 'dish' }
-    const p = selectionProblems(groupsOf(rid), optsFor(g.id, rid))[0]
+    const p = selectionProblems(groupsOf(g.id, rid), optsFor(g.id, rid))[0]
     return p ? { group: g, kind: 'choice', problem: p } : null
   }
   const stepProblem = stepPick ? problemOf(stepPick) : null
@@ -320,8 +342,8 @@ export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, va
   function toggle(gid, rid, dishGroupId, rule, optionId) {
     const key = `${gid}|${rid}`
     setOpts(prev => {
-      const cur = prev[key] ?? defaultSelection(groupsOf(rid))
-      const groupOptions = groupsOf(rid).find(d => d.group.id === dishGroupId)?.options || []
+      const cur = prev[key] ?? defaultSelection(groupsOf(gid, rid))
+      const groupOptions = groupsOf(gid, rid).find(d => d.group.id === dishGroupId)?.options || []
       const inGroup = new Set(groupOptions.map(o => o.id))
       const has = cur.includes(optionId)
       let next
@@ -426,7 +448,8 @@ export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, va
           dishAllowed={dishAllowed}
           chosenId={chosen[stepPick.id]}
           optionIds={chosen[stepPick.id] ? optsFor(stepPick.id, chosen[stepPick.id]) : []}
-          dishGroups={chosen[stepPick.id] ? groupsOf(chosen[stepPick.id]) : []}
+          dishGroups={chosen[stepPick.id] ? groupsOf(stepPick.id, chosen[stepPick.id]) : []}
+          hiddenChoices={chosen[stepPick.id] ? safeOf(stepPick.id, chosen[stepPick.id]).hidden : 0}
           catalog={catalog}
           vat={chosen[stepPick.id] && vatOf ? vatOf(chosen[stepPick.id]) : 0}
           tried={tried}
@@ -468,8 +491,11 @@ export default function GuestComboSheet({ combo, dishGroupsByRecipe, catalog, va
 
 // One pick's step: its dishes as one radio group (or the one dish, included), then the picked dish's
 // own choice groups, drawn as the dish sheet draws them.
-function PickStep({ pick, dishAllowed = () => true, chosenId, optionIds, dishGroups, catalog, vat, tried, problem, groupRefs, onChooseDish, onToggle }) {
+function PickStep({ pick, dishAllowed = () => true, chosenId, optionIds, dishGroups, hiddenChoices = 0, catalog, vat, tried, problem, groupRefs, onChooseDish, onToggle }) {
   const single = pick.items.length === 1
+  // S877: what the allergen filter took out of this step, dishes and the chosen dish's own choices.
+  const offered = single ? pick.items : pick.items.filter(it => it.recipe_id === chosenId || dishAllowed(it))
+  const hiddenHere = hiddenChoices + (pick.items.length - offered.length)
   const labelId = `gc-pick-${pick.id}`
   const dish = pick.items.find(it => it.recipe_id === chosenId)
   const attachByGroup = useMemo(() => Object.fromEntries(dishGroups.map(d => [d.group.id, d.attachment])), [dishGroups])
@@ -481,6 +507,7 @@ function PickStep({ pick, dishAllowed = () => true, chosenId, optionIds, dishGro
 
   return (
     <div className="gm-groups">
+      {hiddenHere > 0 && <p className="gm-hidden-note">{HIDDEN_CHOICES_NOTE}</p>}
       {single ? (
         <div className="gm-group" ref={el => { groupRefs.current[pick.id] = el }} tabIndex={-1}>
           <div className="gm-group-head">
@@ -510,7 +537,7 @@ function PickStep({ pick, dishAllowed = () => true, chosenId, optionIds, dishGro
             </span>
           </div>
           <div className="gm-options">
-            {pick.items.filter(it => it.recipe_id === chosenId || dishAllowed(it)).map((it, i) => {
+            {offered.map((it, i) => {
               const on = it.recipe_id === chosenId
               const extra = Number(it.extra_price) || 0
               const diet = dietOfDish(it.is_veg, it.is_egg)

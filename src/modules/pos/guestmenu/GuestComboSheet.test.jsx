@@ -154,6 +154,18 @@ describe('combo helpers', () => {
     expect(comboMatches(combo, { isIncomplete: () => true })).toBe(true)
     expect(comboDishAllowed({ recipe_id: MOMO, allergens: ['milk'] }, { excludedAllergens: ['milk'] })).toBe(false)
   })
+
+  test('S877: a dish that cannot be ordered without a choice the guest hides is not offered', () => {
+    const blocked = rid => rid === MOMO
+    expect(comboDishAllowed({ recipe_id: MOMO }, { excludedAllergens: ['milk'], choicesBlocked: blocked })).toBe(false)
+    expect(comboDishAllowed({ recipe_id: VEG }, { excludedAllergens: ['milk'], choicesBlocked: blocked })).toBe(true)
+    // With no filter, nothing is blocked.
+    expect(comboDishAllowed({ recipe_id: MOMO }, { choicesBlocked: blocked })).toBe(true)
+    // Veg Momo still answers the pick, so the combo stays; a set meal of Chicken Momo would not.
+    expect(comboMatches(combo, { excludedAllergens: ['milk'], choicesBlocked: blocked })).toBe(true)
+    const chickenOnly = { ...combo, groups: [combo.groups[0], { ...combo.groups[1], items: [combo.groups[1].items[0]] }] }
+    expect(comboMatches(chickenOnly, { excludedAllergens: ['milk'], choicesBlocked: blocked })).toBe(false)
+  })
 })
 
 describe('GuestComboSheet', () => {
@@ -227,6 +239,40 @@ describe('GuestComboSheet', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Update · NPR 350$/ }))
     expect(onConfirm).toHaveBeenCalledWith([
       { group_id: 'g-momo', recipe_id: VEG, option_ids: [] },
+      { group_id: 'g-drink', recipe_id: COKE, option_ids: [] },
+    ])
+  })
+
+  // S877 (owner decision): a picked dish's own choices that carry an allergen the guest hides are
+  // taken out of the step, and the step says so in one line.
+  test('S877: a choice carrying a hidden allergen leaves the picked dish, and the step says so', () => {
+    const milky = groupsForDish(MOMO, { ...catalogRaw, options: catalogRaw.options.map(o => (o.id === 'o-cheese' ? { ...o, allergens: ['milk'] } : o)) })
+    const { onConfirm } = renderSheet({ dishGroupsByRecipe: { [MOMO]: milky }, excludedAllergens: ['milk'] })
+    expect(screen.queryByText('Some choices are hidden because of your allergen filter.')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: /Chicken Momo/ }))
+    expect(screen.queryByRole('checkbox', { name: /Cheese/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Full/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('Some choices are hidden because of your allergen filter.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^Next/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Add to order/ }))
+    expect(onConfirm).toHaveBeenCalledWith([
+      { group_id: 'g-momo', recipe_id: MOMO, option_ids: ['o-full'] },
+      { group_id: 'g-drink', recipe_id: COKE, option_ids: [] },
+    ])
+  })
+
+  test('S877: changing a combo keeps a hidden choice it already holds on the sheet', () => {
+    const milky = groupsForDish(MOMO, { ...catalogRaw, options: catalogRaw.options.map(o => (o.id === 'o-cheese' ? { ...o, allergens: ['milk'] } : o)) })
+    const { onConfirm } = renderSheet({
+      dishGroupsByRecipe: { [MOMO]: milky }, excludedAllergens: ['milk'], editing: true,
+      initialPicks: [{ group_id: 'g-momo', recipe_id: MOMO, option_ids: ['o-full', 'o-cheese'] }, { group_id: 'g-drink', recipe_id: COKE, option_ids: [] }],
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Change Pick a momo' }))
+    expect(screen.getByRole('checkbox', { name: /Cheese/ })).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(screen.getByRole('button', { name: /^Back to review/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Update/ }))
+    expect(onConfirm).toHaveBeenCalledWith([
+      { group_id: 'g-momo', recipe_id: MOMO, option_ids: ['o-full', 'o-cheese'] },
       { group_id: 'g-drink', recipe_id: COKE, option_ids: [] },
     ])
   })

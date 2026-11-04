@@ -11,6 +11,7 @@ import Modal from '../../../components/Modal'
 import { useGuestDocumentIdentity } from './guestDocument'
 import { guestOrderRefusal } from './guestOrderRefusal'
 import GuestOptionSheet from './GuestOptionSheet'
+import { safeDishGroups } from './guestAllergenChoices'
 import DietMark, { dietOfDish, DietLabel, DIET_ORDER } from './DietMark'
 import GuestComboSheet, {
   comboOrderable, comboMatches, comboDishAllowed, comboCartKey, comboUnitPrice, comboOrderItem, comboOrderName,
@@ -446,6 +447,14 @@ export default function GuestMenu() {
     }
     return out
   }, [optionCatalog])
+  // S877 (owner decision): a choice's allergens count in the guest's allergen filter. Each dish's
+  // choices with the ones carrying a hidden allergen taken out (guestAllergenChoices.js); the dish
+  // leaves the menu only when it cannot be ordered without one (`orderable` false). The cart and
+  // its prices still read dishGroupsByRecipe: the filter changes what is offered, never a line.
+  const safeChoicesByRecipe = useMemo(() => {
+    if (excludedAllergens.length === 0) return {}
+    return Object.fromEntries(Object.entries(dishGroupsByRecipe).map(([rid, dg]) => [rid, safeDishGroups(dg, excludedAllergens)]))
+  }, [dishGroupsByRecipe, excludedAllergens])
 
   // ── Polls ─────────────────────────────────────────────────────────────────────────────────────
   // Both polls run only while the page is visible (a phone with its screen off does not need a
@@ -612,11 +621,15 @@ export default function GuestMenu() {
   // S870: a restaurant whose dishes are judged for allergen completeness (allergens_complete is set,
   // i.e. a Growth or Pro plan or the nutrition switch) offers all 14 allergens to filter by, in the
   // list order, so a guest can hide one no dish names: that is what also hides the dishes nobody has
-  // checked. Any other restaurant offers the allergens its dishes carry, as before.
+  // checked. Any other restaurant offers the allergens its dishes carry, as before, and since S877
+  // the allergens its choices carry, since hiding one now hides those choices.
   const allergenCheckOn = meta?.allergens_complete != null
   const allAllergens = useMemo(() => (allergenCheckOn
     ? ALLERGEN_KEYS
-    : sortAllergens(Array.from(new Set((rows || []).flatMap(r => r.allergens || []))))), [rows, allergenCheckOn])
+    : sortAllergens(Array.from(new Set([
+      ...(rows || []).flatMap(r => r.allergens || []),
+      ...(optionCatalog.options || []).flatMap(o => (Array.isArray(o.allergens) ? o.allergens : [])),
+    ])))), [rows, optionCatalog, allergenCheckOn])
   const hasVegMarks = (rows || []).some(r => r.is_veg != null)
   // S846: the marks this menu actually uses (dishes, combo dishes and choices alike), for the key
   // beside the vegetarian filter, in the key's order: veg, egg, non-veg.
@@ -633,9 +646,10 @@ export default function GuestMenu() {
 
   const filteredRows = useMemo(() => (rows || []).filter(r =>
     (!vegOnly || r.is_veg) &&
-    (excludedAllergens.length === 0 || (r.allergens_complete !== false && !(r.allergens || []).some(a => excludedAllergens.includes(a)))) &&
+    (excludedAllergens.length === 0 || (r.allergens_complete !== false && !(r.allergens || []).some(a => excludedAllergens.includes(a))
+      && safeChoicesByRecipe[r.recipe_id]?.orderable !== false)) &&
     matchesSearch({ name: tidyName(r.name), description: r.description, category: r.category }, trimmedQuery)
-  ), [rows, vegOnly, excludedAllergens, trimmedQuery])
+  ), [rows, vegOnly, excludedAllergens, safeChoicesByRecipe, trimmedQuery])
   const activeFilterCount = (vegOnly ? 1 : 0) + excludedAllergens.length
 
   const { categories, byCategory } = useMemo(() => {
@@ -655,9 +669,10 @@ export default function GuestMenu() {
     .filter(c => comboOrderable(c) && comboMatches(c, {
       query: trimmedQuery, vegOnly, excludedAllergens, allergensOf: rid => byRecipe[rid]?.allergens || [],
       isIncomplete: rid => byRecipe[rid]?.allergens_complete === false,
+      choicesBlocked: rid => safeChoicesByRecipe[rid]?.orderable === false,
     }))
     .sort((a, b) => (Number(a.sort) || 0) - (Number(b.sort) || 0) || String(a.name).localeCompare(String(b.name))),
-  [optionCatalog, trimmedQuery, vegOnly, excludedAllergens, byRecipe])
+  [optionCatalog, trimmedQuery, vegOnly, excludedAllergens, byRecipe, safeChoicesByRecipe])
   // The menu's sections in order, for the chips and the section in view: Combos, then the categories.
   const sections = useMemo(() => (visibleCombos.length > 0 ? [COMBOS, ...categories] : categories), [visibleCombos.length, categories])
   const categoryKey = sections.join('|')
@@ -735,6 +750,13 @@ export default function GuestMenu() {
     tappedCategoryRef.current = cat
     setActiveCategory(cat)
     categoryRefs.current[cat]?.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' })
+  }
+
+  // A dish's choice sheet, with the choices the allergen filter hides taken out (S877). A line being
+  // changed keeps its own picks on the sheet, so Update never drops one the guest cannot see.
+  function openOptionSheet(item, edit = null) {
+    const safe = safeDishGroups(dishGroupsByRecipe[item.recipe_id], excludedAllergens, { keep: edit?.initialIds || [] })
+    setOptionSheet({ item, dishGroups: safe.groups, hiddenChoices: safe.hidden, ...(edit || {}) })
   }
 
   function toggleAllergen(a) {
@@ -1298,7 +1320,8 @@ export default function GuestMenu() {
                     qty={qtyByRecipe[item.recipe_id] || 0}
                     onQtyChange={qty => setPlainQty(item.recipe_id, qty)}
                     dishGroups={dishGroupsByRecipe[item.recipe_id]}
-                    onChoose={() => setOptionSheet({ item, dishGroups: dishGroupsByRecipe[item.recipe_id] })}
+                    offeredGroups={safeChoicesByRecipe[item.recipe_id]?.groups}
+                    onChoose={() => openOptionSheet(item)}
                   />
                 ))}
               </ul>
@@ -1363,6 +1386,7 @@ export default function GuestMenu() {
                 <p className="gm-note">
                   Based on the ingredients the restaurant has recorded.
                   {allergenCheckOn && ' While you hide an allergen, dishes the restaurant has not fully checked are hidden too.'}
+                  {optionCatalog.options.length > 0 && ' A choice inside a dish is hidden too when it contains an allergen you hide.'}
                   {' '}If you have a serious allergy, please ask a member of staff.
                 </p>
               </div>
@@ -1384,6 +1408,8 @@ export default function GuestMenu() {
               forward. */}
           {orderLines.length === 0 ? (
             <div className="gm-empty">
+              {/* S877: a refusal that took the only dish off still says which one and why. */}
+              {submitError && <p role="alert" className="gm-error">{submitError}</p>}
               <p>Nothing in your order yet.</p>
               <button type="button" ref={reviewEmptyRef} className="btn btn-primary" onClick={() => setReviewOpen(false)}>Back to the menu</button>
             </div>
@@ -1410,7 +1436,7 @@ export default function GuestMenu() {
                         <button
                           type="button" className="btn btn-ghost btn-sm gm-edit-choices"
                           aria-label={`Change choices for ${l.name}`}
-                          onClick={() => setOptionSheet({ item: l.item, dishGroups: dishGroupsByRecipe[l.item.recipe_id], editKey: l.key, initialIds: l.option_ids })}
+                          onClick={() => openOptionSheet(l.item, { editKey: l.key, initialIds: l.option_ids })}
                         >Change choices</button>
                       )}
                     </div>
@@ -1479,6 +1505,7 @@ export default function GuestMenu() {
           initialIds={optionSheet.initialIds}
           editing={!!optionSheet.editKey}
           stepped={(optionCatalog.buildYourOwn || []).includes(optionSheet.item.recipe_id)}
+          hiddenChoices={optionSheet.hiddenChoices || 0}
           backRef={optionBackRef}
           onClose={() => setOptionSheet(null)}
           onConfirm={ids => { addCustom(optionSheet.item, ids, optionSheet.editKey); setOptionSheet(null) }}
@@ -1498,7 +1525,9 @@ export default function GuestMenu() {
             excludedAllergens,
             allergensOf: rid => byRecipe[rid]?.allergens || [],
             isIncomplete: rid => byRecipe[rid]?.allergens_complete === false,
+            choicesBlocked: rid => safeChoicesByRecipe[rid]?.orderable === false,
           })}
+          excludedAllergens={excludedAllergens}
           onClose={() => setComboSheet(null)}
           onConfirm={picks => { addCombo(comboSheet.combo, picks, comboSheet.editKey); setComboSheet(null) }}
         />
@@ -1682,7 +1711,7 @@ function searchCountText(dishes, combos, query) {
   return `${parts.join(' and ')} ${dishes + combos === 1 ? 'matches' : 'match'} “${query}”`
 }
 
-function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, qty, onQtyChange, dishGroups, onChoose }) {
+function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, qty, onQtyChange, dishGroups, offeredGroups, onChoose }) {
   const [imgFailed, setImgFailed] = useState(false)
   // S842: the 256px copy stored beside a photo uploaded since S842 (its URL carries the mark), falling
   // back to the full photo if the copy will not load. An older photo has no mark and loads in full.
@@ -1694,9 +1723,10 @@ function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, q
   const name = tidyName(item.name)
   const diet = dietOfDish(item.is_veg, item.is_egg)
   const priceInc = priceIncVat(item, vatRegistered)
-  // A dish with choices shows "From" its cheapest valid version (owner decision, S758).
+  // A dish with choices shows "From" its cheapest valid version (owner decision, S758), among the
+  // choices the guest's allergen filter still offers (S877, `offeredGroups`).
   const fromPrice = dishGroups
-    ? Math.round(inclFromEx(lowestDishPrice(item.selling_price, dishGroups), vatRegistered ? (parseFloat(item.vat_rate) || 0) : 0))
+    ? Math.round(inclFromEx(lowestDishPrice(item.selling_price, offeredGroups || dishGroups), vatRegistered ? (parseFloat(item.vat_rate) || 0) : 0))
     : null
   const showFrom = fromPrice != null && fromPrice !== priceInc
   const hasImage = item.image_url && !imgFailed

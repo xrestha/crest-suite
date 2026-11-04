@@ -12,6 +12,15 @@
 //  - notFood: packaging (a cup, a lid). Suggested only when no allergen word matched, so "MILK
 //    CARTON" stays milk.
 //  - nothing matched: shown as "no allergen words found", which a person may confirm as none.
+//
+// A near miss (S877, owner decision): "ICE CREAN" matched nothing, so it read as "no allergen
+// words" and could be confirmed as containing none. A name word of 5 or more letters that matched
+// no rule and is ONE edit (a letter changed, added or removed, or two neighbouring letters swapped)
+// from an allergen word goes into checkLabel, with what it looked like in nearMiss. It never adds a
+// key: a near miss is a reason to read the label, never a match. A word Crest already knows (a
+// label word such as "paste" or "batter", a packaging word, a word of any phrase here, or a real
+// word listed in REAL_WORDS such as "bitter") is not a misspelling, and a near miss outranks
+// packaging the way an allergen word does.
 
 import { ALLERGEN_KEYS } from './allergens'
 
@@ -122,9 +131,48 @@ function tokens(name) {
   return String(name || '').toLowerCase().replace(/[^a-z]+/g, ' ').trim().split(' ').filter(Boolean)
 }
 
+// The words a near miss is measured against: each one-word rule that names an allergen. A word of
+// a longer phrase ("dried" in "dried apricot", "salt" in "celery salt") names none by itself, and
+// measuring against it would read FRIED as DRIED.
+const NEAR_MISS_MIN = 5
+const ALLERGEN_WORDS = RULES.filter(([phrase, keys]) => keys.length > 0 && !phrase.includes(' ')).map(([phrase]) => phrase)
+// Real words one letter from an allergen word, met in item books: BITTER gourd (butter), BROAD
+// beans (bread), FLOOR mop (flour), a pizza CUTTER (butter), GOATS milk (oats), FAIRY washing-up
+// liquid (dairy), kitchen TWINE (wine). None is a misspelling, so none asks for the label.
+const REAL_WORDS = ['bitter', 'broad', 'floor', 'cutter', 'goats', 'fairy', 'twine']
+// Every word Crest already has a rule for, in any list: never a misspelling of something else.
+const KNOWN_WORDS = new Set([
+  ...RULES.flatMap(([phrase]) => phrase.split(' ')),
+  ...CHECK_LABEL, ...NOT_FOOD, ...REAL_WORDS,
+  ...[...CHECK_LABEL_PHRASES, ...NOT_FOOD_PHRASES, ...FOOD_DESPITE].flatMap(p => p.split(' ')),
+])
+
+/** Whether two different words are one edit apart: a letter changed, added, removed, or two neighbours swapped. */
+export function oneEditApart(a, b) {
+  if (a === b || Math.abs(a.length - b.length) > 1) return false
+  if (a.length === b.length) {
+    const diff = []
+    for (let i = 0; i < a.length && diff.length <= 2; i++) if (a[i] !== b[i]) diff.push(i)
+    if (diff.length === 1) return true
+    return diff.length === 2 && diff[1] === diff[0] + 1 && a[diff[0]] === b[diff[1]] && a[diff[1]] === b[diff[0]]
+  }
+  const [s, l] = a.length < b.length ? [a, b] : [b, a]
+  let i = 0
+  while (i < s.length && s[i] === l[i]) i++
+  return s.slice(i) === l.slice(i + 1)
+}
+
+/** The allergen word a name word looks like, or null (see the header: a near miss). */
+function nearMissOf(word) {
+  if (word.length < NEAR_MISS_MIN || KNOWN_WORDS.has(word)) return null
+  return ALLERGEN_WORDS.find(w => oneEditApart(word, w)) || null
+}
+
 /**
  * The guess for one ingredient name.
- * → { keys: [list order], reasons: { key: ['word', …] }, checkLabel: ['sauce', …], notFood: 'cup' | null }
+ * → { keys: [list order], reasons: { key: ['word', …] }, checkLabel: ['sauce', …], notFood: 'cup' | null,
+ *     nearMiss: [{ word: 'crean', like: 'cream' }, …] }
+ * A near-miss word is in checkLabel too, so the row is never confirmed on the guess.
  */
 export function suggestAllergens(name) {
   const t = tokens(name)
@@ -143,13 +191,25 @@ export function suggestAllergens(name) {
   const keys = ALLERGEN_KEYS.filter(k => reasons[k])
   const joined = ` ${t.join(' ')} `
   const has = phrase => joined.includes(` ${phrase} `)
-  // A packaging word outranks a label word ("dip cup" is a cup), never an allergen word ("milk carton").
-  const packWord = keys.length === 0 && !FOOD_DESPITE.some(has)
+  const nearMiss = []
+  t.forEach((w, i) => {
+    const like = used[i] ? null : nearMissOf(w)
+    if (like && !nearMiss.some(n => n.word === w)) nearMiss.push({ word: w, like })
+  })
+  // A packaging word outranks a label word ("dip cup" is a cup), never an allergen word ("milk
+  // carton") or a near miss of one ("ice crean cup" might be ice cream).
+  const packWord = keys.length === 0 && nearMiss.length === 0 && !FOOD_DESPITE.some(has)
     ? NOT_FOOD_PHRASES.find(has) || t.find(w => NOT_FOOD.has(w)) || null
     : null
   const checkLabel = packWord ? [] : [
     ...CHECK_LABEL_PHRASES.filter(has),
     ...t.filter((w, i) => !used[i] && CHECK_LABEL.has(w)),
+    ...nearMiss.map(n => n.word),
   ]
-  return { keys, reasons, checkLabel: [...new Set(checkLabel)], notFood: packWord }
+  return { keys, reasons, checkLabel: [...new Set(checkLabel)], notFood: packWord, nearMiss }
+}
+
+/** "“crean” looks like “cream”", for the Check allergens list and the Nutrition form. */
+export function nearMissText(nearMiss) {
+  return (nearMiss || []).map(n => `“${n.word}” looks like “${n.like}”`).join(', ')
 }

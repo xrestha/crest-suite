@@ -7,6 +7,7 @@ paths:
   - "src/data/nutritionSeed.js"
   - "src/modules/pos/guestmenu/GuestMenu.jsx"
   - "src/modules/pos/guestmenu/GuestComboSheet.jsx"
+  - "src/modules/pos/guestmenu/guestAllergenChoices.js"
 ---
 
 # Nutrition and allergens: one list, a checked flag, two copies of the walk
@@ -14,7 +15,7 @@ paths:
 Nutrition and allergens live on the ingredient (`items.nutrition` jsonb) and roll up through
 recipes and sub-recipes. The editor (`NutritionEditorModal`) opens from a recipe's ingredient row
 and from Item Master; Item Master's Check allergens list (`AllergenReviewModal`) confirms many at
-once. Decisions and verification: CHANGELOG S870, S871.
+once. Decisions and verification: CHANGELOG S870, S871, S877.
 
 - **An allergen is one of the 14 keys in `src/shared/constants/allergens.js`, never free text.**
   The guest filter compares strings exactly, which is why "dairy" and "milk" once split it.
@@ -40,9 +41,20 @@ once. Decisions and verification: CHANGELOG S870, S871.
   the `nutrition_facts` flag, like `planHasFeature`). The nutrient FIGURES still follow the flag
   alone. An incomplete dish says "Allergen info incomplete, please ask staff" and drops out under
   any allergen filter; a combo pick offers only dishes that pass (`comboDishAllowed`).
+- **A hidden allergen hides the CHOICE, not the dish (S877, `guestAllergenChoices.js`).** A choice
+  carrying one leaves the dish and combo sheets and is never a default; the dish leaves the menu
+  only when a group's rule can no longer be met (`orderable`). A line being changed keeps its own
+  picks on the sheet. The cart and prices read the unfiltered groups; the till is not filtered.
 - **Check allergens guesses from the NAME** (`allergenSuggest.js`): whole words and phrases, longest
   first and using up their words. Never route a guess through the nutrition library's loose match
   (OAT MILK matched Buffalo milk). A row marked Check the label is never confirmed on a guess,
   alone or in Confirm all; packaging is suggested as Not food only when no allergen word matched.
-- Known gaps: a choice's allergens do not feed the dish filter; `push_master_data` copies HQ's
-  checked state over a branch's (IMS_TODO).
+  A name word of 5+ letters one edit from a one-word allergen rule ("ICE CREAN") is a near miss:
+  Check the label, `nearMiss` says what it looked like, and it never adds a key. Known words and
+  `REAL_WORDS` (bitter, broad, floor…) are never near misses.
+- **An HQ push keeps a branch's own check (S877, `20261104150000`).** On a branch item with
+  `allergens_checked` true, `push_master_data` sends HQ's nutrition without `allergens`,
+  `allergens_checked` and `not_food`, so the trigger keeps the branch's; a new or unchecked item
+  takes HQ's whole record.
+- Known gap: a choice's allergens are typed on the choice, not rolled up from its stock lines, and
+  a choice has no checked flag.

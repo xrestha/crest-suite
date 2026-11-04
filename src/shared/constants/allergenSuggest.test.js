@@ -1,4 +1,4 @@
-import { suggestAllergens } from './allergenSuggest'
+import { suggestAllergens, nearMissText, oneEditApart } from './allergenSuggest'
 
 // A guess a person confirms, so the failures that matter are the confident wrong ones: a plant
 // milk read as milk, peanut butter read as dairy, a flour that is not wheat read as gluten.
@@ -69,7 +69,78 @@ describe('suggestAllergens', () => {
   })
 
   test('nothing to go on', () => {
-    expect(suggestAllergens('LETTUCE')).toEqual({ keys: [], reasons: {}, checkLabel: [], notFood: null })
-    expect(suggestAllergens('')).toEqual({ keys: [], reasons: {}, checkLabel: [], notFood: null })
+    expect(suggestAllergens('LETTUCE')).toEqual({ keys: [], reasons: {}, checkLabel: [], notFood: null, nearMiss: [] })
+    expect(suggestAllergens('')).toEqual({ keys: [], reasons: {}, checkLabel: [], notFood: null, nearMiss: [] })
+  })
+})
+
+// S877 (owner decision): a misspelt name used to read as "no allergen words found", which Confirm all
+// would save as containing none. A word one letter off an allergen word asks for the label instead,
+// and never ticks anything.
+describe('a near miss asks for the label, never ticks', () => {
+  test('ICE CREAN looks like cream: check the label, nothing ticked', () => {
+    expect(suggestAllergens('ICE CREAN')).toEqual({
+      keys: [], reasons: {}, checkLabel: ['crean'], notFood: null, nearMiss: [{ word: 'crean', like: 'cream' }],
+    })
+    expect(nearMissText(suggestAllergens('ICE CREAN').nearMiss)).toBe('“crean” looks like “cream”')
+  })
+
+  test('each kind of slip: a letter changed, added, removed, or two swapped', () => {
+    expect(suggestAllergens('MOZARELLA').nearMiss).toEqual([{ word: 'mozarella', like: 'mozzarella' }])
+    expect(suggestAllergens('CHEESEE').nearMiss).toEqual([{ word: 'cheesee', like: 'cheese' }])
+    expect(suggestAllergens('SALMAN FILLET').nearMiss).toEqual([{ word: 'salman', like: 'salmon' }])
+    expect(suggestAllergens('SQIUD RINGS').nearMiss).toEqual([{ word: 'sqiud', like: 'squid' }])
+    // A plural the list does not carry is a near miss too, so it is no longer confirmable as none.
+    expect(suggestAllergens('CAKES').checkLabel).toEqual(['cakes'])
+  })
+
+  test('a correct name is a match, with no near miss', () => {
+    expect(suggestAllergens('ICE CREAM')).toMatchObject({ keys: ['milk'], checkLabel: [], nearMiss: [] })
+    expect(suggestAllergens('PANEER').nearMiss).toEqual([])
+  })
+
+  test('a word under 5 letters is never a near miss', () => {
+    // MILC is one letter from milk, but a four-letter word has too many neighbours to judge.
+    expect(suggestAllergens('MILC')).toEqual({ keys: [], reasons: {}, checkLabel: [], notFood: null, nearMiss: [] })
+  })
+
+  test('a near miss never adds an allergen beside the ones that matched', () => {
+    expect(suggestAllergens('CHEDDER CHEESE')).toMatchObject({
+      keys: ['milk'], reasons: { milk: ['cheese'] }, checkLabel: ['chedder'], nearMiss: [{ word: 'chedder', like: 'cheddar' }],
+    })
+    expect(keysOf('SALMAN WITH CREAN')).toEqual([])
+  })
+
+  test('packaging: a packaging word is never a misspelling, and still reads as not food', () => {
+    expect(suggestAllergens('8 OZ RIPPLE CUP')).toMatchObject({ notFood: 'cup', checkLabel: [], nearMiss: [] })
+    expect(suggestAllergens('FLOOR MOP')).toMatchObject({ notFood: 'mop', checkLabel: [], nearMiss: [] })
+    // A near miss outranks packaging, as an allergen word does ("milk carton"): this may be ice cream.
+    expect(suggestAllergens('ICE CREAN CUP')).toMatchObject({ keys: [], notFood: null, checkLabel: ['crean'] })
+  })
+
+  test('a word Crest already knows is not a misspelling of another', () => {
+    // PASTE is a label word one letter from pasta; BATTER is one from butter.
+    expect(suggestAllergens('GINGER GARLIC PASTE')).toMatchObject({ keys: [], checkLabel: ['paste'], nearMiss: [] })
+    expect(suggestAllergens('TEMPURA BATTER')).toMatchObject({ keys: [], checkLabel: ['batter'], nearMiss: [] })
+    // FRIED is one letter from dried, which names no allergen by itself (only in "dried apricot").
+    expect(suggestAllergens('FRIED ONION')).toMatchObject({ keys: [], checkLabel: [], nearMiss: [] })
+  })
+
+  test('BITTER GOURD is not milk, and not a label question: bitter is a real word', () => {
+    expect(suggestAllergens('BITTER GOURD')).toEqual({ keys: [], reasons: {}, checkLabel: [], notFood: null, nearMiss: [] })
+    expect(suggestAllergens('BROAD BEANS').nearMiss).toEqual([])
+    expect(suggestAllergens('PIZZA CUTTER').nearMiss).toEqual([])
+  })
+})
+
+describe('oneEditApart', () => {
+  test('one change, one added or removed letter, or one swap of neighbours', () => {
+    expect(oneEditApart('crean', 'cream')).toBe(true)
+    expect(oneEditApart('buttr', 'butter')).toBe(true)
+    expect(oneEditApart('cheesee', 'cheese')).toBe(true)
+    expect(oneEditApart('sqiud', 'squid')).toBe(true)
+    expect(oneEditApart('cream', 'cream')).toBe(false)
+    expect(oneEditApart('creamy', 'crem')).toBe(false)
+    expect(oneEditApart('sqidu', 'squid')).toBe(false)
   })
 })

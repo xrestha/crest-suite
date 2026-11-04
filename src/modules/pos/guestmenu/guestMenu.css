@@ -711,6 +711,13 @@
   gap: 20px;
   padding-bottom: 8px;
 }
+/* S877: choices the guest's allergen filter took out of this sheet. A plain fact, not a warning. */
+.guest-menu .gm-hidden-note {
+  margin: 0 0 -8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--theme-text2);
+}
 .guest-menu .gm-group {
   outline: none;
 }

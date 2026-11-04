@@ -9,13 +9,14 @@ import { fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { withTimeout } from '../../../utils/withTimeout'
 import { allergensChecked, confirmAllergensPayload, notFoodPayload } from '../../../utils/nutrition'
 import { ALLERGEN_KEYS, normaliseAllergens, allergenLabel } from '../../../shared/constants/allergens'
-import { suggestAllergens } from '../../../shared/constants/allergenSuggest'
+import { suggestAllergens, nearMissText } from '../../../shared/constants/allergenSuggest'
 
 // The Check allergens list (S870): every ingredient nobody has checked, with Crest's guess from its
 // name (allergenSuggest.js) and the word each allergen came from. A person confirms, row by row or
 // all shown at once; nothing counts as checked before that. A row that needs its label (a sauce, a
 // spice mix, a word that is not on the list) has no Confirm: it opens the Nutrition form instead,
-// and Confirm all leaves it out.
+// and Confirm all leaves it out. S877: so does a name with a near miss ("ICE CREAN" looks like
+// cream), which ticks nothing and says what the word looked like.
 
 const KINDS = [
   { key: 'all', label: 'All' },
@@ -42,6 +43,28 @@ function reasonText(row) {
     const from = row.s.reasons[k]
     return `${allergenLabel(k)} (${from ? from.join(', ') : 'already on the item'})`
   }).join(' · ')
+}
+
+// The amber line of a row that needs its label: "Check the label (sauce)", and for a near miss
+// "“crean” looks like “cream”: check the label" (S877), then any word that is not on the list.
+function labelText(row) {
+  const near = row.s.nearMiss || []
+  const nearWords = new Set(near.map(n => n.word))
+  const plain = row.s.checkLabel.filter(w => !nearWords.has(w))
+  const parts = []
+  if (plain.length > 0 || near.length === 0) parts.push(`Check the label${plain.length > 0 ? ` (${plain.join(', ')})` : ''}`)
+  if (near.length > 0) parts.push(parts.length > 0 ? nearMissText(near) : `${nearMissText(near)}: check the label`)
+  if (row.current.other.length > 0) parts.push(`not on the list: ${row.current.other.join(', ')}`)
+  return parts.join(' · ')
+}
+
+// The note the Nutrition form shows when Change or Open hands it this row.
+function guessNoteOf(row) {
+  const notes = []
+  if (row.keys.length > 0) notes.push(`Ticked from the guess Crest made: ${reasonText(row)}.`)
+  const near = row.s.nearMiss || []
+  if (near.length > 0) notes.push(`${nearMissText(near)}: nothing was ticked for ${near.length === 1 ? 'it' : 'them'}.`)
+  return notes.length > 0 ? `${notes.join(' ')} Check the label if unsure, then save.` : ''
 }
 
 export default function AllergenReviewModal({ items, onClose, onSaved, onChange }) {
@@ -143,7 +166,7 @@ export default function AllergenReviewModal({ items, onClose, onSaved, onChange 
     <Modal onClose={onClose} title="Check allergens" maxWidth={920}>
       <p style={{ fontSize: 13, color: 'var(--theme-text2)', margin: '0 0 14px' }}>
         Every ingredient nobody has checked yet, with Crest&rsquo;s guess from its name and the word each allergen came from.
-        A guess is only a guess: confirm it if it is right, or open the ingredient to change it. Mixed or branded products need their label.
+        A guess is only a guess: confirm it if it is right, or open the ingredient to change it. Mixed or branded products, and names that look misspelt, need their label.
       </p>
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
@@ -196,10 +219,7 @@ export default function AllergenReviewModal({ items, onClose, onSaved, onChange 
                           ? <span style={{ color: 'var(--theme-text1)' }}>{reasonText(r)}</span>
                           : r.kind === 'none' && <span style={{ color: 'var(--theme-text2)' }}>No allergen words found</span>}
                         {r.kind === 'label' && (
-                          <span style={{ display: 'block', color: 'var(--theme-amber-text)' }}>
-                            △ Check the label{r.s.checkLabel.length > 0 ? ` (${r.s.checkLabel.join(', ')})` : ''}
-                            {r.current.other.length > 0 ? ` · not on the list: ${r.current.other.join(', ')}` : ''}
-                          </span>
+                          <span style={{ display: 'block', color: 'var(--theme-amber-text)' }}>△ {labelText(r)}</span>
                         )}
                       </>
                     )}
@@ -213,7 +233,7 @@ export default function AllergenReviewModal({ items, onClose, onSaved, onChange 
                         </button>
                       )}
                       <button type="button" className="btn btn-ghost btn-sm" disabled={busy}
-                        onClick={() => onChange(r.item, r.kind === 'notfood' ? [] : r.keys, r.keys.length > 0 ? `Ticked from the guess Crest made: ${reasonText(r)}. Check the label if unsure, then save.` : '')}
+                        onClick={() => onChange(r.item, r.kind === 'notfood' ? [] : r.keys, guessNoteOf(r))}
                         aria-label={`${r.kind === 'label' ? 'Open' : 'Change'} ${r.item.name}`}>
                         {r.kind === 'label' ? 'Open…' : 'Change…'}
                       </button>

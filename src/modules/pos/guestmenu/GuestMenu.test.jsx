@@ -369,6 +369,72 @@ describe('the filter sheet counts what it will show (S844)', () => {
   })
 })
 
+// S877 (owner decision): a choice's allergens count in the guest's filter. Hide the CHOICE, not the
+// dish; the dish goes only when it cannot be ordered without such a choice.
+describe('a choice carrying a hidden allergen (S877)', () => {
+  const PIZZA = { ...ROWS[0], recipe_id: 'r-pizza', name: 'Margherita', selling_price: 500, category: 'Pizza', allergens: ['gluten'] }
+  const LATTE = { ...ROWS[0], recipe_id: 'r-latte', name: 'Iced Latte', selling_price: 250, category: 'Coffee', allergens: [] }
+  const OPTIONS = {
+    groups: [
+      { id: 'g-base', name: 'Base', kind: 'choice', min_select: 1, max_select: 1, included_count: 0, sort: 0, is_active: true },
+      { id: 'g-top', name: 'Toppings', kind: 'addon', min_select: 0, max_select: null, included_count: 0, sort: 1, is_active: true },
+      { id: 'g-milk', name: 'Milk', kind: 'choice', min_select: 1, max_select: 1, included_count: 0, sort: 2, is_active: true },
+    ],
+    options: [
+      // The pizza's default base carries milk; the latte has no choice without milk.
+      { id: 'o-stuffed', group_id: 'g-base', name: 'Cheese-stuffed', price_delta: 80, is_default: true, sort: 0, is_active: true, allergens: ['milk'] },
+      { id: 'o-thin', group_id: 'g-base', name: 'Thin', price_delta: 0, is_default: false, sort: 1, is_active: true, allergens: [] },
+      { id: 'o-cheese', group_id: 'g-top', name: 'Extra cheese', price_delta: 60, is_default: false, sort: 0, is_active: true, allergens: ['milk'] },
+      { id: 'o-olive', group_id: 'g-top', name: 'Olives', price_delta: 40, is_default: false, sort: 1, is_active: true, allergens: [] },
+      { id: 'o-whole', group_id: 'g-milk', name: 'Whole milk', price_delta: 0, is_default: true, sort: 0, is_active: true, allergens: ['milk'] },
+      { id: 'o-cream', group_id: 'g-milk', name: 'Cream', price_delta: 30, is_default: false, sort: 1, is_active: true, allergens: ['milk'] },
+    ],
+    attachments: [
+      { id: 'a1', recipe_id: 'r-pizza', group_id: 'g-base', sort: 0 },
+      { id: 'a2', recipe_id: 'r-pizza', group_id: 'g-top', sort: 1 },
+      { id: 'a3', recipe_id: 'r-latte', group_id: 'g-milk', sort: 0 },
+    ],
+  }
+  const NOTE = 'Some choices are hidden because of your allergen filter.'
+  beforeEach(() => {
+    mockAnswers.get_guest_menu = { data: [PIZZA, LATTE], error: null }
+    mockAnswers.get_guest_menu_options = { data: OPTIONS, error: null }
+  })
+
+  it('hides the choices, keeps the dish, and drops only the dish that cannot be ordered without one', async () => {
+    renderMenu()
+    expect(await screen.findByText('Iced Latte')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }))
+    // Milk is offered although no dish names it: the choices carry it.
+    fireEvent.click(screen.getByRole('button', { name: 'Milk' }))
+    expect(screen.getByText(/A choice inside a dish is hidden too when it contains an allergen you hide/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 dish' }))
+    expect(screen.queryByText('Iced Latte')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pick your choices and add Margherita to your order' }))
+    const sheet = screen.getByRole('dialog', { name: 'Margherita' })
+    expect(within(sheet).getByText(NOTE)).toBeInTheDocument()
+    expect(within(sheet).queryByRole('radio', { name: /Cheese-stuffed/ })).toBeNull()
+    expect(within(sheet).queryByRole('checkbox', { name: /Extra cheese/ })).toBeNull()
+    // The default base carries milk, so nothing is picked for the guest.
+    expect(within(sheet).getByRole('radio', { name: /Thin/ })).toHaveAttribute('aria-checked', 'false')
+    fireEvent.click(within(sheet).getByRole('radio', { name: /Thin/ }))
+    fireEvent.click(within(sheet).getByRole('button', { name: /^Add to order · NPR 500/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Review order/ }))
+    expect(within(screen.getByRole('dialog', { name: 'Your order' })).getByText('Thin')).toBeInTheDocument()
+  })
+
+  it('without a filter every choice is offered and the default is picked, as before', async () => {
+    renderMenu()
+    fireEvent.click(await screen.findByRole('button', { name: 'Pick your choices and add Margherita to your order' }))
+    const sheet = screen.getByRole('dialog', { name: 'Margherita' })
+    expect(within(sheet).queryByText(NOTE)).toBeNull()
+    expect(within(sheet).getByRole('radio', { name: /Cheese-stuffed/ })).toHaveAttribute('aria-checked', 'true')
+    expect(within(sheet).getByRole('checkbox', { name: /Extra cheese/ })).toBeInTheDocument()
+    expect(screen.getByText('Iced Latte')).toBeInTheDocument()
+  })
+})
+
 describe('egg is its own mark, and is not vegetarian (S846)', () => {
   const VEG = { recipe_id: 'r-veg', name: 'Veg Momo', is_veg: true }
   const MEAT = { recipe_id: 'r-meat', name: 'Chicken Momo', is_veg: false, is_egg: false }
@@ -490,6 +556,24 @@ describe('a cart checked against the choices just read', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Put it back in my order' }))
     await waitFor(() => expect(savedCart()).toEqual({ 'r-latte#o-large': { recipe_id: 'r-latte', qty: 1, option_ids: ['o-large'] } }))
     expect(screen.getByText('A choice on Cafe Latte is no longer offered, so it was taken off. The price in your order is the new one.')).toBeInTheDocument()
+  })
+
+  it('S877: when a refusal takes off the only dish, the empty order still names it and why', async () => {
+    // A sheet the test before left open takes its Back guard down a moment after it unmounts
+    // (useBackToClose); let that Back land before this test opens the order sheet.
+    await act(() => new Promise(resolve => { setTimeout(resolve, 20) }))
+    storedCart({ 'r-momo': { recipe_id: 'r-momo', qty: 1, option_ids: [] } })
+    let reads = 0
+    mockAnswers.get_guest_menu = () => Promise.resolve({ data: (reads += 1) === 1 ? [...ROWS, LATTE] : [LATTE], error: null })
+    mockAnswers.get_guest_menu_options = { data: LATTE_OPTIONS, error: null }
+    mockAnswers.submit_guest_order = { data: null, error: { code: 'P0001', hint: 'unavailable_items', details: '["Veg Momo"]', message: 'unavailable' } }
+    renderMenu()
+    fireEvent.click(await screen.findByRole('button', { name: /Review order/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Place order/ }))
+    const sheet = () => screen.getByRole('dialog', { name: 'Your order' })
+    await waitFor(() => expect(within(sheet()).getByText('Nothing in your order yet.')).toBeInTheDocument())
+    expect(within(sheet()).getByRole('alert'))
+      .toHaveTextContent(/Veg Momo is no longer available, so your order was not sent. It has been taken off your order/)
   })
 
   it('after a refusal, takes off only the dish the fresh menu dropped and says so', async () => {

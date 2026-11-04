@@ -9,6 +9,7 @@ import { offeredPicks } from '../../../shared/offeredPicks'
 import { tidyName } from './guestMenuHelpers'
 import GuestOptionGroup, { FOCUSABLE_CHIP, signedNpr } from './GuestOptionGroup'
 import { DietLabel, dietOfDish } from './DietMark'
+import { HIDDEN_CHOICES_NOTE } from './guestAllergenChoices'
 
 // Crest Customization on the QR menu (S758 stage 6): the sheet a guest picks a dish's choices in.
 // Same rules as the till's OptionPickerModal — describeSelection is the twin of the server's pricer
@@ -52,6 +53,11 @@ import { DietLabel, dietOfDish } from './DietMark'
 // S844: each group's chips are GuestOptionGroup and the veg / egg mark is DietMark, one copy each,
 // shared with the combo sheet. S846: the dish's own mark sits under its name with the word spelled
 // out ("Contains egg"), when the restaurant has stated it.
+//
+// S877: under the guest's allergen filter GuestMenu hands this sheet the dish's groups without the
+// choices that carry a hidden allergen (safeDishGroups: each such group has `hiddenCount`), and
+// `hiddenChoices`, how many went. The sheet says so in one line, on a step whose group lost choices
+// and on Review (or at the top of a one-screen sheet), so a missing choice is not a mystery.
 
 const sameIds = (a, b) => {
   if (a.length !== b.length) return false
@@ -59,7 +65,7 @@ const sameIds = (a, b) => {
   return x.every((id, i) => id === y[i])
 }
 
-export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegistered, initialIds, editing, stepped = false, onConfirm, onClose, backRef }) {
+export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegistered, initialIds, editing, stepped = false, hiddenChoices = 0, onConfirm, onClose, backRef }) {
   // Captured once: what the sheet opened with, so a backdrop tap can tell "looked" from "picked".
   // S862 TILL-GUEST-4: only the picks the dish still offers, as the till window starts (S809 3o), so
   // Update can never hand a hidden choice back to the cart.
@@ -103,6 +109,7 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
     if (panel) panel.scrollTop = 0
   }, [stepped, step])
   const visibleGroups = stepped ? (onReview ? [] : [steps[step]]) : dishGroups
+  const showHiddenNote = hiddenChoices > 0 && (!stepped || onReview || visibleGroups.some(d => d.hiddenCount > 0))
   const stepProblem = stepped && !onReview ? problems.find(p => p.group.id === steps[step].group.id) : null
   // S760: a choice's price at the size picked so far.
   const priceAt = (o, group) => Math.round(inclFromEx(scaledDelta(o, group, desc.portion_factor), vat))
@@ -246,6 +253,7 @@ export default function GuestOptionSheet({ item, dishGroups, catalog, vatRegiste
       )}
 
       <div className="gm-groups">
+        {showHiddenNote && <p className="gm-hidden-note">{HIDDEN_CHOICES_NOTE}</p>}
         {visibleGroups.map(({ group, rule, options }) => (
           <GuestOptionGroup
             key={group.id} group={group} rule={rule} options={options}
