@@ -84,3 +84,15 @@ When an entry is paid off, delete it from this file and record the payoff in the
 **Trigger:** When a new table gets a foreign key to `vendors`, add it to both lists in the same change and write the missing test, modelled on `itemRefTables.test.js`.
 
 **Where to look:** the two places above; list the foreign keys with `supabase db query --linked "SELECT conrelid::regclass FROM pg_constraint WHERE contype = 'f' AND confrelid = 'public.vendors'::regclass"`.
+
+---
+
+## 6. The food tables were extracted once, from a PDF, by Python scripts
+
+**What it is.** `src/data/foodTables.json` (the nutrition library's 1,115 Nepal and Indian foods, S884) is built by three Python scripts in `scripts/food-tables/`, the only Python in the repo. The Nepal half is read out of the 2012 PDF with `pdftotext`, by page position, and 332 display names (wrapped, misspelt or unclear in the book) are set by hand in a CSV. The 225 Nepal-to-Indian pairs that supply sugar and sodium were judged one by one. Nothing in `npm` or CI runs any of it; the reviewed CSVs and the JSON are committed.
+
+**Why it is left.** Both books are fixed editions, so the extraction runs once per edition. A Node port would add nothing a reader can see.
+
+**Trigger:** When either table publishes a new edition, or a figure in the library is reported wrong. Re-run the README's rebuild steps, diff the CSVs and re-check the pairs, rather than editing the JSON.
+
+**Where to look:** `scripts/food-tables/README.md` (sources, rebuild, review rules), the CSVs beside it, `src/data/nutritionSeed.test.js` (the invariants a rebuild must keep).

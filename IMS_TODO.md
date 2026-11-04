@@ -13,6 +13,17 @@ them sits the S793 load-time backlog (PERF-n), from measuring the module on a sl
 - Owner follow-up, not code: check BLOOM CAFE's and CASA's ingredients in Check allergens, enter piece weights on
   the 11 piece-counted items, and tick Mustard on mustard oil ingredients filled before S870.
 
+**S884 (2026-11-04) nutrition library, left open on purpose** (rules: `.claude/rules/nutrition-allergens.md`, data: `scripts/food-tables/README.md`):
+- A blank sugar or sodium counts as 0 in a recipe's totals, in both copies of the walk (`nutrition.js` and
+  `_nutrition_rollup` in SQL). 350 of the 575 Nepal foods have no Indian twin, so a dish built on them shows sugar
+  and sodium too low on the label and the guest menu, with nothing saying so. Needs an owner decision (show the
+  figure as incomplete, or hide it) and a migration for the SQL copy.
+- The short USDA list in `nutritionSeed.js` is hand-typed and every row is labelled USDA, but some name foods
+  FoodData Central may not carry (khuwa, beaten rice): the provenance gap the regional rows had. Check each against
+  FoodData Central, then relabel or replace.
+- Owner follow-up, not code: on a real client, open an ingredient's Nutrition form (search "kukhura", press DFTQC
+  Nepal) and Recipes' Auto-fill (untick one line) once; neither was clicked through live in S884.
+
 **S855 (2026-10-21): every S853 "Build next" item below shipped in one release (crest-v470)**: PERF-2, PERF-3 and
 PERF-4, the stock-count device screen, Budget vs Actual's open-month line, unsaved dish photos, and the Owner Report
 supplier split (the aging half was already fixed in S849). PERF-5 stayed open.
