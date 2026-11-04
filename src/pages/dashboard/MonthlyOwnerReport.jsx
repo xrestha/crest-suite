@@ -21,6 +21,7 @@ import ReportLoadError from '../../components/ReportLoadError'
 import MonthStepper, { neighboursOf } from '../../components/MonthStepper'
 import { printWithTitle } from '../../utils/printTitle'
 import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../shared/hooks/usePeriodList'
 import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '../../modules/ownerReport/generateMonthlyReport'
 import { buildExecutiveSummary } from '../../modules/ownerReport/reportNarrative'
 import { reportMadeText } from '../../modules/ownerReport/reportMadeLine'
@@ -198,6 +199,12 @@ function MonthlyOwnerReportBody() {
   // first pick; `replace` so stepping through months does not fill the Back button.
   const [searchParams, setSearchParams] = useSearchParams()
   const askedPeriodRef = useRef(searchParams.get('period'))
+  // The month list is the shared one (S876, PERF-10; loadMonths below).
+  const periodList = usePeriodList()
+  // The month a list opens on: the one the address names when it is one of this outlet's, else the
+  // latest closed one, else the newest.
+  const firstPeriodId = rows => (askedPeriodRef.current && rows.find(p => p.id === askedPeriodRef.current)?.id)
+    || rows.find(p => p.status === 'closed')?.id || rows[0]?.id || null
 
   const [periods, setPeriods] = useState([])
   const [periodsError, setPeriodsError] = useState(null)
@@ -244,30 +251,45 @@ function MonthlyOwnerReportBody() {
 
   useEffect(() => {
     if (!clientId) { setLoading(false); return }
-    let cancelled = false
     namesRef.current = loadProfileNames(supabase, clientId, undefined, { ms: READ_MS, label: 'Reading who made the report' })
+    return loadMonths()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId])
+
+  // The month list, with the report it will open on read beside it (S859, S876 PERF-10). Claims the
+  // page, so Try again after a failed list supersedes it; returns the effect's cancel.
+  //
+  // The list is the shared one (src/shared/periodList.js). Without `?period=`, a list already in memory
+  // (any visit after the first) GUESSES the month the page will open on, and only its stored report is
+  // read early. Nothing else follows the guess: `periods` and the selected month are set from the
+  // fresh list alone, so loadReport runs once, on a month that list confirms, and the lazy generate
+  // (a permanent, frozen write) only ever sees a month the fresh list shows closed and this outlet's.
+  // A guess the fresh list does not open on is dropped, and that month is read afresh.
+  function loadMonths() {
+    const key = periodReq.begin(`months:${clientId}`)
+    let cancelled = false
+    setPeriodsError(null)
+    setLoading(true)
+    const { cached, fresh } = periodList()
     // scopedFrom reads nothing of another outlet's, so a stale or foreign id in the address costs one
     // empty read and is never shown: loadReport uses it only for a month of this outlet's list.
-    const askedId = askedPeriodRef.current
-    earlyReportRef.current = askedId ? { periodId: askedId, res: readReport(askedId) } : null
+    const earlyId = askedPeriodRef.current || (cached ? firstPeriodId(cached) : null)
+    earlyReportRef.current = earlyId ? { periodId: earlyId, res: readReport(earlyId) } : null
     ;(async () => {
-      // `client_id` is read so the lazy generate can refuse a month that is not this outlet's (GAPS-2).
-      const res = await settleWithin(scopedFrom('monthly_periods', 'id, client_id, bs_year, bs_month, status')
-        .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }), READ_MS, 'Loading the months')
-      if (cancelled || !mountedRef.current) return
+      // The list's rows carry `client_id`, so the lazy generate can refuse a month that is not this
+      // outlet's (GAPS-2).
+      const res = await settleWithin(fresh, READ_MS, 'Loading the months')
+      if (cancelled || !mountedRef.current || !periodReq.isCurrent(key)) return
       // A failed read must not impersonate "no periods yet" (S612, the silent-zero class).
       if (res.error) { setPeriodsError(res.error); setLoading(false); return }
       const rows = res.data || []
       setPeriods(rows)
-      // A month named in the address wins when it is one of this outlet's; else the latest closed one.
-      const asked = askedPeriodRef.current && rows.find(p => p.id === askedPeriodRef.current)?.id
-      const first = asked || rows.find(p => p.status === 'closed')?.id || rows[0]?.id || null
+      const first = firstPeriodId(rows)
       setSelectedPeriodId(prev => prev || first)
       if (!first) setLoading(false)
     })()
     return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId])
+  }
 
   // Who made a report, for the header's "when it was made" line (D42), read the way a reload reads
   // it: from the row's `generated_by`, which the database stamps (S849, GAPS-11), so the operator
@@ -710,7 +732,7 @@ function MonthlyOwnerReportBody() {
       )}
 
       {/* The months could not be read: never "no periods yet" (S612), and never the raw message. */}
-      {periodsError && <ReportLoadError error={periodsError} />}
+      {periodsError && <ReportLoadError error={periodsError} onRetry={() => { loadMonths() }} />}
 
       {!periodsError && (loading || generating) && (
         <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>
@@ -718,7 +740,7 @@ function MonthlyOwnerReportBody() {
         </p></div>
       )}
 
-      {!loading && !generating && pageError?.kind === 'read' && <ReportLoadError error={pageError.error} />}
+      {!loading && !generating && pageError?.kind === 'read' && <ReportLoadError error={pageError.error} onRetry={() => { loadReport() }} />}
       {!loading && !generating && pageError?.kind === 'make' && <ActionError error={pageError.error} />}
 
       {/* The operator browsing a client: nothing is frozen until one deliberate press (GAPS-11). */}

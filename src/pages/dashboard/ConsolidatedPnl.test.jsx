@@ -5,18 +5,25 @@
  * markers, a no-period column, stock on the way, and a failed read as an error card.
  */
 import React from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
 let mockAuth = {}
+// Each table's answer: a value, or a function returning one (a promise holds a read open).
 let mockTables = {}
 let mockRpc = {}
 let mockGroupLabour = { byClient: new Map(), error: null }
+// Every table read, in the order they were sent.
+const mockSeen = []
 
 function mockBuilder(table) {
   const b = {}
   for (const m of ['select', 'eq', 'in', 'not', 'gte', 'lt', 'lte', 'order', 'limit']) b[m] = () => b
-  const answer = () => Promise.resolve(mockTables[table] || { data: [], error: null })
+  const answer = () => {
+    mockSeen.push(table)
+    const v = mockTables[table]
+    return Promise.resolve(typeof v === 'function' ? v() : (v || { data: [], error: null }))
+  }
   b.range = answer
   b.then = (res, rej) => answer().then(res, rej)
   return b
@@ -50,10 +57,16 @@ jest.mock('../../modules/ims/reports/depreciationMemo', () => ({
 
 // eslint-disable-next-line import/first
 import ConsolidatedPnl from './ConsolidatedPnl'
+// eslint-disable-next-line import/first
+import { clearPeriodLists, readPeriodList } from '../../shared/periodList'
 
 const P = { id: 'p6', bs_year: 2083, bs_month: 5, status: 'closed' }
 
 beforeEach(() => {
+  // The month list is shared and kept between pages (S855, periodList.js): each test starts with none
+  // in memory, so the page waits for its own read (through the mocked supabase client).
+  clearPeriodLists()
+  mockSeen.length = 0
   mockAuth = {
     clientId: 'c1', profile: { client_id: 'c1' }, loading: false, clientModules: { ims: true, hr: true, pos: true },
     clientModulesKnown: true, outlets: [], isAdmin: false, isOwner: true, groupId: null, viewGroupId: null, imsRole: 'manager',
@@ -159,4 +172,80 @@ test('the previous-month button steps to the month before, and stops at the firs
   expect(screen.getByLabelText('Period').value).toBe('period:p6')
   const none = screen.getByRole('button', { name: 'No earlier month' })
   expect(none.getAttribute('aria-disabled')).toBe('true')
+})
+
+// S876 (PERF-10): the months come from the shared list. With one in memory the statement starts at
+// once, beside a fresh read of the list, and is kept only when the fresh list agrees.
+describe('the month list in memory', () => {
+  // An earlier page left Bhadra (closed) in memory; this visit's fresh read is held open until answered.
+  async function revisit() {
+    await readPeriodList('c1')
+    let answer
+    mockTables.monthly_periods = () => new Promise(res => { answer = res })
+    mockSeen.length = 0
+    renderPage()
+    await waitFor(() => expect(typeof answer).toBe('function'))
+    return res => answer(res)
+  }
+  const statementReads = () => mockSeen.filter(t => t === 'opening_stock').length
+  const guessFinished = () => new Promise(res => setTimeout(res, 20))
+
+  test('a revisit starts the statement before the month list answers, and keeps it when the list agrees', async () => {
+    const answer = await revisit()
+    await waitFor(() => expect(statementReads()).toBe(1))
+    await guessFinished()
+    // The guess never paints alone: the page stays loading until the list has answered too.
+    expect(screen.queryByText('Delivery commission')).toBeNull()
+    answer({ data: [P], error: null })
+    expect(await screen.findByText('Delivery commission')).toBeTruthy()
+    expect(statementReads()).toBe(1)
+    expect(screen.getByLabelText('Period').value).toBe('period:p6')
+  })
+
+  test('a month reopened elsewhere is built again, even though the selection did not change', async () => {
+    const answer = await revisit()
+    await waitFor(() => expect(statementReads()).toBe(1))
+    await guessFinished()
+    answer({ data: [{ ...P, status: 'open' }], error: null })
+    expect(await screen.findByText(/Provisional/)).toBeTruthy()
+    expect(statementReads()).toBe(2)
+    expect(screen.getByLabelText('Period').value).toBe('period:p6')
+  })
+
+  test('a newer month closed elsewhere opens instead of the guessed one', async () => {
+    const answer = await revisit()
+    await waitFor(() => expect(statementReads()).toBe(1))
+    answer({ data: [{ ...P7, status: 'closed' }, P], error: null })
+    await waitFor(() => expect(screen.getByLabelText('Period').value).toBe('period:p7'))
+    expect(await screen.findByText('Delivery commission')).toBeTruthy()
+    expect(statementReads()).toBe(2)
+  })
+
+  test('a failed fresh list is the error card, never the guessed statement', async () => {
+    const answer = await revisit()
+    await waitFor(() => expect(statementReads()).toBe(1))
+    await guessFinished()
+    answer({ data: null, error: { message: 'boom', code: '500' } })
+    expect(await screen.findByText('Could not load this report')).toBeTruthy()
+    expect(screen.queryByText('Delivery commission')).toBeNull()
+  })
+})
+
+test('a failed month list offers Try again, which reads the months and the statement again', async () => {
+  mockTables.monthly_periods = { data: null, error: { message: 'boom', code: '500' } }
+  renderPage()
+  expect(await screen.findByText('Could not load this report')).toBeTruthy()
+  mockTables.monthly_periods = { data: [P], error: null }
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(await screen.findByText('Delivery commission')).toBeTruthy()
+})
+
+test('a failed statement read offers Try again, which reads the same month again', async () => {
+  mockTables.purchase_entries = { data: null, error: { message: 'boom', code: '500' } }
+  renderPage()
+  expect(await screen.findByText('Could not load this report')).toBeTruthy()
+  delete mockTables.purchase_entries
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(await screen.findByText('Delivery commission')).toBeTruthy()
+  expect(screen.getByLabelText('Period').value).toBe('period:p6')
 })

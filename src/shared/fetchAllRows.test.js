@@ -352,3 +352,82 @@ describe('fetchAllRowsParallel', () => {
     expect(ranges).toEqual([[0, 999], [1000, 1999]])
   })
 })
+
+// S876 (PERF-13): `onPage` hands each page over as it lands, so a caller can start the reads that
+// hang off its rows before the last page is in. A head start only: the answer is still the truth.
+describe('fetchAllRowsParallel onPage', () => {
+  const firstIds = pages => pages.map(p => p[0].id)
+
+  test('once per page, the first included, in the order the pages land, before the answer', async () => {
+    // The fourth page lands first, then the third, then the second.
+    const src = makeCountedSource(rows(3500), { delayOf: from => (from === 1000 ? 9 : from === 2000 ? 5 : 0) })
+    const pages = []
+    let answered = false
+    const res = await fetchAllRowsParallel(src.makeQuery, {
+      pageSize: 1000,
+      onPage: page => { expect(answered).toBe(false); pages.push(page) },
+    })
+    answered = true
+    expect(res.error).toBeNull()
+    expect(firstIds(pages)).toEqual([0, 3000, 2000, 1000])
+    expect(pages.map(p => p.length)).toEqual([1000, 500, 1000, 1000])
+    // Every row handed over once, and the answer is every row in order.
+    expect(pages.flat().map(r => r.id).sort((a, b) => a - b)).toEqual(res.data.map(r => r.id))
+    expect(res.data.map(r => r.id)).toEqual(rows(3500).map(r => r.id))
+  })
+
+  test('the first page goes out before any later page is asked for', async () => {
+    const src = makeCountedSource(rows(2500))
+    const asked = []
+    await fetchAllRowsParallel(src.makeQuery, { pageSize: 1000, onPage: page => asked.push([page[0].id, src.ranges.length]) })
+    // Page 1 was handed over while only it had been asked for.
+    expect(asked[0]).toEqual([0, 1])
+  })
+
+  test('a short single page is handed over once; no rows, no call', async () => {
+    const short = makeCountedSource(rows(384))
+    const pages = []
+    await fetchAllRowsParallel(short.makeQuery, { onPage: p => pages.push(p) })
+    expect(pages.map(p => p.length)).toEqual([384])
+    const empty = makeCountedSource([])
+    const none = jest.fn()
+    await fetchAllRowsParallel(empty.makeQuery, { onPage: none })
+    expect(none).not.toHaveBeenCalled()
+  })
+
+  test('never a page that failed, nor any page after the failure is known', async () => {
+    // A failed first page: nothing handed over.
+    const head = makeCountedSource(rows(2500), { failOn: from => (from === 0 ? { message: 'head died' } : null) })
+    const onHead = jest.fn()
+    expect((await fetchAllRowsParallel(head.makeQuery, { onPage: onHead })).error.message).toBe('head died')
+    expect(onHead).not.toHaveBeenCalled()
+    // The third page lands, then the second fails, then the fourth lands: the fourth is not handed over.
+    const mid = makeCountedSource(rows(3500), {
+      delayOf: from => (from === 1000 ? 6 : from === 3000 ? 12 : 0),
+      failOn: from => (from === 1000 ? { message: 'second died' } : null),
+    })
+    const pages = []
+    const res = await fetchAllRowsParallel(mid.makeQuery, { pageSize: 1000, onPage: p => pages.push(p) })
+    expect(res).toEqual({ data: null, error: { message: 'second died' } })
+    expect(firstIds(pages)).toEqual([0, 2000])
+  })
+
+  test('a count past maxRows hands nothing over', async () => {
+    const src = makeCountedSource(rows(10000))
+    const onPage = jest.fn()
+    const res = await fetchAllRowsParallel(src.makeQuery, { pageSize: 1000, maxRows: 3000, onPage })
+    expect(res.error.code).toBe(ROW_CAP_CODE)
+    expect(onPage).not.toHaveBeenCalled()
+  })
+
+  test('pages read on past the count, or with no count, are handed over too', async () => {
+    const grown = makeCountedSource(rows(2100), { count: 1500 })
+    const pages = []
+    await fetchAllRowsParallel(grown.makeQuery, { pageSize: 1000, onPage: p => pages.push(p) })
+    expect(pages.map(p => p.length)).toEqual([1000, 1000, 100])
+    const uncounted = makeSource(rows(1753))
+    const more = []
+    await fetchAllRowsParallel(uncounted.makeQuery, { pageSize: 1000, onPage: p => more.push(p) })
+    expect(more.map(p => p.length)).toEqual([1000, 753])
+  })
+})

@@ -44,7 +44,8 @@ export async function fetchAllRows(makeQuery, { pageSize = 1000, maxRows = 10000
 
 // fetchAllRows' loop, from any offset: one page at a time, a short page ends it, an exactly-full page
 // asks for the next, and a read that runs past `maxRows` fails. `out` holds the rows already read.
-async function pageOnFrom(makeQuery, out, start, { pageSize, maxRows }) {
+// `onPage` (fetchAllRowsParallel's, below) is handed each page that lands.
+async function pageOnFrom(makeQuery, out, start, { pageSize, maxRows }, onPage) {
   for (let from = start; from < maxRows; from += pageSize) {
     // Never ask past the ceiling, so the rows returned can never exceed it either.
     const to = Math.min(from + pageSize, maxRows) - 1
@@ -52,6 +53,7 @@ async function pageOnFrom(makeQuery, out, start, { pageSize, maxRows }) {
     if (error) return { data: null, error }
     const batch = data || []
     out.push(...batch)
+    if (onPage) onPage(batch)
     // A short page means the end of the result set. An exactly-full page is ambiguous, so it
     // costs one extra round trip that comes back empty — cheap, and the only way to be sure.
     if (batch.length < to - from + 1) return { data: out, error: null }
@@ -81,21 +83,39 @@ async function pageOnFrom(makeQuery, out, start, { pageSize, maxRows }) {
 //   - a SHORT page before the last means the rows moved while they were read (a delete), so the read
 //     starts again one page at a time rather than stitch two snapshots together;
 //   - no count in the answer (a makeQuery that ignores its argument) pages on one at a time.
-export async function fetchAllRowsParallel(makeQuery, { pageSize = 1000, maxRows = 100000 } = {}) {
+//
+// `onPage(rows)` (optional, S876 PERF-13) is handed each page as it lands, the first included, so a
+// caller can start the reads that hang off those rows before the last page is in. Pages arrive in
+// any order; an empty page is not handed over; a page that failed never is, nor any page after a
+// failure is known, nor the row-cap case. It is a head start, never the answer: the rows handed over
+// can include rows the answer drops (a read that starts again because rows moved hands nothing more
+// over), and a read can still fail after some pages went out. The caller takes the answer as the
+// truth and catches up from it.
+export async function fetchAllRowsParallel(makeQuery, { pageSize = 1000, maxRows = 100000, onPage } = {}) {
   const opts = { pageSize, maxRows }
+  let pageFailed = false
+  const handOver = rows => { if (onPage && !pageFailed && rows.length > 0) onPage(rows) }
   const firstTo = Math.min(pageSize, maxRows) - 1
   const head = await makeQuery({ count: 'exact' }).range(0, firstTo)
   if (head.error) return { data: null, error: head.error }
   const first = head.data || []
-  if (first.length < firstTo + 1) return { data: first, error: null }
+  if (first.length < firstTo + 1) { handOver(first); return { data: first, error: null } }
   const total = head.count
-  if (typeof total !== 'number' || !Number.isFinite(total)) return pageOnFrom(makeQuery, [...first], firstTo + 1, opts)
+  if (typeof total !== 'number' || !Number.isFinite(total)) {
+    handOver(first)
+    return pageOnFrom(makeQuery, [...first], firstTo + 1, opts, handOver)
+  }
   if (total > maxRows) return { data: null, error: rowCapError(maxRows) }
+  handOver(first)
 
   const ranges = []
   for (let from = firstTo + 1; from < total; from += pageSize) ranges.push([from, Math.min(from + pageSize, maxRows) - 1])
-  if (ranges.length === 0) return pageOnFrom(makeQuery, [...first], firstTo + 1, opts)
-  const pages = await Promise.all(ranges.map(([from, to]) => makeQuery().range(from, to)))
+  if (ranges.length === 0) return pageOnFrom(makeQuery, [...first], firstTo + 1, opts, handOver)
+  const pages = await Promise.all(ranges.map(([from, to]) => Promise.resolve(makeQuery().range(from, to)).then(p => {
+    if (p.error) pageFailed = true
+    else handOver(p.data || [])
+    return p
+  })))
   const failed = pages.find(p => p.error)
   if (failed) return { data: null, error: failed.error }
 
@@ -109,7 +129,7 @@ export async function fetchAllRowsParallel(makeQuery, { pageSize = 1000, maxRows
       return fetchAllRows(() => makeQuery(), opts)
     }
   }
-  return pageOnFrom(makeQuery, out, ranges[ranges.length - 1][1] + 1, opts)
+  return pageOnFrom(makeQuery, out, ranges[ranges.length - 1][1] + 1, opts, handOver)
 }
 
 // Same job for a read whose filter is `.in(column, ids)` with a long id list.

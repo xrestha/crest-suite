@@ -31,10 +31,17 @@ function mockBuilder(table) {
 }
 const mockScopedDb = { scopedFrom: table => mockBuilder(table) }
 jest.mock('../../shared/hooks/useScopedDb', () => ({ useScopedDb: () => mockScopedDb }))
+// The bill ids each chunked read was asked for, in order. The bill read hands no page over unless a
+// test sets `mockParallel` (S876): the page then starts every line from the final bill list.
+const mockChunkIds = []
+let mockParallel = null
 jest.mock('../../shared/fetchAllRows', () => ({
   fetchAllRows: makeQuery => makeQuery(),
-  fetchAllRowsChunked: (ids, makeQuery) => (ids.length ? makeQuery(ids) : Promise.resolve({ data: [], error: null })),
-  fetchAllRowsParallel: makeQuery => makeQuery({ count: 'exact' }),
+  fetchAllRowsChunked: (ids, makeQuery) => {
+    mockChunkIds.push(ids)
+    return ids.length ? makeQuery(ids) : Promise.resolve({ data: [], error: null })
+  },
+  fetchAllRowsParallel: (makeQuery, opts) => (mockParallel ? mockParallel(makeQuery, opts) : makeQuery({ count: 'exact' })),
 }))
 jest.mock('../../supabaseClient', () => ({ supabase: { from: table => mockBuilder(table), rpc: () => mockBuilder('rpc') } }))
 const mockAuth = { clientId: 'c1', isAdmin: true, isOwner: false, profile: {}, clientModules: { ims: false } }
@@ -83,6 +90,8 @@ beforeEach(() => {
   Object.keys(mockRates).forEach(k => delete mockRates[k])
   mockBookCalls.length = 0
   mockCostingCalls.length = 0
+  mockChunkIds.length = 0
+  mockParallel = null
   mockRange = { from: '2025-09-01', to: '2025-09-10' }
   mockAuth.clientModules = { ims: false }
   mockAuth.clientId = 'c1'
@@ -356,5 +365,51 @@ describe('the reads', () => {
     await waitFor(() => expect(mockReads.pos_order_items).toBe(1))
     expect(mockBookCalls.length).toBe(0)
     expect(mockReads.pos_option_ingredients).toBeUndefined()
+  })
+
+  // S876 (PERF-13): each page of bills starts its lines and choices as it lands, and no bill is read
+  // twice, which would count its plates twice.
+  test('each page of bills starts its own lines before the last page lands, and every bill is read once', async () => {
+    const bill = (id, day) => ({ id, closed_at: `2025-09-0${day}T06:00:00Z` })
+    const line = (id, order) => ({ id, order_id: order, recipe_id: 'r1', name: 'Momo', qty: 1, comped: false, selection_key: 'op1' })
+    const pick = (id, lineId) => ({
+      id, order_item_id: lineId, option_id: 'op1', group_name: 'Extras', group_kind: 'addon', option_name: 'Cheese',
+      is_removal: false, price_delta: 50, list_price_delta: 50, included: false, ingredient_deltas: null,
+    })
+    // Each read answers for the bills it was asked for, in the order asked: o1, then o2, then o3.
+    const lineAnswers = [[line('l1', 'o1')], [line('l2', 'o2')], [line('l3', 'o3')]]
+    const pickAnswers = [[pick('s1', 'l1')], [pick('s2', 'l2')], [pick('s3', 'l3')]]
+    mockAnswers.pos_order_items = () => ({ data: lineAnswers.shift() || [], error: null })
+    mockAnswers.pos_order_item_options = () => ({ data: pickAnswers.shift() || [], error: null })
+    let releaseLastPage
+    mockParallel = async (makeQuery, { onPage }) => {
+      onPage([bill('o1', 5)])
+      await new Promise(res => { releaseLastPage = res })
+      // The last page repeats a bill a page already started (rows moved): it is not read again.
+      onPage([bill('o1', 5), bill('o2', 6)])
+      return { data: [bill('o1', 5), bill('o2', 6), bill('o3', 7)], error: null }
+    }
+    renderPage()
+    await waitFor(() => expect(mockReads.pos_order_items).toBe(1))
+    expect(mockReads.pos_order_item_options).toBe(1)
+    expect(mockChunkIds).toEqual([['o1'], ['o1']])
+    expect(screen.getByText('Building report…')).toBeTruthy()
+    releaseLastPage()
+    expect(await screen.findByRole('tab', { name: 'Popular choices' })).toBeTruthy()
+    // The second page started o2; the final list's o3, which no page handed over, came after it.
+    expect(mockChunkIds).toEqual([['o1'], ['o1'], ['o2'], ['o2'], ['o3'], ['o3']])
+    expect(mockReads.pos_order_items).toBe(3)
+    const table = screen.getByRole('table')
+    const cheese = within(table).getByText('Cheese').closest('tr')
+    // Three bills, three plates of Cheese: each counted once.
+    expect(within(cheese).getAllByRole('cell').map(c => c.textContent)).toContain('3')
+  })
+
+  test('a failed batch of lines fails the report, never a report short of its plates', async () => {
+    answerOnePlate()
+    mockAnswers.pos_order_item_options = { data: null, error: { message: 'connection reset', code: '08006' } }
+    renderPage()
+    expect(await screen.findByText('Could not load this report')).toBeTruthy()
+    expect(screen.queryByRole('tab', { name: 'Popular choices' })).toBeNull()
   })
 })

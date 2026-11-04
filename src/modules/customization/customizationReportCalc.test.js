@@ -420,13 +420,15 @@ describe('the Customization Report page', () => {
   const src = fs.readFileSync(path.join(__dirname, 'CustomizationReport.jsx'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ').replace(/\s+/g, ' ')
 
-  // S862 REPORTS-STOCK-5: both read waves are bounded over the chosen range AND the one before it,
-  // the option catalog included, and a hung costing fails only the Margin tab.
-  test('every read wave is bounded, the catalog included', () => {
+  // S862 REPORTS-STOCK-5: every read is bounded over the chosen range AND the one before it, the option
+  // catalog included, and a hung costing fails only the Margin tab. Since S876 (PERF-13) one limit
+  // covers the whole chain, bills to lines, because the line reads start as each bill page lands.
+  test('every read is bounded, the catalog included', () => {
     expect(src).toMatch(/const readMs = rangeReadMs\(prevFromIso, toIso\)/)
-    expect(src.match(/await settleAll\(\[/g)).toHaveLength(2)
-    expect(src).toMatch(/loadOptionCatalog\(scopedFrom\), \], readMs, LOAD_LABEL\)/)
-    expect(src).not.toMatch(/await Promise\.all\(\[/)
+    expect(src).toMatch(/await withTimeout\(readAll\(\), readMs, LOAD_LABEL\)/)
+    expect(src.match(/readAll\(\)/g)).toHaveLength(1)
+    expect(src).toMatch(/settled\(loadOptionCatalog\(scopedFrom\)\)/)
+    expect(src).not.toMatch(/settleAll/)
   })
   test('the costing is bounded in its own try, so a hang reaches costError only', () => {
     // S869: the costing takes the book read ahead beside the bills, and is still bounded as a whole.

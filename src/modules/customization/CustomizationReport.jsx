@@ -18,13 +18,13 @@ import ActionError, { asActionError } from '../../components/ActionError'
 import Tip from '../../components/Tip'
 import BsCalendarPicker from '../../components/BsCalendarPicker'
 import RangePresets from '../pos/reports/RangePresets'
-import { settleAll, rangeReadMs } from '../pos/reports/reportTimeout'
+import { rangeReadMs } from '../pos/reports/reportTimeout'
 import { withTimeout } from '../../utils/withTimeout'
 import { adToBsSafe, BS_MONTHS, daysInBsMonth, formatAdAsBs, formatBsDay } from '../../utils/bsCalendar'
 import { nepalDayStartTs, nepalDayEndTs, bsMonthRangeIso } from '../pos/reports/reportRange'
 import { deltaItems } from '../../utils/orderLineIngredients'
 import { posDeltaCosting, loadPosRecipeBook, deltaIdsOf } from '../pos/orders/posRecipeBook'
-import { loadOptionCatalog, isMissingColumn } from './customizationData'
+import { loadOptionCatalog } from './customizationData'
 import { buildCustomizationReport, withOptionCosts, allDeltaSets, mostAddedOf, sliceByOrders, weeklyDishShares, TREND_MIN_PLATES, TREND_DROP_POINTS, buildComboReport } from './customizationReportCalc'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer } from 'recharts'
 import ChartCard from '../../components/ChartCard'
@@ -79,10 +79,12 @@ const DEFAULT_SORT = {
   combos:   { key: 'sold',   dir: 'desc' },
 }
 
-// The bill lines the report reads. S839 adds each combo dish's combo; a database the combos migration
-// has not reached has no such columns and no combos, so the read falls back to the lines alone.
-const LINE_COLS = 'id, order_id, recipe_id, name, qty, comped, selection_key'
-const COMBO_LINE_COLS = `${LINE_COLS}, unit_price, combo_line_id, combo_id, combo_name, combo_group_id, combo_group_name, combo_sort`
+// The bill lines the report reads, with each combo dish's combo (S839). There is no fallback to the
+// lines alone since S876 (PERF-13): the combo columns are live (the till reads them unguarded), and
+// the lines are now read in batches as the bills land, where a per-batch fallback would mix rows
+// with and without combo fields and drop some combos silently. A missing column fails the report.
+const LINE_COLS = 'id, order_id, recipe_id, name, qty, comped, selection_key, unit_price, combo_line_id, combo_id, combo_name, combo_group_id, combo_group_name, combo_sort'
+const CHOICE_COLS = 'id, order_item_id, option_id, group_name, group_kind, option_name, is_removal, price_delta, list_price_delta, included, ingredient_deltas'
 
 const pct = v => (v == null ? '—' : `${(v * 100).toFixed(1)}%`)
 // AD ISO date arithmetic in UTC, so no runtime timezone can shift a day (S800).
@@ -442,47 +444,69 @@ export default function CustomizationReport() {
       return loadPosRecipeBook(supabase, clientId, { recipeIds: subRecipeIds, itemIds })
     }
     const earlyBook = imsOn ? readChoiceBook().catch(() => null) : Promise.resolve(null)
-    try {
-      const [ordersRes, catalog] = await settleAll([
+    // A read that threw answers `{ error }`, the shape a refused one has, so firstError sees both.
+    const settled = read => Promise.resolve(read).catch(error => ({ data: null, error }))
+    // S876 (PERF-13): each page of bills starts its own lines and choices as it lands, instead of
+    // every line waiting for the last page of bills. Each bill is read once only (`dispatched`):
+    // two reads of one bill would count its plates twice. Bills of a page the final list drops
+    // (the read started again because bills moved) are harmless, since sliceByOrders keeps only the
+    // final list's bills; the final list's bills not yet started are read once it is in.
+    const dispatched = new Set()
+    const batches = []   // { first: its first bill's id, lines, choices }, one per set of bills started
+    const readLinesOf = bills => {
+      const ids = []
+      for (const b of bills) if (b.id != null && !dispatched.has(b.id)) { dispatched.add(b.id); ids.push(b.id) }
+      if (ids.length === 0) return
+      batches.push({
+        first: ids[0],
+        lines: settled(fetchAllRowsChunked(ids, chunk => scopedFrom('pos_order_items', LINE_COLS).in('order_id', chunk).order('id'))),
+        choices: settled(fetchAllRowsChunked(ids, chunk => scopedFrom('pos_order_item_options', CHOICE_COLS).in('order_id', chunk).order('id'))),
+      })
+    }
+    const readAll = async () => {
+      const [ordersRes, catalog] = await Promise.all([
         // Paged: a month of bills passes 1000 at any real volume, and every share on this page
         // divides by a count taken from it. In parallel after the first page (S869): three months
         // on BLOOM CAFE was three 1000-bill pages, one after another.
         // S800: the chosen range AND the equal range before it, in one read, so the tiles can say
         // how this period compares and the trend costs no second round of reads.
-        fetchAllRowsParallel(opts => scopedFrom('pos_orders', 'id, closed_at', opts)
+        settled(fetchAllRowsParallel(opts => scopedFrom('pos_orders', 'id, closed_at', opts)
           .eq('close_type', 'paid')
           .gte('closed_at', nepalDayStartTs(prevFromIso)).lte('closed_at', nepalDayEndTs(toIso))
-          .order('id')),
+          .order('id'), { onPage: readLinesOf })),
         // Today's catalog: which group a choice belongs to (a size is not an add-on), its list price
         // (a free-by-design choice is not a loss) and which dishes have a group attached (S869: its
         // own attachment read, where the page used to read them a second time). A failed catalog
         // read is a failed report read — without it the tiles and the Margin tab would state things
         // they cannot know. S809 3o (REPORTS-12): each bill's own snapshot decides kind and list
-        // price now; the catalog only fills a snapshot row that carries neither. Bounded, it answers
-        // `{ error }` on a timeout, the shape a refused catalog read has.
-        loadOptionCatalog(scopedFrom),
-      ], readMs, LOAD_LABEL)
-      const err1 = ordersRes.error || catalog.error
-      if (err1) throw err1
+        // price now; the catalog only fills a snapshot row that carries neither.
+        settled(loadOptionCatalog(scopedFrom)),
+      ])
+      // A failed bill or catalog read fails the report now; lines already asked for are left to land unread.
+      if (ordersRes.error || catalog.error) return { ordersRes, catalog, lines: [], choices: [] }
+      readLinesOf(ordersRes.data || [])   // the final list's bills no page started
+      // In bill order, whichever page of bills landed first, so one range always lists its lines the
+      // same way (a dish keeps the name of its first line; equal counts keep their order).
+      const at = new Map((ordersRes.data || []).map((o, i) => [o.id, i]))
+      const pos = b => (at.has(b.first) ? at.get(b.first) : at.size)
+      const ordered = [...batches].sort((a, b) => pos(a) - pos(b))
+      const lines = await Promise.all(ordered.map(b => b.lines))
+      const choices = await Promise.all(ordered.map(b => b.choices))
+      return { ordersRes, catalog, lines, choices }
+    }
+    try {
+      // One limit over the whole chain, bills to lines (it was one per wave): a hung read answers
+      // TimeoutError and fails the page like a refused one. The bill read spans the range before.
+      const { ordersRes, catalog, lines, choices } = await withTimeout(readAll(), readMs, LOAD_LABEL)
+      // Every read, the bills and the catalog first: one failed batch of lines fails the report, never
+      // a report short of that batch's plates. The error itself is thrown, so its detail line stays.
+      const results = [ordersRes, catalog, ...lines, ...choices]
+      if (firstError(results)) throw results.find(r => r.error).error
       const kindByGroup = Object.fromEntries(catalog.groups.map(g => [g.id, g.kind]))
       const kindByOptionId = Object.fromEntries(catalog.options.map(o => [o.id, kindByGroup[o.group_id] || 'unknown']))
       const listPriceByOptionId = Object.fromEntries(catalog.options.map(o => [o.id, Number(o.price_delta) || 0]))
-
-      const orderIds = (ordersRes.data || []).map(o => o.id)
-      const readLines = async () => {
-        const r = await fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_items', COMBO_LINE_COLS).in('order_id', ids).order('id'))
-        return isMissingColumn(r.error)
-          ? fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_items', LINE_COLS).in('order_id', ids).order('id'))
-          : r
-      }
-      const [linesRes, snapRes] = await settleAll([
-        readLines(),
-        fetchAllRowsChunked(orderIds, ids => scopedFrom('pos_order_item_options',
-          'id, order_item_id, option_id, group_name, group_kind, option_name, is_removal, price_delta, list_price_delta, included, ingredient_deltas')
-          .in('order_id', ids).order('id')),
-      ], readMs, LOAD_LABEL)
-      const err2 = firstError([linesRes, snapRes])
-      if (err2) throw err2
+      const linesRes = { data: lines.flatMap(r => r.data || []) }
+      const snapRes = { data: choices.flatMap(r => r.data || []) }
       const attachedRecipeIds = new Set(catalog.attachments.map(a => a.recipe_id))
       const curStartMs = Date.parse(nepalDayStartTs(fromIso))
       const curOrders = (ordersRes.data || []).filter(o => Date.parse(o.closed_at) >= curStartMs)

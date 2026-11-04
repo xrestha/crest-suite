@@ -38,6 +38,7 @@ import { loadDeliveryCommission, bsMonthWindow } from '../../shared/deliveryComm
 import { sheetWithLetterhead } from '../../shared/excelLetterhead'
 import { useBizInfo } from '../../shared/hooks/useBizInfo'
 import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
+import { usePeriodList } from '../../shared/hooks/usePeriodList'
 import { UncountedItemsBanner } from '../../shared/uncountedItems'
 import SuiteGate, { SUITE_PAGES, useSuiteAccess } from '../../components/SuiteGate'
 import Tip from '../../components/Tip'
@@ -67,6 +68,30 @@ const fyLabel = start => `${start}/${String((start + 1) % 100).padStart(2, '0')}
 const fyMonths = start => [4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3].map(m => ({ bs_year: m >= 4 ? start : start + 1, bs_month: m }))
 const notFuture = (m, today) => m.bs_year < today.year || (m.bs_year === today.year && m.bs_month <= today.month)
 
+// The selection a month list opens on: the month or fiscal year the address names (`asked`, read once)
+// when it is this outlet's, else the latest closed month (COGS subtracts a closing count an open month
+// does not have), else the newest. Null with no months.
+function firstKeyOf(list, asked) {
+  const askedFy = Number(asked.fy)
+  if (asked.fy && list.some(x => fiscalYearOf(x.bs_year, x.bs_month).fyStart === askedFy)) return `fy:${askedFy}`
+  const target = (asked.period && list.find(x => x.id === asked.period)) || list.find(x => x.status === 'closed') || list[0]
+  return target ? `period:${target.id}` : null
+}
+// Every selection key a month list offers: each month, and each fiscal year it has a month of.
+const selectionKeys = list => [
+  ...list.map(p => `period:${p.id}`),
+  ...new Set(list.map(p => `fy:${fiscalYearOf(p.bs_year, p.bs_month).fyStart}`)),
+]
+// Whether two descriptions of one key cover the same months with the same status. A statement built
+// from a guessed list is kept only then: an open month is built on the running-month clock and
+// printed without a verdict, so a month closed or reopened elsewhere is built again.
+const sameSelection = (a, b) => !!a && !!b && a.kind === b.kind
+  && a.months.length === b.months.length && a.periods.length === b.periods.length
+  && a.periods.every((p, i) => {
+    const q = b.periods[i]
+    return p.id === q.id && p.status === q.status && p.bs_year === q.bs_year && p.bs_month === q.bs_month
+  })
+
 // Labour for one outlet-month, once its Labor tab is known: the rule's result plus whether it is a
 // figure a statement may print (labourFigure).
 function finishLabour(r) {
@@ -84,6 +109,9 @@ export default function ConsolidatedPnl() {
   const { scopedFrom } = db
   const biz = useBizInfo()
   const periodReq = useLatestRequest()
+  // The month list is the shared one (S876, PERF-10; src/shared/periodList.js): on a revisit the
+  // statement's reads start from the list in memory, beside a fresh read of it.
+  const periodList = usePeriodList()
   // The selection lives in the address (S858): `?period=<id>` for a month, `?fy=<start>` for a fiscal
   // year, as HR's pages keep theirs (S804). So a reload, Back or a link sent to the accountant opens the
   // same statement, and the Owner Dashboard's Net Margin tile links straight to the month it showed
@@ -353,42 +381,85 @@ export default function ConsolidatedPnl() {
     return { data: { kind: 'group', cols, consolidated, excludedNames, senders, running }, error: null }
   }, [groupArg])
 
-  const loadSelection = useCallback(async (key, list) => {
+  // `claim` is the request this load answers to, the key itself unless a load of the same key must be
+  // told apart from an older one (a guessed statement, one built again from the fresh list).
+  const loadSelection = useCallback(async (key, list, claim = key) => {
     const sel = describe(key, list)
     if (!sel) return
     setLoadError(null)
     const { data, error } = grouped ? await loadGroupMonths(sel) : await loadOutletStatements(sel)
-    if (!periodReq.isCurrent(key)) return   // superseded by a newer selection
+    if (!periodReq.isCurrent(claim)) return   // superseded by a newer selection
     if (error) { console.error('Consolidated P&L failed:', error); setResult(null); setLoadError(error); return }
     setResult({ ...data, builtFor: key, sel })
   }, [describe, grouped, loadGroupMonths, loadOutletStatements, periodReq])
 
   // init() claims the page before its first await (PNL-4); a later selection supersedes it.
+  //
+  // The months come from the shared list (S876, PERF-10), guessed then confirmed by hand rather than
+  // through initPeriodLoad, whose pick is one month by id: here a pick is a key (`period:<id>` or
+  // `fy:<start>`) and a fiscal year spans many months. With a list in memory (any visit after the
+  // first) the statement starts at once under its own claim (`<key>:guess`) beside a fresh read of the
+  // list. That load is kept only when the fresh list opens on the same key with the same months, each
+  // with the same status; otherwise the statement is built again from the fresh rows, under the key
+  // itself, which supersedes the guess even when the key did not change. The page stays loading until
+  // both have landed, so the guess never paints alone, and a failed or empty fresh list cancels it.
   const init = useCallback(async () => {
     const initKey = periodReq.begin(`init:${effectiveClientId}`)
     setLoading(true)
     setLoadError(null)
     setResult(null)
-    const { data: p, error } = await settleWithin(
-      scopedFrom('monthly_periods', 'id, bs_year, bs_month, status')
-        .order('bs_year', { ascending: false }).order('bs_month', { ascending: false }).order('id'),
-      LOAD_MS, 'Loading the months')
-    if (!periodReq.isCurrent(initKey)) return
-    if (error) { setLoadError(error); setPeriods([]); setLoading(false); return }
-    const list = p || []
+    const { cached, fresh } = periodList()
+    const freshRead = settleWithin(fresh, LOAD_MS, 'Loading the months')
+    const guessKey = cached ? firstKeyOf(cached, askedRef.current) : null
+    const guessClaim = guessKey ? `${guessKey}:guess` : null
+    let guessLoad = null
+    if (guessKey) {
+      periodReq.begin(guessClaim)
+      setPeriods(cached)
+      setSelectedKey(guessKey)
+      guessLoad = loadSelection(guessKey, cached, guessClaim)
+      guessLoad.catch(() => {})   // awaited below on the path that keeps it; never an unhandled rejection
+    }
+    const { data, error } = await freshRead
+    if (!periodReq.isCurrent(guessClaim || initKey)) {
+      // Superseded. A pick made from the guessed list while the fresh read was out (the picker, ‹ ›)
+      // still gets the fresh rows, and is built again when its months or their status moved. Only a
+      // key of THIS list: a client switch claims `init:<client>`, which no key here matches.
+      if (error || !cached) return
+      const list = data || []
+      const picked = selectionKeys(list).find(k => periodReq.isCurrent(k))
+      if (!picked) return
+      setPeriods(list)
+      if (sameSelection(describe(picked, cached), describe(picked, list))) return
+      const claim = periodReq.begin(`${picked}:fresh`)
+      setLoading(true)
+      setResult(null)
+      await loadSelection(picked, list, claim)
+      if (periodReq.isCurrent(claim)) setLoading(false)
+      return
+    }
+    if (error) {
+      if (guessClaim) periodReq.begin(`${initKey}:failed`)   // the guessed statement must not land over the error
+      setLoadError(error); setPeriods([]); setSelectedKey(null); setResult(null); setLoading(false); return
+    }
+    const list = data || []
     setPeriods(list)
-    // Closed-period default — COGS subtracts a closing count that an open month does not have — unless
-    // the address names a month or fiscal year of this outlet's (askedRef above).
-    const askedFy = Number(askedRef.current.fy)
-    const fyKnown = askedRef.current.fy && list.some(x => fiscalYearOf(x.bs_year, x.bs_month).fyStart === askedFy)
-    const asked = askedRef.current.period ? list.find(x => x.id === askedRef.current.period) : null
-    const target = asked || list.find(x => x.status === 'closed') || list[0]
-    if (!target) { setSelectedKey(null); setLoading(false); return }
-    const key = periodReq.begin(fyKnown ? `fy:${askedFy}` : `period:${target.id}`)
+    const key = firstKeyOf(list, askedRef.current)
+    if (!key) {
+      if (guessClaim) periodReq.begin(`${initKey}:none`)
+      setSelectedKey(null); setResult(null); setLoadError(null); setLoading(false); return
+    }
     setSelectedKey(key)
+    if (key === guessKey && sameSelection(describe(guessKey, cached), describe(key, list))) {
+      await guessLoad
+      if (periodReq.isCurrent(guessClaim)) setLoading(false)
+      return
+    }
+    periodReq.begin(key)
+    setResult(null)   // a guessed statement of the same key must not stand in for this one
     await loadSelection(key, list)
     if (periodReq.isCurrent(key)) setLoading(false)
-  }, [effectiveClientId, scopedFrom, loadSelection, periodReq])
+  }, [effectiveClientId, periodList, loadSelection, describe, periodReq])
 
   // authLoading is a real dependency: a hard load lands here while auth is still resolving. The load runs
   // only once the Suite gate and the role allow it (ACCESS-9: nothing is read behind the card).
@@ -404,6 +475,13 @@ export default function ConsolidatedPnl() {
     setLoading(true)
     await loadSelection(key)
     if (periodReq.isCurrent(key)) setLoading(false)
+  }
+
+  // Try again (S876): the statement on screen read again, or the whole first load when the month list
+  // itself could not be read (no months, so nothing on screen to read). Both claim the page first.
+  function retryLoad() {
+    if (selectedKey && describe(selectedKey)) handleSelect(selectedKey)
+    else init()
   }
 
   // Whatever picked the statement (the first load, the picker, ‹ ›), the address follows it, so a link
@@ -744,6 +822,7 @@ export default function ConsolidatedPnl() {
         loading={busy}
         loadingText="Building the statement…"
         error={loadError}
+        onRetry={effectiveClientId ? retryLoad : undefined}
         empty={isEmpty}
         // No pictograph: a screen reader read the old page emoji aloud (S857).
         emptyIcon={null}
