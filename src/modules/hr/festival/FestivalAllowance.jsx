@@ -294,7 +294,7 @@ export default function FestivalAllowance() {
     return 'No longer on the payroll'
   }
 
-  const sortedRows   = useMemo(() => [...rows].sort((a, b) => nameOf(a.employee_id).localeCompare(nameOf(b.employee_id))), [rows, empMap]) // eslint-disable-line react-hooks/exhaustive-deps
+  const sortedRows   = useMemo(() => [...rows].sort((a, b) => nameOf(a.employee_id).localeCompare(nameOf(b.employee_id))), [rows, empMap]) // eslint-disable-line react-hooks/exhaustive-deps -- nameOf is rebuilt each render; it reads only empMap
   const flagged      = sortedRows.filter(r => !isExcluded(r) && reasonFor(r))
   const amountNeeded = sortedRows.filter(r => !isExcluded(r) && (r.pay_basis || 'monthly') !== 'monthly' && !(parseFloat(r.amount) > 0) && !reasonFor(r))
   const excludedRows = sortedRows.filter(isExcluded)
@@ -313,7 +313,7 @@ export default function FestivalAllowance() {
     if (!emp) return []
     const fresh = taxFor(emp, parseFloat(r.amount) || 0)
     return Math.abs(fresh - (parseFloat(r.tds) || 0)) >= 1 ? [{ row: r, fresh, kept: !!r.tds_overridden }] : []
-  }) : NONE), [ready, drafts, empMap, compsIdx, ytdMap, others, fyStart]) // eslint-disable-line react-hooks/exhaustive-deps
+  }) : NONE), [ready, drafts, empMap, compsIdx, ytdMap, others, fyStart]) // eslint-disable-line react-hooks/exhaustive-deps -- taxFor is rebuilt each render; its inputs are listed
   // A row whose tax a person typed or kept (tds_overridden, S753) is not stale — it is listed in the
   // Finalize confirmation instead. Before S753 "keep" was a page-session acknowledgement that a
   // reload forgot.

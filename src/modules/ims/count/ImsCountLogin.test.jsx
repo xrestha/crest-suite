@@ -12,13 +12,21 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom'
 // implementations before every test (the PosLogin.test.jsx shape).
 let mockRpcAnswers = {}
 const mockRpcCalls = []
+// The sign-in function: every call is recorded, and a test may hold the answer back.
+const mockInvokeCalls = []
+let mockInvokeAnswer = () => Promise.resolve({ data: null, error: null })
 jest.mock('../../../supabaseClient', () => ({
   supabase: {
     rpc: (name, args) => {
       mockRpcCalls.push([name, args])
       return Promise.resolve(mockRpcAnswers[name] || { data: [], error: null })
     },
-    functions: { invoke: () => Promise.resolve({ data: null, error: null }) },
+    functions: {
+      invoke: (name, opts) => {
+        mockInvokeCalls.push([name, opts])
+        return mockInvokeAnswer()
+      },
+    },
     auth: { setSession: () => Promise.resolve({ data: {}, error: null }) },
   },
 }))
@@ -45,6 +53,8 @@ const setUpDevice = () => {
 beforeEach(() => {
   mockRpcAnswers = {}
   mockRpcCalls.length = 0
+  mockInvokeCalls.length = 0
+  mockInvokeAnswer = () => Promise.resolve({ data: null, error: null })
   localStorage.clear()
   window.history.replaceState(null, '', '/ims/count')
 })
@@ -111,4 +121,38 @@ it('a device that is set up shows its counters, not the set-up screen', async ()
   renderCount()
   expect(await screen.findByRole('button', { name: /Maya/ })).toBeTruthy()
   expect(screen.queryByText('This device is not set up yet')).toBeNull()
+})
+
+// S890: the keyboard listener is re-subscribed when the state handleSignIn reads changes. It was
+// keyed on the counter and the PIN only, so a second Enter while the first sign-in was still in
+// flight ran the handleSignIn of the earlier render, which still saw signingIn false, and sent a
+// second request: two PIN attempts counted towards the lockout for one PIN typed once.
+describe('signing in from the keyboard', () => {
+  const typePin = digits => digits.split('').forEach(key => fireEvent.keyDown(window, { key }))
+
+  it('a second Enter while the sign-in is in flight sends nothing more, and Enter works again after', async () => {
+    setUpDevice()
+    mockRpcAnswers.get_ims_count_staff = { data: [{ id: 'p-1', full_name: 'Maya' }], error: null }
+    let answer
+    mockInvokeAnswer = () => new Promise(resolve => { answer = resolve })
+    renderCount()
+    fireEvent.click(await screen.findByRole('button', { name: /Maya/ }))
+    typePin('1234')
+    fireEvent.keyDown(window, { key: 'Enter' })
+    await screen.findByRole('button', { name: 'Signing in…' })
+    fireEvent.keyDown(window, { key: 'Enter' })
+    fireEvent.keyDown(window, { key: 'Enter' })
+    expect(mockInvokeCalls).toHaveLength(1)
+    expect(mockInvokeCalls[0]).toEqual(['ims-staff-login', { body: { client_id: 'client-1', device_secret: 'secret-1', staff_id: 'p-1', pin: '1234' } }])
+
+    // The connection fails: the PIN is kept and the counter presses Enter again, which must send.
+    mockInvokeAnswer = () => Promise.resolve({ data: null, error: null })
+    answer({ data: null, error: null })
+    await screen.findByRole('button', { name: 'Sign in' })
+    fireEvent.keyDown(window, { key: 'Enter' })
+    expect(mockInvokeCalls).toHaveLength(2)
+    await screen.findByRole('button', { name: 'Sign in' })
+    // The roster was read once: re-subscribing the listener re-reads nothing.
+    expect(mockRpcCalls.filter(([name]) => name === 'get_ims_count_staff')).toHaveLength(1)
+  })
 })

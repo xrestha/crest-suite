@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -27,6 +27,7 @@ import { usePeriodList } from '../../../shared/hooks/usePeriodList'
 import { initPeriodLoad } from '../../../shared/periodList'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { readPeriodTransfers, transferNetQtyByItem } from '../transfers/transferFlows'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 function dispPurch(baseQty, item) {
   const cf = parseFloat(item.conversion_factor) || 1
@@ -86,7 +87,7 @@ export default function Variance() {
   )
 
 
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11). A failed
   // first load re-runs init: the categories read beside the month list is one a month switch

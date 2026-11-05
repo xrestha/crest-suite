@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -30,6 +30,7 @@ import {
 } from '../../../shared/menuEngineering'
 import { BYO_REASON, BYO_TIP, isCostedByBuild } from './buildYourOwnRating'
 import { hasRevenue } from '../../../shared/revenueFloor'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 const QUADRANTS = {
   Star:      { color: 'var(--theme-green-text)', bg: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-green) 30%, transparent)', icon: '★', desc: 'High profit · High popularity' },
@@ -124,7 +125,7 @@ export default function MenuEngineering() {
   // either. Non-blocking, under the content, naming the consequence.
   const [classWriteError, setClassWriteError] = useState(null)
 
-  useEffect(() => { if (!authLoading && clientId) init() }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(clientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load re-runs init, a failed month re-reads that month and stays on it.

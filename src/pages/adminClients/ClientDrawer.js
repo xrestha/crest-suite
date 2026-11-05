@@ -301,7 +301,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
 
   useEffect(() => {
     loadUsers()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loads the logins per client; loadUsers is rebuilt each render
   }, [client.id])
 
   useEffect(() => {
@@ -317,7 +317,7 @@ export default function ClientDrawer({ client, onClose, onClientUpdated }) {
     // Outlet groups live on the Billing tab; loaded on first visit rather than with the drawer,
     // since most clients are single-outlet and never open it.
     if (activeTab === 'billing') reloadGroups()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loads a tab when it opens; the loaders are rebuilt each render
   }, [activeTab])
 
   // The groups, re-read after any group change: the database clears a group's HQ when the HQ

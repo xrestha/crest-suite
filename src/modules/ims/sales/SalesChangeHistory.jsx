@@ -32,7 +32,7 @@ export default function SalesChangeHistory({ period }) {
   const [moreLoading, setMoreLoading] = useState(false)
   const [moreError, setMoreError] = useState(null)
 
-  useEffect(() => { if (periodId) loadFirst(periodId) }, [periodId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (periodId) loadFirst(periodId) }, [periodId]) // eslint-disable-line react-hooks/exhaustive-deps -- reloads on period switch only; loadFirst is rebuilt each render
 
   function readPage(id, before) {
     return settleWithin(

@@ -41,7 +41,7 @@ export default function ValuationReportTab({ assets }) {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null) // a failed read is not "no posted runs yet"
 
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps -- reads on mount; the tab remounts on every visit
 
   async function load() {
     setLoading(true)

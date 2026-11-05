@@ -32,6 +32,7 @@ import { nprPaisa } from '../../../shared/nepalMoney'
 import { nepalTime, nepalBsLong } from '../../../shared/nepalTime'
 import { salesDraftId, salesDraftSignature, readSalesDraft, saveSalesDraft, clearSalesDraft, draftBaseMoved } from './salesEntryDraft'
 import { hasRevenue } from '../../../shared/revenueFloor'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 // S454 added a pre-save `getSession()` probe on an 8s clock to diagnose a hang. It served its
 // purpose and is deliberately GONE (S458): an 8s gate is *tighter* than the 15s cap that
@@ -286,7 +287,7 @@ export default function Sales() {
     writePageCache('sales', section, effectiveClientId, value)
   }
 
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   useEffect(() => {
     if (!selectedPeriod) return
@@ -296,15 +297,15 @@ export default function Sales() {
     } else {
       setSelectedDay(1)
     }
-  }, [selectedPeriod]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedPeriod])
 
   useEffect(() => {
     if (viewMode === 'daily' && selectedPeriod) loadDailySales(selectedPeriod.id, selectedDay)
-  }, [viewMode, selectedDay, selectedPeriod]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [viewMode, selectedDay, selectedPeriod]) // eslint-disable-line react-hooks/exhaustive-deps -- reloads on tab, day or period change; loader is rebuilt each render
 
   useEffect(() => {
     if (viewMode === 'breakdown' && selectedPeriod) loadMonthlyEntries(selectedPeriod.id)
-  }, [viewMode, selectedPeriod]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [viewMode, selectedPeriod]) // eslint-disable-line react-hooks/exhaustive-deps -- reloads on tab or period change; loader is rebuilt each render
 
   // viewMode starts at 'bulk' and clientModules only resolves once the profile has loaded, so a
   // POS client's first render can legitimately land on a tab that is about to become disabled.
@@ -1218,7 +1219,7 @@ export default function Sales() {
     const bulkColTotal = activeRecipes.reduce((s, r) => s + (pivot[r.id]?.[0] || 0), 0)
     const grandTotal = activeRecipes.reduce((s, r) => s + (rowTotals[r.id] || 0), 0)
     return { pivot, activeDays, hasBulk, activeRecipes, rowTotals, colTotals, bulkColTotal, grandTotal }
-  }, [monthlyEntries, recipes, categoryFilter, menuSearchLc]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [monthlyEntries, recipes, categoryFilter, menuSearchLc]) // eslint-disable-line react-hooks/exhaustive-deps -- matchesMenuFilter is rebuilt each render; its inputs are listed
 
   const periodLabel = selectedPeriod
     ? `${BS_MONTHS[selectedPeriod.bs_month - 1]} ${selectedPeriod.bs_year}`

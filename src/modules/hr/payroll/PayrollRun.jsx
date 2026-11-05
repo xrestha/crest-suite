@@ -303,7 +303,7 @@ export default function PayrollRun() {
       if (periodReq.isCurrent(open.id)) setLoading(false)
     }
     init()
-  }, [clientId, initRun]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, initRun]) // eslint-disable-line react-hooks/exhaustive-deps -- client switch or retry only; loaders rebuilt each render, link read once
 
   // Everything a month's payslips are computed from, read together. Used by the page load AND by
   // Generate, Regenerate and Finalize, so every write is computed from data read for that write — not

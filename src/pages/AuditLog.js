@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../supabaseClient'
 import Tip from '../components/Tip'
@@ -11,6 +11,7 @@ import { nepalBsLong, nepalCivilDate, nepalDateLong, nepalTime, nepalTime24 } fr
 import { NPR_LOCALE } from '../shared/nepalMoney'
 import { formatAd } from '../utils/bsCalendar'
 import { settleWithin, isTimeout } from '../utils/withTimeout'
+import { useClientInit } from '../shared/hooks/useClientInit'
 
 const PAGE_SIZE = 500
 
@@ -328,7 +329,8 @@ export default function AuditLog() {
   // table, under whichever label was selected last (S601's shape).
   const req = useLatestRequest()
 
-  useEffect(() => { if (!authLoading) init() }, [authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
+  // S890: once, after the sign-in loads. A profile re-fetch used to re-run init and reset the filters.
+  useClientInit('audit-log', authLoading, init)
 
   async function init() {
     fetchLogs('all', 'all', '7d')

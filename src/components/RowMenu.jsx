@@ -102,7 +102,7 @@ export default function RowMenu({ label, items, disabled = false, busy = false, 
       window.removeEventListener('resize', onScroll)
       document.removeEventListener('scroll', onScroll, true)
     }
-  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open])
 
   if (actionable.length === 0) return null
 

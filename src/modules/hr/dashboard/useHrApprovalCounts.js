@@ -51,7 +51,7 @@ export function useHrApprovalCounts() {
       setError(true)
       setLoading(false)
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- scopedFrom is memoised on clientId, which is listed
   }, [clientId])
 
   return { ...counts, loading, error }

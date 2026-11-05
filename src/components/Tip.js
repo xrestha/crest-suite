@@ -59,7 +59,7 @@ export default function Tip({ text, children, width = 220, style }) {
     }
     document.addEventListener('keydown', onKey, true)
     return () => document.removeEventListener('keydown', onKey, true)
-  }, [visible]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visible]) // eslint-disable-line react-hooks/exhaustive-deps -- listens only while the tip shows; hide is rebuilt each render
   useEffect(() => () => clearTimeout(hideTimer.current), [])
 
   const bubble = pos && createPortal(

@@ -177,6 +177,9 @@ export default function ImsCountLogin() {
     return `in ${mins} minute${mins !== 1 ? 's' : ''}`
   }
 
+  // The keyboard calls the handleSignIn of the render that subscribed it, so every value that
+  // function reads is a dependency (S890). Without `signingIn` here, a second Enter during the
+  // sign-in still saw signingIn false and sent a second request, two PIN attempts for one PIN.
   useEffect(() => {
     if (!selected) return
     function onKey(e) {
@@ -187,7 +190,7 @@ export default function ImsCountLogin() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selected, pin, pressKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selected, pin, pressKey, signingIn, device]) // eslint-disable-line react-hooks/exhaustive-deps -- handleSignIn is rebuilt each render; the state it reads is listed
 
   const pinDots = Math.max(4, pin.length)
 

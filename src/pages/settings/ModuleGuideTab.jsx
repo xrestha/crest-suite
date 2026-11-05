@@ -38,7 +38,7 @@ export default function ModuleGuideTab({ groups, docTitle, docSubtitle }) {
     return groups
       .map(g => ({ ...g, sections: g.sections.filter(s => haystack(s).includes(q)) }))
       .filter(g => g.sections.length > 0)
-  }, [q, groups]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [q, groups])
 
   const active = useMemo(() => {
     for (const g of groups) {

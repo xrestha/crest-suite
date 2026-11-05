@@ -29,6 +29,9 @@ const mockRpcCalls = []
 let mockSignInAnswer = { data: null, error: null }
 let mockSetSessionAnswer = { data: {}, error: null }
 const mockInvokeCalls = []
+// pos-staff-login's own call when a test sets one (S890): a function, so a test can hold the answer
+// back. Null answers with mockSignInAnswer.
+let mockSignInCall = null
 jest.mock('../../../supabaseClient', () => ({
   supabase: {
     rpc: (name, args) => {
@@ -40,7 +43,7 @@ jest.mock('../../../supabaseClient', () => ({
         { id: 'p-sita', full_name: 'Sita', pos_job_title: 'Waiter' },
       ], error: null })
     },
-    functions: { invoke: (name, opts) => { mockInvokeCalls.push([name, opts]); return Promise.resolve(mockSignInAnswer) } },
+    functions: { invoke: (name, opts) => { mockInvokeCalls.push([name, opts]); return mockSignInCall ? mockSignInCall() : Promise.resolve(mockSignInAnswer) } },
     auth: { setSession: () => Promise.resolve(mockSetSessionAnswer) },
   },
 }))
@@ -62,6 +65,7 @@ beforeEach(() => {
   mockSignInAnswer = { data: null, error: null }
   mockSetSessionAnswer = { data: {}, error: null }
   mockInvokeCalls.length = 0
+  mockSignInCall = null
   localStorage.clear()
   localStorage.setItem('pos_device_client_id', 'c-1')
   localStorage.setItem('pos_device_secret', 'secret')
@@ -270,6 +274,33 @@ describe('signing in', () => {
     expect(within(alert).getByText("Couldn't sign in. Ask your manager.")).toBeTruthy()
     expect(within(alert).getByText('409 · staff_id does not belong to client_id')).toHaveClass('action-error-detail')
     expect(screen.getByText('4 digits entered')).toBeTruthy() // not a wrong PIN, so the PIN stays
+  })
+
+  // S890: the keyboard listener ran the handleSignIn of the render that subscribed it, and it was
+  // re-subscribed only when the waiter or the PIN changed. A second Enter while the first sign-in was
+  // still in flight saw signingIn false and sent the PIN again: two attempts towards the lockout.
+  it('a second Enter while the sign-in is in flight sends nothing more, and Enter works again after', async () => {
+    let answer
+    mockSignInCall = () => new Promise(resolve => { answer = resolve })
+    renderAt()
+    fireEvent.click(await screen.findByRole('button', { name: /Ram/ }))
+    for (const key of ['1', '2', '3', '4']) fireEvent.keyDown(window, { key })
+    fireEvent.keyDown(window, { key: 'Enter' })
+    await screen.findByRole('button', { name: 'Signing in…' })
+    fireEvent.keyDown(window, { key: 'Enter' })
+    fireEvent.keyDown(window, { key: 'Enter' })
+    expect(mockInvokeCalls).toHaveLength(1)
+    expect(mockInvokeCalls[0][1].body).toEqual({ client_id: 'c-1', device_id: 'd-1', device_secret: 'secret', staff_id: 'p-ram', pin: '1234' })
+
+    // The answer carries no session: the connection, so the PIN is kept, and Enter must send again.
+    mockSignInCall = null
+    await act(async () => { answer({ data: null, error: null }) })
+    await screen.findByRole('button', { name: /Login/ })
+    fireEvent.keyDown(window, { key: 'Enter' })
+    expect(mockInvokeCalls).toHaveLength(2)
+    await screen.findByRole('button', { name: /Login/ })
+    // The staff list was read once: re-subscribing the listener reads nothing again.
+    expect(mockRpcCalls.filter(([name]) => name === 'get_pos_device_staff')).toHaveLength(1)
   })
 })
 

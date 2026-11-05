@@ -701,7 +701,7 @@ export default function PosShifts() {
     setShiftReadError(null)
     setPageMsg(null)
     if (mainTab === 'history') loadHistory()
-  }, [clientId]) // eslint-disable-line
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- reloads on client switch; History loads when its tab opens
 
   // S840: the names read above leaves out Crest support, which the RPC names only for an id asked
   // for, so a shift it opened or closed would show no name and print none on its slip. The ones the
@@ -720,7 +720,7 @@ export default function PosShifts() {
     const onVisible = () => { if (document.visibilityState === 'visible') loadOpenShift() }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [clientId]) // eslint-disable-line
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- listener follows the client; loadOpenShift is rebuilt each render
 
   // Same pattern as PosOrders.jsx's printHtml — a popup window that auto-prints and closes.
   // On a POS device launched with Chrome's --kiosk-printing flag this goes straight to the

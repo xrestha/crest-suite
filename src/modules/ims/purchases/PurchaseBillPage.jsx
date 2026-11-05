@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
@@ -17,6 +17,7 @@ import ActionError, { asActionError } from '../../../components/ActionError'
 import Modal from '../../../components/Modal'
 import PurchaseBillForm from './PurchaseBillForm'
 import PurchaseBillPrint from './PurchaseBillPrint'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 // Add / Edit Purchase Bill, as a route rather than the <Modal maxWidth={1160}> it was until S647.
 //
@@ -78,7 +79,7 @@ export default function PurchaseBillPage() {
   const [rateUpdateBusy, setRateUpdateBusy]         = useState(false)
   const [rateUpdateError, setRateUpdateError]       = useState(null)
 
-  useEffect(() => { if (!authLoading && effectiveClientId) load() }, [clientId, groupId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(effectiveClientId, authLoading, load, groupId) // S890: once per outlet and bill, after the sign-in loads
 
   async function load() {
     const [{ data: p, error: pErr }, { data: i, error: iErr }, { data: v, error: vErr }] = await Promise.all([

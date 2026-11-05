@@ -24,6 +24,7 @@ import { initPeriodLoad } from '../../../shared/periodList'
 import { PURCHASE_PAYMENT_METHODS } from './purchasesHelpers'
 import { fmtLineRate } from './purchaseLines'
 import { unitRateCell } from '../../../shared/unitRate'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 // Quantities are numeric(12,3) in the database, and every one of these figures has been through
 // `parseFloat` on the way here. Without this, ordering 0.3 and receiving 0.1 twice leaves
@@ -111,9 +112,9 @@ export default function PurchaseOrders() {
   const prefillRef = useRef(location.state?.poPrefill || null)
   useEffect(() => {
     if (location.state?.poPrefill) navigate(location.pathname, { replace: true, state: null })
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps -- clears the router hand-off once, on mount
 
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   useEffect(() => {
     if (!printPo) return

@@ -58,7 +58,7 @@ export default function PurchaseOneLakhAboveReport() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
 
-  useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps -- loads on mount and client switch; init is rebuilt each render
 
   // Keyed on client AND fiscal year: an admin switching client keeps the same FY label, and the
   // previous client's read must not land on the new one's page (the S721 rule).

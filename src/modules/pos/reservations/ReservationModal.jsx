@@ -70,7 +70,7 @@ export default function ReservationModal({ row, tables, settings, dayIso, onClos
   }, [party, settings, durationTouched])
 
   // On edit, show what the book knows about this guest without waiting for a blur.
-  useEffect(() => { if (row?.phone) lookupPhone(row.phone) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (row?.phone) lookupPhone(row.phone) }, []) // eslint-disable-line react-hooks/exhaustive-deps -- once on open; the form is seeded from row once too
 
   async function lookupPhone(raw) {
     const canonical = normalizePhone(raw)

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
@@ -24,6 +24,7 @@ import { buildStockRows } from './stockReportCalc'
 import { unitRateCell } from '../../../shared/unitRate'
 import { periodRowIds, periodValuationItems } from '../reports/periodCost'
 import { readPeriodTransfers } from '../transfers/transferFlows'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 const npr = n => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })
 const STATUS_LABEL = { out: 'OUT', low: 'LOW', ok: 'OK', idle: 'NO ACTIVITY', hidden: 'HIDDEN' }
@@ -51,7 +52,7 @@ export default function StockReport() {
   const [filterStatus, setFilterStatus] = useState('all')
   const [search, setSearch] = useState('')
 
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load (the month list or the categories) re-runs init, a failed month re-reads that month and stays on it.

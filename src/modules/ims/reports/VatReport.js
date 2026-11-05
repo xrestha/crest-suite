@@ -51,7 +51,7 @@ export default function VatReport() {
   const [loadError, setLoadError]     = useState(null)
   const [tab, setTab]                 = useState('entries')
 
-  useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps -- loads on mount and client switch; init is rebuilt each render
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load re-runs init, a failed month re-reads that month and stays on it.

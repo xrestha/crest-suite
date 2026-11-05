@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsChunked, runChunkedByIds } from '../../../shared/fetchAllRows'
@@ -23,6 +23,7 @@ import { billStatus, billBalance, vendorGroups, payablesScopeLine, payablesSheet
 import { payTermsLabel, parsePayTerms, DEFAULT_PAY_WITHIN_DAYS, MAX_PAY_WITHIN_DAYS } from '../vendors/payTerms'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import LetterheadButton from '../../../components/LetterheadButton'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -161,7 +162,8 @@ export default function OutstandingPayables() {
   const [modeSaving, setModeSaving] = useState(false)
   const [modeError, setModeError]   = useState('')
 
-  useEffect(() => { if (!authLoading && effectiveClientId) load(activeTab) }, [effectiveClientId]) // eslint-disable-line
+  // S890: once per outlet, after the sign-in loads, on the tab on screen; a tab switch loads its own.
+  useClientInit(effectiveClientId, authLoading, () => load(activeTab))
 
   async function load(tab = activeTab) {
     tabReq.begin(tab)

@@ -376,7 +376,7 @@ export default function FinalSettlement() {
     const leaveTypes = types.data || []
     setClientData({ status: 'ok', error: null, components: comps.data || [], leaveTypes, ssf: ssf.data || {}, settlements: setts.data || [] })
     setLeaveTypeId(prev => prev || (leaveTypes.find(t => (parseFloat(t.annual_quota) || 0) > 0) || leaveTypes[0])?.id || '')
-  }, [scopedFrom]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scopedFrom]) // eslint-disable-line react-hooks/exhaustive-deps -- clientReq is a stable ref the linter cannot see
 
   useEffect(() => {
     if (!clientId) return
@@ -384,7 +384,7 @@ export default function FinalSettlement() {
     setEmpId(''); setCurrent(null); setMsg(''); setLeaveTypeId('')
     loadEmployees()
     loadClientData(clientId)
-  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- client switch only; loadEmployees changes with every employee pick
 
   const currentKey = clientId && empId ? `${clientId}:${empId}:${lastDate.year}-${lastDate.month}` : null
 
@@ -456,7 +456,7 @@ export default function FinalSettlement() {
         tada: { total: claims.reduce((a, c) => a + (parseFloat(c.total_amount) || 0), 0), ids: claims.map(c => c.id) },
       })
     })()
-  }, [currentKey, reloadTick]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentKey, reloadTick]) // eslint-disable-line react-hooks/exhaustive-deps -- currentKey carries the client, employee and month
 
   const emp = employees.find(e => e.id === empId) || null
   const frozen = current?.status === 'finalized' ? current : null
@@ -623,7 +623,7 @@ export default function FinalSettlement() {
       })
     })()
     return () => { live = false }
-  }, [checkKey, reloadTick, confirmOpen]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [checkKey, reloadTick, confirmOpen]) // eslint-disable-line react-hooks/exhaustive-deps -- checkKey carries the employee and day; confirm open re-reads
 
   // S798 3b (H5): the payroll months finalized without this person, for the Reopen dialog (a finalized
   // settlement) and a reopened draft. Never for an earlier employment, which cannot be reopened.
@@ -638,7 +638,7 @@ export default function FinalSettlement() {
         if (live) setSkipped(error ? { key: skipKey, error } : { key: skipKey, months: data || [] })
       })
     return () => { live = false }
-  }, [skipKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [skipKey]) // eslint-disable-line react-hooks/exhaustive-deps -- skipKey carries the row id, its last day and reload tick
   const skippedMonths = skipped.key === skipKey && Array.isArray(skipped.months) ? skipped.months : []
   const skippedText = skippedMonths.map(bsMonthLabel).join(', ')
 

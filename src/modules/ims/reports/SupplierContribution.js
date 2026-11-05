@@ -14,7 +14,7 @@
 // • Wastage and staff meals are deliberately excluded — this is the cost of what was SOLD.
 // • Every period-scoped read is fetchAllRows-paged. On a busy period a bare .select() truncates at
 //   1000 rows with no error, and a truncated purchase set silently reassigns supplier shares.
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -41,6 +41,7 @@ import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { usePeriodList } from '../../../shared/hooks/usePeriodList'
 import { initPeriodLoad } from '../../../shared/periodList'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 const npr = n => `NPR ${(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const pct = (part, whole) => (whole > 0 ? (part / whole) * 100 : 0)
@@ -83,7 +84,7 @@ export default function SupplierContribution() {
 
   // authLoading in the deps for the same reason ConsolidatedPnl has it: a hard load lands here
   // while auth is still resolving, the guard fails once, and nothing re-fires (S594).
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load re-runs init, a failed month re-reads that month and stays on it.

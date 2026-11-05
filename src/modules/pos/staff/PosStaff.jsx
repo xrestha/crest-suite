@@ -163,7 +163,7 @@ export default function PosStaff() {
     ? staff.filter(p => (p.full_name || '').toLowerCase().includes(staffQuery))
     : staff
 
-  useEffect(() => { if (clientId) init() }, [clientId]) // eslint-disable-line
+  useEffect(() => { if (clientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- loads on client switch; init is rebuilt each render
 
   // S835 (D39). Beside every staff read (init, load, a PIN reset), never in front of it. Keyed per
   // read, so an answer for an earlier read or another outlet never lands over a newer one.

@@ -122,7 +122,7 @@ export default function ImsStaff() {
     setStaff([]); setEmployees([]); setEligibleUsers([]); setCustomRoles([])
     setLoadError(null); setPartialWarn(''); clearMsgs()
     init(clientId)
-  }, [clientId]) // eslint-disable-line
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- loads on client switch; init is rebuilt each render
 
   // The three dialogs below are on the shared Modal since S682 (Escape, focus trap, focus return,
   // role="dialog"); the document-level Escape listener that stood in for it is gone with them.

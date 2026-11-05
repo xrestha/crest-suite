@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -19,6 +19,7 @@ import { usePeriodList } from '../../../shared/hooks/usePeriodList'
 import { initPeriodLoad } from '../../../shared/periodList'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 import { findUncountedItems, mergeGaps, gapNote, unjudgedFcFigure } from '../../../shared/uncountedItems'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { readPeriodTransfers, lineValue } from '../transfers/transferFlows'
@@ -72,7 +73,7 @@ export default function AnnualSummary() {
   const [loading, setLoading]           = useState(true)
   const [loadError, setLoadError]       = useState(null)
 
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load re-runs init, a failed year re-reads that year in the mode on screen.

@@ -673,7 +673,7 @@ export default function Layout() {
         const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
         setNewTrialCount((data || []).filter(c => c.is_trial && c.trial_start_date && c.trial_start_date >= sevenDaysAgo).length)
       })
-  }, [isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isAdmin])
 
   async function handleSignOut() {
     const isPosDevice = !!localStorage.getItem('pos_device_client_id')
@@ -1158,7 +1158,7 @@ export default function Layout() {
   // canReachPosPath, imsCountOnly, groupId and clientId, an outlet switch that changed none of the
   // other keys kept offering the PREVIOUS outlet's pages — the S638 class of bug. Each of those is
   // rebuilt when the session it describes changes, which is exactly when this must recompute.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- isItemVisible is rebuilt each render; what it reads is listed
   }, [hrVisible, posVisible, customizationVisible, isAdmin, isOwner, outlets, plan, dashLabel, homeIsOverview,
       hasFeature, hasPosAccess, hasImsAccess, hasHrAccess, canReachPosPath, imsCountOnly, groupId, clientId])
 

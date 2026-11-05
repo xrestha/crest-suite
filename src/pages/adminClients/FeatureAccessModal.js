@@ -2,6 +2,7 @@ import { FEATURE_GROUPS } from '../../shared/featureCatalog'
 import { useEffect, useState } from 'react'
 import { useSettings } from '../../context/SettingsContext'
 import Modal from '../../components/Modal'
+import ActionError from '../../components/ActionError'
 import { colorTint } from '../../data/pricingPlans'
 import { suiteState } from '../../utils/subscription'
 import { formatAdAsBs } from '../../utils/bsCalendar'
@@ -123,6 +124,10 @@ export default function FeatureAccessModal({ client, onClose }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  // S890: a failed read is its own state. The grid then shows nothing and Save is gone, because
+  // saving the defaults on screen would overwrite the client's real grants.
+  const [loadError, setLoadError] = useState('')
+  const [loadTry, setLoadTry] = useState(0)
 
   // clientPlan drives the IMS feature grid (which tiers are auto-included) — always the IMS plan.
   const clientPlan = client.plan || 'starter'
@@ -142,12 +147,29 @@ export default function FeatureAccessModal({ client, onClose }) {
   const activeLabel  = activePlan.charAt(0).toUpperCase() + activePlan.slice(1)
 
   useEffect(() => {
-    loadClientFeatureFlags(client.id).then(data => {
-      setFlags({ ...DEFAULT_FLAGS, ...data })
-      setLoading(false)
-    })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client.id])
+    let alive = true
+    setLoading(true); setLoadError('')
+    loadClientFeatureFlags(client.id).then(
+      data => {
+        if (!alive) return
+        setFlags({ ...DEFAULT_FLAGS, ...data })
+        setLoading(false)
+      },
+      err => {
+        if (!alive) return
+        setLoadError(err?.message || String(err))
+        setLoading(false)
+      })
+    return () => { alive = false }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loads once per client or Try again; the useSettings loader is rebuilt each render
+  }, [client.id, loadTry])
+
+  const loadErrorEl = (
+    <div style={{ gridColumn: '1/-1', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
+      <ActionError error={`The feature access for this client could not be read, so nothing is shown and Save is off: saving now would overwrite their real grants. ${loadError}`} />
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setLoadTry(n => n + 1)}>Try again</button>
+    </div>
+  )
 
   async function handleSave() {
     setSaving(true); setMsg('')
@@ -279,6 +301,7 @@ export default function FeatureAccessModal({ client, onClose }) {
       <div style={{ paddingBottom: 8 }}>
         <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--theme-text2)' }}>POS features — included with the Crest POS module.</p>
         {loading ? <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
+          : loadError ? loadErrorEl
           : [
               { key: 'menu_pricing',   label: 'Menu Pricing' },
               { key: 'guest_ordering', label: 'Guest QR Self-Ordering', moduleIncluded: true },
@@ -313,7 +336,7 @@ export default function FeatureAccessModal({ client, onClose }) {
          constrains width otherwise) wider than the viewport instead of letting columns
          shrink. minmax(0, 1fr) lets each column actually shrink to fit. */
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0 14px', alignItems: 'start', overflowX: 'auto' }}>
-        {loading ? <p style={{ color: 'var(--theme-text2)', fontSize: 13, gridColumn: '1/-1' }}>Loading…</p> : FEATURE_GROUPS.map(group => {
+        {loading ? <p style={{ color: 'var(--theme-text2)', fontSize: 13, gridColumn: '1/-1' }}>Loading…</p> : loadError ? loadErrorEl : FEATURE_GROUPS.map(group => {
           const planIncluded = isPlanIncluded(group.tier, clientPlan, client.pos_enabled)
           return (
             <div key={group.tier} style={{ marginBottom: 16 }}>
@@ -376,8 +399,8 @@ export default function FeatureAccessModal({ client, onClose }) {
         </span>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={onClose}>Close</button>
-          {(imsEnabled || posEnabled) && (
-            <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={handleSave} disabled={saving}>
+          {(imsEnabled || posEnabled) && !loadError && (
+            <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={handleSave} disabled={saving || loading}>
               {saving ? 'Saving…' : 'Save'}
             </button>
           )}

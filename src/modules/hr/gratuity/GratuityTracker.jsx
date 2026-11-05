@@ -49,7 +49,7 @@ export default function GratuityTracker() {
   useEffect(() => {
     if (!clientId) return
     load(clientId)
-  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- reloads on client switch only; load is rebuilt each render
 
   async function load(forClient) {
     clientReq.begin(forClient)   // an operator switching clients must not land the previous one's list

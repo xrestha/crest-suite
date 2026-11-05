@@ -6,7 +6,7 @@
 // precisely because nothing currently deletes on trial_purge_at — this is insurance being put in
 // place ahead of the risk, not a race against it. When a purge is eventually built it must gate
 // on clients.last_backup_at rather than on this having fired at the right moment.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { runBackup } from './runBackup'
 import { ensureBackupDirectory } from './backupDirectory'
 
@@ -33,27 +33,37 @@ export function useAutoPurgeBackup(clients, onDone = () => {}) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [blocked, setBlocked] = useState(false)
-  // Guards against a re-render or a refreshed client list starting a second run for the same
-  // client while the first is still writing.
+  // The client this page load has already tried, and whether a backup is writing now. Refs, not
+  // state, because starting a backup re-renders the page and the run must still finish and report.
+  // Until S890 `busy` was a dependency of the effect below and the effect cancelled itself on
+  // cleanup, so setBusy(true) cancelled the very run that set it: the files were written and
+  // stamped, but the banner stayed on "Backing up…" for good and the list was never reloaded.
   const runningFor = useRef(null)
+  const inFlight = useRef(false)
+  const alive = useRef(true)
+  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
 
-  const pending = (clients || []).filter(c => needsPrePurgeBackup(c))
+  // Memoised on the list, so the effect re-runs whenever AdminClients reloads it. That reload is
+  // the only signal after "Choose backup folder…" grants permission; keyed on the pending COUNT,
+  // the effect never looked again and the banner kept asking for a folder (S890).
+  const pending = useMemo(() => (clients || []).filter(c => needsPrePurgeBackup(c)), [clients])
 
   useEffect(() => {
-    if (pending.length === 0 || busy) return
+    if (pending.length === 0 || inFlight.current) return
     const target = pending[0]
     if (runningFor.current === target.id) return
 
-    let cancelled = false
     ;(async () => {
       // request:false — no user gesture is available here, so a prompt would be rejected anyway.
       // Without granted permission this becomes a visible banner rather than a silent no-op.
       const { state } = await ensureBackupDirectory({ request: false })
-      if (cancelled) return
+      // Another run of this effect may have claimed the backup while this one waited.
+      if (!alive.current || inFlight.current || runningFor.current === target.id) return
       if (state !== 'granted') { setBlocked(true); return }
 
       setBlocked(false)
       runningFor.current = target.id
+      inFlight.current = true
       setBusy(true)
       setMessage(`Backing up ${target.name} before its purge deadline…`)
       try {
@@ -64,19 +74,17 @@ export function useAutoPurgeBackup(clients, onDone = () => {}) {
           allowPrompt: false,
           allowDownloadFallback: false, // never spray files into Downloads unattended
         })
-        if (cancelled) return
+        if (!alive.current) return
         setMessage(`✓ ${target.name} backed up before its purge deadline.`)
         onDone()
       } catch (err) {
-        if (!cancelled) setMessage(`Could not back up ${target.name}: ${err.message}`)
+        if (alive.current) setMessage(`Could not back up ${target.name}: ${err.message}`)
       } finally {
-        if (!cancelled) setBusy(false)
+        inFlight.current = false
+        if (alive.current) setBusy(false)
       }
     })()
-
-    return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending.length, busy])
+  }, [pending]) // eslint-disable-line react-hooks/exhaustive-deps -- onDone is a fresh arrow each render; it only reloads the list
 
   return { pending, blocked, busy, message }
 }

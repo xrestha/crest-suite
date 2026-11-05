@@ -111,7 +111,7 @@ export default function Overtime() {
       setLoading(false)
     }
     init()
-  }, [clientId]) // eslint-disable-line
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- loads on client switch; month switches write ?period= themselves
 
   // Whether payroll for a BS month is finalized. A month with no period has no payroll at all.
   // → 'none' | 'draft' | 'finalized' | 'unknown' (a read failed — treated as locked).
@@ -143,7 +143,7 @@ export default function Overtime() {
     // A failed read is not "no OT this month" (S682): keep the last-good list and say so.
     if (error) { setMsg('error:Could not load this month\'s overtime — the list is from the last successful load. ' + errorLine(error)); return }
     setEntries(data || [])
-  }, [scopedFrom, monthReq]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scopedFrom, monthReq]) // eslint-disable-line react-hooks/exhaustive-deps -- monthFinalized is rebuilt each render; it reads only scopedFrom
 
   async function handlePeriodChange(id) {
     const p = periods.find(x => x.id === id); if (!p) return

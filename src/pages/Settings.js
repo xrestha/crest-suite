@@ -334,7 +334,7 @@ export default function Settings() {
       return next
     })
   }, [settings])
-  useEffect(() => { setCats([...recipeCategories]) }, [recipeCategories]) // eslint-disable-line
+  useEffect(() => { setCats([...recipeCategories]) }, [recipeCategories])
 
   // Category usage, for the Recipe Categories tab. One row per recipe, so paged — a client's
   // menu is master data, but a truncated read here would report a category as unused and let it
@@ -354,7 +354,7 @@ export default function Settings() {
       setCatUsage(counts)
     })
     return () => { cancelled = true }
-  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- reloads on outlet switch; plan and scopedFrom follow clientId
 
   function update(key, val) {
     setForm(f => ({ ...f, [key]: val }))

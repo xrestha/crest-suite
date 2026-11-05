@@ -1,5 +1,5 @@
 import { npr2 } from '../../../shared/nepalMoney'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -18,6 +18,7 @@ import { budgetActuals } from './budgetActuals'
 import { readPeriodTransfers } from '../transfers/transferFlows'
 import { printWithTitle } from '../../../utils/printTitle'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 export default function BudgetVsActual() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -42,7 +43,7 @@ export default function BudgetVsActual() {
   const [loadError, setLoadError] = useState(null)
   const [saveError, setSaveError] = useState(null)
 
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load (the month list or the categories) re-runs init, a failed month re-reads that month and stays on it.

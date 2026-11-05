@@ -150,7 +150,7 @@ export default function HrStaff() {
     setReaching([]); setReachingError(null)
     setLoadError(null); setPartialWarn(''); setMsg(''); setNotice('')
     init(clientId)
-  }, [clientId]) // eslint-disable-line
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- loads on client switch; init is rebuilt each render
 
   async function init(forClient) {
     setLoading(true)

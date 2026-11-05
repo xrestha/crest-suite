@@ -400,7 +400,7 @@ export default function SalesReport() {
       setBizLoaded(true)
     })
     return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- scopedFrom follows clientId, which is listed
   }, [clientId])
 
   /* ── Daily / Hourly / Category / Customer — one shared date-range fetch ── */

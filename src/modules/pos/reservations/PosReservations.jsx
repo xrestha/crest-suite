@@ -242,7 +242,7 @@ export default function PosReservations() {
     setNewCount(changed || 0)
     if (nameMap) setIfChanged(setStaffNames, nameMap, v => JSON.stringify(v))
     setLoading(false)
-  }, [clientId, dayIso, filter, seenStamp, scopedFrom, commitRequests]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, dayIso, filter, seenStamp, scopedFrom, commitRequests]) // eslint-disable-line react-hooks/exhaustive-deps -- dayReq is a stable object from useLatestRequest
 
   useEffect(() => { load() }, [load])
   const loadRef = useRef(load)

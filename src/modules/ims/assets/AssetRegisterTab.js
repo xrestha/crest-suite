@@ -77,7 +77,7 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [deleteError, setDeleteError] = useState('')
 
-  useEffect(() => { loadNbv() }, [assets]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadNbv() }, [assets]) // eslint-disable-line react-hooks/exhaustive-deps -- rereads when the assets prop changes; loadNbv is rebuilt each render
 
   // Posted depreciation per asset, resolved once here (not one query per asset) — this is the ONE
   // view allowed sessionDataCache's read-revisit cache (a pure display read, never a batch-save

@@ -60,7 +60,7 @@ export function useSetupGuide({ surface = 'dashboard' } = {}) {
   // Keyed on its values, not the object: profile is replaced on every profile reload, and the
   // effects below must not re-run their reads for a viewer that has not changed.
   const viewerKey = viewerRaw ? `${viewerRaw.kind}:${viewerRaw.module || ''}:${viewerRaw.rank || ''}` : ''
-  const viewer = useMemo(() => viewerRaw, [viewerKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const viewer = useMemo(() => viewerRaw, [viewerKey]) // eslint-disable-line react-hooks/exhaustive-deps -- keyed on viewerKey; profile is replaced on every reload
   const userId = profile?.id || null
   const readOnly = viewer?.kind === 'admin'
 
@@ -116,7 +116,7 @@ export function useSetupGuide({ surface = 'dashboard' } = {}) {
       setClientFlags(f.error ? null : (f.data || null))
       setRows(p.error ? null : (p.data || []))
     })()
-  }, [authLoading, viewerKey, clientId, userId, readOnly, reloadKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authLoading, viewerKey, clientId, userId, readOnly, reloadKey]) // eslint-disable-line react-hooks/exhaustive-deps -- viewerKey stands for viewer; scopedFrom follows clientId, req is stable
 
   // Phase 2: the signals, only once we know the guide can be shown here, and only the ones this
   // viewer's own steps need. Keyed on the sorted signal list rather than on `feature`, which is a
@@ -142,7 +142,7 @@ export function useSetupGuide({ surface = 'dashboard' } = {}) {
       setSignalState({ ...out, loaded: true })
     })()
     return () => { cancelled = true }
-  }, [wantSignals, clientId, neededKey, reloadKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [wantSignals, clientId, neededKey, reloadKey]) // eslint-disable-line react-hooks/exhaustive-deps -- keyed on neededKey, not feature; scopedFrom follows clientId
 
   const monthEndOpen = useMemo(() => monthEndWindow({
     firstPeriod: signalState.firstPeriod, today: getBsToday(), daysIn: daysInBsMonth,

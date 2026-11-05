@@ -163,13 +163,13 @@ export default function Overheads() {
   const loadedFor = useRef(null)
   const loadSig = pid => `${pid}:${hrOn}:${payrollFenced}:${assetsOn}`
 
-  useEffect(() => { if (effectiveClientId) loadPeriods(effectiveClientId) }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (effectiveClientId) loadPeriods(effectiveClientId) }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps -- loads on mount and client switch; loadPeriods is rebuilt each render
   // `hrOn` is a dependency, not just an input: for an ADMIN viewing a client it comes from
   // `viewModules`, which resolves on its own schedule — so the first load can run with hrOn=false
   // and silently fall back to the Labor bucket on a client who does run payroll. Re-run when it
   // settles. It is memoized in AuthContext, so this cannot loop. The first month's load is started
   // by loadPeriods (S855), so a month already loaded with the same inputs is skipped here.
-  useEffect(() => { if (periodId && loadedFor.current !== loadSig(periodId)) loadAll(periodId) }, [periodId, hrOn, payrollFenced, assetsOn]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (periodId && loadedFor.current !== loadSig(periodId)) loadAll(periodId) }, [periodId, hrOn, payrollFenced, assetsOn]) // eslint-disable-line react-hooks/exhaustive-deps -- loadAll and loadSig are rebuilt each render; their inputs are listed
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // month list re-runs loadPeriods, a failed month re-reads that month through loadAll (not

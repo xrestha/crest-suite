@@ -13,6 +13,7 @@ import Tip from '../../../components/Tip'
 import ReportLoadError from '../../../components/ReportLoadError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import VendorBalanceConfirmationPrint from './VendorBalanceConfirmationPrint'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 // Nepal IRD Annexure 13 (अनुसूची १३) balance confirmation — per-vendor, per-fiscal-year printable
 // letter. See vendorBalanceHelpers.js for the opening/running-balance computation this wires up.
@@ -35,7 +36,7 @@ export default function VendorBalanceConfirmation() {
   const [result, setResult] = useState(null)
   const [loadError, setLoadError] = useState(null)
 
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [effectiveClientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load (vendors, months, business name) re-runs init, a failed letter recomputes it.

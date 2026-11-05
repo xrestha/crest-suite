@@ -211,7 +211,7 @@ export default function Items() {
     checkAllUsage(clientId)
     Promise.all([loadCategories(clientId), loadItems(clientId)])
       .finally(() => { if (loadedClientRef.current === clientId) setLoading(false) })
-  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- reloads on client switch only; the loaders are rebuilt each render
 
   // Starts a scan and never rejects: it is not awaited anywhere, so a throw inside it (a bug, or a
   // builder that refused its arguments) would otherwise be an unhandled rejection that leaves the

@@ -150,7 +150,7 @@ export default function EmployeeList() {
     }
     if (effectiveClientId) { fetchEmployees(); fetchSelfServiceStatus() }
     else setLoading(false)
-  }, [effectiveClientId]) // eslint-disable-line
+  }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps -- loads on client switch; the fetchers are rebuilt each render
 
   async function fetchEmployees() {
     const forClient = effectiveClientId

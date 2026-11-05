@@ -113,7 +113,7 @@ export default function AdminClients() {
   // Pre-purge backup: fires opportunistically for any trial whose purge deadline is within 72h.
   const autoBackup = useAutoPurgeBackup(clients, () => loadClients())
 
-  useEffect(() => { loadClients(); loadLastSeen() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadClients(); loadLastSeen() }, [])
 
   async function loadLastSeen() {
     // fetchAllRows: this reads every profile across every tenant, and a bare .select() truncates

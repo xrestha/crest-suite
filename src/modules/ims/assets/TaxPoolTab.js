@@ -230,8 +230,8 @@ export default function TaxPoolTab() {
   const fyLabel = getBsFiscalYear(fyStart, 4)
   const canPost = hasImsAccess('manager')
 
-  useEffect(() => { loadRepairExpenses(fyLabel) }, [fyLabel]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { loadRepost() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadRepairExpenses(fyLabel) }, [fyLabel]) // eslint-disable-line react-hooks/exhaustive-deps -- rereads on fiscal year change; the loader is rebuilt each render
+  useEffect(() => { loadRepost() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- rereads on client switch; loadRepost is rebuilt each render
 
   const built = useMemo(() => (previewInputs ? buildTaxPoolLines({ ...previewInputs, closedPools }) : null), [previewInputs, closedPools])
   const lines = built ? built.lines : null

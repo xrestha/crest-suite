@@ -375,7 +375,7 @@ export default function GuestMenu() {
       applyCartCheck(fresh, { menuRows })
     })
     return () => { cancelled = true }
-  }, [tableId, retryToken]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tableId, retryToken]) // eslint-disable-line react-hooks/exhaustive-deps -- reads per table or Retry; both loaders are rebuilt each render
 
   function loadOptions(isCancelled = () => false) {
     // Bounded like the menu (GUEST-6): a stalled read is a failed one, which keeps the menu and says
@@ -731,7 +731,7 @@ export default function GuestMenu() {
       root.removeEventListener('keydown', release)
       if (frame) cancelAnimationFrame(frame)
     }
-  }, [categoryKey, navHeight]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [categoryKey, navHeight]) // eslint-disable-line react-hooks/exhaustive-deps -- categoryKey is sections joined, so a new list re-runs it
 
   // Keep the highlighted chip visible inside the bar. It used to highlight a chip scrolled far off
   // the right edge ("Desserts" at x=968 in a bar ending at 340). Scrolls the BAR only, never the page.

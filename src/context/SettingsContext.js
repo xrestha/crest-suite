@@ -128,8 +128,8 @@ export function SettingsProvider({ children }) {
     const cid = isAdmin && !clientId ? null : clientId
     wantedCidRef.current = cid ?? null
     loadSettings(cid)
-  }, [clientId, isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (clientId) loadFeatureFlags(clientId) }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, isAdmin])
+  useEffect(() => { if (clientId) loadFeatureFlags(clientId) }, [clientId])
 
   async function loadSettings(cid) {
     const key = cid ?? null
@@ -329,12 +329,16 @@ export function SettingsProvider({ children }) {
     return data
   }
 
+  // S890: a failed read throws, like loadClientSettings above. It used to return the default flags,
+  // so FeatureAccessModal showed a client with no grants and its Save wrote those defaults over the
+  // real ones. No row at all is still the defaults: that client has never had a grant.
   async function loadClientFeatureFlags(cid) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('feature_flags')
       .select('*')
       .eq('client_id', cid)
       .maybeSingle()
+    if (error) throw new Error(await errorLineLater(error))
     return data || { ...DEFAULT_FLAGS, client_id: cid }
   }
 

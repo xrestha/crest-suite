@@ -169,7 +169,7 @@ export default function HrReports() {
       setLoading(false)
     }
     init()
-  }, [clientId, initRun]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, initRun]) // eslint-disable-line react-hooks/exhaustive-deps -- client switch or retry only; loaders rebuilt each render, link read once
 
   // Company name and PAN for the TDS certificate header. settings.vat_number IS Nepal's PAN (same
   // field the Tax Invoice and the payslip letterhead already print). Both are RESET on a client
@@ -236,7 +236,7 @@ export default function HrReports() {
         setCertLoading(false)
       })
     return () => { cancelled = true }
-  }, [tab, certFy, certEmpId, clientId, certRun]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tab, certFy, certEmpId, clientId, certRun]) // eslint-disable-line react-hooks/exhaustive-deps -- scopedFrom follows clientId, which is listed
 
   // `knownRun`: the month's run row when init has just read it with the month list; omitted (a month
   // switch), it is read here.

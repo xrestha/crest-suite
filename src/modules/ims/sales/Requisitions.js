@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
@@ -27,6 +27,7 @@ import { statusMeta, trailParts } from './requisitionTrail'
 import { findShortfalls } from './requisitionShortfall'
 import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 import { chipKeys } from '../../../shared/rovingFocus'
 import { FilterChips } from '../../../components/Tabs'
 import { unitRateCell } from '../../../shared/unitRate'
@@ -119,7 +120,7 @@ export default function Requisitions() {
     onError: err => { console.error('Requisitions: some names on the slips could not be read:', err); setNamesFailed(true) },
   })
 
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load (the month list or the item list) re-runs init, a failed month re-reads that month and stays on it.

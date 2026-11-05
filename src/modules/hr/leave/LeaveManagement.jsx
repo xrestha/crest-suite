@@ -115,7 +115,7 @@ export default function LeaveManagement() {
   const canReopen = hasHrAccess('manager')
   const years = Array.from({ length: 6 }, (_, i) => today.year - 3 + i)
 
-  useEffect(() => { if (clientId) load() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (clientId) load() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- reloads on client switch only; load is rebuilt each render
 
   // Half-day only makes sense for a single-day request — force back to Full Day otherwise.
   useEffect(() => { if (!isSingleDay) setFDayType('full') }, [isSingleDay])

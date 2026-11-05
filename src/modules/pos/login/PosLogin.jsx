@@ -173,7 +173,10 @@ export default function PosLogin() {
     setError('')
   }, [])
 
-  // Keyboard support
+  // Keyboard support. The listener calls the handleSignIn of the render that subscribed it, so every
+  // value that function reads is a dependency (S890). Keyed on the waiter and the PIN alone, a second
+  // Enter during a sign-in still saw signingIn false and sent the PIN again: two attempts towards the
+  // lockout for one PIN typed once.
   useEffect(() => {
     if (!selected) return
     function onKey(e) {
@@ -184,7 +187,7 @@ export default function PosLogin() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selected, pin, pressKey]) // eslint-disable-line
+  }, [selected, pin, pressKey, signingIn, holdForSignOut, clientId, deviceId, deviceSecret]) // eslint-disable-line react-hooks/exhaustive-deps -- handleSignIn is rebuilt each render; the state it reads is listed
 
   async function handleSignIn() {
     if (pin.length < 4 || signingIn || holdForSignOut) return

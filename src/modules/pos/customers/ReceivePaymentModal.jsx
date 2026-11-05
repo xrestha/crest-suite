@@ -94,7 +94,7 @@ export default function ReceivePaymentModal({ party, vatReg, prefix, deliveryPar
       setMeta({ loading: false, vatById, baseById, error: err })
     })()
     return () => { gone = true }
-  }, [party.key]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [party.key]) // eslint-disable-line react-hooks/exhaustive-deps -- reads once per party when the dialog opens
 
   // The agreed rate from POS Setup → Delivery Partners, the settle flow's pre-fill (S596). Only a rate
   // that was read: the defaults are a guess, so a failed settings read leaves the boxes for the cashier.

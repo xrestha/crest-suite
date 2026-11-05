@@ -152,7 +152,7 @@ export default function Periods() {
     if (isAdmin && !clientId) loadAllClientPeriods()
     else if (clientId) loadPeriods()
     else setLoading(false)
-  }, [clientId, isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps -- reloads on client switch; the loaders are rebuilt each render
 
   // Who posts till bills from this page (S809 3j, IMS-HANDOFF-1 / CREDIT-NOTES-3, owner decision
   // Q12 c): the Owner and the operator. An IMS supervisor or manager also opens Periods, but reads

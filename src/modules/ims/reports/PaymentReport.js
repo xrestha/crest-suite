@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows } from '../../../shared/fetchAllRows'
@@ -21,6 +21,7 @@ import { billPayables, summariseUnlinkedReturns, returnLinesOutsidePeriod, prior
 import { applyPriorBillFactors } from './supplierAttribution'
 import { readPriorBillLines } from './readPriorBillLines'
 import { CHART_COLORS } from '../../../shared/chartColors'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 const METHODS = PURCHASE_PAYMENT_METHODS
 // Two roles, two values: the base token is the FILL (split bar, legend swatch), the -text variant
@@ -53,7 +54,7 @@ export default function PaymentReport() {
   const [loadError, setLoadError] = useState(null)
   const [viewMode, setViewMode] = useState('summary')
 
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load re-runs init, a failed month re-reads that month and stays on it.

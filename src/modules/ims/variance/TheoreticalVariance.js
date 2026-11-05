@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
@@ -23,6 +23,7 @@ import { initPeriodLoad } from '../../../shared/periodList'
 import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 import { readPeriodTransfers, transferNetQtyByItem } from '../transfers/transferFlows'
 
 export default function TheoreticalVariance() {
@@ -53,7 +54,7 @@ export default function TheoreticalVariance() {
   const [sortBy,          setSortBy]          = useState('variance_val')
   const [hasClosing,      setHasClosing]      = useState(true)
 
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11). The base
   // (items, categories, the recipe book) is read only by init, and every month reuses its promise,

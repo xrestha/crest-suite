@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
 import { vatModeOf } from '../recipes/menuPriceVat'
@@ -22,6 +22,7 @@ import { unitRateText, unitRateCell } from '../../../shared/unitRate'
 import { readItemRefCounts, priceImpactSentence, PRICE_CHANGE_KEEPS } from '../items/itemRefTables'
 import { BS_MONTHS, bsDayOrdinal } from '../../../utils/bsCalendar'
 import { Navigate } from 'react-router-dom'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 // A FREE line is not a price. `lineState()` has accepted rate 0 as free goods since S698 (buy 10
 // get 1 free: stock up, spend unchanged), and this page read every one of them as a price
@@ -109,7 +110,7 @@ export default function SupplierPriceTracker() {
   // nothing on screen to say so. Same shape as `useLatestRequest` on the period-driven reports;
   // this page derives rather than reloads, so the axis it races on is the client, not the period.
   const loadedClientRef = useRef(null)
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [effectiveClientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   async function init() {
     const myClient = effectiveClientId
@@ -460,7 +461,7 @@ export default function SupplierPriceTracker() {
   // inline price editor.
   const vendorPurchases = useMemo(
     () => getPurchasesForVendor(selectedVendorId),
-    [allPurchases, selectedVendorId, selectedPeriodId, periodMap, itemMap]) // eslint-disable-line react-hooks/exhaustive-deps
+    [allPurchases, selectedVendorId, selectedPeriodId, periodMap, itemMap]) // eslint-disable-line react-hooks/exhaustive-deps -- getPurchasesForVendor is rebuilt each render; its inputs are listed
 
   const activeVendors   = useMemo(() => vendors.filter(v => v.is_active !== false), [vendors])
   const inactiveVendors = useMemo(() => vendors.filter(v => v.is_active === false), [vendors])

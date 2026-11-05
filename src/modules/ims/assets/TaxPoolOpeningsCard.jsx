@@ -89,7 +89,7 @@ export default function TaxPoolOpeningsCard({ fyLabel, priorLabel, canEdit, onCh
   // openings on another's card.
   const loadReq = useLatestRequest()
 
-  useEffect(() => { load() }, [clientId, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [clientId, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps -- reloads on client switch or after a post; load is rebuilt each render
 
   async function load() {
     const key = clientId || 'none'

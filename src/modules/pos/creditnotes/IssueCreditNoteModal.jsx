@@ -179,7 +179,7 @@ export default function IssueCreditNoteModal({ order, onClose, onIssued }) {
     setRefundShift({ loading: true, shift: undefined, error: null })
     readOpenShift().then(r => { if (!cancelled) setRefundShift({ loading: false, ...r }) })
     return () => { cancelled = true }
-  }, [refundMode, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [refundMode, clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- reads when Cash is picked; readOpenShift is rebuilt each render
 
   // S809 2e (SHIFTS-3): how much of this bill came into the drawer in cash, as the server works it out
   // (pos_bill_cash_taken — the figure the note's refund is recorded with). A read of its own, beside

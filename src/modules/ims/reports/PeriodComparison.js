@@ -118,7 +118,7 @@ export default function PeriodComparison() {
   const limitReq = useLatestRequest()
   const periodList = usePeriodList()
 
-  useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (effectiveClientId) init() }, [effectiveClientId]) // eslint-disable-line react-hooks/exhaustive-deps -- loads on mount and client switch; init is rebuilt each render
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load re-runs init, a failed range re-reads the range on screen.

@@ -1,5 +1,5 @@
 import { npr } from '../../../shared/nepalMoney'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
@@ -27,6 +27,7 @@ import {
   transferBatchesOf,
 } from './stockAgeingCalc'
 import { readPeriodTransfers } from '../transfers/transferFlows'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 
 // How old stock has to be before the page calls it capital worth acting on. Matches the last
@@ -100,7 +101,7 @@ export default function StockAgeing() {
   const periodList = usePeriodList()
 
   // authLoading is a real dependency: a hard load lands here while auth is still resolving (S594).
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId, authLoading]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   function resetFigures() {
     setRows([]); setTotals(null); setWindowDays(0); setWindowLabel(''); setHadBatches(false); setLastCountByItem({})

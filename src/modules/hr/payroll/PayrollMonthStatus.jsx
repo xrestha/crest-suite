@@ -117,7 +117,7 @@ export default function PayrollMonthStatus({ period: givenPeriod, auto = false, 
       })
     })()
     return () => { live = false }
-  }, [clientId, auto, givenPeriod?.id, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, auto, givenPeriod?.id, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps -- page data arrives through refreshKey; scopedFrom follows clientId
 
   if (state.none) return null
   if (state.periodError) {

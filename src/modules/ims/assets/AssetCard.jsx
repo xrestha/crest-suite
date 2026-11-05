@@ -38,7 +38,7 @@ export default function AssetCard({ asset, onClose, onChanged }) {
   // Per-field validation; `error` above stays the form-level channel for a rejected write (S603).
   const [dateErr, setDateErr] = useState('')
 
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps -- reads once per opening; the card mounts per asset
 
   async function load() {
     setLoading(true)

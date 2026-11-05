@@ -500,7 +500,7 @@ export default function Roster() {
     all.forEach(r => { map[rKey(r.bs_year, r.bs_month, r.bs_day, r.employee_id)] = r })
     setRoster(map)
     setLoading(false)
-  }, [clientId, viewMode, weekStart, bsYear, bsMonth, monthRosterRows, rosterReq, rangeKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, viewMode, weekStart, bsYear, bsMonth, monthRosterRows, rosterReq, rangeKey])
 
   useEffect(() => { loadRoster() }, [loadRoster])
 
@@ -536,7 +536,7 @@ export default function Roster() {
     }
     if (!publishReq.isCurrent(key)) return
     setPublishedDays(new Set(all.map(r => `${r.bs_year}:${r.bs_month}:${r.bs_day}`)))
-  }, [clientId, viewMode, weekStart, bsYear, bsMonth, scopedFrom, publishReq, rangeKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, viewMode, weekStart, bsYear, bsMonth, scopedFrom, publishReq, rangeKey])
   useEffect(() => { loadPublishedDays() }, [loadPublishedDays])
 
   // Publishes every day in `dayGroups` (usually one group, two if a visible week straddles a BS

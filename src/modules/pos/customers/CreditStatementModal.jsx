@@ -68,7 +68,7 @@ export default function CreditStatementModal({ party, vatReg, prefix, outlet, on
       setData({ loading: false, events: events || [], bills: bills || [], vatById, error: null })
     })()
     return () => { gone = true }
-  }, [party.key, readRun]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [party.key, readRun]) // eslint-disable-line react-hooks/exhaustive-deps -- reads once per party or Try again; an outlet switch unmounts it
 
   const badRange = fromIso && toIso && fromIso > toIso
   const statement = useMemo(() => (data.loading || data.error || badRange ? null

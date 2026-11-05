@@ -61,7 +61,7 @@ export default function FixedAssets() {
   // Two reloads in a row (a save, then a close) must not let the slower, older one win.
   const loadSeq = useRef(0)
 
-  useEffect(() => { if (canLoad) load() }, [canLoad]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (canLoad) load() }, [canLoad]) // eslint-disable-line react-hooks/exhaustive-deps -- loads once access is known; load is rebuilt each render
 
   async function load() {
     if (!canLoad) return

@@ -155,7 +155,6 @@ export default function Modal({
     // Deliberately mount-only: `onClose` is almost always a fresh inline arrow function from the
     // caller, so depending on it here would re-run this effect (and re-steal focus into the panel's
     // first field) on every parent re-render — e.g. every keystroke in a controlled form field.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (

@@ -93,7 +93,7 @@ export default function TillNotice({ notice, onDismiss }) {
     }
     document.addEventListener('keydown', onKeyDown, true)
     return () => document.removeEventListener('keydown', onKeyDown, true)
-  }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id])
 
   function dismissNow() {
     // Back to where focus was when the notice appeared, or else into the dialog the ✕ was reached from.

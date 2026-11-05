@@ -126,7 +126,7 @@ export default function LoadOnOpen({ tool, label, open, onClose, ...props }) {
     if (Tool) return undefined
     return whenIdle(() => { tool.load().then(T => setTool(() => T), () => {}) })
     // Once, on mount: an open before then fetches on its own, below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once on mount; later opens fetch in the effect below
   }, [])
 
   // Opened before that file arrived, or after it failed: fetch it now. Every open tries again.

@@ -80,7 +80,6 @@ export default function Calculator({ open, onClose }) {
       setPos(p => clampPos(p))
       setTimeout(() => inputRef.current?.focus(), 0)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   useEffect(() => {
@@ -90,7 +89,6 @@ export default function Calculator({ open, onClose }) {
     function onResize() { setPos(p => clampPos(p)) }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   // Document-level, not just the input's onKeyDown: this can be open on top of a Modal (see

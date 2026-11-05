@@ -153,7 +153,7 @@ export default function PosTableManagement() {
   const [bookingQrUrl, setBookingQrUrl] = useState('')
   const [newClosedDate, setNewClosedDate] = useState('') // AD iso from the BS picker, pending Add
 
-  useEffect(() => { if (clientId) load() }, [clientId]) // eslint-disable-line
+  useEffect(() => { if (clientId) load() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- loads on client switch; load is rebuilt each render
 
   // Each settings tab below only loads once per its own xLoaded flag — cheap while clientId is
   // stable, but those flags were never reset on an admin "view as" client switch, so a tab left
@@ -183,7 +183,7 @@ export default function PosTableManagement() {
     else if (mainTab === 'discounts') loadDiscReasons()
     else if (mainTab === 'delivery') loadDeliverySettings()
     else if (mainTab === 'reservations') loadReservationSettings()
-  }, [clientId]) // eslint-disable-line
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- reloads the open tab on client switch; tab clicks load their own
 
   if (!hasPosAccess('manager')) return <Navigate to="/pos" replace />
 

@@ -80,7 +80,6 @@ function ChartModal({ title, legend, footer, renderChart, onClose, modalHeight }
     }
     // Mount-only, for the same reason Modal.js documents: onClose is a fresh arrow on every
     // parent render, so depending on it would re-steal focus continuously.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return createPortal(

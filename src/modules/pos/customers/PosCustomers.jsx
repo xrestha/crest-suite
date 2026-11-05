@@ -62,7 +62,7 @@ const NO_ROWS = []
 // anniversary falls in the next 7 days (Nepal's today), and Edit for the card, credit limit and dates.
 const CustomerBookTable = memo(function CustomerBookTable({ rows, expandedId, historyMap, noShowByPhone, vatReg, prefix, onToggle, onRetryHistory, typesById, onEdit }) {
   const today = todayNepalIso()
-  const soon = useMemo(() => customerIdsWithOccasion(rows, 7), [rows, today]) // eslint-disable-line react-hooks/exhaustive-deps
+  const soon = useMemo(() => customerIdsWithOccasion(rows, 7), [rows, today]) // eslint-disable-line react-hooks/exhaustive-deps -- today moves the 7-day window at Nepal midnight
   return (
     <div className="table-wrap">
       <table className="data-table">
@@ -246,7 +246,7 @@ export default function PosCustomers() {
         setPointValue(Number(data?.pos_loyalty_point_value) || 1)
       })
     return () => { cancelled = true }
-  }, [clientId]) // eslint-disable-line
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- loads on client switch; loadCustomers is rebuilt each render
 
   // S842: filtered once per deferred search or book read, not per render.
   const customers = book.rows || NO_ROWS

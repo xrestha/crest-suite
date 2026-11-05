@@ -123,7 +123,7 @@ export default function ComboBuilder() {
       if (!cancelled) setMenuLoading(false)
     })()
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scopedFrom changes only with clientId, which is listed
   }, [clientId, menuRun])
 
   const loadPairs = useCallback(async () => {

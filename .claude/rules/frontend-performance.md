@@ -221,6 +221,19 @@ handlers. On a page whose row handler is on a read–modify–write path (Stock 
 stale closure corrupts a saved figure rather than merely rendering an old number. Take the smallest
 safe cut — memoize the derived lists — and leave the row alone. Same reasoning as `PosOrders.jsx`.
 
+## A switched-off reload warning names its rule and its reason (S890)
+
+- **Every `react-hooks/exhaustive-deps` disable ends `-- <reason>`**, naming the trigger the effect keeps
+  (an outlet switch, a period change, a loader rebuilt each render). A bare `// eslint-disable-line`
+  hides every rule on its line: never write one. S890 reviewed all 165 and found six real bugs.
+- **Never quiet the warning by listing a loader function** (a reload loop). List the missing VALUE, move
+  the loader inside the effect, or `useCallback` it; then check the page does not keep re-requesting.
+- **A page's first load is `useClientInit(effectiveClientId, authLoading, init)`**
+  (`src/shared/hooks/useClientInit.js`), never `if (!authLoading && …) init()` keyed on `[clientId]`: a
+  page opened during a profile re-fetch skipped init and sat on its skeleton.
+- **A keydown listener that calls a handler reads that handler's state in its deps** (`signingIn`): a
+  stale handler let a second Enter send the PIN twice (`ImsCountLogin`, S890).
+
 ## A poll that always calls its setter re-renders the page forever (added S629, POS)
 
 A `setState(freshRows)` always re-renders, because the array is new even when every row in it is

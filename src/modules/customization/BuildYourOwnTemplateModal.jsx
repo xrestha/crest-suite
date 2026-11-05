@@ -50,7 +50,7 @@ export default function BuildYourOwnTemplateModal({ dishes, buildYourOwn = [], g
   const taken = useMemo(() => {
     const have = new Set(groupNames.map(n => String(n).trim().toLowerCase()))
     return names.filter(n => have.has(n.toLowerCase()))
-  }, [groupNames, names]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [groupNames, names])
 
   async function create() {
     if (busyRef.current || saving) return

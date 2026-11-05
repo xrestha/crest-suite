@@ -213,7 +213,7 @@ export default function AttendanceSheet() {
         setRosterRows(error ? [] : (data || []))
       })
     return () => { live = false }
-  }, [period?.bs_year, period?.bs_month, scopedFrom]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [period?.bs_year, period?.bs_month, scopedFrom]) // eslint-disable-line react-hooks/exhaustive-deps -- reloads on a month change, not on a new period object
 
   const locked = runStatus === 'finalized' || runStatus === 'unknown'
 

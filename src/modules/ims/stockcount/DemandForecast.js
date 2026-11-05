@@ -166,7 +166,7 @@ function DemandForecastBody() {
       if (!horizonReq.isCurrent(reqKey)) return
       setIngredients({ ...EMPTY_ING, error: err })
     }
-  }, [horizonReq, customizationEnabled]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [horizonReq, customizationEnabled]) // eslint-disable-line react-hooks/exhaustive-deps -- EMPTY_ING is a fixed constant rebuilt each render
 
   const loadStored = useCallback(async () => {
     if (!clientId) return

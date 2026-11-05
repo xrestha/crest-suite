@@ -40,6 +40,7 @@ import StockCountSettings from './StockCountSettings'
 import { findUncountedItems, gapNote, UncountedItemsBanner } from '../../../shared/uncountedItems'
 import Tabs, { TabPanel, FilterChips } from '../../../components/Tabs'
 import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 // The touch count screen's gate. Exported-in-spirit rather than inlined so the initial state, the
 // resize handler and the media-query listener below cannot drift to three different thresholds —
@@ -337,9 +338,7 @@ export default function Stock() {
     return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down) }
   }, [])
 
-  useEffect(() => {
-    if (!authLoading && effectiveClientId) startInit()
-  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(effectiveClientId, authLoading, startInit) // S890: once per outlet, after the sign-in loads
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load (the months, the item book, the categories) re-runs init, a failed month re-reads
@@ -1666,7 +1665,7 @@ export default function Stock() {
       if (value >= valueThreshold && value > 0 && freq >= freqThreshold) flagged.add(item.id)
     })
     return flagged
-  }, [items, stockData, purchases, returns, purchFreq, transferMaps]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, stockData, purchases, returns, purchFreq, transferMaps]) // eslint-disable-line react-hooks/exhaustive-deps -- getStockValue is rebuilt each render; its inputs are listed
 
   // Key used for items whose `category_id` is NULL (Items.js writes null when the field is left
   // blank) or points at a category this client no longer has. Both used to fall out of the rollup

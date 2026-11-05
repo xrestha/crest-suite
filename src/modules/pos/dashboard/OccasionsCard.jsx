@@ -54,7 +54,7 @@ export function useUpcomingOccasions({ enabled, refreshKey }) {
 
 export default function OccasionsCard({ state, clientId, outletName = '' }) {
   const today = todayNepalAdIso()
-  const items = useMemo(() => (state.rows ? upcomingOccasions(state.rows, 7) : []), [state.rows, today]) // eslint-disable-line react-hooks/exhaustive-deps
+  const items = useMemo(() => (state.rows ? upcomingOccasions(state.rows, 7) : []), [state.rows, today]) // eslint-disable-line react-hooks/exhaustive-deps -- today moves the 7-day window at Nepal midnight
   const loading = !clientId || state.clientId !== clientId
 
   return (

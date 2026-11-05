@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../../../context/AuthContext'
 import { useSettings } from '../../../context/SettingsContext'
@@ -25,6 +25,7 @@ import {
   buildDishCostHistory, monthsAscending, windowMonths, monthLabel, todayRatesOf, dishesOf,
   sortDishRows, dishCostSummary, dishCostSheetRows, changeDirection, DISH_STATUS, SORTS,
 } from './dishCostHistory'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 // Dish Cost History (S885, Pro, IMS manager and the Owner). Every dish's cost per portion in each BS
 // month, at that month's purchase prices on the recipe as it is today. The arithmetic and the rules
@@ -150,7 +151,7 @@ export default function DishCostHistory() {
     }
   }, [clientId, scopedFrom, periodList, recipeBook, req])
 
-  useEffect(() => { if (!authLoading && clientId) load() }, [authLoading, clientId, load])
+  useClientInit(clientId, authLoading, load) // S890: once per outlet, after the sign-in loads; Try again calls load itself
 
   const ascending = useMemo(() => monthsAscending(data?.periods), [data])
   const months = useMemo(() => windowMonths(ascending, toId, span), [ascending, toId, span])

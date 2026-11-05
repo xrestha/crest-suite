@@ -140,7 +140,7 @@ export default function CreditTab({ vatReg = true, prefix = '', deliveryPartners
       })
     })
     return () => { gone = true }
-  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- loads on outlet switch only; loadOwed also follows the onOwedCount prop
 
   const loadCollected = useCallback(async r => {
     const key = collReq.begin(`${r.from}|${r.to}|${++collSeq.current}`) // before any await

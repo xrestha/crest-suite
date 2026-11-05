@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useSearchParams, Navigate } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { useAuth } from '../../../context/AuthContext'
@@ -23,6 +23,7 @@ import { isCostedByBuild } from '../recipes/buildYourOwnRating'
 import { isMissingColumn } from '../../customization/customizationData'
 import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
 import { readPeriodTransfers, lineValue, TRANSFER_LINE_SELECT } from '../transfers/transferFlows'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 // A stock-transfer line, in words (S849, PNL-8). Every line here COUNTS for this outlet: 'sent'
 // left it, 'received' arrived, 'returned' came back after the transfer was cancelled or refused.
@@ -102,7 +103,7 @@ export default function StockMovements() {
   // round trips, 12.5s on a Fast-3G profile.
   const recipeBook = useRecipeBook()
 
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load re-runs init, a failed month re-reads that month and stays on it.

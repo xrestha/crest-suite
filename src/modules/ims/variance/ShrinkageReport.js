@@ -15,6 +15,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
 import { usePeriodList } from '../../../shared/hooks/usePeriodList'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 import { Navigate } from 'react-router-dom'
 
 // How each verdict from shrinkageCalc.js is drawn. The verdict, the observation loop and the
@@ -58,9 +59,9 @@ export default function ShrinkageReport() {
   // this page sat on "Analysing N closed periods…" for ever on a client whose months were all open.
   const [noClosed, setNoClosed] = useState(false)
 
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
   // A window picked on the page; the first load is init's, started from the month list (S855).
-  useEffect(() => { if (periods.length) loadWindow(periods, periodCount) }, [periodCount]) // eslint-disable-line
+  useEffect(() => { if (periods.length) loadWindow(periods, periodCount) }, [periodCount]) // eslint-disable-line react-hooks/exhaustive-deps -- reloads on a window change; init loads the first window
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load (the month list or the categories) re-runs init, a failed window re-reads it.

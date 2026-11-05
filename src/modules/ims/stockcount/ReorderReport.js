@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useNavigate, Navigate, Link } from 'react-router-dom'
 import NoPeriodState from '../../../components/NoPeriodState'
 import LetterheadButton from '../../../components/LetterheadButton'
@@ -27,6 +27,7 @@ import { buildStockRows } from './stockReportCalc'
 import { packsFor, packText, reorderQtyText } from './reorderPacks'
 import { useSuiteAccess, SUITE_PAGES } from '../../../components/SuiteGate'
 import { readPeriodTransfers } from '../transfers/transferFlows'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 // The day a slip is printed, in BS as the day is read in Nepal (S792, PLANNING-9) — the Stock
 // Count Print Sheet's rule. `new Date().toLocaleDateString('en-GB')` was the AD date on the
@@ -95,7 +96,7 @@ export default function ReorderReport() {
     })
   }
 
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load (the month list or the categories) re-runs init, a failed month re-reads that month and stays on it.

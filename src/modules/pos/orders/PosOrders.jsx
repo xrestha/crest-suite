@@ -615,7 +615,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       } finally { busy = false }
     }, LINK_PROBE_MS)
     return () => clearInterval(probe)
-  }, [linkDown]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [linkDown]) // eslint-disable-line react-hooks/exhaustive-deps -- re-arms on linkDown only; scopedFrom moves only with the outlet
   // S833 (POS_TODO B3): an entry the upload keeps for a reason other than the connection (a refused read,
   // a failure on this device) used to say "kept on this till" for ever, the reason only in the console.
   // After UPLOAD_TROUBLE_TRIES in a row the floor names it; it goes once the entry uploads or is settled.
@@ -740,7 +740,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     for (const a of own) if (!closeAttemptRef.current.has(a.orderId)) closeAttemptRef.current.set(a.orderId, a)
     foreignCloseRef.current = new Map(foreign.filter(f => !closeAttemptRef.current.has(f.orderId)).map(f => [f.orderId, f]))
     showUnsettledCloses()
-  }, [clientId, profile?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, profile?.id])
   // Every 15 s while any attempt is unsettled, it is read again (pollUnsettledCloses), wherever the till
   // is. Through a ref, so the interval always runs the current render's closure.
   const closePollRef = useRef(null)
@@ -812,7 +812,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     cacheAppliedForRef.current = null
     loadTillSettings()
     if (navigator.onLine) flushRef.current?.()
-  }, [clientId]) // eslint-disable-line
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- loads on client switch; both loaders are rebuilt each render
 
   // Puts one settings row on the till: a read that answered, or the offline copy. A routing list that
   // was never set is the built-in default (Beverage to the bar), as at first load, and an empty one
@@ -902,7 +902,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const poll = setInterval(retry, TILL_SETTINGS_RETRY_MS)
     window.addEventListener('online', retry)
     return () => { clearInterval(poll); window.removeEventListener('online', retry) }
-  }, [billingSettingsLoaded, clientId, view]) // eslint-disable-line
+  }, [billingSettingsLoaded, clientId, view]) // eslint-disable-line react-hooks/exhaustive-deps -- settingsFailure is read on arrival; listing it retries in a loop
 
   // S842: the three 5-second checks (the floor's kitchen badges, the open order's tickets, guest orders).
   // None runs while the link is down (tillOffline(): the Wi-Fi can be up with no internet behind it),
@@ -926,7 +926,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (view !== 'floor') return
     const poll = setInterval(() => pollOnce('kitchen badges', () => loadKotStatus()), 5000)
     return () => clearInterval(poll)
-  }, [view, tableOrders, takeawayOrders]) // eslint-disable-line
+  }, [view, tableOrders, takeawayOrders]) // eslint-disable-line react-hooks/exhaustive-deps -- restarts when the floor orders change; the loader is rebuilt each render
 
   // The floor itself used to refresh only after THIS device's own save or close, so a table
   // opened, billed or freed on another till stayed wrong here until someone tapped (S754). Quiet:
@@ -944,7 +944,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     floorViewSeen.current = true
     const poll = setInterval(() => { if (navigator.onLine) loadFloorRef.current?.({ quiet: true }) }, 15000)
     return () => clearInterval(poll)
-  }, [view, clientId]) // eslint-disable-line
+  }, [view, clientId])
 
   // "open 18 min" on the Billing list has to move on its own — the floor poll's setIfChanged
   // suppresses a re-render when nothing in the DATA changed, and the clock is not in the data.
@@ -963,7 +963,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (view !== 'order' || !orderId) return
     setBillOnLoad(false)
     openBilling()
-  }, [billOnLoad, view, orderId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [billOnLoad, view, orderId]) // eslint-disable-line react-hooks/exhaustive-deps -- fires once per armed bill; openBilling is rebuilt each render
 
   // Keeps each cart line's KOT/BOT timer live while the order screen for a saved order is open.
   // A brand-new, not-yet-sent order (orderId still null) has no tickets to poll for.
@@ -975,7 +975,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     loadOrderKotTickets(orderId)
     const poll = setInterval(() => pollOnce('order tickets', () => loadOrderKotTickets(orderId)), 5000)
     return () => clearInterval(poll)
-  }, [view, orderId]) // eslint-disable-line
+  }, [view, orderId]) // eslint-disable-line react-hooks/exhaustive-deps -- restarts per open order; the loader is rebuilt each render
 
   useEffect(() => {
     if (view !== 'order') return
@@ -994,7 +994,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (view !== 'floor' && view !== 'order') return
     const poll = setInterval(() => pollOnce('guest orders', () => loadPendingGuestOrders()), 5000)
     return () => clearInterval(poll)
-  }, [view, clientId]) // eslint-disable-line
+  }, [view, clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- restarts on view or client switch; the loader is rebuilt each render
 
   // S809 3c (FLOOR-KITCHEN-1, S809.4): the app-wide guest-order alert hears from this screen which
   // view is up and which waiting guest orders this till holds (accepted into the cart, saved but not
@@ -1017,7 +1017,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (staleRecovery || staleGuestReqIdsRef.current.size === 0) return
     staleGuestReqIdsRef.current = new Set()
     loadPendingGuestOrders()
-  }, [staleRecovery]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [staleRecovery]) // eslint-disable-line react-hooks/exhaustive-deps -- runs when the stale-order box closes; the loader is rebuilt each render
 
   // Bookings change on the scale of minutes, not seconds — 60 s, not the 5 s the kitchen needs.
   // The once-a-minute clock tick beside it is what moves a tile's booking chip from quiet to
@@ -1028,7 +1028,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     const poll = setInterval(() => loadFloorReservations(), 60000)
     const tick = setInterval(() => setKotNow(Date.now()), 60000)
     return () => { clearInterval(poll); clearInterval(tick) }
-  }, [view, clientId]) // eslint-disable-line
+  }, [view, clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- restarts on view or client switch; the loader is rebuilt each render
 
   // Handoff from the Reservations page: "Seat <name>" there picks a table and navigates here with
   // the booking and the FULL pos_tables row (table_name is snapshotted onto the order at first
@@ -1040,7 +1040,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     seatReservationRef.current = handoff.reservation
     navigate(location.pathname, { replace: true, state: null })
     openTable(handoff.table)
-  }, [location.state, clientId]) // eslint-disable-line
+  }, [location.state, clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- runs once per Reservations handoff; openTable is rebuilt each render
 
   useEffect(() => {
     const up   = () => { setIsOnline(true);  flushRef.current?.() }
@@ -1180,7 +1180,10 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (discountReason === memberNow.reason && discountMode === 'percent' && discountStr === pctStr) return
     if ((parseFloat(discountStr) || 0) > 0 && !isMembershipReason(discountReason)) return
     setDiscountMode('percent'); setDiscountStr(pctStr); setDiscountReason(memberNow.reason)
-  }, [billingOpen, billCustomer?.id, memberNow.kind, memberNow.reason, memberDismissedFor]) // eslint-disable-line react-hooks/exhaustive-deps
+  // S890: tendersLocked is listed so a guest changed WHILE the payment was locked is caught up the
+  // moment the tenders come off (it used to wait for the next guest change, leaving the previous
+  // member's discount on the bill).
+  }, [billingOpen, tendersLocked, billCustomer?.id, memberNow.kind, memberNow.reason, memberDismissedFor]) // eslint-disable-line react-hooks/exhaustive-deps -- the discount fields are its outputs; listing them refills a cleared box
 
   function removeMemberDiscount() {
     if (tendersLocked) return
@@ -1218,7 +1221,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       setCreditOwedBefore((data || []).reduce((s, b) => s + (Number(b.owed) || 0), 0))
     })
     return () => { cancelled = true }
-  }, [billingOpen, splitMode, payMethod, deliveryPartner, billCustomer?.id, creditLimit]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [billingOpen, splitMode, payMethod, deliveryPartner, billCustomer?.id, creditLimit]) // eslint-disable-line react-hooks/exhaustive-deps -- reads per customer; the party key comes from that customer
   const creditWarning = creditOwedBefore == null ? null
     : creditLimitWarning({ limit: creditLimit, owed: creditOwedBefore, billTotal: payTotal })
 
@@ -1333,7 +1336,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [coversModal, pendingCoversStr, pendingTable]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [coversModal, pendingCoversStr, pendingTable]) // eslint-disable-line react-hooks/exhaustive-deps -- confirmCovers reads only the listed values and is rebuilt each render
 
   // Armed by restoreLockedCart, consumed by showLoadedOrder / startFreshOrder (applyLockedCart).
   const lockedCartRef = useRef(null)
@@ -1345,7 +1348,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     lockedCartCheckedRef.current = true
     const kept = takeLockedCart(profile.id, clientId)
     if (kept) restoreLockedCart(kept)
-  }, [clientId, profile?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clientId, profile?.id]) // eslint-disable-line react-hooks/exhaustive-deps -- once per mount; billingStation is fixed per route instance
   // payTotal changes on every discount/item edit too — same staleness risk as closeOrder above,
   // needed for the poll's amount-match check without also being a restart trigger.
   const payTotalRef = useRef(payTotal)
@@ -1388,7 +1391,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     // Only what should actually restart the polling loop — !!billQrUrl (not the QR string
     // itself, which regenerates on every discount/amount keystroke) so re-rendering the same QR
     // for the same order doesn't reset the interval either.
-  }, [billingOpen, splitMode, orderId, payMethod, !!billQrUrl]) // eslint-disable-line
+  }, [billingOpen, splitMode, orderId, payMethod, !!billQrUrl]) // eslint-disable-line react-hooks/exhaustive-deps -- restarts per bill and method, not per QR string
 
   // No document Escape listener here (2026-10-15 audit). Billing, Covers and Recent Bills are all on
   // Modal now, whose own Escape answers only the topmost dialog. The listener this file kept from its
@@ -1444,7 +1447,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       setLoyaltyOnOtherBills(pointsOnOtherBills(heldRows))
     }, 400)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [billingOpen, buyerPhone, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [billingOpen, buyerPhone, clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- looks up per phone; orderId is fixed while billing is open
 
   // ── S843: members and credit limits ─────────────────────────────────────────────────────────────
   // Does this outlet give out member cards at all? Read once per billing window, so the Card no. box
@@ -1459,7 +1462,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       setOutletHasCards((data || []).length > 0)
     })
     return () => { cancelled = true }
-  }, [billingOpen, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [billingOpen, clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- scopedFrom follows clientId, which is listed
 
   // The customer the bill's phone finds, with their card and credit limit. Debounced like the points
   // lookup above, and found by the number however it is typed. Never for a delivery partner: the
@@ -1480,7 +1483,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       setBillCustomer(data || null)
     }, 400)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [billingOpen, buyerPhone, deliveryPartner, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [billingOpen, buyerPhone, deliveryPartner, clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- looks up per phone; delivery partners are read before billing can open
 
   // A member card number typed at payment: the card names the guest, so its holder's phone goes on
   // the bill (the phone lookup above then confirms the same customer) and their name where none was
@@ -1501,7 +1504,7 @@ export default function PosOrders({ billingStation = false } = {}) {
       if (data.phone) setBuyerPhone(data.phone)
     }, 500)
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [billingOpen, memberCardStr, clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [billingOpen, memberCardStr, clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- scopedFrom follows clientId, which is listed
 
   // Live bill/slip preview inside the Billing modal — built from the exact same functions used
   // for the real print, so what the cashier sees always matches what will actually print.
@@ -1557,7 +1560,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (previewHtml == null || previewSrc == null || tabChanged) { setPreviewSrc(previewHtml); return }
     const t = setTimeout(() => setPreviewSrc(previewHtml), PREVIEW_DEBOUNCE_MS)
     return () => clearTimeout(t)
-  }, [previewHtml, billingTab]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [previewHtml, billingTab]) // eslint-disable-line react-hooks/exhaustive-deps -- previewSrc is its own output; listing it re-arms after each write
 
   // Crest Customization lookups, rebuilt only when the catalog changes (not per keystroke).
   const optionMaps = useMemo(() => ({
@@ -1621,7 +1624,7 @@ export default function PosOrders({ billingStation = false } = {}) {
     if (!stale && !mine) { say(); return } // the menu was already read again on the switch
     const read = mine && (mine.mode === 'full' || !stale) ? mine.promise : loadMenu({ force: true })
     void read.then(ok => { if (ok) say() }, e => console.error('menu re-read after a Customization switch failed:', e))
-  }, [customizationEnabled, customSwitchCheck]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [customizationEnabled, customSwitchCheck]) // eslint-disable-line react-hooks/exhaustive-deps -- runs on a switch or a refusal; loadMenu is rebuilt each render
 
   // A reload or a closed tab ends this screen without a word (S809.4): ← asks before it drops unsaved
   // lines, and Cancel before it drops recorded payments, but the browser asked nothing. While either is

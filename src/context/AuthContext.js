@@ -906,7 +906,6 @@ export function AuthProvider({ children }) {
       })
     return () => { cancelled = true }
   // MODULE_COLS/modulesOf are module-level-stable helpers declared inline for locality.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, adminViewClientId])
 
   // Re-fetch on demand — the module toggles in AdminClients write straight to the DB (instant

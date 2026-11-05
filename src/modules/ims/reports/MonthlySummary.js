@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { fetchAllRows, fetchAllRowsParallel } from '../../../shared/fetchAllRows'
@@ -25,6 +25,7 @@ import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { buildMonthlySummaryWorkbook, closingUncounted, cogsShareLine, foodCostSentence, foodCostVerdict, openFcText, openMonthLine, uncountedNamed, verdictWithheld } from './monthlySummarySheet'
 import { readPeriodTransfers } from '../transfers/transferFlows'
 import { hasRevenue } from '../../../shared/revenueFloor'
+import { useClientInit } from '../../../shared/hooks/useClientInit'
 
 export default function MonthlySummary() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -40,7 +41,7 @@ export default function MonthlySummary() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
 
-  useEffect(() => { if (!authLoading && effectiveClientId) init() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useClientInit(effectiveClientId, authLoading, init) // S890: once per outlet, after the sign-in loads
 
   // Which load put the error card up, so Try again repeats that one (S876, PERF-11): a failed
   // first load re-runs init, a failed month re-reads that month and stays on it.
