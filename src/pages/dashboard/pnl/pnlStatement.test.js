@@ -122,7 +122,7 @@ describe('groupColumn / columnMarkers', () => {
   it('marks open, no count and a missing labour figure', () => {
     expect(columnMarkers(groupColumn(row({ period_status: 'open' }), payroll())).map(m => m.text)).toEqual(['open'])
     expect(columnMarkers(groupColumn(row({ has_closing: false }), payroll())).map(m => m.text)).toEqual(['no count'])
-    expect(columnMarkers(groupColumn(row(), { source: 'failed', amount: null, hasFigure: false })).map(m => m.text)).toEqual(['labour not loaded'])
+    expect(columnMarkers(groupColumn(row(), { source: 'failed', amount: null, hasFigure: false })).map(m => m.text)).toEqual(['labor not loaded'])
   })
 })
 
@@ -139,7 +139,7 @@ describe('pnlNotes', () => {
     }))
     expect(out).toMatch(/Still open at BLOOM CAFE/)
     expect(out).toMatch(/No Bhadra 2083 in Inventory for: BLOOM CAFE - PKR — the consolidated column is the other outlets only/)
-    expect(out).toMatch(/BLOOM CAFE: No labour entered/)
+    expect(out).toMatch(/BLOOM CAFE: No labor entered/)
     expect(out).toMatch(/NPR 1,000 of stock was on the way between your outlets at the end of Bhadra 2083 — sent by BLOOM CAFE/)
   })
 
@@ -156,7 +156,7 @@ describe('pnlNotes', () => {
 
   it('names a typed Labor tab ignored beside HR', () => {
     const s = buildStatement(raw({ labour: { ...payroll(), ignoredBucket: 250000 } }))
-    expect(texts(pnlNotes({ scope: 'Bhadra 2083', stmt: s, hrOn: true }))).toMatch(/Labour tab NPR 2,50,000 not counted — Crest HR is the labour figure/)
+    expect(texts(pnlNotes({ scope: 'Bhadra 2083', stmt: s, hrOn: true }))).toMatch(/Labor tab NPR 2,50,000 not counted — Crest HR is the labor figure/)
   })
 })
 
@@ -175,7 +175,7 @@ describe('statementRows', () => {
     const a = buildStatement(raw())
     const rows = statementRows({ stmt: sumStatements([a, a]), monthCols: [{ label: 'Shrawan 2082', stmt: a }, { label: 'Bhadra 2082', stmt: a }] })
     expect(Object.keys(rows[0])).toEqual(['Line', 'Shrawan 2082', 'Bhadra 2082', 'Year (NPR)', '% of Revenue'])
-    expect(rows.find(r => r.Line === 'Labour')['Year (NPR)']).toBe(-60000)
+    expect(rows.find(r => r.Line === 'Labor')['Year (NPR)']).toBe(-60000)
   })
 })
 

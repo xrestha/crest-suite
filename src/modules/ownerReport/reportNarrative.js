@@ -33,12 +33,12 @@ const sev = band => (band ? SEVERITY[band.key] || 0 : 0)
 function labourClause(snapshot) {
   const lab = snapshot.combined?.labour
   if (lab) {
-    if (lab.source === 'estimate') return 'labour estimated: payroll was not finalized'
-    if (lab.source === 'overheads') return 'labour from the Overheads Labor tab'
+    if (lab.source === 'estimate') return 'labor estimated: payroll was not finalized'
+    if (lab.source === 'overheads') return 'labor from the Overheads Labor tab'
     return ''
   }
   // A report made before schema 18 names its basis on the HR section.
-  return snapshot.hr?.payrollSource === 'estimated' ? 'labour estimated: payroll was not finalized' : ''
+  return snapshot.hr?.payrollSource === 'estimated' ? 'labor estimated: payroll was not finalized' : ''
 }
 
 /** "a", "a and b" — the list joins of the Look-at line and the margin costs. */
@@ -105,7 +105,7 @@ export function buildExecutiveSummary(snapshot, periodLabel, { fcT = null, canOv
     ].filter(([, v]) => v > 0)
     const costTotal = parts.reduce((s, [, v]) => s + v, 0)
     const costNote = nm < 0 && costTotal > 0 ? `, after ${fmt(costTotal)} of recorded ${joinAnd(parts.map(([n]) => n))}` : ''
-    const extra = lab?.source === 'none' ? ' (no labour entered on Overheads)' : sayLabour()
+    const extra = lab?.source === 'none' ? ' (no labor entered on Overheads)' : sayLabour()
     made.push(`Net Margin was ${nm.toFixed(1)}%${costNote}${extra}`)
   }
   if (made.length > 0) {

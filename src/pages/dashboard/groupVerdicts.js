@@ -79,6 +79,43 @@ export function costBandWithheld(ratio, clock) {
   return !!clock?.running && clock.today != null && clock.today < SETTLE_DAY
 }
 
+// An outlet that closed the month with no closing stock count (get_group_pnl's has_closing). Its COGS
+// counts all the stock it had as used, so its Food Cost % reads high (S889, the Suite critique P2#3).
+// null (the P&L read did not say) is not "no count".
+export const closedWithoutCount = r => !!r && r.period_status === 'closed' && r.has_closing === false
+
+// One row's cost-ratio verdict: the settle guard, and a Food Cost % from a month closed without a
+// count, which Profit & Loss calls "Not judged: count incomplete" and the Owner Report withholds.
+export function rowCostWithheld(r, ratio, clock) {
+  if (ratio?.basis === 'cogs' && closedWithoutCount(r)) return true
+  return costBandWithheld(ratio, clock)
+}
+
+// The group total's cost-ratio verdict → { withheld, reason, names }. reason:
+//   'mixed'   — some outlets have closed the month and some have not, so the group shows a Spend % over
+//               rows that are partly Food Cost %: a figure, never a verdict (no ✓ over △ outlets);
+//   'noCount' — a Food Cost % whose total takes in an outlet closed with no count (names lists them);
+//   'settle'  — a Spend % so far before SETTLE_DAY;
+//   null      — judged.
+export function groupCostVerdict(rows, ratio, clock) {
+  const scope = (rows || []).filter(inScope)
+  if (new Set(scope.map(r => fcBasisOf(r.period_status))).size > 1) return { withheld: true, reason: 'mixed', names: [] }
+  const uncounted = scope.filter(closedWithoutCount)
+  if (ratio?.basis === 'cogs' && uncounted.length > 0) {
+    return { withheld: true, reason: 'noCount', names: uncounted.map(r => r.client_name) }
+  }
+  if (costBandWithheld(ratio, clock)) return { withheld: true, reason: 'settle', names: [] }
+  return { withheld: false, reason: null, names: [] }
+}
+
+// The coverage headline (S889): outlets with figures for the month, out of every outlet in the
+// group. An outlet left out for want of Suite Pro, or with no period for the month, has none.
+export function coverageHeadline(rows, monthLabel) {
+  const all = (rows || []).length
+  const shown = (rows || []).filter(inScope).length
+  return `${shown} of ${all} outlet${all === 1 ? '' : 's'} ${shown === 1 ? 'has' : 'have'} figures for ${monthLabel}`
+}
+
 // Labour ÷ revenue for one row on the clock's pair, or null for a dash. groupOutletLabour already
 // prorates a run or a Labor tab and accrues the estimate to the counted days, so both sides of the
 // ratio sit on the same days.

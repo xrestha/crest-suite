@@ -138,7 +138,7 @@ describe('labourNotJudgedText', () => {
 
 test('every source has a label', () => {
   for (const source of LABOUR_SOURCES) {
-    expect(labourSourceLabel({ source }, true)).toMatch(/^Labour: /)
+    expect(labourSourceLabel({ source }, true)).toMatch(/^Labor: /)
   }
 })
 
@@ -400,19 +400,19 @@ describe('resolveOutletLabour — the one labour rule', () => {
     // The GAPS-4 example: estimate 2,88,000, Labor tab 2,50,000 → 2,88,000 on every page.
     const r = resolveOutletLabour({ hrOn: true, payroll: null, estimate: est(288000), labourBucket: 250000 })
     expect(r).toMatchObject({ source: 'estimate', amount: 288000, ignoredBucket: 250000, verdictWithheld: false, reason: '' })
-    expect(outletLabourNotes(r).long[0]).toBe('Labour tab NPR 2,50,000 not counted — Crest HR is the labour figure')
+    expect(outletLabourNotes(r).long[0]).toBe('Labor tab NPR 2,50,000 not counted — Crest HR is the labor figure')
   })
 
   test('SU17: pay not set → figure kept, verdict withheld; nobody on payroll the same', () => {
     const r = resolveOutletLabour({ hrOn: true, estimate: est(120000, { noPay: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }] }), labourBucket: 90000 })
     expect(r).toMatchObject({ source: 'estimate', amount: 120000, verdictWithheld: true, reason: 'nopay', ignoredBucket: 90000 })
     expect(outletLabourNotes(r).long).toEqual([
-      'Labour tab NPR 90,000 not counted — Crest HR is the labour figure',
-      'Pay not set for 4 staff — not counted, so labour is not judged · Pay Setup →',
+      'Labor tab NPR 90,000 not counted — Crest HR is the labor figure',
+      'Pay not set for 4 staff — not counted, so labor is not judged · Pay Setup →',
     ])
     const n = resolveOutletLabour({ hrOn: true, estimate: est(0, { onPayroll: 0 }) })
     expect(n).toMatchObject({ verdictWithheld: true, reason: 'nostaff', amount: 0 })
-    expect(outletLabourNotes(n).long).toContain('No staff on payroll in Crest HR — labour is not judged')
+    expect(outletLabourNotes(n).long).toContain('No staff on payroll in Crest HR — labor is not judged')
   })
 
   test('HR + fenced: unreadable, no figure, the Labor tab NOT substituted', () => {
@@ -447,11 +447,11 @@ describe('resolveOutletLabour — the one labour rule', () => {
 
 describe('outletLabourNotes — every sentence a page owes', () => {
   test('short notes per source', () => {
-    expect(outletLabourNotes(resolveOutletLabour({ hrOn: true, payroll: 1 })).short).toBe('labour from finalized payroll')
-    expect(outletLabourNotes(resolveOutletLabour({ hrOn: true, estimate: { amount: 1, onPayroll: 1, noPay: [] } })).short).toBe('labour estimate — payroll not finalized')
-    expect(outletLabourNotes(resolveOutletLabour({ hrOn: false, labourBucket: 5 })).short).toBe('labour from Overheads')
-    expect(outletLabourNotes(resolveOutletLabour({ hrOn: true, fenced: true })).short).toBe('labour not readable on this login')
-    expect(outletLabourNotes(resolveOutletLabour({ hrOn: true, payrollReadFailed: true })).short).toBe('labour could not be loaded')
+    expect(outletLabourNotes(resolveOutletLabour({ hrOn: true, payroll: 1 })).short).toBe('labor from finalized payroll')
+    expect(outletLabourNotes(resolveOutletLabour({ hrOn: true, estimate: { amount: 1, onPayroll: 1, noPay: [] } })).short).toBe('labor estimate — payroll not finalized')
+    expect(outletLabourNotes(resolveOutletLabour({ hrOn: false, labourBucket: 5 })).short).toBe('labor from Overheads')
+    expect(outletLabourNotes(resolveOutletLabour({ hrOn: true, fenced: true })).short).toBe('labor not readable on this login')
+    expect(outletLabourNotes(resolveOutletLabour({ hrOn: true, payrollReadFailed: true })).short).toBe('labor could not be loaded')
     expect(outletLabourNotes(null)).toEqual({ short: '', long: [] })
   })
   test('the estimate\'s own notes, in order', () => {

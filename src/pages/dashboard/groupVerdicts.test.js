@@ -1,6 +1,7 @@
 import {
   SETTLE_DAY, rowFigure, ratioPair, rowCostRatio, groupRatioOf, costBandWithheld,
   rowLabourPct, labourWithheld, labourBandWithheld, revenueChange, rankMarks,
+  closedWithoutCount, rowCostWithheld, groupCostVerdict, coverageHeadline,
 } from './groupVerdicts'
 import { mtdClock } from '../../modules/dashboard/mtdClock'
 
@@ -132,5 +133,52 @@ describe('an outlet with less than one paisa of revenue has no ratios (S887)', (
     const r = open({ revenue: 0.01, net_purchases: 0.005, labour: { ...labour, amount: 0.005 } })
     expect(rowLabourPct(r, past)).toBeCloseTo(50, 9)
     expect(rowCostRatio(r, past).pct).toBeCloseTo(50, 9)
+  })
+})
+
+// S889, the Suite critique P2#3: the Group Console judged what Profit & Loss and the Owner Report refuse to.
+describe('a month closed with no stock count is not judged (S889)', () => {
+  const closed = (extra = {}) => open({ period_status: 'closed', cogs: 70000, has_closing: true, ...extra })
+  test('only a closed month whose P&L read says no count', () => {
+    expect(closedWithoutCount(closed({ has_closing: false }))).toBe(true)
+    expect(closedWithoutCount(closed())).toBe(false)
+    expect(closedWithoutCount(closed({ has_closing: null }))).toBe(false)          // not read: not "no count"
+    expect(closedWithoutCount(open({ has_closing: false }))).toBe(false)           // still open: Spend %
+  })
+  test('the row Food Cost % is withheld, a counted one is judged', () => {
+    const r = closed({ has_closing: false })
+    expect(rowCostWithheld(r, rowCostRatio(r, past), past)).toBe(true)
+    expect(rowCostWithheld(closed(), rowCostRatio(closed(), past), past)).toBe(false)
+  })
+  test('the settle guard still applies to an open row', () => {
+    expect(rowCostWithheld(open(), rowCostRatio(open(), running(9)), running(9))).toBe(true)
+  })
+  test('a group total over an uncounted outlet names it', () => {
+    const rows = [closed({ has_closing: false }), closed({ client_id: 'b', client_name: 'Casa' })]
+    const v = groupCostVerdict(rows, groupRatioOf(rows, past), past)
+    expect(v).toEqual({ withheld: true, reason: 'noCount', names: ['Bloom Cafe'] })
+  })
+  test('a group total over closed and open outlets is a figure, not a verdict', () => {
+    const rows = [closed(), open({ client_id: 'b' })]
+    const ratio = groupRatioOf(rows, past)
+    expect(ratio.basis).not.toBe('cogs')
+    expect(groupCostVerdict(rows, ratio, past)).toMatchObject({ withheld: true, reason: 'mixed' })
+  })
+  test('a no-period or excluded outlet does not make the bases mixed', () => {
+    const rows = [closed(), closed({ client_id: 'b' }), open({ client_id: 'c', has_period: false }), open({ client_id: 'd', is_included: false })]
+    expect(groupCostVerdict(rows, groupRatioOf(rows, past), past)).toEqual({ withheld: false, reason: null, names: [] })
+  })
+  test('one basis, every outlet counted, after the settle day: judged', () => {
+    const rows = [open(), open({ client_id: 'b' })]
+    expect(groupCostVerdict(rows, groupRatioOf(rows, running(12)), running(12)).withheld).toBe(false)
+    expect(groupCostVerdict(rows, groupRatioOf(rows, running(9)), running(9))).toMatchObject({ withheld: true, reason: 'settle' })
+  })
+})
+
+describe('the coverage headline counts only outlets with figures (S889)', () => {
+  test('a no-period outlet and an excluded one are not shown', () => {
+    const rows = [open(), open({ client_id: 'b', has_period: false }), open({ client_id: 'c', is_included: false })]
+    expect(coverageHeadline(rows, 'Kartik 2083')).toBe('1 of 3 outlets has figures for Kartik 2083')
+    expect(coverageHeadline([open(), open({ client_id: 'b' })], 'Kartik 2083')).toBe('2 of 2 outlets have figures for Kartik 2083')
   })
 })

@@ -73,7 +73,7 @@ const SECTION_CONSEQUENCE = {
   ims: 'Sales, purchases and fixed costs could not be loaded, so Revenue, Spend % so far, the margins, Wastage and Cash / Credit are not shown.',
   reorder: 'The stock position could not be loaded, so Items Below Par is not shown.',
   payables: 'Unpaid supplier bills could not be loaded, so Overdue Payables is not shown.',
-  labour: 'Labour could not be loaded, so Labor Cost %, Prime Cost % and Net Margin % are not shown.',
+  labour: 'Labor could not be loaded, so Labor Cost %, Prime Cost % and Net Margin % are not shown.',
   commission: 'Delivery-partner commission could not be loaded, so Net Margin % is not shown.',
 }
 
@@ -283,7 +283,7 @@ export default function OwnerDashboard() {
       period, hrOn: !!hrEnabled, fenced: false, throughDay: clock.countedDays, scale: clock.fraction, timeoutMs: READ_TIMEOUT_MS, masters,
     })
     if (!isCurrent('labour', id)) return
-    if (labour.source === 'failed') setSection('labour', { status: 'failed', error: error || { message: 'Labour could not be loaded' } })
+    if (labour.source === 'failed') setSection('labour', { status: 'failed', error: error || { message: 'Labor could not be loaded' } })
     else setSection('labour', { status: 'ok', data: parts })
   }
 
@@ -678,7 +678,7 @@ export default function OwnerDashboard() {
                 : figs?.firstDay ? firstDayNote
                 : figs?.fixedMissing ? `Not judged: no fixed costs entered for ${monthName} yet · Overheads →`
                 : clock?.running ? `Fixed costs for ${daysText.replace(/^Days?/, m => m.toLowerCase())} · ${labourNotes.short} · Profit & Loss →`
-                : `After food, labour and overheads · ${labourNotes.short} · Profit & Loss →`,
+                : `After food, labor and overheads · ${labourNotes.short} · Profit & Loss →`,
               extra: canOverheads ? [
                 labour?.verdictWithheld ? labourNotJudgedText(labour) : '',
                 posOn && commission && (commission.amount > 0 || commission.unsettledBills > 0)

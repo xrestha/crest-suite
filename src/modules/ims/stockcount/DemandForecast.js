@@ -648,7 +648,7 @@ function DemandForecastBody() {
       )}
 
       {loading ? (
-        <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Loading…</p></div>
+        <div className="card"><p role="status" style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Loading the forecast…</p></div>
       ) : loadError ? (
         <ReportLoadError error={loadError} onRetry={loadStored} />
       ) : forecast.length === 0 ? (

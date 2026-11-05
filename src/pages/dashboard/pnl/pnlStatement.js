@@ -33,10 +33,10 @@ export const LINES = [
     tip: 'Food consumed by staff, valued at cost — spent stock that earned no revenue, shown as its own line.' },
   { key: 'deliveryCommission', label: 'Delivery commission', cost: true,
     tip: 'What Foodmandu, Pathao or another delivery partner kept from bills sold this month. A bill not settled yet has no commission in it.' },
-  { key: 'labour', label: 'Labour', cost: true,
+  { key: 'labour', label: 'Labor', cost: true,
     tip: 'Wages for the month: the finalized Crest HR payroll, or the HR estimate until payroll is finalized. An outlet without Crest HR uses the Overheads Labor tab, never both.' },
   { key: 'overheads', label: 'Overheads', cost: true,
-    tip: "The Overheads page's 'overhead' bucket — rent, utilities, and other fixed costs. Labour and Tax & Fees buckets are their own lines." },
+    tip: "The Overheads page's 'overhead' bucket — rent, utilities, and other fixed costs. Labor and Tax & Fees buckets are their own lines." },
   { key: 'taxFees', label: 'Tax & Fees', cost: true,
     tip: "The Overheads page's 'tax & fees' bucket." },
   { key: 'netProfit', label: 'Net Profit', strong: true,
@@ -186,12 +186,12 @@ export const sheetValue = (line, amount) => (amount == null ? '' : Math.round((l
 /** The labour marker a column wears (empty for finalized payroll and a typed Labor tab). */
 export function labourMarker(stmt) {
   const lab = stmt?.labourInfo
-  if (!lab) return stmt && !stmt.labourHasFigure ? 'labour missing' : ''
+  if (!lab) return stmt && !stmt.labourHasFigure ? 'labor missing' : ''
   if (lab.source === 'estimate') return 'estimate — payroll not finalized'
   if (!stmt.labourHasFigure) {
     return lab.source === 'none' ? 'none entered'
-      : lab.source === 'unreadable' ? 'labour not readable'
-      : 'labour not loaded'
+      : lab.source === 'unreadable' ? 'labor not readable'
+      : 'labor not loaded'
   }
   return ''
 }
@@ -273,15 +273,15 @@ function labourNotes(stmt, { scope, name, hrOn }) {
   const at = name ? `${name}: ` : ''
   if (!lab) return out
   if (lab.source === 'estimate') {
-    out.push({ key: `lab-est-${name || ''}`, tone: 'warn', text: `${at}Labour is the HR wage estimate from the staff list — payroll for ${scope} is not finalized.` })
+    out.push({ key: `lab-est-${name || ''}`, tone: 'warn', text: `${at}Labor is the HR wage estimate from the staff list — payroll for ${scope} is not finalized.` })
   } else if (!stmt.labourHasFigure) {
     const why = lab.source === 'none'
-      ? (hrOn === false || name ? 'no labour entered — Crest HR is off and the Overheads Labor tab is empty' : 'no labour entered')
-      : lab.source === 'unreadable' ? 'labour is not readable on this login'
-      : 'labour could not be loaded'
+      ? (hrOn === false || name ? 'no labor entered — Crest HR is off and the Overheads Labor tab is empty' : 'no labor entered')
+      : lab.source === 'unreadable' ? 'labor is not readable on this login'
+      : 'labor could not be loaded'
     out.push({ key: `lab-none-${name || ''}`, tone: 'warn', text: `${at}${why[0].toUpperCase()}${why.slice(1)}, so Net Profit has no wage bill in it and carries no colour.` })
   } else if (lab.source === 'overheads' && !name && hrOn === false) {
-    out.push({ key: 'lab-tab', tone: 'info', text: 'Crest HR is not on, so labour is the Overheads Labor tab.' })
+    out.push({ key: 'lab-tab', tone: 'info', text: 'Crest HR is not on, so labor is the Overheads Labor tab.' })
   }
   for (const line of outletLabourNotes(lab).long) {
     const t = sentence(line)
@@ -346,7 +346,7 @@ export function pnlNotes(state = {}) {
       add('open', fy
         ? `${openMonths.length ? `${openMonths.join(', ')} ${plural(openMonths.length, 'is', 'are')}` : 'A month is'} still open, so the year is provisional: COGS there treats closing stock as zero and overstates the true figure, and the year's Gross and Net Profit carry no colour.`
         : `${scope} is still open: closing stock is not counted yet, so COGS treats it as zero and overstates the true figure. Gross and Net Profit are shown without a colour until the month is closed.`, 'warn')
-      if (runningMonth) add('open-labour', 'While the month runs, labour counts the days so far; Overheads and Tax & Fees are the whole month as entered.')
+      if (runningMonth) add('open-labour', 'While the month runs, labor counts the days so far; Overheads and Tax & Fees are the whole month as entered.')
     } else if (stmt.closedWithoutCount) {
       add('no-count', `${fy ? 'A month of the year was' : 'This month was'} closed without a closing stock count — COGS treats closing stock as zero and is overstated by whatever was actually on hand.`, 'warn')
     }
@@ -363,8 +363,8 @@ export function pnlNotes(state = {}) {
     if (missing.length) add('lab-missing-all', `The consolidated Net Profit has no wage bill for ${missing.join(', ')}, so it carries no colour.`, 'warn')
   } else if (stmt) {
     if (fy) {
-      if (stmt.labourMissing > 0) add('lab-fy', `${stmt.labourMissing} ${plural(stmt.labourMissing, 'month has', 'months have')} no labour figure, so the year's labour leaves ${plural(stmt.labourMissing, 'it', 'them')} out and Net Profit carries no colour.`, 'warn')
-      if (stmt.ignoredLabourBucket > 0) add('lab-fy-tab', `Labour tab entries of ${npr(stmt.ignoredLabourBucket)} across the year were not counted — Crest HR is the labour figure.`, 'warn')
+      if (stmt.labourMissing > 0) add('lab-fy', `${stmt.labourMissing} ${plural(stmt.labourMissing, 'month has', 'months have')} no labor figure, so the year's labor leaves ${plural(stmt.labourMissing, 'it', 'them')} out and Net Profit carries no colour.`, 'warn')
+      if (stmt.ignoredLabourBucket > 0) add('lab-fy-tab', `Labor tab entries of ${npr(stmt.ignoredLabourBucket)} across the year were not counted — Crest HR is the labor figure.`, 'warn')
     } else {
       for (const n of labourNotes(stmt, { scope, hrOn })) add(n.key, n.text, n.tone)
     }
@@ -417,7 +417,7 @@ export function pnlNotes(state = {}) {
   }
 
   add('prices', 'Stock is valued at today\'s item prices, so a closed month\'s figure moves when a price changes (stock transfers keep the price they were sent at).')
-  add('sources', 'Revenue and COGS tie to Monthly Summary, labour to Payroll, overheads to the Overheads page. Stock Count\'s Summary includes prep in its COGS; this statement, like Monthly Summary, counts its raw ingredients instead — the two differ by exactly the prep amount.')
+  add('sources', 'Revenue and COGS tie to Monthly Summary, labor to Payroll, overheads to the Overheads page. Stock Count\'s Summary includes prep in its COGS; this statement, like Monthly Summary, counts its raw ingredients instead — the two differ by exactly the prep amount.')
   return notes
 }
 

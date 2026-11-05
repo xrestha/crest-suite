@@ -582,7 +582,7 @@ function MonthlyOwnerReportBody() {
   // The short words under Labor, Prime and Net Margin, so the basis prints (a Tip does not).
   const labourSub = lab?.source === 'overheads' ? 'from Overheads'
     : labourEstimated ? 'estimate — payroll not finalized'
-    : lab?.source === 'failed' ? 'labour could not be read'
+    : lab?.source === 'failed' ? 'labor could not be read'
     : ''
   const labourNotJudgedSub = lab?.reason === 'nopay' ? `pay not set for ${num(lab.noPayCount)} staff — not judged`
     : lab?.reason === 'nostaff' ? 'nobody on payroll — not judged'
@@ -628,18 +628,18 @@ function MonthlyOwnerReportBody() {
     const food = cogsBasis ? 'food used (COGS)' : 'net purchases'
     // One or two plain sentences each (S857); the full method is on the Help page.
     if (pnlCostsInNet(snapshot)) {
-      return 'Revenue minus every recorded cost, as a % of revenue: food used, raw stock wasted, staff meals, delivery commission, labour, overheads, and tax and fees. As on Consolidated P&L.'
+      return 'Revenue minus every recorded cost, as a % of revenue: food used, raw stock wasted, staff meals, delivery commission, labor, overheads, and tax and fees. As on Profit & Loss.'
     }
     if (taxFeesInNet(snapshot)) {
-      return `Revenue minus ${food}, labour, overheads, and tax and fees, as a % of revenue. Older rule: raw stock wasted, staff meals and delivery commission are not taken off, so it reads high.`
+      return `Revenue minus ${food}, labor, overheads, and tax and fees, as a % of revenue. Older rule: raw stock wasted, staff meals and delivery commission are not taken off, so it reads high.`
     }
-    return `Revenue minus ${food}, labour and overheads, as a % of revenue. Older rule: tax and fees, raw stock wasted, staff meals and delivery commission are not taken off, so it reads high.`
+    return `Revenue minus ${food}, labor and overheads, as a % of revenue. Older rule: tax and fees, raw stock wasted, staff meals and delivery commission are not taken off, so it reads high.`
   })()
   // Labor Cost %'s tip says what labour is in this report (OWNER-REPORT-10), in one or two sentences.
   const laborTip = lab?.source === 'overheads'
     ? 'The Overheads Labor tab for the month, as a % of revenue. This outlet had no Crest HR when the report was made.'
     : lab?.source === 'none'
-      ? 'No labour was entered on the Overheads Labor tab, and this outlet had no Crest HR when the report was made.'
+      ? 'No labor was entered on the Overheads Labor tab, and this outlet had no Crest HR when the report was made.'
       : labourEstimated
         ? 'An estimate of wages from Crest HR, as a % of revenue, because payroll was not finalized. Finalize payroll, then Regenerate Snapshot, for the exact figure.'
         : earnedLabour(snapshot)
@@ -737,8 +737,8 @@ function MonthlyOwnerReportBody() {
       {periodsError && <ReportLoadError error={periodsError} onRetry={() => { loadMonths() }} />}
 
       {!periodsError && (loading || generating) && (
-        <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>
-          {generating ? 'Making the report for this month…' : 'Loading…'}
+        <div className="card"><p role="status" style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>
+          {generating ? 'Making the report for this month…' : 'Loading the report…'}
         </p></div>
       )}
 
@@ -823,7 +823,7 @@ function MonthlyOwnerReportBody() {
                   .map(m => ({
                     ims: 'Crest IMS',
                     // v18 (OWNER-REPORT-9, SU18): without Crest HR the Labor tab is the labour.
-                    hr: lab?.source === 'overheads' ? 'Crest HR (labour is from the Overheads Labor tab)' : 'Crest HR (no payroll or labour figures)',
+                    hr: lab?.source === 'overheads' ? 'Crest HR (labor is from the Overheads Labor tab)' : 'Crest HR (no payroll or labor figures)',
                     pos: 'Crest POS',
                   })[m]).join(', ')}
                 {' '}— not enabled when it was generated.
@@ -922,7 +922,7 @@ function MonthlyOwnerReportBody() {
                         <td><Tip text={laborTip} width={280}>Labor Cost %</Tip></td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: lcBandOf(snapshot.combined?.laborCostPct).color }} title={lcBandOf(snapshot.combined?.laborCostPct).title}>
                           <span className="owner-report-nowrap">{pct(snapshot.combined?.laborCostPct)} {lcBandOf(snapshot.combined?.laborCostPct).mark}</span>
-                          {lab?.source === 'none' && <span style={subStyle}>no labour entered on Overheads</span>}
+                          {lab?.source === 'none' && <span style={subStyle}>no labor entered on Overheads</span>}
                           {labourSub && <span style={subStyle}>{labourSub}</span>}
                           {labourNotJudgedSub && <span style={subStyle}>{labourNotJudgedSub}</span>}
                         </td>
@@ -952,7 +952,7 @@ function MonthlyOwnerReportBody() {
                             ? `Requires Overheads (${overheadsTier})`
                             : <span className="owner-report-nowrap">{pct(snapshot.combined?.netMarginPct)} {nmCellOf(snapshot.combined?.netMarginPct).mark}</span>}
                           {snapshot.combined?.netMarginPct != null && <>
-                            {lab?.source === 'none' && <span style={subStyle}>no labour entered on Overheads</span>}
+                            {lab?.source === 'none' && <span style={subStyle}>no labor entered on Overheads</span>}
                             {labourSub && <span style={subStyle}>{labourSub}</span>}
                             {!canOverheads && <span style={subStyle}>no verdict: Overheads ({overheadsTier}) is not on this plan</span>}
                           </>}
@@ -982,17 +982,17 @@ function MonthlyOwnerReportBody() {
               {/* v18 (SU11): the Labor tab is never a second labour figure beside Crest HR. Named, printed. */}
               {lab?.laborTabNotCounted > 0 && (
                 <p style={noteStyle}>
-                  Overheads Labor tab {fmt(lab.laborTabNotCounted)} not counted: {lab.source === 'payroll' ? 'payroll' : 'Crest HR'} is this month's labour.
+                  Overheads Labor tab {fmt(lab.laborTabNotCounted)} not counted: {lab.source === 'payroll' ? 'payroll' : 'Crest HR'} is this month's labor.
                 </p>
               )}
               {lab?.reason === 'nopay' && (
                 <p style={warnNoteStyle}>
-                  △ Pay is not set for {num(lab.noPayCount)} staff on payroll, so their wages are not in labour, and Labor Cost, Prime Cost and Net Margin are shown without a verdict. Set their pay in Pay Setup, then Regenerate Snapshot.
+                  △ Pay is not set for {num(lab.noPayCount)} staff on payroll, so their wages are not in labor, and Labor Cost, Prime Cost and Net Margin are shown without a verdict. Set their pay in Pay Setup, then Regenerate Snapshot.
                 </p>
               )}
               {lab?.reason === 'nostaff' && (
                 <p style={warnNoteStyle}>
-                  △ Nobody was on payroll in Crest HR this month, so labour is not judged.
+                  △ Nobody was on payroll in Crest HR this month, so labor is not judged.
                 </p>
               )}
               {/* The count COGS rests on, frozen with it (v9). Printed, not a hover: it qualifies
@@ -1035,13 +1035,13 @@ function MonthlyOwnerReportBody() {
                     {snapshot.ims.staffMealsValueTotal != null && (
                       <Row label="Staff Meals" value={fmt(snapshot.ims.staffMealsValueTotal)}
                         tip={pnlCostsInNet(snapshot)
-                          ? 'Food logged as staff meals, at each item rate. It is kept out of Food Used (COGS), and Net Margin takes it off as a cost, as Consolidated P&L does.'
-                          : 'Food logged as staff meals, at each item rate, kept out of Food Used (COGS). This report was made before Net Margin took it off as a cost.'} />
+                          ? 'Food logged as staff meals, at each item rate. It is kept out of Food used (COGS), and Net Margin takes it off as a cost, as Profit & Loss does.'
+                          : 'Food logged as staff meals, at each item rate, kept out of Food used (COGS). This report was made before Net Margin took it off as a cost.'} />
                     )}
                     <Row label="Closing Stock" value={fmt(snapshot.ims.closingStockValueTotal)}
                       tip="Value of stock physically counted at period close (qty × per-unit rate) — becomes next period's Opening Stock." />
                     {snapshot.ims.cogsTotal != null && (
-                      <Row label="Food Used (COGS)" value={fmt(snapshot.ims.cogsTotal)}
+                      <Row label="Food used (COGS)" value={fmt(snapshot.ims.cogsTotal)}
                         tip={`${COGS_FORMULA}, as on Monthly Summary. Prep (sub-recipes) is left out, so the rows above add up to it exactly only when no prep was counted.`} />
                     )}
                     <Row label="Cash Purchases" value={fmt(snapshot.ims.cashNet)} />
@@ -1061,16 +1061,16 @@ function MonthlyOwnerReportBody() {
                     {canOverheads && snapshot.ims.taxFeesTotal != null && <>
                       <Row label="Overheads" value={fmt(snapshot.ims.overheadTotal)}
                         tip={hrInReport
-                          ? "The Overheads page's fixed costs for the month (rent, utilities and the like). The Labor tab is not here: labour is payroll, in the Crest HR section."
-                          : "The Overheads page's fixed costs for the month (rent, utilities and the like). The Labor tab is not here: without Crest HR, labour comes from the Labor tab, shown under Labor Cost %."} />
+                          ? "The Overheads page's fixed costs for the month (rent, utilities and the like). The Labor tab is not here: labor is payroll, in the Crest HR section."
+                          : "The Overheads page's fixed costs for the month (rent, utilities and the like). The Labor tab is not here: without Crest HR, labor comes from the Labor tab, shown under Labor Cost %."} />
                       <Row label="Tax & Fees" value={fmt(snapshot.ims.taxFeesTotal)}
-                        tip="The Overheads page's Tax & Fees tab for the month: card and bank fees, the accountant, licences and permits. Net Margin subtracts it, as Consolidated P&L does." />
+                        tip="The Overheads page's Tax & Fees tab for the month: card and bank fees, the accountant, licences and permits. Net Margin subtracts it, as Profit & Loss does." />
                     </>}
                     {/* v18 (S849, GAPS-1 / PNL-1): the other costs Net Margin takes off, so it can be
                         traced. Absent on an older report, which did not subtract them. */}
                     {snapshot.ims.cogsWastageTotal != null && (
                       <Row label="Stock wasted (raw items)" value={fmt(snapshot.ims.cogsWastageTotal)}
-                        tip="The raw-ingredient part of Wastage Value, which Net Margin takes off as a cost. Wasted prep is left out: its raw items are already in Food Used." />
+                        tip="The raw-ingredient part of Wastage Value, which Net Margin takes off as a cost. Wasted prep is left out: its raw items are already in Food used." />
                     )}
                     {dc && (
                       <Row label="Delivery commission" value={fmt(dc.amount)}
@@ -1103,11 +1103,11 @@ function MonthlyOwnerReportBody() {
                         An estimate has no unpaid-day figure (null), so the row is not shown. */}
                     {snapshot.hr.payroll?.absenceDeduction != null && (
                       <Row label="Less unpaid days" value={`− ${fmt(snapshot.hr.payroll.absenceDeduction)}`}
-                        tip="Days the payroll did not pay: unpaid leave, absent days, and days before joining or after leaving. Taken off so labour is what was earned." />
+                        tip="Days the payroll did not pay: unpaid leave, absent days, and days before joining or after leaving. Taken off so labor is what was earned." />
                     )}
                     <Row label="Overtime" value={`${num(snapshot.hr.payroll?.ot?.hours)} hrs — ${fmt(snapshot.hr.payroll?.ot?.amount)}`} />
                     <Row label="Employer SSF" value={fmt(snapshot.hr.payroll?.ssfEmployer)}
-                      tip="What the business pays into the Social Security Fund for staff enrolled in it, on top of their pay. It counts as labour." />
+                      tip="What the business pays into the Social Security Fund for staff enrolled in it, on top of their pay. It counts as labor." />
                     {/* v13 (H18): pay finalized outside the monthly run, in the month it was paid. */}
                     {snapshot.hr.payroll?.other?.festival > 0 && (
                       <Row label={snapshot.hr.payroll.other.festivalName ? `${snapshot.hr.payroll.other.festivalName} Allowance` : 'Festival Allowance'}
@@ -1121,7 +1121,7 @@ function MonthlyOwnerReportBody() {
                       <Row label="Leavers' Final Pay" value={fmt(snapshot.hr.payroll.other.settlement)}
                         tip="Final Settlements finalized this month: the last part-month of pay, leave encashment, gratuity and the rest. Travel claims are not counted." />
                     )}
-                    <Row label={earnedLabour(snapshot) ? 'Total Labour Cost' : 'Total Payroll Cost'} value={fmt(snapshot.hr.payroll?.total)}
+                    <Row label={earnedLabour(snapshot) ? 'Total Labor Cost' : 'Total Payroll Cost'} value={fmt(snapshot.hr.payroll?.total)}
                       tip={earnedLabour(snapshot)
                         ? 'Pay earned, overtime and employer SSF, plus festival, incentive and final-settlement pay finalized this month. Labor Cost % is this divided by revenue.'
                         : 'Gross pay, overtime and employer SSF (an older rule). Unpaid days are not taken off, and festival, incentive and final-settlement pay are not counted.'} />
@@ -1690,7 +1690,7 @@ function MonthlyOwnerReportBody() {
                       {t?.available && showLabour && earnedLabour(snapshot) !== earnedLabour(t.snapshot) && (
                         <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '6px 0 0', lineHeight: 1.5 }}>
                           Labor Cost, Prime Cost and Net Margin are not compared: {earnedLabour(snapshot) ? 'this report' : priorLabel} counts
-                          labour as pay earned (unpaid days taken off) plus festival, incentive and final-settlement pay,
+                          labor as pay earned (unpaid days taken off) plus festival, incentive and final-settlement pay,
                           and {earnedLabour(snapshot) ? priorLabel : 'this report'} was made before it did.
                           To compare them, regenerate {priorLabel}'s snapshot and then this one.
                         </p>

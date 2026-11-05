@@ -235,9 +235,9 @@ const plural = (n, one, many) => (n === 1 ? one : many)
  * Every sentence a page owes the reader about a `resolveOutletLabour` result.
  *
  * @returns {{ short: string, long: string[] }}
- *   short: the tile subtext ('labour from finalized payroll', 'labour estimate — payroll not finalized',
- *          'labour from Overheads', 'no labour entered on Overheads', 'labour not readable on this login',
- *          'labour could not be loaded'); '' for a null result.
+ *   short: the tile subtext ('labor from finalized payroll', 'labor estimate — payroll not finalized',
+ *          'labor from Overheads', 'no labor entered on Overheads', 'labor not readable on this login',
+ *          'labor could not be loaded'); '' for a null result.
  *   long:  the notes in order, never an empty string: the Labor tab not counted; pay not set / nobody on
  *          payroll; other labour; leavers with no End Date; calendar days for daily and hourly staff;
  *          sheet overtime.
@@ -245,21 +245,21 @@ const plural = (n, one, many) => (n === 1 ? one : many)
 export function outletLabourNotes(labour, { money = npr } = {}) {
   if (!labour) return { short: '', long: [] }
   const short = {
-    payroll: 'labour from finalized payroll',
-    estimate: 'labour estimate — payroll not finalized',
-    overheads: 'labour from Overheads',
-    none: 'no labour entered on Overheads',
-    unreadable: 'labour not readable on this login',
-    failed: 'labour could not be loaded',
+    payroll: 'labor from finalized payroll',
+    estimate: 'labor estimate — payroll not finalized',
+    overheads: 'labor from Overheads',
+    none: 'no labor entered on Overheads',
+    unreadable: 'labor not readable on this login',
+    failed: 'labor could not be loaded',
   }[labour.source] || ''
   const long = []
-  if (labour.ignoredBucket > 0) long.push(`Labour tab ${money(labour.ignoredBucket)} not counted — Crest HR is the labour figure`)
+  if (labour.ignoredBucket > 0) long.push(`Labor tab ${money(labour.ignoredBucket)} not counted — Crest HR is the labor figure`)
   const est = labour.estimate
   if (labour.reason === 'nopay') {
     const n = est?.noPay?.length || 0
-    long.push(`Pay not set for ${n} staff — not counted, so labour is not judged · Pay Setup →`)
+    long.push(`Pay not set for ${n} staff — not counted, so labor is not judged · Pay Setup →`)
   }
-  if (labour.reason === 'nostaff') long.push('No staff on payroll in Crest HR — labour is not judged')
+  if (labour.reason === 'nostaff') long.push('No staff on payroll in Crest HR — labor is not judged')
   const otherLine = otherLabourLine(labour)
   if (otherLine) long.push(otherLine)
   if (est) {
@@ -300,7 +300,7 @@ export function labourNotJudgedText({ source, verdictWithheld, reason = '' }) {
   if (reason === 'nostaff') return 'Not judged — no staff on payroll'
   switch (source) {
     case 'unreadable': return 'Not judged on this login'
-    case 'failed':     return 'Not judged — labour could not be loaded'
+    case 'failed':     return 'Not judged — labor could not be loaded'
     case 'none':       return 'Not judged until payroll is finalized'
     default:           return 'Not judged'
   }
@@ -401,12 +401,12 @@ export function groupLabourRatio(outlets) {
 /** A short on-tile label for the source, or '' when there is nothing useful to say. */
 export function labourSourceLabel({ source }, hrOn) {
   switch (source) {
-    case 'payroll':    return 'Labour: finalized payroll'
-    case 'estimate':   return 'Labour: HR wage estimate (payroll not finalized)'
-    case 'overheads':  return 'Labour: Overheads Labor tab'
-    case 'unreadable': return 'Labour: payroll not readable on this login'
-    case 'failed':     return 'Labour: could not be loaded'
-    case 'none':       return hrOn ? 'Labour: none yet (no finalized payroll, Labor tab empty)' : 'Labour: Labor tab empty'
+    case 'payroll':    return 'Labor: finalized payroll'
+    case 'estimate':   return 'Labor: HR wage estimate (payroll not finalized)'
+    case 'overheads':  return 'Labor: Overheads Labor tab'
+    case 'unreadable': return 'Labor: payroll not readable on this login'
+    case 'failed':     return 'Labor: could not be loaded'
+    case 'none':       return hrOn ? 'Labor: none yet (no finalized payroll, Labor tab empty)' : 'Labor: Labor tab empty'
     default:           return ''
   }
 }

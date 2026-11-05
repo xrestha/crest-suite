@@ -128,7 +128,7 @@ export default function FixedAssets() {
         <p className="page-footnote no-print" style={{ margin: '0 0 16px' }}>{TAB_NOTES[activeTab]}</p>
       )}
       {loading ? (
-        <div className="card"><p style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Loading…</p></div>
+        <div className="card"><p role="status" style={{ color: 'var(--theme-text2)', fontSize: 13, margin: 0 }}>Loading your assets…</p></div>
       ) : loadError ? (
         <ReportLoadError error={loadError} onRetry={load} />
       ) : (

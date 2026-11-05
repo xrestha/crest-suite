@@ -496,7 +496,7 @@ ${text}`, detail })
               <div className="form-field">
                 <label htmlFor="deprec-run">Run to reverse</label>
                 <select id="deprec-run" className="form-select" value={runId} onChange={e => { setRunId(e.target.value); setLines(null); setAdjReason('') }} disabled={runs === null}>
-                  <option value="">{runs === null ? 'Loading…' : selectableRuns.length === 0 ? 'No posted runs' : 'Choose a posted run'}</option>
+                  <option value="">{runs === null ? 'Loading the posted runs…' : selectableRuns.length === 0 ? 'No posted runs' : 'Choose a posted run'}</option>
                   {selectableRuns.map(r => (
                     <option key={r.id} value={r.id} disabled={reversedIds.has(r.id)}>
                       {runLabel(r)} · posted {fmtPosted(r.posted_at)}{reversedIds.has(r.id) ? ' · already reversed' : ''}

@@ -114,7 +114,7 @@ export default function ValuationReportTab({ assets }) {
       {exportError && <ActionError error={exportError} className="action-error--top" />}
 
       {loading ? (
-        <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
+        <p role="status" style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading the valuation…</p>
       ) : loadError ? (
         <ReportLoadError error={loadError} onRetry={load} />
       ) : !valuation ? (

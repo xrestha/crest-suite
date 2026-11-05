@@ -296,7 +296,7 @@ export default function TaxPoolOpeningsCard({ fyLabel, priorLabel, canEdit, onCh
           <button className="btn btn-ghost" style={{ marginTop: 8, fontSize: 12 }} onClick={load}>Try again</button>
         </div>
       ) : !loaded ? (
-        <p style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Loading…</p>
+        <p role="status" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>Loading the opening pool values…</p>
       ) : (
         <>
           {yearLockedBy && (

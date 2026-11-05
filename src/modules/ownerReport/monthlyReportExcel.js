@@ -80,13 +80,13 @@ export function exportMonthlyReportExcel(report, bizInfo) {
     // v18 (OWNER-REPORT-5): the thresholds the report is judged against, frozen with it.
     ...(snapshot.combined?.fcThresholds ? { 'Food Cost Target %': `≤ ${snapshot.combined.fcThresholds.warn} (critical above ${snapshot.combined.fcThresholds.critical})` } : {}),
     'Labor Cost %': pct(snapshot.combined?.laborCostPct),
-    ...(labourFrom ? { 'Labour From': labourFrom } : {}),
+    ...(labourFrom ? { 'Labor From': labourFrom } : {}),
     ...(lab?.laborTabNotCounted > 0 ? { 'Labor Tab Not Counted (NPR)': round2(lab.laborTabNotCounted) } : {}),
-    ...(lab?.reason === 'nopay' ? { 'Labour Judged': `No: pay not set for ${lab.noPayCount} staff` } : lab?.reason === 'nostaff' ? { 'Labour Judged': 'No: nobody on payroll in Crest HR' } : {}),
+    ...(lab?.reason === 'nopay' ? { 'Labor Judged': `No: pay not set for ${lab.noPayCount} staff` } : lab?.reason === 'nostaff' ? { 'Labor Judged': 'No: nobody on payroll in Crest HR' } : {}),
     'Prime Cost %': pct(snapshot.combined?.primeCostPct),
     'Net Margin %': pct(snapshot.combined?.netMarginPct),
     // v18 (GAPS-1 / PNL-1): which costs Net Margin takes off.
-    'Net Margin Basis': pnlCosts ? 'As Consolidated P&L' : 'Before wastage, staff meals and commission (the earlier rule)',
+    'Net Margin Basis': pnlCosts ? 'As Profit & Loss' : 'Before wastage, staff meals and commission (the earlier rule)',
     ...(dc ? {
       'Delivery Commission (NPR)': round2(dc.amount),
       'Delivery Bills Not Settled': dc.unsettledBills ?? 0,
@@ -144,7 +144,7 @@ export function exportMonthlyReportExcel(report, bizInfo) {
         'Festival Allowance (NPR)': round2(hr.payroll.other.festival),
         'Incentives (NPR)': round2(hr.payroll.other.incentive),
         "Leavers' Final Pay (NPR)": round2(hr.payroll.other.settlement),
-        'Total Labour Cost (NPR)': round2(hr.payroll?.total),
+        'Total Labor Cost (NPR)': round2(hr.payroll?.total),
       } : { 'Total Payroll Cost (NPR)': round2(hr.payroll?.total) }),
       // v18 (OWNER-REPORT-7): everyone employed at any time in the month, by join and End Dates.
       ...(hr.headcount?.basis === 'dates'
@@ -316,7 +316,7 @@ export function exportMonthlyReportExcel(report, bizInfo) {
       const whyNot = kind => {
         if (kind !== 'revenue' && kind !== 'labour' && priorMissing.includes('ims')) return `not compared: ${priorLabel}'s report is missing its Crest IMS section`
         if ((kind === 'food' || kind === 'prime' || kind === 'margin') && basisDiffers) return 'not compared: different food-cost basis'
-        if ((kind === 'labour' || kind === 'prime' || kind === 'margin') && d.labourBasisChanged) return 'not compared: labour counted differently'
+        if ((kind === 'labour' || kind === 'prime' || kind === 'margin') && d.labourBasisChanged) return 'not compared: labor counted differently'
         if (kind === 'margin' && d.netMarginBasisChanged) return 'not compared: Tax & Fees were not subtracted then'
         if (kind === 'margin' && d.netMarginCostsChanged) return 'not compared: wastage, staff meals and delivery commission were not subtracted then'
         return null

@@ -616,8 +616,8 @@ export default function ConsolidatedPnl() {
           the only labour this page can see is Overheads' Labor tab — say so above the figures (S683). */}
       {!hrOn && !grouped && (
         <div className="amber-banner">
-          <strong>Labour is from Overheads only.</strong>{' '}
-          Crest HR is not enabled, so no payroll feeds this statement — the Labour line is whatever was
+          <strong>Labor is from Overheads only.</strong>{' '}
+          Crest HR is not enabled, so no payroll feeds this statement — the Labor line is whatever was
           entered in Overheads&apos; Labor tab for the month{stmt?.labourInfo?.source === 'overheads' || stmt?.labour ? '' : ', which is currently nothing'}.
         </div>
       )}
@@ -629,7 +629,7 @@ export default function ConsolidatedPnl() {
   const verdictSub = (s, line) => {
     if (s.open) return 'Not judged until the month is closed'
     if (s.gapMaterial) return 'Not judged: count incomplete'
-    if (line.key === 'netProfit' && (!s.labourHasFigure || s.labourVerdictWithheld)) return 'Not judged: labour incomplete — see notes'
+    if (line.key === 'netProfit' && (!s.labourHasFigure || s.labourVerdictWithheld)) return 'Not judged: labor incomplete — see notes'
     return null
   }
   const headline = stmt ? (
@@ -643,7 +643,7 @@ export default function ConsolidatedPnl() {
       </div>
       <div className="stat-card">
         <div className="stat-label">
-          <Tip width={280} text="Revenue less cost of goods sold, before wastage, staff meals, delivery commission, labour, overheads and tax.">Gross Profit</Tip>
+          <Tip width={280} text="Revenue less cost of goods sold, before wastage, staff meals, delivery commission, labor, overheads and tax.">Gross Profit</Tip>
         </div>
         <div className="stat-value" style={{ color: lineColor(gross, stmt.grossProfit, lineWithheld(gross, stmt)) }}>
           {npr(stmt.grossProfit)}
@@ -688,7 +688,7 @@ export default function ConsolidatedPnl() {
     return src === 'payroll' ? `from finalized payroll${s.labourInfo?.other ? ' + bonus/final pay' : ''}`
       : src === 'estimate' ? 'HR estimate — payroll not finalized'
       : src === 'overheads' ? 'from the Overheads Labor tab'
-      : src === 'none' ? 'no labour entered — Crest HR is off and the Labor tab is empty'
+      : src === 'none' ? 'no labor entered — Crest HR is off and the Labor tab is empty'
       : src === 'unreadable' ? 'not readable on this login'
       : 'could not be loaded'
   }

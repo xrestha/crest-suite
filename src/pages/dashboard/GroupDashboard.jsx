@@ -26,8 +26,9 @@ import { groupOutletLabour, groupLabourRatio, outletLabourNotes } from '../../mo
 import { loadGroupLabourInputs } from '../../modules/dashboard/loadOutletLabour'
 import { mtdClock, nepalBsToday, countedDaysText } from '../../modules/dashboard/mtdClock'
 import {
-  SETTLE_DAY, FIRST_DAY_TEXT, rowFigure, ratioPair, rowCostRatio, groupRatioOf, costBandWithheld,
+  SETTLE_DAY, FIRST_DAY_TEXT, rowFigure, ratioPair, rowCostRatio, groupRatioOf,
   rowLabourPct, labourWithheld, labourBandWithheld, revenueChange, rankMarks,
+  closedWithoutCount, rowCostWithheld, groupCostVerdict, coverageHeadline,
 } from './groupVerdicts'
 
 // Multi-Outlet Group Console — every branch in the group on one screen.
@@ -328,7 +329,10 @@ export default function GroupDashboard() {
   // before, never as an average of the outlets' percentages.
   const groupRatio = groupRatioOf(rows, clock)
   const groupFc = groupRatio.pct
-  const groupCostWithheld = costBandWithheld(groupRatio, clock)
+  // S889 (the Suite critique P2#3): the total is not judged while the outlets stand on different
+  // bases, or when it takes in an outlet closed with no count, so a ✓ never sits over △ outlets.
+  const groupCostCheck = groupCostVerdict(rows, groupRatio, clock)
+  const groupCostWithheld = groupCostCheck.withheld
   const ratioOf = r => rowCostRatio(r, clock)
   // Which of the two figures the column holds. When outlets stand differently the heading names
   // both and every cell names its own, so no cell can be read under the other's name.
@@ -341,7 +345,7 @@ export default function GroupDashboard() {
   // never on a figure whose verdict is withheld (S849: before day 10, or labour with a lump ahead).
   const costMarks = mixedBases ? {} : rankMarks(inScope.map(r => {
     const ratio = ratioOf(r)
-    return { id: r.client_id, pct: costBandWithheld(ratio, clock) ? null : ratio?.pct ?? null }
+    return { id: r.client_id, pct: rowCostWithheld(r, ratio, clock) ? null : ratio?.pct ?? null }
   }))
   const labourMarks = rankMarks(inScope.map(r => ({
     id: r.client_id, pct: labourBandWithheld(r.labour, clock) ? null : rowLabourPct(r, clock),
@@ -368,14 +372,22 @@ export default function GroupDashboard() {
   // words first; it was a hover title, which a phone and a keyboard never reach.
   const subLine = { fontSize: 11, fontWeight: 400, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }
   const cogsText = (ratio, cogs) => (ratio?.basis === 'cogs' && cogs != null ? `Food used (COGS) ${fmtNpr(cogs)}` : null)
-  const ratioCell = (ratio, cogs) => {
-    const c = bandCell(ratio?.pct ?? null, fcBandOf, costBandWithheld(ratio, clock))
+  // Why a Food Cost % carries no verdict (S889): its outlet closed with no count, or, on the total,
+  // the outlets stand on different bases or one of them closed with no count.
+  const groupCostNote = groupCostCheck.reason === 'mixed' ? `Not judged: not every outlet has closed ${monthName}`
+    : groupCostCheck.reason === 'noCount' ? `Not judged: ${groupCostCheck.names.join(', ')} closed with no count`
+    : null
+  const rowCostNote = (r, ratio) => (ratio?.basis === 'cogs' && closedWithoutCount(r) ? 'Not judged: no count' : null)
+  // `r` is the outlet; the group total passes none and takes the group verdict.
+  const ratioCell = (ratio, cogs, r) => {
+    const c = bandCell(ratio?.pct ?? null, fcBandOf, r ? rowCostWithheld(r, ratio, clock) : groupCostWithheld)
     const name = mixedBases && ratio ? ratio.label : null
     const used = cogsText(ratio, cogs)
-    if (!name && !used) return c
+    const unjudged = r ? rowCostNote(r, ratio) : groupCostNote
+    if (!name && !used && !unjudged) return c
     return {
       ...c,
-      children: <>{c.children}{name && <div style={subLine}>{name}</div>}{used && <div style={subLine}>{used}</div>}</>,
+      children: <>{c.children}{name && <div style={subLine}>{name}</div>}{used && <div style={subLine}>{used}</div>}{unjudged && <div style={subLine}>{unjudged}</div>}</>,
     }
   }
   // A neutral chip under the figure: the band already carries the verdict, this only ranks.
@@ -386,9 +398,10 @@ export default function GroupDashboard() {
     ? inScope.reduce((t, r) => t + (Number(r.cogs) || 0), 0)
     : null
   const daysText = countedDaysText(clock)
-  const costSub = !clock.running ? null
-    : clock.firstDay ? FIRST_DAY_TEXT
-    : [daysText, groupCostWithheld ? `no colour before day ${SETTLE_DAY}` : null].filter(Boolean).join(' · ')
+  const costSub = clock.running && clock.firstDay ? FIRST_DAY_TEXT
+    : [clock.running ? daysText : null,
+       groupCostNote || (groupCostCheck.reason === 'settle' ? `no colour before day ${SETTLE_DAY}` : null),
+      ].filter(Boolean).join(' · ') || null
 
   // One row's figures and verdicts, worked out once (S857) so the table row and its phone card are
   // drawn from the same values through the same helpers, and cannot disagree.
@@ -414,8 +427,9 @@ export default function GroupDashboard() {
         : labourNote,
       labourNoteColor: r.labour?.hasFigure && !lump ? 'var(--theme-text2)' : 'var(--theme-amber-text)',
       labourAmount: inMonth && r.labour?.hasFigure ? fmtNpr(r.labour.amount) : '—',
-      costCell: withMark(ratioCell(fcRatio, r.cogs), markOf(costMarks, r.client_id)),
-      costFigure: bandCell(fcRatio?.pct ?? null, fcBandOf, costBandWithheld(fcRatio, clock)),
+      costCell: withMark(ratioCell(fcRatio, r.cogs, r), markOf(costMarks, r.client_id)),
+      costFigure: bandCell(fcRatio?.pct ?? null, fcBandOf, rowCostWithheld(r, fcRatio, clock)),
+      costNote: rowCostNote(r, fcRatio),
       costMark: markOf(costMarks, r.client_id),
       labourCell: bandCell(rowLabourPct(r, clock), lcBand, labourBandWithheld(r.labour, clock)),
       labourMark: markOf(labourMarks, r.client_id),
@@ -428,7 +442,7 @@ export default function GroupDashboard() {
     !r.is_included && <span key="suite" className="badge-gray" style={{ marginLeft: gap }}>No Suite Pro</span>,
     r.is_included && r.has_period === false && <span key="period" className="badge-amber" style={{ marginLeft: gap }}>No period</span>,
     r.is_included && r.period_status === 'closed' && r.has_closing === false && (
-      <Tip key="count" text={`Closed ${monthName} without a closing stock count, so its Food Cost % reads high. Enter the count in Stock Count at that outlet, then Resync Opening Stock in Periods.`} width={280}
+      <Tip key="count" text={`Closed ${monthName} without a closing stock count, so its Food Cost % reads high and is not judged. Enter the count in Stock Count at that outlet, then Resync Opening Stock in Periods.`} width={280}
         style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', marginLeft: gap }}>
         <span className="badge-amber">No count</span>
       </Tip>
@@ -445,11 +459,11 @@ export default function GroupDashboard() {
   // A phone card's money, one tap away: the columns the card's first lines leave out.
   const moneyLines = ({ purchases, cogs, labour, labourNote, covers }) => (
     <details className="phone-card__lines">
-      <summary>Purchases, labour and covers</summary>
+      <summary>Purchases, labor and covers</summary>
       <ul>
         <li><span>Net Purchases</span><span>{fmtNpr(purchases)}</span></li>
         {cogs != null && <li><span>Food used (COGS)</span><span>{fmtNpr(cogs)}</span></li>}
-        <li><span>Labour{labourNote}</span><span>{labour}</span></li>
+        <li><span>Labor{labourNote}</span><span>{labour}</span></li>
         <li><span>Covers</span><span>{covers}</span></li>
       </ul>
     </details>
@@ -463,6 +477,12 @@ export default function GroupDashboard() {
   const stepOf = d => { const t = monthStep(bsYear, bsMonth, d); return inRange(t) ? { key: `${t.y}-${t.m}`, label: `${BS_MONTHS[t.m - 1]} ${t.y}` } : null }
   const steps = { prev: stepOf(-1), next: stepOf(1) }
   const stepTo = key => { const [y, m] = key.split('-').map(Number); setBsYear(y); setBsMonth(m) }
+  // One month box, newest first, the same range the arrows step through (S889, the Suite critique
+  // P2#4: a Month box and a Year box, each with its own label, took two lines on a phone). A month
+  // asked for in the address outside that range stays on the list, so the box never shows another.
+  const monthOptions = []
+  for (let n = today.year * 12 + today.month - 1; n >= years[0] * 12; n--) monthOptions.push({ y: Math.floor(n / 12), m: (n % 12) + 1 })
+  if (!monthOptions.some(o => o.y === bsYear && o.m === bsMonth)) monthOptions.unshift({ y: bsYear, m: bsMonth })
 
   // The no-group card says the next step for whoever is reading: the Owner asks their consultant;
   // Crest support sets groups up itself (never "contact your consultant" to the consultant).
@@ -481,25 +501,15 @@ export default function GroupDashboard() {
 
   const body = () => (!groupId ? noGroupCard : (
     <>
-      {/* flex-end, not center: the two labelled fields are taller than the button, and
-          centring would float the button halfway up their labels. */}
-      <div className="card no-print" style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        {/* ‹ › step month and year together (S858), so Baisakh steps back to Chaitra of the year before. */}
-        <MonthStepper prev={steps.prev} next={steps.next} onStep={stepTo} className="month-stepper--fields">
-          <div className="form-field" style={{ margin: 0 }}>
-            <label htmlFor="group-bs-month">Month</label>
-            <select id="group-bs-month" className="form-select" style={{ maxWidth: 140 }} value={bsMonth} onChange={e => setBsMonth(Number(e.target.value))}>
-              {BS_MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-            </select>
-          </div>
-          <div className="form-field" style={{ margin: 0 }}>
-            <label htmlFor="group-bs-year">Year</label>
-            <select id="group-bs-year" className="form-select" style={{ maxWidth: 120 }} value={bsYear} onChange={e => setBsYear(Number(e.target.value))}>
-              {years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </div>
+      {/* One row on a phone (S889): ‹ month › and Refresh, as Profit & Loss draws its month. ‹ › step
+          month and year together (S858), so Baisakh steps back to Chaitra of the year before. */}
+      <div className="card card--compact no-print" style={{ marginBottom: 16, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <MonthStepper prev={steps.prev} next={steps.next} onStep={stepTo}>
+          <select aria-label="Month" className="form-select" value={`${bsYear}-${bsMonth}`} onChange={e => stepTo(e.target.value)}>
+            {monthOptions.map(o => <option key={`${o.y}-${o.m}`} value={`${o.y}-${o.m}`}>{BS_MONTHS[o.m - 1]} {o.y}</option>)}
+          </select>
         </MonthStepper>
-        <button className="btn btn-ghost" onClick={refresh} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
+        <button className="btn btn-ghost" onClick={refresh} disabled={loading}>Refresh</button>
       </div>
 
       {error && <div style={{ marginBottom: 16 }}><ReportLoadError error={error} onRetry={load} /></div>}
@@ -509,7 +519,8 @@ export default function GroupDashboard() {
           read it. `.amber-banner` (S857) is the shared box; this was a hand-typed copy at its own tint. */}
       {!loading && !error && (excluded.length > 0 || noPeriod.length > 0) && (
         <div className="amber-banner">
-          <strong>Showing {included.length} of {rows.length} outlets</strong>
+          {/* From the outlets with figures (S889): one with no month for it is not shown. */}
+          <strong>{coverageHeadline(rows, monthLabel)}</strong>
           {excluded.length > 0 && (
             <p style={{ margin: '6px 0 0' }}>
               {excluded.map(r => r.client_name).join(', ')} {excluded.length === 1 ? 'is not on Crest Suite Pro, or its Suite Pro has' : 'are not on Crest Suite Pro, or their Suite Pro has'} lapsed —
@@ -532,7 +543,8 @@ export default function GroupDashboard() {
           ONE line (see Layout.css). Four .cards in it butted their 1px borders into 2px
           double rules with their shadows overlapping at every join -- the exact two-depth-
           models-arguing the class comment warns about. dash-section for the mobile rhythm. */}
-      {!error && <div className="stat-grid dash-section">
+      {/* stat-grid--pair (S889): two across under 480px, not four stacked above the outlets. */}
+      {!error && <div className="stat-grid stat-grid--pair dash-section">
         <div className="stat-card">
           <div className="stat-label"><Tip text="Sales of all included outlets this month, before VAT and after discounts. A till bill counts once it is posted to Inventory." width={300}>Group Revenue</Tip></div>
           <div className="stat-value">{loading ? <StatSkeleton /> : fmtNpr(groupRevenue)}</div>
@@ -550,14 +562,14 @@ export default function GroupDashboard() {
           {!loading && costSub && <div className="stat-sub">{costSub}</div>}
         </div>
         <div className="stat-card">
-          <div className="stat-label"><Tip text="Labour of all outlets ÷ revenue of all outlets. Shown only when every outlet has a labour figure, so a missing one cannot make the group look cheaper to staff." width={300}>{`Group ${LABOUR_PCT_LABEL}`}</Tip></div>
+          <div className="stat-label"><Tip text="Labor of all outlets ÷ revenue of all outlets. Shown only when every outlet has a labor figure, so a missing one cannot make the group look cheaper to staff." width={300}>{`Group ${LABOUR_PCT_LABEL}`}</Tip></div>
           {(() => {
             const c = bandCell(groupLabour, lcBand, groupLabourWithheld)
             return <div className="stat-value" style={{ color: loading ? undefined : c.style.color }} title={loading ? undefined : c.title}>{loading ? <StatSkeleton /> : c.children}</div>
           })()}
           {!loading && clock.firstDay && <div className="stat-sub">{FIRST_DAY_TEXT}</div>}
           {!loading && !clock.firstDay && groupLabourMissing.length > 0 && (
-            <div className="stat-sub">No labour figure yet: {groupLabourMissing.join(', ')}</div>
+            <div className="stat-sub">No labor figure yet: {groupLabourMissing.join(', ')}</div>
           )}
           {!loading && !clock.firstDay && groupLabourMissing.length === 0 && lumpRows.length > 0 && (
             <div className="stat-sub">Not judged yet: bonus or final pay in {lumpRows.map(r => r.client_name).join(', ')}</div>
@@ -590,13 +602,13 @@ export default function GroupDashboard() {
               <th style={{ textAlign: 'right' }}>Net Purchases</th>
               {/* Neutral while loading: `rows` still holds the previous month, whose outlets may stand differently. */}
               <th style={{ textAlign: 'right' }}><Tip text={columnTip} width={300}>{loading ? 'Food Cost / Spend %' : columnLabel}</Tip></th>
-              <th style={{ textAlign: 'right' }}><Tip text="Wages for the month: finalized payroll, the HR estimate, or the Overheads Labor tab. The line under each figure says which." width={300}>Labour</Tip></th>
-              <th style={{ textAlign: 'right' }}><Tip text="Labour ÷ revenue for this outlet, on the same days. No colour while its labour figure is missing or not final.">{LABOUR_PCT_LABEL}</Tip></th>
+              <th style={{ textAlign: 'right' }}><Tip text="Wages for the month: finalized payroll, the HR estimate, or the Overheads Labor tab. The line under each figure says which." width={300}>Labor</Tip></th>
+              <th style={{ textAlign: 'right' }}><Tip text="Labor ÷ revenue for this outlet, on the same days. No colour while its labor figure is missing or not final.">{LABOUR_PCT_LABEL}</Tip></th>
               <th style={{ textAlign: 'right' }}>Covers</th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={7} style={{ color: 'var(--theme-text2)' }}>Loading…</td></tr>}
+            {loading && <tr><td colSpan={7} role="status" style={{ color: 'var(--theme-text2)' }}>Loading the outlets for {monthLabel}…</td></tr>}
             {!loading && rows.length === 0 && <tr><td colSpan={7} style={{ color: 'var(--theme-text2)' }}>No outlets in this group.</td></tr>}
             {views.map(v => {
               const r = v.r
@@ -672,7 +684,7 @@ export default function GroupDashboard() {
           prints; the table does. */}
       {!error && (
         <ul className="phone-cards phone-cards--no-fab phone-only" aria-label={`Outlets, ${monthLabel}`}>
-          {loading && <li className="phone-card phone-card__meta">Loading…</li>}
+          {loading && <li className="phone-card phone-card__meta" role="status">Loading the outlets for {monthLabel}…</li>}
           {!loading && rows.length === 0 && <li className="phone-card phone-card__meta">No outlets in this group.</li>}
           {views.map(v => {
             const r = v.r
@@ -696,7 +708,7 @@ export default function GroupDashboard() {
                 {v.change && <div className="phone-card__meta" style={{ color: changeColor(v.change) }}>{v.change.text}</div>}
                 {v.inMonth && (
                   <>
-                    <div className="phone-card__meta">{v.fcRatio?.label || columnLabel}: {cardFigure(v.costFigure, v.costMark)}</div>
+                    <div className="phone-card__meta">{v.fcRatio?.label || columnLabel}: {cardFigure(v.costFigure, v.costMark)}{v.costNote && ` · ${v.costNote.toLowerCase()}`}</div>
                     <div className="phone-card__meta">{LABOUR_PCT_LABEL}: {cardFigure(v.labourCell, v.labourMark)}</div>
                   </>
                 )}
@@ -717,6 +729,7 @@ export default function GroupDashboard() {
                 <span className="phone-card__figure">{fmtNpr(groupRevenue)}</span>
               </div>
               <div className="phone-card__meta">{groupRatio.label}: {cardFigure(bandCell(groupFc, fcBandOf, groupCostWithheld))}</div>
+              {groupCostNote && <div className="phone-card__meta">{groupCostNote}</div>}
               <div className="phone-card__meta">{LABOUR_PCT_LABEL}: {cardFigure(bandCell(groupLabour, lcBand, groupLabourWithheld))}</div>
               {moneyLines({
                 purchases: groupPurchases,

@@ -314,16 +314,15 @@ export default function OutletAccessPanel({ outlets, readGroupId = null, readOnl
         </div>
       )}
 
-      <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '10px 0 0' }}>
-        Removing an outlet moves that person back to their own outlet straight away. A window they have
-        open on the removed outlet shows nothing from it, and moves itself back the next time they
-        return to it or open another page. It also removes their link to an employee record there.
+      {/* S889 (the Suite critique P2#5): two 11px paragraphs of about 60 words each became one short
+          line apiece at the footnote size; what a window left open does is in Help (Crest Suite). */}
+      <p className="page-footnote" style={{ margin: '10px 0 0' }}>
+        Removing an outlet sends that person back to their own outlet at once and unlinks their employee record there.
       </p>
       {/* S798 3f-1 (GAP-OUTLETS-1): a tick reaches the outlet; only a link makes its record theirs. */}
-      <p style={{ fontSize: 11, color: 'var(--theme-text3)', margin: '6px 0 0' }}>
-        If someone you tick is also on that outlet's payroll, open that outlet's HR Staff page and link their login to
-        their employee record there. Until you do, Crest does not know the record is theirs, so they could approve their
-        own leave, claims and overtime at that outlet.
+      <p className="page-footnote" style={{ margin: '4px 0 0' }}>
+        <strong>On the payroll there too?</strong> Link their login to their employee record on the HR Staff page of
+        that outlet, or they could approve their own leave, claims and overtime there.
       </p>
     </div>
   )

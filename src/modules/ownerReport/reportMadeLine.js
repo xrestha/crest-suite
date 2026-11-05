@@ -28,11 +28,11 @@ export function reportMadeText({ generatedAt, source, byName, monthLabel }) {
   const month = monthLabel || 'the month'
   switch (source) {
     case 'period_close':
-      return { line: `Made when ${month} was ended: ${when}${by}.`, note: null }
+      return { line: `Made when ${month} was closed: ${when}${by}.`, note: null }
     case 'backfill':
       return {
         line: `Made ${when}${by}, the first time this report was opened.`,
-        note: `It was not made when ${month} was ended — for example, when a supervisor ends the month the report waits for the Owner, because a supervisor's login cannot make it. So it shows ${month} as it stood on the day it was made: a bill added to ${month} after it was ended is included.`,
+        note: `It was not made when ${month} was closed — for example, when a supervisor closes the month the report waits for the Owner, because a supervisor's login cannot make it. So it shows ${month} as it stood on the day it was made: a bill added to ${month} after it was closed is included.`,
       }
     case 'manual_regenerate':
       return { line: `Regenerated ${when}${by}, from ${month}'s figures as they stood then.`, note: null }

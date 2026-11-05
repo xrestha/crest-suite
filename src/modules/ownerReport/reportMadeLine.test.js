@@ -31,16 +31,16 @@ describe('reportMadeText', () => {
 
   test('made at the close', () => {
     const r = reportMadeText({ ...base, source: 'period_close' })
-    expect(r.line).toMatch(/^Made when Bhadra 2083 was ended: .*09:14 AM \(Nepal time\) by Aashish Shrestha\.$/)
+    expect(r.line).toMatch(/^Made when Bhadra 2083 was closed: .*09:14 AM \(Nepal time\) by Aashish Shrestha\.$/)
     expect(r.note).toBeNull()
   })
 
   test('made at the first view after someone else ended the month says so, and what it means', () => {
     const r = reportMadeText({ ...base, source: 'backfill' })
     expect(r.line).toMatch(/the first time this report was opened\.$/)
-    expect(r.note).toMatch(/not made when Bhadra 2083 was ended/)
+    expect(r.note).toMatch(/not made when Bhadra 2083 was closed/)
     expect(r.note).toMatch(/supervisor/)
-    expect(r.note).toMatch(/a bill added to Bhadra 2083 after it was ended is included/)
+    expect(r.note).toMatch(/a bill added to Bhadra 2083 after it was closed is included/)
   })
 
   test('regenerated', () => {
@@ -51,7 +51,7 @@ describe('reportMadeText', () => {
 
   test('an unknown maker or time is left out rather than printed as a dash', () => {
     const r = reportMadeText({ generatedAt: null, source: 'period_close', byName: '', monthLabel: 'Bhadra 2083' })
-    expect(r.line).toBe('Made when Bhadra 2083 was ended: at a time that was not recorded.')
+    expect(r.line).toBe('Made when Bhadra 2083 was closed: at a time that was not recorded.')
     expect(r.line).not.toMatch(/—| by /)
   })
 })

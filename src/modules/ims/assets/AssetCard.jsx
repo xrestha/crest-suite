@@ -206,7 +206,7 @@ The asset is still on the register as active.`, detail })
 
       <h3 style={{ fontSize: 13, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>Depreciation History (Book)</h3>
       {loading ? (
-        <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
+        <p role="status" style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading the depreciation history…</p>
       ) : loadError ? (
         <div style={{ marginBottom: 20 }}>
           <ReportLoadError error={loadError} onRetry={load} />
