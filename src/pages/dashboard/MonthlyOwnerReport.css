@@ -19,12 +19,26 @@
 .owner-report-table td {
   padding: 6px 8px;
 }
-/* S887: with each figure kept on one line, the four-column Financial Summary ran 8px past a 375px phone
-   and clipped its Target column; 5px a side gives the row back 24px. Screen only, so paper keeps 8px. */
+/* S887: with each figure kept on one line, the Financial Summary's four columns need about 315px of
+   unbreakable figures and padding ("NPR 3,63,076", "≤60–65%"), and a 360px phone has 300. Measured on
+   the live page: the card's sides go to 8px, the cells to 4px, a heading may take two lines ("Last /
+   month"), and the two reference columns (Last month, Target, already the quiet ones) drop to 12px,
+   which fits 360px exactly. Padding alone (crest-v498) was not enough. Screen only: paper is unchanged. */
 @media screen and (max-width: 420px) {
+  .card.owner-report-doc {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
   .owner-report-table th,
   .owner-report-table td {
-    padding: 6px 5px;
+    padding: 6px 4px;
+  }
+  .owner-report-table thead th {
+    white-space: normal;
+  }
+  .owner-report-table td.owner-report-last,
+  .owner-report-table td.owner-report-target {
+    font-size: 12px;
   }
 }
 

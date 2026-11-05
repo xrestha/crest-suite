@@ -883,7 +883,7 @@ function MonthlyOwnerReportBody() {
                           "7,05,786" at 375px); the notes under a figure still wrap. */}
                       <td style={{ textAlign: 'right', fontWeight: 700 }}><span className="owner-report-nowrap">{fmt(snapshot.combined?.revenueTotal)}</span></td>
                       <LastMonthCell cell={lm?.rows.revenue} show={fmt} />
-                      <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>—</td>
+                      <td className="owner-report-target" style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>—</td>
                     </tr>
                     {snapshot.ims && (
                       <tr>
@@ -904,7 +904,7 @@ function MonthlyOwnerReportBody() {
                         <LastMonthCell cell={lm?.rows.foodCost} show={pct} />
                         {/* The client's own target (OWNER-REPORT-5): frozen with a v18 report, today's
                             Settings for an older one. It printed a fixed "28–35%". */}
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>
+                        <td className="owner-report-target" style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>
                           <Tip text={fcFrozen
                             ? `Your Food Cost target when this report was made: up to ${fcT.warn}% is on target, above ${fcT.critical}% is critical. Saved with the report, so changing Settings later does not re-judge it.`
                             : `Your Food Cost target in Settings today (up to ${fcT.warn}%, critical above ${fcT.critical}%). This report was made before the thresholds were saved with it.`} width={260}>
@@ -927,7 +927,7 @@ function MonthlyOwnerReportBody() {
                           {labourNotJudgedSub && <span style={subStyle}>{labourNotJudgedSub}</span>}
                         </td>
                         <LastMonthCell cell={lm?.rows.labour} show={pct} />
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><span className="owner-report-nowrap">25–30%</span></td>
+                        <td className="owner-report-target" style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><span className="owner-report-nowrap">25–30%</span></td>
                       </tr>
                     )}
                     {snapshot.ims && labourShown && (
@@ -938,7 +938,7 @@ function MonthlyOwnerReportBody() {
                           {snapshot.combined?.primeCostPct != null && labourSub && <span style={subStyle}>{labourSub}</span>}
                         </td>
                         <LastMonthCell cell={lm?.rows.prime} show={pct} />
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><span className="owner-report-nowrap">≤60–65%</span></td>
+                        <td className="owner-report-target" style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><span className="owner-report-nowrap">≤60–65%</span></td>
                       </tr>
                     )}
                     {snapshot.ims && labourShown && (
@@ -961,7 +961,7 @@ function MonthlyOwnerReportBody() {
                           )}
                         </td>
                         <LastMonthCell cell={lm?.rows.netMargin} show={pct} />
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><span className="owner-report-nowrap">≥20%</span></td>
+                        <td className="owner-report-target" style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><span className="owner-report-nowrap">≥20%</span></td>
                       </tr>
                     )}
                   </tbody>
