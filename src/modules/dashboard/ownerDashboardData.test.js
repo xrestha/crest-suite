@@ -54,6 +54,10 @@ describe('operatingFigures — True Net Margin on one clock (OWNER-DASHBOARD-1)'
   test('no revenue or no labour: no margin', () => {
     expect(operatingFigures({ revenue: null, spend: 1, labour: 1, clock: ended }).marginPct).toBeNull()
     expect(operatingFigures({ revenue: 0, spend: 1, labour: 1, clock: ended }).marginPct).toBeNull()
+    // S887: bills credited back in full leave a float residue, not a revenue.
+    expect(operatingFigures({ revenue: 5.2e-13, spend: 12500, labour: 125000, clock: ended }))
+      .toMatchObject({ spendPct: null, labourPct: null, marginPct: null })
+    expect(operatingFigures({ revenue: 0.01, spend: 0, labour: 0, clock: ended }).marginPct).toBeCloseTo(100, 9)
     const r = operatingFigures({ revenue: 1000, spend: 100, labour: null, clock: ended })
     expect(r).toMatchObject({ marginPct: null, labourPct: null, primePct: null })
     expect(r.spendPct).toBeCloseTo(10, 9)

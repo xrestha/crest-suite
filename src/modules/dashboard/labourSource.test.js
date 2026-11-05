@@ -478,3 +478,14 @@ describe('labourFigure', () => {
     expect(labourFigure(null)).toEqual({ hasFigure: false, note: 'not loaded' })
   })
 })
+
+// S887: a month whose bills were all credited back sums to a float residue like 5e-13, not 0.
+describe('groupLabourRatio needs at least one paisa of revenue (S887)', () => {
+  const outlet = (revenue, payroll) => ({ name: 'Bloom', revenue, labour: groupOutletLabour({ labour_payroll: payroll, labour_bucket: 0 }, true) })
+  test('a residue revenue keeps the labour and gives no Labour %', () => {
+    expect(groupLabourRatio([outlet(5.2e-13, 125000)])).toEqual({ pct: null, labour: 125000, missing: [] })
+  })
+  test('one paisa still computes', () => {
+    expect(groupLabourRatio([outlet(0.01, 0.005)]).pct).toBeCloseTo(50, 9)
+  })
+})

@@ -26,6 +26,7 @@
 
 import { npr } from '../../shared/nepalMoney'
 import { estimateLabour, estimatedEmployerSsf } from './labourEstimate'
+import { hasRevenue } from '../../shared/revenueFloor'
 
 // Kept under its old name for the readers that import it from here (the Owner Report until CROSS-2).
 export { estimatedEmployerSsf }
@@ -393,7 +394,7 @@ export function groupLabourRatio(outlets) {
   const missing = list.filter(o => !o.labour?.hasFigure).map(o => o.name)
   const revenue = list.reduce((s, o) => s + (Number(o.revenue) || 0), 0)
   const labour = list.reduce((s, o) => s + (o.labour?.hasFigure ? o.labour.amount : 0), 0)
-  if (list.length === 0 || missing.length > 0 || !(revenue > 0)) return { pct: null, labour: missing.length > 0 ? null : labour, missing }
+  if (list.length === 0 || missing.length > 0 || !hasRevenue(revenue)) return { pct: null, labour: missing.length > 0 ? null : labour, missing }
   return { pct: (labour / revenue) * 100, labour, missing }
 }
 

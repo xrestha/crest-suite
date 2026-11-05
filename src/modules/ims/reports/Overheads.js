@@ -29,6 +29,7 @@ import { groupSavedRows, nearestPeriodWithFigures, overheadInserts } from './ove
 import { SPEND_LABEL, SPEND_SO_FAR_LABEL, SPEND_TIP, SPEND_SO_FAR_TIP } from './foodCostBasis'
 import { COST_BREAKDOWN_COLORS } from '../../../shared/chartColors'
 import Tabs from '../../../components/Tabs'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
 // The month's depreciation memo lives in depreciationMemo.js (S849, PNL-3) so Consolidated P&L reads the
 // same figure without this page's chunk; re-exported under the name the contract gave it.
@@ -532,7 +533,10 @@ export default function Overheads() {
     : labourSource === 'estimate' ? (labour.estimate?.amount ?? null) : null
 
   const totalFixed = totals.overhead + (labourEffective ?? 0) + totals.tax_fees
-  const netProfit = revenue > 0 && labourEffective != null ? revenue - foodCost - totalFixed : null
+  // Under one paisa of revenue is no sales (S887, hasRevenue): a month whose bills were all credited
+  // back sums to a float residue, and every percentage below divides by it.
+  const hasSales = hasRevenue(revenue)
+  const netProfit = hasSales && labourEffective != null ? revenue - foodCost - totalFixed : null
 
   // A bucket with nothing in it has not been measured at 0 — it has not been entered. The
   // distinction has to be carried from here to the cell, because the first `? :` that defaults it
@@ -555,8 +559,6 @@ export default function Overheads() {
   const selectedPeriodObj = periods.find(p => p.id === periodId)
   const daysInSelectedMonth = selectedPeriodObj ? daysInBsMonth(selectedPeriodObj.bs_year, selectedPeriodObj.bs_month) : 30
 
-  const hasSales = revenue > 0
-
   // D7 (S792 COSTS-3): an OPEN month is not judged. Rent, labour and fees are whole-month figures
   // (a new month even starts from last month's, copied as a draft) while revenue is sales so far,
   // so from day 1 every % sat over its target and the page said "✗ Operating at a loss" in red.
@@ -570,7 +572,7 @@ export default function Overheads() {
   // `null` in means `null` out: an absent figure has no ratio, and banding it would band a zero.
   function pct(amount, base) {
     if (amount == null) return null
-    return base > 0 ? (amount / base) * 100 : null
+    return hasRevenue(base) ? (amount / base) * 100 : null
   }
 
   function fmtPct(amount, base) {
@@ -698,14 +700,14 @@ export default function Overheads() {
       .map(l => ({
         ...l,
         pctOfTotal: totalFixed > 0 ? (l.amount / totalFixed) * 100 : 0,
-        pctOfRev:   revenue    > 0 ? (l.amount / revenue)    * 100 : null,
+        pctOfRev:   hasRevenue(revenue) ? (l.amount / revenue) * 100 : null,
       }))
       .sort((a, b) => b.amount - a.amount)
   }, [rows, totalFixed, revenue, hrOn, labourSource, labourBase, labourOtherCounted])
 
   // Break-even
   const avgDishPrice = dishes > 0 ? revenue / dishes : 0
-  const fcPct     = revenue > 0 ? foodCost / revenue : 0.30
+  const fcPct     = hasSales ? foodCost / revenue : 0.30
   const contribMargin   = 1 - fcPct
   const breakEvenRev    = contribMargin > 0 && totalFixed > 0 ? totalFixed / contribMargin : null
   const breakEvenDishes = avgDishPrice > 0 && breakEvenRev ? Math.ceil(breakEvenRev / avgDishPrice) : null
@@ -1244,7 +1246,7 @@ export default function Overheads() {
                       <th style={{ textAlign: 'right' }}>
                         <Tip text="This line item's share of your total fixed costs (overheads + labor + tax combined)." width={220}>% of Total Cost</Tip>
                       </th>
-                      {revenue > 0 && (
+                      {hasSales && (
                         <th style={{ textAlign: 'right' }}>
                           <Tip text="This line item as a percentage of period revenue. Helps see which costs eat into margin most." width={220}>% of Revenue</Tip>
                         </th>
@@ -1268,7 +1270,7 @@ export default function Overheads() {
                           <td style={{ color: 'var(--theme-text2)', maxWidth: 220 }}>{item.description || '—'}</td>
                           <td style={{ textAlign: 'right', fontWeight: 600 }}>{item.amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                           <td style={{ textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>{item.pctOfTotal.toFixed(1)}%</td>
-                          {revenue > 0 && (
+                          {hasSales && (
                             <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>
                               {item.pctOfRev != null ? `${item.pctOfRev.toFixed(1)}%` : '—'}
                             </td>
@@ -1289,7 +1291,7 @@ export default function Overheads() {
                       <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 10, fontSize: 12 }}>TOTAL FIXED COSTS</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 10 }}>{totalFixed.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 10 }}>100%</td>
-                      {revenue > 0 && (
+                      {hasSales && (
                         <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 10 }}>
                           {fmtPct(totalFixed, revenue)}
                         </td>
@@ -1361,7 +1363,7 @@ export default function Overheads() {
             <p style={{ fontSize: 11, color: 'var(--theme-text3)', marginTop: 10, marginBottom: 0, lineHeight: 1.6 }}>
               Formula: Total Fixed Costs ÷ (1 − {periodOpen ? SPEND_SO_FAR_LABEL : SPEND_LABEL}) &nbsp;·&nbsp;
               Avg dish price: {avgDishPrice > 0 ? fmt(avgDishPrice) : '—'} &nbsp;·&nbsp;
-              {periodOpen ? SPEND_SO_FAR_LABEL : SPEND_LABEL}: {revenue > 0 ? `${(fcPct * 100).toFixed(1)}%` : '—'} (net purchases ÷ revenue)
+              {periodOpen ? SPEND_SO_FAR_LABEL : SPEND_LABEL}: {hasSales ? `${(fcPct * 100).toFixed(1)}%` : '—'} (net purchases ÷ revenue)
               {missingLines.length > 0 && <> &nbsp;·&nbsp; excludes {missingLines.join(', ')}, so the real break-even is higher</>}
             </p>
           </div>

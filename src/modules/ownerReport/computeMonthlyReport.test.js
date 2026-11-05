@@ -174,7 +174,7 @@ describe('computeMonthlyReport reads what the two helpers need', () => {
   // non-sub-recipe item — active or hidden (D29) — so the items read carries no is_active filter.
   test('Food Cost % is COGS ÷ revenue, valued by periodCost.js over every non-sub-recipe item', () => {
     expect(flat).toMatch(/valuePeriodItems\(cogsItems, stockMaps\)/)
-    expect(flat).toMatch(/foodCostPct = revenueTotal > 0 \? \(cogsTotal \/ revenueTotal\) \* 100 : null/)
+    expect(flat).toMatch(/foodCostPct = hasRevenue\(revenueTotal\) \? \(cogsTotal \/ revenueTotal\) \* 100 : null/)
     expect(flat).toMatch(/cogsItems = \(allItems \|\| \[\]\)\.filter\(i => !i\.is_sub_recipe\)/)
     const at = flat.indexOf("scopedFrom('items'")
     expect(flat.slice(at, at + 160)).not.toMatch(/is_active', true/)
@@ -603,5 +603,47 @@ test('the schema version moved for S855', () => {
 
 // S862 REPORTS-STOCK-1: Comped Bills' food cost includes the choices (computeMonthlyReport.pos.test.js).
 test('the schema version moved for S862', () => {
-  expect(CURRENT_SCHEMA_VERSION).toBe(20)
+  expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(20)
+})
+
+// S887: a build-your-own comp is costed by its build after Customization lapsed (computeMonthlyReport.pos.test.js).
+test('the schema version moved for S887', () => {
+  expect(CURRENT_SCHEMA_VERSION).toBe(21)
+})
+
+// S887: a month whose bills were all credited back sums to a float residue, not 0. Divided by it,
+// a frozen snapshot would keep a Net Margin of billions of percent for good.
+describe('a month with less than one paisa of revenue freezes no ratio (S887)', () => {
+  const labour = { source: 'payroll', amount: 125000, hasFigure: true }
+  const ims = (revenueTotal) => ({
+    revenueTotal, cogsTotal: 12500, overheadTotal: 40000, taxFeesTotal: 0,
+    foodCostPct: null, foodCostBasis: 'cogs',
+  })
+
+  test('a residue revenue gives no Labor Cost % and no Net Margin %', () => {
+    const c = computeCombinedMetrics({ ims: ims(5.2e-13), labour })
+    expect(c.laborCostPct).toBeNull()
+    expect(c.primeCostPct).toBeNull()
+    expect(c.netMarginPct).toBeNull()
+  })
+
+  test('one paisa still computes', () => {
+    const c = computeCombinedMetrics({ ims: { ...ims(0.01), cogsTotal: 0, overheadTotal: 0 }, labour: { ...labour, amount: 0 } })
+    expect(c.laborCostPct).toBeCloseTo(0, 9)
+    expect(c.netMarginPct).toBeCloseTo(100, 9)
+  })
+
+  test('the IMS Food Cost % is guarded the same way', () => {
+    const flat = fs.readFileSync(path.join(__dirname, 'computeMonthlyReport.js'), 'utf8')
+    expect(flat).toMatch(/const foodCostPct = hasRevenue\(revenueTotal\)/)
+    expect(flat).not.toMatch(/revenueTotal > 0/)
+  })
+
+  test('Trend gives no percentage change against a residue month, and still does against a paisa', () => {
+    const snap = (revenueTotal) => ({ combined: { revenueTotal, foodCostBasis: 'cogs' } })
+    expect(buildDeltas(snap(150000), snap(5.2e-13)).revenueTotal).toEqual({ absoluteChange: 150000 - 5.2e-13, pctChange: null })
+    expect(buildDeltas(snap(150000), snap(0)).revenueTotal.pctChange).toBeNull()
+    expect(buildDeltas(snap(0.02), snap(0.01)).revenueTotal.pctChange).toBeCloseTo(100, 9)
+    expect(buildDeltas(snap(150000), snap(100000)).revenueTotal.pctChange).toBeCloseTo(50, 9)
+  })
 })

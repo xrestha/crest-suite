@@ -24,6 +24,7 @@ import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { buildMonthlySummaryWorkbook, closingUncounted, cogsShareLine, foodCostSentence, foodCostVerdict, openFcText, openMonthLine, uncountedNamed, verdictWithheld } from './monthlySummarySheet'
 import { readPeriodTransfers } from '../transfers/transferFlows'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
 export default function MonthlySummary() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
@@ -204,8 +205,8 @@ export default function MonthlySummary() {
     const totalStaffMeals  = catRows.reduce((s, r) => s + (r.staffMealsVal || 0), 0)
     const totalClosing     = catRows.reduce((s, r) => s + r.closingVal, 0)
     const totalCOGS        = catRows.reduce((s, r) => s + r.cogsVal, 0)
-    const fcPct            = totalRevenue > 0 ? (totalCOGS / totalRevenue) * 100 : null
-    const purchaseFcPct    = totalRevenue > 0 ? (totalNetPurchase / totalRevenue) * 100 : null
+    const fcPct            = hasRevenue(totalRevenue) ? (totalCOGS / totalRevenue) * 100 : null
+    const purchaseFcPct    = hasRevenue(totalRevenue) ? (totalNetPurchase / totalRevenue) * 100 : null
 
     // Uncounted items (S756 D6): active, non-sub-recipe items with opening stock or purchases this
     // period and no closing count (findUncountedItems skips a hidden one — Stock Count does not offer

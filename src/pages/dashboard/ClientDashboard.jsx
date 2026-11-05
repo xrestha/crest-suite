@@ -75,6 +75,7 @@ import { HOME_POS_READS, HOME_KITCHEN_READS, anyReadFailed, keepLastGood, readUn
 import { buildTopVariance, topVarianceRows, isTopVarianceView } from './homeTopVariance'
 import { loadChoiceLinkedItemIds } from '../../modules/ims/variance/variancePopulation'
 import { waitingRequests } from '../../shared/reservationSeen'
+import { hasRevenue } from '../../shared/revenueFloor'
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
 const tierLabel = t => (t ? t[0].toUpperCase() + t.slice(1) : '')
 
@@ -1621,7 +1622,7 @@ export default function ClientDashboard({ scope = 'home' }) {
       const clock = mtdClock(currentPeriod)
       const net = netSpendOf({ purchases: openPurch || [], returns: openRet || [], transfers: openTransfers || [], clock }).counted
       const rev = revenueOf(openSales || [], priceMap, clock).counted
-      const fc  = rev > 0 && !clock.firstDay ? parseFloat(((net / rev) * 100).toFixed(1)) : null
+      const fc  = hasRevenue(rev) && !clock.firstDay ? parseFloat(((net / rev) * 100).toFixed(1)) : null
       if (fc != null) {
         // Purchases/revenue were withheld here (null) so the tooltip would omit them, which left
         // the one point most likely to look alarming as the only one you could not interrogate.
@@ -2117,7 +2118,8 @@ export default function ClientDashboard({ scope = 'home' }) {
     includeManual: !showModuleHeaders && salesMixIncludeManual,
     includePos: !showModuleHeaders && salesMixIncludePos,
   })
-  const salesMixCategories = Object.keys(salesMixBuckets).filter(c => salesMixBuckets[c] > 0).sort((a, b) => salesMixBuckets[b] - salesMixBuckets[a])
+  // A category whose sales were all credited back sums to a float residue, not 0 (S887): no slice.
+  const salesMixCategories = Object.keys(salesMixBuckets).filter(c => hasRevenue(salesMixBuckets[c])).sort((a, b) => salesMixBuckets[b] - salesMixBuckets[a])
   const salesMixTotal = salesMixCategories.reduce((s, c) => s + salesMixBuckets[c], 0)
   // Food/Beverage keep the fixed semantic colors FoodBeverageSplit.jsx always gave them; any other
   // category rotates through CHART_COLORS (the page's own categorical palette) rather than a
@@ -2136,7 +2138,7 @@ export default function ClientDashboard({ scope = 'home' }) {
   })()
   const salesMixSummary = salesMixError
     ? 'The sales mix could not be loaded.'
-    : salesMixTotal <= 0
+    : !hasRevenue(salesMixTotal)
     ? 'No sales data for this period.'
     : `Sales mix this period: ${salesMixCategories.map(c => `${c} NPR ${Math.round(salesMixBuckets[c]).toLocaleString('en-IN')} (${((salesMixBuckets[c] / salesMixTotal) * 100).toFixed(0)}%)`).join(', ')}.`
   // Whether each half of the merged card has anything to offer at all — "available" means
@@ -3356,7 +3358,7 @@ export default function ClientDashboard({ scope = 'home' }) {
                     )}
                   </>
                 )
-                if (salesMixTotal <= 0) return (
+                if (!hasRevenue(salesMixTotal)) return (
                   <>
                     {tabs}
                     {panel(

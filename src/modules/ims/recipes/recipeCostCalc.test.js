@@ -190,3 +190,15 @@ describe('isValidYield — what the sub-recipe form accepts as a yield', () => {
     expect(src).toMatch(/<FieldError id="recipe-f3" message=\{yieldErr\} \/>/)
   })
 })
+
+// S887: a month whose bills were all credited back sums to a float residue like 5e-13, not 0.
+describe('allocateOverhead needs at least one paisa of period revenue (S887)', () => {
+  const NOTHING = { ohPerPortion: 0, revenueSharePct: 0, covers: 0 }
+  const oh = totalRevenue => ({ totalOverheads: 50000, totalRevenue, revenueByRecipe: { momo: 0.005 }, coversByRecipe: { momo: 1 } })
+  test('a residue revenue allocates nothing, where it used to hand one dish billions', () => {
+    expect(allocateOverhead('momo', oh(5.2e-13))).toEqual(NOTHING)
+  })
+  test('one paisa still allocates', () => {
+    expect(allocateOverhead('momo', oh(0.01)).revenueSharePct).toBeCloseTo(0.5, 9)
+  })
+})

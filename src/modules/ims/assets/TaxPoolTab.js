@@ -355,12 +355,21 @@ export default function TaxPoolTab() {
     // The list is about to change, so a preview on screen no longer matches it (COSTS-7): the one
     // shown before this repair was added would lock a cap that leaves it out.
     inputsChanged()
-    const { error } = await scopedInsert('assets_repair_expenses', {
+    // Bounded (S887): a hung insert left the person waiting on a press that never answered.
+    const { error } = await settleWithin(scopedInsert('assets_repair_expenses', {
       pool: newExpense.pool, fiscal_year: fyLabel, expense_date: newExpense.expense_date,
       amount: parseFloat(newExpense.amount), description: newExpense.description.trim() || null,
-    })
+    }), ASSET_CALL_MS, 'Adding the repair expense')
     if (error) {
       const { text, detail } = asActionError(error)
+      // No answer is not a refusal: the row may have landed after the clock ran out, and the table
+      // has no unique key, so a blind second Add would count the repair twice. The form keeps what
+      // was typed, and the list is re-read so the person can see which happened.
+      if (answerLost(error)) {
+        setErr({ text: 'No answer came back from the server, so whether the repair expense was added is not known yet. The list below is re-read: check it before pressing + Add again, because adding it twice counts it twice toward the Section 16 cap.', detail })
+        reloadRepairsFor(fyLabel)
+        return
+      }
       setErr({ text: `The repair expense was not added, so it is not counting toward this year's Section 16 cap. ${text}`, detail })
       return
     }
@@ -371,8 +380,14 @@ export default function TaxPoolTab() {
   async function deleteExpense(id) {
     setErr(null)
     inputsChanged()
-    const { error } = await scopedDelete('assets_repair_expenses').eq('id', id)
-    if (error) { const a = asActionError(error); setErr({ text: 'The repair expense was not deleted — it is still on the list. ' + a.text, detail: a.detail }) }
+    const { error } = await settleWithin(scopedDelete('assets_repair_expenses').eq('id', id), ASSET_CALL_MS, 'Deleting the repair expense')
+    if (error) {
+      const a = asActionError(error)
+      // The delete may have landed after the answer was lost; the re-read below shows which.
+      setErr(answerLost(error)
+        ? { text: 'No answer came back from the server, so whether the repair expense was deleted is not known yet. The list below is re-read, so it shows what is stored now.', detail: a.detail }
+        : { text: 'The repair expense was not deleted — it is still on the list. ' + a.text, detail: a.detail })
+    }
     reloadRepairsFor(fyLabel)
   }
 
@@ -467,7 +482,9 @@ export default function TaxPoolTab() {
   // then carries that into every year after it. A first year opens at 0 legitimately, so only the
   // skipped-year case is asked about; the banner over the table speaks for both. S849 asks three
   // more things first: a year that has not ended (ASSETS-11), assets in no pool (ASSETS-5), and an
-  // earlier year whose posted schedule no longer matches its openings (ASSETS-9).
+  // earlier year whose posted schedule no longer matches its openings (ASSETS-9). S887: every post
+  // then ends with ONE summary confirm (checkAndPost), so a post with nothing to warn about no
+  // longer locks the schedule at a single press.
   async function post() {
     if (!lines || !built) return
     // S858: Post stays pressable for a login without the rank (aria-disabled, the S857 Depreciation
@@ -484,6 +501,7 @@ export default function TaxPoolTab() {
     // payload is fixed here: what the confirms describe is what is sent.
     const version = inputsVersion.current
     const label = fyLabel
+    const start = fyStart
     const payload = postedLinePayload(lines)
     const listed = repost.list.find(x => x.fiscalYear === label)
     const postNotes = listed ? `Posted again: ${repostReason(listed, repost.names)}` : null
@@ -555,13 +573,16 @@ export default function TaxPoolTab() {
         confirmLabel: 'Post anyway',
       })
     }
-    askInTurn(questions, () => checkAndPost(version, label, payload, postNotes))
+    askInTurn(questions, () => checkAndPost(version, start, label, payload, postNotes))
   }
 
   // A fiscal year can be posted twice — there is deliberately no unique constraint, since a
   // correction is a new run — and the next year's opening WDV then reads whichever posted last.
   // Look first, and make a second schedule for the same year a decision naming the first (S756).
-  async function checkAndPost(version, label, payload, postNotes) {
+  // S887: whatever was asked before, every post ends here in ONE summary dialog naming the year,
+  // each pool and the total being locked; a second schedule is folded into it rather than asked as
+  // another question (the S857 Depreciation shape). Cancel closes it and nothing is sent.
+  async function checkAndPost(version, start, label, payload, postNotes) {
     setPosting(true)
     const { data: existing, error: existingErr } = await settleWithin(scopedFrom('assets_tax_pool_runs', 'id, posted_at, created_at')
       .eq('fiscal_year', label).eq('status', 'posted').order('created_at').order('id'), ASSET_CALL_MS, 'Checking for a posted schedule')
@@ -572,17 +593,44 @@ export default function TaxPoolTab() {
       setErr({ text: `Could not check whether FY ${label} already has a posted schedule, so nothing was posted. Try again. ` + a.text, detail: a.detail })
       return
     }
-    if (!existing || existing.length === 0) { await submitPost(version, label, payload, postNotes); return }
+    const earlier = existing || []
+    const again = earlier.length > 0
+    const total = payload.reduce((s, l) => s + n(l.depreciation_amount), 0)
+    const closing = payload.reduce((s, l) => s + n(l.closing_wdv), 0)
+    const nextLabel = getBsFiscalYear(start + 1, 4)
     askConfirm({
-      title: `FY ${label} already has a posted schedule`,
-      danger: true,
+      title: again ? `FY ${label} already has a posted schedule` : `Post the tax pool schedule for FY ${label}?`,
+      danger: again,
       body: (
-        <p style={{ margin: 0 }}>
-          A tax pool schedule for FY {label} was posted on {existing.map(r => nepalBsLong(r.posted_at || r.created_at) || 'an unknown date').join(', ')}.
-          {' '}Posting again adds a second locked schedule for the same year beside it; next year's opening values will be taken from this new one. Neither can be edited afterwards.
-        </p>
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            This posts the tax pool schedule for <strong>FY {label}</strong> (1 Shrawan {start} to {daysInBsMonth(start + 1, 3)} Ashadh {start + 1}),
+            with the tax depreciation of these {payload.length} pools:
+          </p>
+          <ul style={{ margin: '0 0 8px', paddingLeft: 18 }}>
+            {payload.map(l => (
+              <li key={l.pool}>
+                {POOL_LABELS[l.pool] || `Pool ${l.pool}`}: NPR {fmt(l.depreciation_amount)}
+                {n(l.terminal_deduction) > 0.005 ? `, and NPR ${fmt(l.terminal_deduction)} written off as the pool closes` : ''}
+              </li>
+            ))}
+          </ul>
+          <p style={{ margin: '0 0 8px' }}>
+            Total tax depreciation: <strong>NPR {fmt(total)}</strong>. The pools close at NPR {fmt(closing)} in all, the value FY {nextLabel} opens from.
+          </p>
+          {again && (
+            <p style={{ margin: '0 0 8px' }}>
+              A schedule for FY {label} was already posted on {earlier.map(r => nepalBsLong(r.posted_at || r.created_at) || 'an unknown date').join(', ')}.
+              {' '}Posting again adds a second locked schedule beside it, and FY {nextLabel} opens from the new one.
+            </p>
+          )}
+          <p style={{ margin: 0 }}>
+            Once posted, the schedule is locked and cannot be edited afterwards. To correct it, fix the register or the repairs and post a second schedule for the same year.
+          </p>
+        </>
       ),
-      confirmLabel: 'Post a second schedule',
+      confirmLabel: again ? 'Post a second schedule' : 'Post schedule',
+      busyLabel: 'Posting…',
       run: () => submitPost(version, label, payload, postNotes),
     })
   }

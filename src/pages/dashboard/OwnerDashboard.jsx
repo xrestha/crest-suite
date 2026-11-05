@@ -37,6 +37,7 @@ import {
 } from '../../modules/dashboard/ownerDashboardData'
 import { startFirstWave, startMonthBatch } from '../../modules/dashboard/ownerDashboardLoad'
 import { loadDeliveryCommission, bsMonthWindow } from '../../shared/deliveryCommission'
+import { hasRevenue } from '../../shared/revenueFloor'
 
 // Cost & Margin trend series. Fixed hex, for the reason DESIGN.md states by name: the semantic
 // token set is five ROLES, not five distinguishable hues (accent and purple are the same value on
@@ -496,7 +497,9 @@ export default function OwnerDashboard() {
     let line
     if (figs?.firstDay) {
       line = `${monthName} has just started. Its first figures come after today, the first full day.`
-    } else if (!(ims?.revenue.counted > 0)) {
+    } else if (!hasRevenue(ims?.revenue.counted)) {
+      // Bills all credited back sum to a float residue, not 0, and the margin is withheld for it
+      // (S887): this branch, not the one below, which points at a message that is not there.
       line = `No sales are recorded for the finished days of ${monthName} yet.`
     } else if (!canOverheads || figs?.marginPct == null) {
       line = <>{monthName} so far: <span className="owner-verdict__figure">{npr(ims.revenue.all)}</span> sold.</>

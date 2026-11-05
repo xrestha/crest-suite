@@ -23,8 +23,16 @@ profit figure is **Net Margin** on every owner page; the upgrade screen shows th
 - ✅ S858 Owner Report, P&L and Group Console keep the month in the address and step it with ‹ ›; every Fixed
   Assets date is BS; the Tax pool Post and the disposal Confirm explain themselves; Demand Forecast lost its
   ~180 Tab stops.
-- **Open:** a browser pass on a phone (the Group Console cards, the four-column Financial Summary at 375px) and
-  a re-run of `/impeccable critique` to score the fixes. ✅ S877: ~~Print and Export that wait for the business
+- ✅ S887: ~~a browser pass on a phone (the Group Console cards, the four-column Financial Summary at 375px) and
+  a re-run of `/impeccable critique` to score the fixes~~. Both pages fit 375px with no sideways scroll; the money
+  wrap and four-decimal prices it found were fixed in crest-v497. Re-scored 28/40 (was 25), snapshot
+  `.impeccable/critique/2026-11-05T03-40-57Z__crest-suite-pro.md`; its two new P1s (a zero-sales guard on one page
+  only, a Tax pool post with no confirm) were fixed in S887. **Open from it (P2, not fixed):** the Group Console bands
+  an outlet closed with no count (`costBandWithheld` ignores `has_closing`), gives the group total a ✓ over two △
+  outlets, and counts an outlet with no month as shown; about 720px of chrome before the first outlet on a phone
+  (`stat-grid--pair`, one `MonthStepper`); name drift (Labour beside Labor Cost %, three tips still say Consolidated
+  P&L, Home says Est. Net Margin %, "Made when Ashwin was ended"); 60-word 11px paragraphs in Outlet Access; a bare
+  "Loading…" in 13 places. ✅ S877: ~~Print and Export that wait for the business
   name still use `disabled`~~ (`LetterheadButton`, 32 pages: aria-disabled and a press that says why); ~~a
   keyboard user gets one explanation per forecast day, not each dish average~~ (Demand Forecast's Show averages).
 

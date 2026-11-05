@@ -620,3 +620,15 @@ describe('a sugar or sodium figure the server sends empty (S886)', () => {
     expect(screen.getByText(/^Energy 310 kcal/).textContent).toMatch(/· Sugar 0\.0 g · Sodium 180 mg$/)
   })
 })
+
+// S887: an ingredient with no figures makes get_guest_menu send has_nutrition false, with the dish
+// figures still in the row. The guest sees no nutrition line at all.
+describe('a dish whose ingredients do not all have figures (S887)', () => {
+  const FIGURES = { nutrition_enabled: true, energy_kcal: 310, protein_g: 18, carbs_g: 30, fat_g: 12, sugar_g: 2, sodium_mg: 180 }
+  it('prints no nutrition line when the server says has_nutrition is false', async () => {
+    mockAnswers.get_guest_menu = { data: [{ ...ROWS[0], ...FIGURES, has_nutrition: false }], error: null }
+    renderMenu()
+    await screen.findByText('Veg Momo')
+    expect(screen.queryByText(/Energy 310 kcal/)).not.toBeInTheDocument()
+  })
+})

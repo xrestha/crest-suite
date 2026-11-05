@@ -205,11 +205,21 @@ function addInto(target, values) {
   NUTRIENTS.forEach(def => { target[def.key] += values[def.key] || 0 })
 }
 
+// S887 (owner decision): a sub-recipe line of the data count has data only when the sub-recipe
+// reaches an ingredient with figures and is missing none, so the count agrees with the guest menu,
+// which shows no figures for a dish until every ingredient it reaches has them (_nutrition_rollup's
+// figures_missing, read by get_guest_menu).
+function subRecipeHasData(sr) {
+  return sr.covered && !sr.figuresMissing
+}
+
 // Per-yield-unit nutrition of a sub-recipe (recursive). Mirrors calcSubRecipeCostPerUnit.
 // `check` (optional) collects the allergen check across the whole walk.
-// → { values:{...per yield unit}, allergens:Set, covered:boolean }
+// → { values:{...per yield unit}, allergens:Set, covered:boolean, figuresMissing:boolean }
+// `covered`: some ingredient reached has figures. `figuresMissing` (S887): a food ingredient
+// reached has none (or is counted in pieces with no weight), or a sub-recipe inside reaches none.
 export function calcSubRecipeNutritionPerUnit(sub, allRecipes, seen = new Set(), check = null) {
-  const empty = { values: ZERO(), allergens: new Set(), covered: false }
+  const empty = { values: ZERO(), allergens: new Set(), covered: false, figuresMissing: true }
   if (!sub || seen.has(sub.id)) {
     if (check) check.broken = true
     return empty
@@ -219,10 +229,12 @@ export function calcSubRecipeNutritionPerUnit(sub, allRecipes, seen = new Set(),
   const total = ZERO()
   const allergens = new Set()
   let covered = false
+  let figuresMissing = false
   ;(sub.recipe_ingredients || []).forEach(ri => {
     if (ri.item_id && ri.items) {
       const r = itemNutrition(ri.items, ri.qty_per_portion)
       if (r.has) covered = true
+      else if (!isNotFood(ri.items.nutrition)) figuresMissing = true
       noteItem(check, ri.item_id, ri.items, r.blank)
       addInto(total, r.values)
       r.allergens.forEach(a => allergens.add(a))
@@ -231,6 +243,7 @@ export function calcSubRecipeNutritionPerUnit(sub, allRecipes, seen = new Set(),
       if (nested) {
         const sr = calcSubRecipeNutritionPerUnit(nested, allRecipes, new Set(seen), check)
         if (sr.covered) covered = true
+        if (!subRecipeHasData(sr)) figuresMissing = true
         const q = parseFloat(ri.qty_per_portion) || 0
         NUTRIENTS.forEach(def => { total[def.key] += (sr.values[def.key] || 0) * q })
         sr.allergens.forEach(a => allergens.add(a))
@@ -242,7 +255,7 @@ export function calcSubRecipeNutritionPerUnit(sub, allRecipes, seen = new Set(),
 
   const yieldQty = parseFloat(sub.yield_qty) || 1
   const values = NUTRIENTS.reduce((o, def) => { o[def.key] = total[def.key] / yieldQty; return o }, {})
-  return { values, allergens, covered }
+  return { values, allergens, covered, figuresMissing }
 }
 
 // Full per-portion nutrition of a recipe.
@@ -270,7 +283,7 @@ export function calcRecipeNutrition(recipe, allRecipes) {
       if (sub) {
         total += 1
         const sr = calcSubRecipeNutritionPerUnit(sub, allRecipes, new Set([recipe?.id].filter(Boolean)), check)
-        if (sr.covered) have += 1
+        if (subRecipeHasData(sr)) have += 1
         const q = parseFloat(ri.qty_per_portion) || 0
         NUTRIENTS.forEach(def => { perPortion[def.key] += (sr.values[def.key] || 0) * q })
         sr.allergens.forEach(a => allergens.add(a))
@@ -308,7 +321,7 @@ export function calcLiveNutrition(ingList, itemsList, allRecipes) {
       if (!sub) { check.broken = true; return }
       total += 1
       const sr = calcSubRecipeNutritionPerUnit(sub, allRecipes, new Set(), check)
-      if (sr.covered) have += 1
+      if (subRecipeHasData(sr)) have += 1
       const q = parseFloat(ing.qty_per_portion) || 0
       NUTRIENTS.forEach(def => { perPortion[def.key] += (sr.values[def.key] || 0) * q })
       sr.allergens.forEach(a => allergens.add(a))

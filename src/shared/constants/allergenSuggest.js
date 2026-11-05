@@ -10,7 +10,9 @@
 //  - checkLabel: a mixed or branded product (a sauce, a spice mix, a sausage) whose allergens only
 //    its label knows. Never confirmed in bulk.
 //  - notFood: packaging (a cup, a lid). Suggested only when no allergen word matched, so "MILK
-//    CARTON" stays milk.
+//    CARTON" stays milk, and only when no label word comes AFTER the last packaging word (S887):
+//    in English the thing a name is comes last, so "DIP CUP" is a cup, while "KOREAN RICE BOWL
+//    GRAVY" and "BOWL SAUCE" are a gravy and a sauce, and ask for the label.
 //  - nothing matched: shown as "no allergen words found", which a person may confirm as none.
 //
 // A near miss (S877, owner decision): "ICE CREAN" matched nothing, so it read as "no allergen
@@ -103,6 +105,8 @@ const CHECK_LABEL = new Set([
   'nuggets', 'patty', 'patties', 'dressing', 'chocolate', 'premix', 'paste', 'stock', 'cube', 'cubes', 'gravy',
   'cereal', 'ham', 'bacon', 'chips', 'biscoff', 'nutella', 'marinade', 'dip', 'pickle', 'achar',
   'topping', 'filling', 'batter', 'crumb', 'coating',
+  // Food heads that follow a packaging word in real names ("RICE BOWL GRAVY", "BOWL MARINATION"), S887.
+  'marination', 'marinades', 'garnish', 'toppings', 'fillings', 'sauces', 'dressings',
 ])
 const CHECK_LABEL_PHRASES = ['baking powder', 'custard powder', 'cheese powder']
 
@@ -196,9 +200,23 @@ export function suggestAllergens(name) {
     const like = used[i] ? null : nearMissOf(w)
     if (like && !nearMiss.some(n => n.word === w)) nearMiss.push({ word: w, like })
   })
-  // A packaging word outranks a label word ("dip cup" is a cup), never an allergen word ("milk
-  // carton") or a near miss of one ("ice crean cup" might be ice cream).
+  // Where a phrase ends in the name, each time it occurs.
+  const endsOf = phrase => {
+    const p = phrase.split(' ')
+    const out = []
+    for (let i = 0; i + p.length <= t.length; i++) if (p.every((w, j) => t[i + j] === w)) out.push(i + p.length - 1)
+    return out
+  }
+  const labelAt = [
+    ...CHECK_LABEL_PHRASES.flatMap(endsOf),
+    ...t.map((w, i) => (!used[i] && CHECK_LABEL.has(w) ? i : -1)).filter(i => i >= 0),
+  ]
+  const lastPackAt = Math.max(-1, ...NOT_FOOD_PHRASES.flatMap(endsOf), ...t.map((w, i) => (NOT_FOOD.has(w) ? i : -1)))
+  // A packaging word outranks a label word only when it comes LAST of the two (S887): the head of an
+  // English name is its last word, so "dip cup" is a cup and "rice bowl gravy" is a gravy. It never
+  // outranks an allergen word ("milk carton") or a near miss of one ("ice crean cup" might be ice cream).
   const packWord = keys.length === 0 && nearMiss.length === 0 && !FOOD_DESPITE.some(has)
+    && lastPackAt >= 0 && !labelAt.some(i => i > lastPackAt)
     ? NOT_FOOD_PHRASES.find(has) || t.find(w => NOT_FOOD.has(w)) || null
     : null
   const checkLabel = packWord ? [] : [

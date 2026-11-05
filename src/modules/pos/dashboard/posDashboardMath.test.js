@@ -288,3 +288,20 @@ describe('hourlyPeaks', () => {
     expect(hourlyPeaks(undefined)).toEqual({ today: null, lastWeek: null })
   })
 })
+
+// S887: a month whose bills were all credited back sums to a float residue like 5e-13, not 0.
+describe('paymentMix shares need at least one paisa of sales (S887)', () => {
+  test('bills credited back to a float residue give no shares', () => {
+    const old = bill({ id: 'old', paid_amount: 360.7, payment_method: 'Cash' })
+    const orders = [bill({ id: 'a', paid_amount: 120.4, payment_method: 'Cash' }), bill({ id: 'b', paid_amount: 240.3, payment_method: 'Cash' })]
+    const mix = paymentMix(orders, new Map(), returnsOf([note(old)]))
+    const cash = mix.find(r => r.method === 'Cash')
+    expect(cash.amount).not.toBe(0)          // the residue itself, which used to be 100% of sales
+    expect(Math.abs(cash.amount)).toBeLessThan(0.01)
+    expect(cash.share).toBe(0)
+  })
+  test('one paisa still has a share', () => {
+    const mix = paymentMix([bill({ id: 'p', paid_amount: 0.01, payment_method: 'Cash' })], new Map())
+    expect(mix.find(r => r.method === 'Cash').share).toBeCloseTo(1, 9)
+  })
+})

@@ -18,6 +18,7 @@
 //     not built: a Bulk month is one bs_day 0 row, so last month's "same days" would be all of it.
 import { periodCostRatio, groupCostRatio, fcBasisOf } from '../../modules/ims/reports/foodCostBasis'
 import { compareFigures } from '../../shared/compareFigures'
+import { hasRevenue } from '../../shared/revenueFloor'
 
 // The dashboards' own settle threshold (ClientDashboard, OwnerDashboard), deliberately the same.
 export const SETTLE_DAY = 10
@@ -84,7 +85,7 @@ export function costBandWithheld(ratio, clock) {
 export function rowLabourPct(r, clock) {
   if (!inScope(r) || !r.labour?.hasFigure || clock?.firstDay) return null
   const rev = ratioPair(r, clock).revenue
-  return rev > 0 ? (r.labour.amount / rev) * 100 : null
+  return hasRevenue(rev) ? (r.labour.amount / rev) * 100 : null
 }
 
 // A lump paid in the running month is not spread over it, so it sits over part of a month's sales.

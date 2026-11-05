@@ -25,6 +25,7 @@ import { isOverdue } from '../ims/vendors/payTerms'
 import { transferTotals } from '../ims/transfers/transferFlows'
 import { foodCostBasisOf, netMarginTaxFeesOf, labourBasisOf } from '../ownerReport/computeMonthlyReport'
 import { inCountedDays, prorate } from './mtdClock'
+import { hasRevenue } from '../../shared/revenueFloor'
 
 // ── Sections and tiles ───────────────────────────────────────────────────────────────────────────
 
@@ -122,8 +123,9 @@ export function operatingFigures({ revenue, spend, labour, overhead = 0, taxFees
   const fixedMissing = fixedWhole === 0
   const none = { spendPct: null, labourPct: null, primePct: null, marginPct: null, fixedCostsPct: null, fixedCounted, fixedMissing }
   if (clock?.firstDay) return { ...none, firstDay: true }
-  const revOk = revenue != null && revenue > 0
-  if (!revOk) return { ...none, firstDay: false }
+  // At least one paisa (S887, hasRevenue): a month whose bills were all credited back sums to a
+  // float residue like 5e-13, and dividing by it printed a margin of -240397222296944640000% on BLOOM CAFE.
+  if (!hasRevenue(revenue)) return { ...none, firstDay: false }
   const spendPct = spend != null ? (spend / revenue) * 100 : null
   const labourPct = labour != null ? (labour / revenue) * 100 : null
   const primePct = spendPct != null && labourPct != null ? spendPct + labourPct : null

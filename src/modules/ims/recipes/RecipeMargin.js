@@ -22,6 +22,7 @@ import { extrasCostByRecipe, loadExtrasCosting } from './extrasCost'
 import { BYO_REASON, BYO_TIP, isCostedByBuild } from './buildYourOwnRating'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
 export default function RecipeMargin() {
   const { clientId, profile, hasImsAccess, customizationEnabled } = useAuth()
@@ -226,7 +227,7 @@ export default function RecipeMargin() {
       contrib: costed.reduce((s, r) => s + r.totalContribution, 0),
       revenue, cost,
       extras: costed.reduce((s, r) => s + r.extrasCost, 0),
-      fcPct: revenue > 0 ? (cost / revenue) * 100 : null,
+      fcPct: hasRevenue(revenue) ? (cost / revenue) * 100 : null,
       costedCount: costed.length,
       byoCount,
       uncostedCount: list.length - costed.length - byoCount,

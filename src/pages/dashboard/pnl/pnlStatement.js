@@ -11,8 +11,11 @@ import { computeUsed, COGS_FORMULA } from '../../../shared/imsFormulas'
 import { npr } from '../../../shared/nepalMoney'
 import { gapHeadline, isMaterialGap, mergeGaps } from '../../../shared/uncountedItems'
 import { outletLabourNotes } from '../../../modules/dashboard/labourSource'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
-export const pctOf = (part, whole) => (whole > 0 && part != null ? `${((part / whole) * 100).toFixed(1)}%` : '—')
+// A line as a share of revenue. A month with less than one paisa of revenue (bills all credited back
+// leave a float residue, S887) has no shares: every percentage is a dash.
+export const pctOf = (part, whole) => (hasRevenue(whole) && part != null ? `${((part / whole) * 100).toFixed(1)}%` : '—')
 
 // One definition of the statement's lines, shared by the single-outlet table, the group matrix and the
 // Excel export (dashboards.md: never a second label or tip list).

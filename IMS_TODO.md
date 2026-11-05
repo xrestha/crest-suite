@@ -10,21 +10,39 @@ them sits the S793 load-time backlog (PERF-n), from measuring the module on a sl
 - ✅ S877 (owner: hide the choice, not the dish; `guestAllergenChoices.js`) — ~~A choice's allergens ("+ cheese") do not feed the guest menu's dish filter~~.
 - ✅ S877 (`20261104150000`, owner: the branch keeps its own) — ~~`push_master_data` copies HQ's `items.nutrition` whole, so HQ's checked state overwrites a branch's own check~~.
 - ✅ S877 (owner: a near miss is Check the label, nothing ticked) — ~~The Check allergens guess reads words exactly, so a misspelling goes unguessed~~: a 5+ letter word one edit from an allergen word is a near miss, never a key; `REAL_WORDS` (bitter, floor…) are exempt.
-- Owner follow-up, not code: check BLOOM CAFE's and CASA's ingredients in Check allergens, enter piece weights on
-  the 11 piece-counted items, and tick Mustard on mustard oil ingredients filled before S870.
+- ✅ S887 (owner approved a reviewed list, saved live as Crest support) — ~~Owner follow-up, not code: check BLOOM CAFE's and CASA's ingredients in Check allergens, enter piece weights on
+  the 11 piece-counted items, and tick Mustard on mustard oil ingredients filled before S870.~~ BLOOM 34 of 35 and CASA 110 of
+  117 unchecked ingredients checked, 10 wrongly checked CASA items fixed (Soy Milk was milk, Paratha and Roti
+  Roll had no gluten, Prawns were molluscs too), 12 piece weights entered, Mustard on CASA's Mustard Oil (BLOOM has
+  none). Still unchecked on purpose, until someone reads the pack: BLOOM's Curry Spice Mix; CASA's Buldak Sauce Black
+  and Pink, Chicken Ham Slice, Peri Peri Mix, Salami Chicken, Icehot Bev (Richs) and Tomato Pest.
+- Owner follow-up, not code: CASA's checked Breakfast Sausage, Ham Pork Slice, BBQ Sauce, Chocolate Syrup, Chicken
+  Masala and Butterfly Pea Powder were left as ticked before S870, though such products often carry allergens; read
+  their packs when convenient.
 
 **S884 (2026-11-04) nutrition library, left open on purpose** (rules: `.claude/rules/nutrition-allergens.md`, data: `scripts/food-tables/README.md`):
 - ✅ S886 (owner: hide it for guests; `20261105110000`) — ~~A blank sugar or sodium counts as 0 in a recipe's totals,
   in both copies of the walk~~: the guest menu leaves a blank figure off the dish, staff see the known part as "at
   least" with the ingredients named, and a typed 0 is a figure.
-- An ingredient with NO nutrition figures at all still adds 0 to all six on the guest menu, which prints the dish's
-  figures too low with nothing telling the guest (staff see "Data: 3/5 ingredients"). Needs an owner decision, as
-  S886 had for sugar and sodium.
-- The short USDA list in `nutritionSeed.js` is hand-typed and every row is labelled USDA, but some name foods
+- ✅ S887 (owner: hide the figures; `20261105130000`) — ~~An ingredient with NO nutrition figures at all still adds 0
+  to all six on the guest menu, which prints the dish's figures too low with nothing telling the guest (staff see
+  "Data: 3/5 ingredients"). Needs an owner decision, as S886 had for sugar and sodium.~~ The guest menu shows no
+  nutrition line until every ingredient the dish reaches has figures; staff still see the partial figures, and a
+  sub-recipe now counts as having data only when every ingredient in it does.
+- ✅ S887 (owner: use the Nepal or Indian table, else remove) — ~~The short USDA list in `nutritionSeed.js` is hand-typed and every row is labelled USDA, but some name foods
   FoodData Central may not carry (khuwa, beaten rice): the provenance gap the regional rows had. Check each against
-  FoodData Central, then relabel or replace.
-- Owner follow-up, not code: on a real client, open an ingredient's Nutrition form (search "kukhura", press DFTQC
-  Nepal) and Recipes' Auto-fill (untick one line) once; neither was clicked through live in S884.
+  FoodData Central, then relabel or replace.~~ All 92 rows checked against the FDC bulk files: 75 matched; 9 took
+  the figures of the FDC food their name describes (raw meats were cooked figures), noodles split into plain and
+  instant and cheddar got its own row; beaten rice, paneer, khuwa, jaggery and freshwater fish now fill from the
+  Nepal or Indian table (`REGIONAL_KITCHEN_NAMES` carries the names jaggery and fish needed); garam masala and dry
+  tea removed; acai kept on an FDC Branded Foods pulp (2161316). Still open: semolina, black gram, chia and
+  coriander type a sugar of 0 where FDC has no figure (S886 says blank, but blank drops sugar from every dal dish on
+  the guest menu, so it needs an owner word).
+- ✅ S887 (pressed live on BLOOM CAFE) — ~~Owner follow-up, not code: on a real client, open an ingredient's Nutrition form (search "kukhura", press DFTQC
+  Nepal) and Recipes' Auto-fill (untick one line) once; neither was clicked through live in S884.~~ "kukhura" in DFTQC
+  Nepal lists chicken dishes only (the 2012 table has no plain chicken meat; IFCT carries the cuts) and a pick fills the
+  form with its source; Auto-fill on Chicken Chowmein filled 4 ingredients with Chowmein Noodles and Capsicum unticked,
+  left for the corrected USDA figures once crest-v497 is live.
 
 **S855 (2026-10-21): every S853 "Build next" item below shipped in one release (crest-v470)**: PERF-2, PERF-3 and
 PERF-4, the stock-count device screen, Budget vs Actual's open-month line, unsaved dish photos, and the Owner Report

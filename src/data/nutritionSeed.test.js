@@ -1,6 +1,7 @@
 import TABLES from './foodTables.json'
 import {
-  NUTRITION_SEED, LIBRARY_SOURCES, loadLibrary, suggestSeeds, searchLibrary, basisUnitFor, seedFigures, seedSourceText,
+  NUTRITION_SEED, LIBRARY_SOURCES, REGIONAL_KITCHEN_NAMES, loadLibrary, suggestSeeds, searchLibrary, basisUnitFor,
+  seedFigures, seedSourceText,
 } from './nutritionSeed'
 import { normaliseAllergens } from '../shared/constants/allergens'
 
@@ -62,6 +63,36 @@ describe('the regional tables (foodTables.json, built by scripts/food-tables)', 
   })
 })
 
+// S887: every hand-typed USDA row was checked against FoodData Central. A food FDC does not have
+// was replaced by the same food in the Nepal or Indian table, or removed where neither has it
+// (owner decision 2026-11-05).
+describe('the USDA list after the S887 check', () => {
+  const REPLACED = ['Beaten rice (chiura)', 'Paneer / cheese (soft)', 'Khuwa / mawa', 'Jaggery (gud/sakhar)',
+    'Fish (freshwater, raw)']
+  const REMOVED = ['Garam masala / mixed spice', 'Tea leaves (dry)']
+  const usda = NUTRITION_SEED.filter(r => r.source === 'USDA')
+
+  test('no USDA row is a food that went to a regional table or was removed', () => {
+    const names = new Set(usda.map(r => r.name))
+    ;[...REPLACED, ...REMOVED].forEach(n => expect(names.has(n)).toBe(false))
+    // Nor under another name: their kitchen words are on no USDA row.
+    const words = new Set(usda.flatMap(r => r.match))
+    ;['chiura', 'poha', 'beaten rice', 'paneer', 'chenna', 'khuwa', 'mawa', 'khoa', 'jaggery', 'gud', 'sakhar',
+      'chaku', 'fish', 'machha', 'rohu', 'garam', 'masala', 'mixed spice', 'tea', 'chiya', 'chai patti']
+      .forEach(w => expect(words.has(w)).toBe(false))
+  })
+
+  test('every USDA figure is a number or left out, never text', () => {
+    usda.forEach(r => ['energy_kcal', 'protein_g', 'carbs_g', 'fat_g', 'sugar_g', 'sodium_mg'].forEach(k => {
+      if (r[k] != null) expect(Number.isFinite(r[k]) && r[k] >= 0).toBe(true)
+    }))
+  })
+
+  test('a kitchen name points at a table row that exists, and adds no row', () => {
+    Object.keys(REGIONAL_KITCHEN_NAMES).forEach(id => expect(TABLES.some(r => r.id === id)).toBe(true))
+  })
+})
+
 describe('matching', () => {
   let lib
   beforeAll(async () => { lib = await loadLibrary() })
@@ -82,8 +113,48 @@ describe('matching', () => {
   })
 
   // A food sharing only a word with the item is offered in the picker, never filled on a guess.
-  test.each(['OAT MILK', 'MOMO WRAPPER', 'PRICE TAG', 'TISSUE PAPER', 'GAS CYLINDER'])('%s is never filled', item => {
+  test.each(['OAT MILK', 'MOMO WRAPPER', 'PRICE TAG', 'TISSUE PAPER', 'GAS CYLINDER', 'FISH SAUCE'])('%s is never filled', item => {
     expect(top(lib, item)).toBeUndefined()
+  })
+
+  test('each food is one row: a table food appears once, kitchen names or not', () => {
+    const ids = lib.rows.filter(r => r.id).map(r => r.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(ids).toHaveLength(TABLES.length)
+  })
+
+  // S887: a food FDC does not have fills from the same food in a regional table, labelled with it.
+  test.each([
+    ['CHIURA', 'NP-A26'], ['BEATEN RICE', 'NP-A26'], ['POHA', 'NP-A26'], ['PANEER', 'NP-M7'],
+    ['KHUWA', 'IN-L004'], ['MAWA', 'IN-L004'], ['JAGGERY', 'NP-O17'], ['GUD', 'NP-O17'], ['SAKHAR', 'NP-O17'],
+    ['FISH', 'IN-S006'], ['MACHHA', 'IN-S006'], ['ROHU', 'NP-L10'],
+  ])('%s fills from the table row %s', (item, id) => {
+    const row = top(lib, item)
+    expect(row?.id).toBe(id)
+    expect(seedSourceText(row)).toMatch(/^(DFTQC Nepal|IFCT 2017): /)
+  })
+
+  test('a kitchen name wins only a tie: white jaggery and chaku keep their own rows', () => {
+    expect(top(lib, 'WHITE JAGGERY')?.id).toBe('NP-O13')
+    expect(top(lib, 'CHAKU')?.id).toBe('NP-O14')
+    expect(top(lib, 'TUNA FISH')?.name).toBe('Tuna')
+  })
+
+  test('neither FDC nor the regional tables have garam masala or dry tea, so nothing fills them', () => {
+    expect(top(lib, 'GARAM MASALA')).toBeUndefined()
+    expect(top(lib, 'TEA')).toBeUndefined()
+    expect(top(lib, 'CHIYA')).toBeUndefined()
+  })
+
+  test('plain and instant noodles are two rows, and plain noodles carry no egg', () => {
+    expect(top(lib, 'CHOWMEIN NOODLES')).toMatchObject({ name: 'Noodles (dry)', source: 'USDA', allergens: 'gluten' })
+    expect(top(lib, 'INSTANT NOODLES')).toMatchObject({ name: 'Instant noodles (dry)', source: 'USDA' })
+    expect(top(lib, 'WAI WAI')?.name).toBe('Wai Wai')
+  })
+
+  test('cheddar is cheddar, never processed cheese', () => {
+    expect(top(lib, 'CHEDDAR')?.name).toBe('Cheese (cheddar)')
+    expect(top(lib, 'PROCESSED CHEESE')?.name).toBe('Cheese (processed)')
   })
 
   test('a typed search finds kitchen names and word starts within one source', () => {

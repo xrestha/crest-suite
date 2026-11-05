@@ -4,6 +4,7 @@
 // footer keeps behaving identically after the extraction.
 import { hourlyRateOf, calcAmount } from '../payroll/payrollCompute'
 import { shiftKind, SSF_CAP, SSF_EMPLOYER_PCT, STANDARD_HOURS_PER_DAY, OT_MULTIPLIER } from '../payrollConstants'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
 export function calcHours(start, end) {
   if (!start || !end) return null
@@ -288,6 +289,6 @@ export function summarizeLaborForecastRows(rows) {
   }
   out.hours = parseFloat(out.hours.toFixed(1))
   out.requiredHours = parseFloat(out.requiredHours.toFixed(1))
-  out.costPct = out.revenueOnMeasuredDays > 0 ? (out.costOnMeasuredDays / out.revenueOnMeasuredDays) * 100 : null
+  out.costPct = hasRevenue(out.revenueOnMeasuredDays) ? (out.costOnMeasuredDays / out.revenueOnMeasuredDays) * 100 : null
   return out
 }

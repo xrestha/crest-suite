@@ -18,19 +18,30 @@ import { NUTRIENTS, defaultBasisUnit } from '../utils/nutrition'
 //             energy_kcal, protein_g, carbs_g, fat_g, sugar_g, sodium_mg, allergens }
 // `allergens` uses the keys of src/shared/constants/allergens.js only (S870). A library pick adds
 // them to the form; it never marks an ingredient checked.
+//
+// The USDA list was typed by hand, and in S887 every row was checked against the FoodData Central
+// bulk files (SR Legacy, Foundation, Survey). A row whose figures differed now carries the figures
+// of the FDC food its NAME describes (a raw row the raw food, never the cooked one), with the FDC id
+// beside it. A food FDC does not have was, by owner decision (2026-11-05), replaced by the same
+// food in the Nepal or Indian table (beaten rice, paneer, khuwa, jaggery, freshwater fish), or
+// removed where neither table has it (garam masala, dry tea leaves). A figure FDC does not print
+// stays out, never 0, except where it is plainly 0 (no sugar in meat, fish or oil).
 
 export const NUTRITION_SEED = [
   // ════════════════════════ USDA (FoodData Central) ════════════════════════
   // ── Grains, flours, rice ──
   { name: 'Rice (white, raw)',      match: ['rice', 'chamal', 'basmati'], unit: 'GM', source: 'USDA', energy_kcal: 360, protein_g: 6.6, carbs_g: 79, fat_g: 0.6, sugar_g: 0.1, sodium_mg: 1, allergens: '' },
   { name: 'Rice (brown, raw)',      match: ['brown rice'], unit: 'GM', source: 'USDA', energy_kcal: 370, protein_g: 7.9, carbs_g: 77, fat_g: 2.9, sugar_g: 0.7, sodium_mg: 4, allergens: '' },
-  { name: 'Beaten rice (chiura)',   match: ['chiura', 'beaten rice', 'poha'], unit: 'GM', source: 'USDA', energy_kcal: 350, protein_g: 6.6, carbs_g: 77, fat_g: 1.2, sugar_g: 0.5, sodium_mg: 5, allergens: '' },
   { name: 'Wheat flour (maida)',    match: ['maida', 'wheat flour', 'flour', 'pitho'], unit: 'GM', source: 'USDA', energy_kcal: 364, protein_g: 10, carbs_g: 76, fat_g: 1, sugar_g: 0.3, sodium_mg: 2, allergens: 'gluten' },
   { name: 'Whole wheat flour (atta)', match: ['atta', 'whole wheat', 'gahu'], unit: 'GM', source: 'USDA', energy_kcal: 340, protein_g: 13, carbs_g: 72, fat_g: 2.5, sugar_g: 0.4, sodium_mg: 2, allergens: 'gluten' },
   { name: 'Gram flour (besan)',     match: ['besan', 'gram flour', 'chickpea flour'], unit: 'GM', source: 'USDA', energy_kcal: 387, protein_g: 22, carbs_g: 58, fat_g: 6.7, sugar_g: 11, sodium_mg: 64, allergens: '' },
   { name: 'Cornflour / cornstarch', match: ['cornflour', 'cornstarch', 'corn flour'], unit: 'GM', source: 'USDA', energy_kcal: 381, protein_g: 0.3, carbs_g: 91, fat_g: 0.1, sugar_g: 0, sodium_mg: 9, allergens: '' },
   { name: 'Semolina (suji)',        match: ['suji', 'semolina', 'rava'], unit: 'GM', source: 'USDA', energy_kcal: 360, protein_g: 13, carbs_g: 73, fat_g: 1.1, sugar_g: 0, sodium_mg: 1, allergens: 'gluten' },
-  { name: 'Noodles (dry)',          match: ['noodle', 'chowmein', 'chow mein', 'wai wai'], unit: 'GM', source: 'USDA', energy_kcal: 380, protein_g: 9, carbs_g: 71, fat_g: 6, sugar_g: 2, sodium_mg: 700, allergens: 'gluten' },
+  // Plain wheat noodles: FDC 169736 "Pasta, dry, enriched". FDC files an egg-free noodle as pasta (its
+  // dry "Noodles" rows are egg noodles), so this is the same wheat-and-water dough, with no egg.
+  { name: 'Noodles (dry)',          match: ['noodle', 'chowmein', 'chow mein'], unit: 'GM', source: 'USDA', energy_kcal: 371, protein_g: 13, carbs_g: 75, fat_g: 1.5, sugar_g: 2.7, sodium_mg: 6, allergens: 'gluten' },
+  // Fried and seasoned, so one row could not honestly cover both: FDC 171177 "Soup, ramen noodle, any flavor, dry".
+  { name: 'Instant noodles (dry)',  match: ['instant noodle', 'wai wai'], unit: 'GM', source: 'USDA', energy_kcal: 440, protein_g: 10.2, carbs_g: 60.3, fat_g: 17.6, sugar_g: 2, sodium_mg: 1855, allergens: 'gluten' },
   { name: 'Pasta / macaroni (dry)', match: ['pasta', 'macaroni', 'spaghetti'], unit: 'GM', source: 'USDA', energy_kcal: 371, protein_g: 13, carbs_g: 75, fat_g: 1.5, sugar_g: 2.7, sodium_mg: 6, allergens: 'gluten' },
   { name: 'Bread (white)',          match: ['bread', 'pau', 'bun'], unit: 'GM', source: 'USDA', energy_kcal: 265, protein_g: 9, carbs_g: 49, fat_g: 3.2, sugar_g: 5, sodium_mg: 491, allergens: 'gluten' },
   { name: 'Oats',                   match: ['oats', 'oat'], unit: 'GM', source: 'USDA', energy_kcal: 389, protein_g: 17, carbs_g: 66, fat_g: 7, sugar_g: 1, sodium_mg: 2, allergens: 'gluten' },
@@ -46,22 +57,21 @@ export const NUTRITION_SEED = [
   // ── Meat, poultry, fish, egg ──
   { name: 'Chicken (broiler, raw)', match: ['chicken', 'kukhura', 'broiler'], unit: 'GM', source: 'USDA', energy_kcal: 215, protein_g: 18, carbs_g: 0, fat_g: 15, sugar_g: 0, sodium_mg: 70, allergens: '' },
   { name: 'Chicken breast (raw)',   match: ['chicken breast', 'breast'], unit: 'GM', source: 'USDA', energy_kcal: 120, protein_g: 23, carbs_g: 0, fat_g: 2.6, sugar_g: 0, sodium_mg: 45, allergens: '' },
-  { name: 'Mutton / goat (raw)',    match: ['mutton', 'goat', 'khasi', 'boka'], unit: 'GM', source: 'USDA', energy_kcal: 143, protein_g: 27, carbs_g: 0, fat_g: 3, sugar_g: 0, sodium_mg: 82, allergens: '' },
-  { name: 'Buff / buffalo (raw)',   match: ['buff', 'buffalo', 'rango'], unit: 'GM', source: 'USDA', energy_kcal: 130, protein_g: 26, carbs_g: 0, fat_g: 1.8, sugar_g: 0, sodium_mg: 70, allergens: '' },
-  { name: 'Pork (raw)',             match: ['pork', 'bangur', 'sungur'], unit: 'GM', source: 'USDA', energy_kcal: 242, protein_g: 27, carbs_g: 0, fat_g: 14, sugar_g: 0, sodium_mg: 62, allergens: '' },
-  { name: 'Fish (freshwater, raw)', match: ['fish', 'machha', 'rohu'], unit: 'GM', source: 'USDA', energy_kcal: 97, protein_g: 17, carbs_g: 0, fat_g: 2.8, sugar_g: 0, sodium_mg: 50, allergens: 'fish' },
-  { name: 'Prawn / shrimp (raw)',   match: ['prawn', 'shrimp'], unit: 'GM', source: 'USDA', energy_kcal: 99, protein_g: 24, carbs_g: 0.2, fat_g: 0.3, sugar_g: 0, sodium_mg: 111, allergens: 'crustaceans' },
+  { name: 'Mutton / goat (raw)',    match: ['mutton', 'goat', 'khasi', 'boka'], unit: 'GM', source: 'USDA', energy_kcal: 109, protein_g: 20.6, carbs_g: 0, fat_g: 2.3, sugar_g: 0, sodium_mg: 82, allergens: '' }, // FDC 175303
+  { name: 'Buff / buffalo (raw)',   match: ['buff', 'buffalo', 'rango'], unit: 'GM', source: 'USDA', energy_kcal: 99, protein_g: 20.4, carbs_g: 0, fat_g: 1.4, sugar_g: 0, sodium_mg: 53, allergens: '' }, // FDC 175299
+  { name: 'Pork (raw)',             match: ['pork', 'bangur', 'sungur'], unit: 'GM', source: 'USDA', energy_kcal: 198, protein_g: 19.7, carbs_g: 0, fat_g: 12.6, sugar_g: 0, sodium_mg: 50, allergens: '' }, // FDC 167818
+  { name: 'Prawn / shrimp (raw)',   match: ['prawn', 'shrimp'], unit: 'GM', source: 'USDA', energy_kcal: 85, protein_g: 20.1, carbs_g: 0, fat_g: 0.5, sugar_g: 0, sodium_mg: 119, allergens: 'crustaceans' }, // FDC 175179
   { name: 'Egg (whole)',            match: ['egg', 'anda', 'phul'], unit: 'GM', source: 'USDA', energy_kcal: 155, protein_g: 13, carbs_g: 1.1, fat_g: 11, sugar_g: 1.1, sodium_mg: 124, allergens: 'eggs' },
 
   // ── Dairy ──
   { name: 'Milk (whole)',           match: ['milk', 'dudh'], unit: 'GM', source: 'USDA', energy_kcal: 61, protein_g: 3.2, carbs_g: 4.8, fat_g: 3.3, sugar_g: 5.1, sodium_mg: 43, allergens: 'milk' },
   { name: 'Curd / yogurt (dahi)',   match: ['dahi', 'curd', 'yogurt', 'yoghurt'], unit: 'GM', source: 'USDA', energy_kcal: 61, protein_g: 3.5, carbs_g: 4.7, fat_g: 3.3, sugar_g: 4.7, sodium_mg: 46, allergens: 'milk' },
-  { name: 'Paneer / cheese (soft)', match: ['paneer', 'chenna'], unit: 'GM', source: 'USDA', energy_kcal: 265, protein_g: 18, carbs_g: 1.2, fat_g: 21, sugar_g: 1.2, sodium_mg: 22, allergens: 'milk' },
-  { name: 'Cheese (processed)',     match: ['cheese', 'cheddar'], unit: 'GM', source: 'USDA', energy_kcal: 402, protein_g: 25, carbs_g: 1.3, fat_g: 33, sugar_g: 0.5, sodium_mg: 621, allergens: 'milk' },
+  // The typed figures were cheddar's under a processed-cheese name, so cheddar has its own row.
+  { name: 'Cheese (processed)',     match: ['cheese', 'processed cheese'], unit: 'GM', source: 'USDA', energy_kcal: 371, protein_g: 18.1, carbs_g: 3.7, fat_g: 31.8, sugar_g: 2.3, sodium_mg: 1671, allergens: 'milk' }, // FDC 171290
+  { name: 'Cheese (cheddar)',       match: ['cheddar'], unit: 'GM', source: 'USDA', energy_kcal: 403, protein_g: 22.9, carbs_g: 3.4, fat_g: 33.3, sugar_g: 0.5, sodium_mg: 653, allergens: 'milk' }, // FDC 173414
   { name: 'Butter',                 match: ['butter', 'makhan'], unit: 'GM', source: 'USDA', energy_kcal: 717, protein_g: 0.9, carbs_g: 0.1, fat_g: 81, sugar_g: 0.1, sodium_mg: 11, allergens: 'milk' },
   { name: 'Ghee / clarified butter', match: ['ghee', 'ghiu'], unit: 'GM', source: 'USDA', energy_kcal: 900, protein_g: 0, carbs_g: 0, fat_g: 100, sugar_g: 0, sodium_mg: 0, allergens: 'milk' },
   { name: 'Cream',                  match: ['cream', 'malai'], unit: 'GM', source: 'USDA', energy_kcal: 340, protein_g: 2.1, carbs_g: 2.8, fat_g: 36, sugar_g: 2.9, sodium_mg: 27, allergens: 'milk' },
-  { name: 'Khuwa / mawa',           match: ['khuwa', 'mawa', 'khoa'], unit: 'GM', source: 'USDA', energy_kcal: 421, protein_g: 15, carbs_g: 25, fat_g: 31, sugar_g: 25, sodium_mg: 80, allergens: 'milk' },
 
   // ── Oils & fats ──
   { name: 'Cooking oil (vegetable)', match: ['oil', 'tel', 'soybean oil', 'sunflower'], unit: 'GM', source: 'USDA', energy_kcal: 884, protein_g: 0, carbs_g: 0, fat_g: 100, sugar_g: 0, sodium_mg: 0, allergens: '' },
@@ -78,7 +88,7 @@ export const NUTRITION_SEED = [
   { name: 'Cabbage',                match: ['cabbage', 'bandakopi'], unit: 'GM', source: 'USDA', energy_kcal: 25, protein_g: 1.3, carbs_g: 6, fat_g: 0.1, sugar_g: 3.2, sodium_mg: 18, allergens: '' },
   { name: 'Carrot',                 match: ['carrot', 'gajar'], unit: 'GM', source: 'USDA', energy_kcal: 41, protein_g: 0.9, carbs_g: 10, fat_g: 0.2, sugar_g: 4.7, sodium_mg: 69, allergens: '' },
   { name: 'Spinach / greens (saag)', match: ['spinach', 'saag', 'palungo'], unit: 'GM', source: 'USDA', energy_kcal: 23, protein_g: 2.9, carbs_g: 3.6, fat_g: 0.4, sugar_g: 0.4, sodium_mg: 79, allergens: '' },
-  { name: 'Capsicum / bell pepper', match: ['capsicum', 'bell pepper', 'khursani simi'], unit: 'GM', source: 'USDA', energy_kcal: 31, protein_g: 1, carbs_g: 6, fat_g: 0.3, sugar_g: 4.2, sodium_mg: 4, allergens: '' },
+  { name: 'Capsicum / bell pepper', match: ['capsicum', 'bell pepper', 'khursani simi'], unit: 'GM', source: 'USDA', energy_kcal: 26, protein_g: 1, carbs_g: 6, fat_g: 0.3, sugar_g: 4.2, sodium_mg: 4, allergens: '' }, // FDC 170108
   { name: 'Green chilli',           match: ['chilli', 'chili', 'khursani'], unit: 'GM', source: 'USDA', energy_kcal: 40, protein_g: 1.9, carbs_g: 9, fat_g: 0.4, sugar_g: 5, sodium_mg: 7, allergens: '' },
   { name: 'Mushroom',               match: ['mushroom', 'chyau'], unit: 'GM', source: 'USDA', energy_kcal: 22, protein_g: 3.1, carbs_g: 3.3, fat_g: 0.3, sugar_g: 2, sodium_mg: 5, allergens: '' },
   { name: 'Cucumber',               match: ['cucumber', 'kakro'], unit: 'GM', source: 'USDA', energy_kcal: 15, protein_g: 0.7, carbs_g: 3.6, fat_g: 0.1, sugar_g: 1.7, sodium_mg: 2, allergens: '' },
@@ -95,16 +105,17 @@ export const NUTRITION_SEED = [
   { name: 'Lemon / lime',           match: ['lemon', 'lime', 'kagati', 'nibuwa'], unit: 'GM', source: 'USDA', energy_kcal: 29, protein_g: 1.1, carbs_g: 9, fat_g: 0.3, sugar_g: 2.5, sodium_mg: 2, allergens: '' },
   { name: 'Orange',                 match: ['orange', 'suntala'], unit: 'GM', source: 'USDA', energy_kcal: 47, protein_g: 0.9, carbs_g: 12, fat_g: 0.1, sugar_g: 9, sodium_mg: 0, allergens: '' },
   { name: 'Coconut (fresh)',        match: ['coconut', 'nariwal'], unit: 'GM', source: 'USDA', energy_kcal: 354, protein_g: 3.3, carbs_g: 15, fat_g: 33, sugar_g: 6, sodium_mg: 20, allergens: '' },
-  { name: 'Acai pulp (unsweetened)', match: ['acai', 'açaí'], unit: 'GM', source: 'USDA', energy_kcal: 70, protein_g: 1, carbs_g: 4, fat_g: 5, sugar_g: 0, sodium_mg: 7, allergens: '' },
+  // FDC Branded Foods 2161316, a frozen unsweetened pure acai pulp (acai and citric acid); the
+  // generic FDC tables carry only acai drinks.
+  { name: 'Acai pulp (unsweetened)', match: ['acai', 'açaí'], unit: 'GM', source: 'USDA', energy_kcal: 77, protein_g: 1, carbs_g: 3.3, fat_g: 6.6, sugar_g: 0, sodium_mg: 36, allergens: '' },
   { name: 'Strawberry',             match: ['strawberry'], unit: 'GM', source: 'USDA', energy_kcal: 32, protein_g: 0.7, carbs_g: 8, fat_g: 0.3, sugar_g: 4.9, sodium_mg: 1, allergens: '' },
   { name: 'Blueberry',              match: ['blueberry'], unit: 'GM', source: 'USDA', energy_kcal: 57, protein_g: 0.7, carbs_g: 14, fat_g: 0.3, sugar_g: 10, sodium_mg: 1, allergens: '' },
-  { name: 'Granola',                match: ['granola', 'muesli'], unit: 'GM', source: 'USDA', energy_kcal: 471, protein_g: 10, carbs_g: 64, fat_g: 20, sugar_g: 25, sodium_mg: 26, allergens: 'gluten, tree nuts' },
+  { name: 'Granola',                match: ['granola', 'muesli'], unit: 'GM', source: 'USDA', energy_kcal: 489, protein_g: 13.7, carbs_g: 53.9, fat_g: 24.3, sugar_g: 19.8, sodium_mg: 26, allergens: 'gluten, tree nuts' }, // FDC 171646
   { name: 'Peanut butter',          match: ['peanut butter'], unit: 'GM', source: 'USDA', energy_kcal: 588, protein_g: 25, carbs_g: 20, fat_g: 50, sugar_g: 9, sodium_mg: 17, allergens: 'peanuts' },
   { name: 'Chia seed',              match: ['chia'], unit: 'GM', source: 'USDA', energy_kcal: 486, protein_g: 17, carbs_g: 42, fat_g: 31, sugar_g: 0, sodium_mg: 16, allergens: '' },
 
   // ── Sugars & sweeteners ──
   { name: 'Sugar (white)',          match: ['sugar', 'chini', 'chinni'], unit: 'GM', source: 'USDA', energy_kcal: 387, protein_g: 0, carbs_g: 100, fat_g: 0, sugar_g: 100, sodium_mg: 1, allergens: '' },
-  { name: 'Jaggery (gud/sakhar)',   match: ['jaggery', 'gud', 'sakhar', 'chaku'], unit: 'GM', source: 'USDA', energy_kcal: 383, protein_g: 0.4, carbs_g: 98, fat_g: 0.1, sugar_g: 97, sodium_mg: 30, allergens: '' },
   { name: 'Honey',                  match: ['honey', 'maha'], unit: 'GM', source: 'USDA', energy_kcal: 304, protein_g: 0.3, carbs_g: 82, fat_g: 0, sugar_g: 82, sodium_mg: 4, allergens: '' },
 
   // ── Nuts & seeds ──
@@ -119,8 +130,8 @@ export const NUTRITION_SEED = [
   { name: 'Turmeric (besar)',       match: ['turmeric', 'besar', 'haldi'], unit: 'GM', source: 'USDA', energy_kcal: 312, protein_g: 9.7, carbs_g: 67, fat_g: 3.3, sugar_g: 3.2, sodium_mg: 27, allergens: '' },
   { name: 'Cumin (jeera)',          match: ['cumin', 'jeera', 'jira'], unit: 'GM', source: 'USDA', energy_kcal: 375, protein_g: 18, carbs_g: 44, fat_g: 22, sugar_g: 2.3, sodium_mg: 168, allergens: '' },
   { name: 'Coriander (dhaniya)',    match: ['coriander', 'dhaniya'], unit: 'GM', source: 'USDA', energy_kcal: 298, protein_g: 12, carbs_g: 55, fat_g: 18, sugar_g: 0, sodium_mg: 35, allergens: '' },
-  { name: 'Chilli powder',          match: ['chilli powder', 'chili powder', 'red chilli'], unit: 'GM', source: 'USDA', energy_kcal: 282, protein_g: 12, carbs_g: 50, fat_g: 14, sugar_g: 8, sodium_mg: 1640, allergens: '' },
-  { name: 'Garam masala / mixed spice', match: ['masala', 'garam', 'mixed spice'], unit: 'GM', source: 'USDA', energy_kcal: 379, protein_g: 14, carbs_g: 45, fat_g: 15, sugar_g: 3, sodium_mg: 90, allergens: '' },
+  // Plain ground red chilli: FDC 170932 "Spices, pepper, red or cayenne". The US "chili powder" is a salted blend.
+  { name: 'Chilli powder',          match: ['chilli powder', 'chili powder', 'red chilli'], unit: 'GM', source: 'USDA', energy_kcal: 318, protein_g: 12, carbs_g: 56.6, fat_g: 17.3, sugar_g: 10.3, sodium_mg: 30, allergens: '' },
   { name: 'Black pepper',           match: ['pepper', 'marich'], unit: 'GM', source: 'USDA', energy_kcal: 251, protein_g: 10, carbs_g: 64, fat_g: 3.3, sugar_g: 0.6, sodium_mg: 20, allergens: '' },
   { name: 'Soy sauce',              match: ['soy sauce', 'soya sauce'], unit: 'GM', source: 'USDA', energy_kcal: 53, protein_g: 8, carbs_g: 4.9, fat_g: 0.6, sugar_g: 0.4, sodium_mg: 5493, allergens: 'gluten, soy' },
   { name: 'Tomato ketchup',         match: ['ketchup', 'tomato sauce'], unit: 'GM', source: 'USDA', energy_kcal: 101, protein_g: 1.3, carbs_g: 27, fat_g: 0.1, sugar_g: 22, sodium_mg: 907, allergens: '' },
@@ -129,12 +140,24 @@ export const NUTRITION_SEED = [
   { name: 'Tamarind (imli)',        match: ['tamarind', 'imli', 'titri'], unit: 'GM', source: 'USDA', energy_kcal: 239, protein_g: 2.8, carbs_g: 63, fat_g: 0.6, sugar_g: 39, sodium_mg: 28, allergens: '' },
 
   // ── Beverages ──
-  { name: 'Tea leaves (dry)',       match: ['tea', 'chiya', 'chai patti'], unit: 'GM', source: 'USDA', energy_kcal: 1, protein_g: 0, carbs_g: 0.3, fat_g: 0, sugar_g: 0, sodium_mg: 3, allergens: '' },
   { name: 'Coffee (instant powder)', match: ['coffee', 'nescafe'], unit: 'GM', source: 'USDA', energy_kcal: 353, protein_g: 13, carbs_g: 75, fat_g: 0.5, sugar_g: 0, sodium_mg: 37, allergens: '' },
   { name: 'Cocoa powder',           match: ['cocoa', 'cacao'], unit: 'GM', source: 'USDA', energy_kcal: 228, protein_g: 20, carbs_g: 58, fat_g: 14, sugar_g: 1.8, sodium_mg: 21, allergens: '' },
   { name: 'Cola / soft drink',      match: ['cola', 'coke', 'soft drink', 'soda'], unit: 'ML', source: 'USDA', energy_kcal: 42, protein_g: 0, carbs_g: 11, fat_g: 0, sugar_g: 11, sodium_mg: 4, allergens: '' },
   { name: 'Orange juice',           match: ['orange juice', 'juice'], unit: 'ML', source: 'USDA', energy_kcal: 45, protein_g: 0.7, carbs_g: 10, fat_g: 0.2, sugar_g: 8.4, sodium_mg: 1, allergens: '' },
 ]
+
+// Kitchen names for a Nepal or Indian table food that replaced a USDA row (S887, owner decision).
+// Beaten rice, paneer and khuwa needed nothing: their table rows are already found by every name
+// their USDA row had (the row's own name, a bracketed name, SAME_FOOD below). These two did not:
+// FISH and MACHHA found no fish without the USDA row, and JAGGERY, GUD and SAKHAR found white
+// jaggery, which ties cane jaggery and comes first in the book. So the table row takes the names
+// here as keywords and goes first in its table, which is what wins a tie (suggestSeeds: strong,
+// score, regional first, then table order). It stays one row, with its own table figures and label;
+// nothing is added to foodTables.json.
+export const REGIONAL_KITCHEN_NAMES = {
+  'NP-O17': ['jaggery', 'gud', 'sakhar'], // DFTQC Nepal: Jaggery, cane (sakhar)
+  'IN-S006': ['fish', 'machha'],          // IFCT 2017: Rohu
+}
 
 // The library picker's three sources, regional first (most relevant for Nepal).
 export const LIBRARY_SOURCES = ['DFTQC Nepal', 'IFCT 2017', 'USDA']
@@ -356,7 +379,11 @@ export function loadLibrary() {
   if (!libraryPromise) {
     libraryPromise = import(/* webpackChunkName: "food-tables" */ './foodTables.json')
       .then(m => {
-        const rows = [...NUTRITION_SEED, ...(m.default || m)].map(prepareRow)
+        const tables = m.default || m
+        const named = tables.filter(r => REGIONAL_KITCHEN_NAMES[r.id])
+          .map(r => ({ ...r, match: [...(r.match || []), ...REGIONAL_KITCHEN_NAMES[r.id]] }))
+        const rest = tables.filter(r => !REGIONAL_KITCHEN_NAMES[r.id])
+        const rows = [...NUTRITION_SEED, ...named, ...rest].map(prepareRow)
         return { rows, heads: new Set(rows.flatMap(r => r._heads.flat())) }
       })
       .catch(err => { libraryPromise = null; throw err })

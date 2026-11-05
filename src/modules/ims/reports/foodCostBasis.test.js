@@ -113,3 +113,28 @@ describe('costTrendPoint', () => {
     expect(p.uncountedCount).toBe(1)
   })
 })
+
+// S887: a month whose bills were all credited back sums to a float residue like 5e-13, not 0.
+describe('less than one paisa of revenue is no revenue (S887)', () => {
+  test('periodCostRatio gives no figure on a residue revenue, and one on a paisa', () => {
+    expect(periodCostRatio({ status: 'closed', revenue: 5.2e-13, cogs: 12500 }).pct).toBeNull()
+    expect(periodCostRatio({ status: 'open', revenue: 5.2e-13, netPurchases: 12500 }).pct).toBeNull()
+    expect(periodCostRatio({ status: 'closed', revenue: 0.01, cogs: 0.005 }).pct).toBeCloseTo(50, 9)
+  })
+  test('costTrendPoint draws no point for a residue month', () => {
+    const row = {
+      revenue: 5.2e-13, opening_val: '2000', purchases_val: '6000', returns_val: '0',
+      wastage_val: '0', staff_meals_val: '0', closing_val: '2500', stock_items: 40, uncounted_count: 0, uncounted_val: '0',
+    }
+    expect(costTrendPoint(row).fc).toBeNull()
+    expect(costTrendPoint({ ...row, revenue: '0.01', opening_val: '0', purchases_val: '0.005', closing_val: '0' }).fc).toBeCloseTo(50, 9)
+  })
+  test('groupCostRatio over outlets whose revenue nets to a residue has no figure', () => {
+    const rows = [
+      { is_included: true, has_period: true, period_status: 'open', revenue: 0.1, net_purchases: 500 },
+      { is_included: true, has_period: true, period_status: 'open', revenue: 0.2, net_purchases: 500 },
+      { is_included: true, has_period: true, period_status: 'open', revenue: -0.3, net_purchases: 0 },
+    ]
+    expect(groupCostRatio(rows).pct).toBeNull()
+  })
+})

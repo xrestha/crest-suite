@@ -189,14 +189,20 @@ export default function TaxPoolOpeningsCard({ fyLabel, priorLabel, canEdit, onCh
     setSaving(true)
     onChanged()
     const results = []
-    if (upserts.length) results.push(await scopedUpsert('assets_tax_pool_openings', upserts, { onConflict: 'client_id,pool' }))
-    if (deletes.length) results.push(await scopedDelete('assets_tax_pool_openings').in('id', deletes))
+    // Bounded (S887): a hung write left Save busy for good.
+    if (upserts.length) results.push(await settleWithin(scopedUpsert('assets_tax_pool_openings', upserts, { onConflict: 'client_id,pool' }), ASSET_CALL_MS, 'Saving the opening values'))
+    if (deletes.length) results.push(await settleWithin(scopedDelete('assets_tax_pool_openings').in('id', deletes), ASSET_CALL_MS, 'Clearing the opening values left blank'))
     setSaving(false)
     const failed = results.find(x => x.error)
     if (failed) {
       const e = failed.error
       if (refusedWith(e, 'tax_pool_opening_locked')) setErr(lockedError(e))
-      else {
+      else if (answerLost(e)) {
+        // No answer is not a refusal: the write may have landed after the clock ran out. A second
+        // Save is safe (one row per pool, and a delete by id), but the boxes are reset from the re-read.
+        const { detail } = asActionError(e)
+        setErr({ text: 'No answer came back from the server, so whether the opening values saved is not known yet. The table below is re-read, so it shows what is stored now: if your figures are not there, type them again and press Save.', detail })
+      } else {
         const a = asActionError(e)
         // Two writes: the upsert may have landed before the delete failed. The reload shows which.
         setErr({ text: `The opening values may not all have saved — the table below is re-read, so it shows what is stored now. ${a.text}`, detail: a.detail })

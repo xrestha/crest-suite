@@ -18,6 +18,7 @@ import { loadOtherLabourPay, otherLabourFor } from '../../dashboard/loadOtherLab
 import ChartCard from '../../../components/ChartCard'
 import ReportLoadError from '../../../components/ReportLoadError'
 import Tip from '../../../components/Tip'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
 // The HR Dashboard's labour section (S800 stage D): what labour cost, and what share of sales it
 // was, for each of the last six FINALIZED payroll months — the half of a hospitality HR home every
@@ -112,7 +113,7 @@ export default function HrLabourPanel() {
           pay: Math.round(sum(slips, 'gross') - sum(slips, 'absence_deduction')), ot: Math.round(sum(slips, 'ot_amount')), ssf: Math.round(sum(slips, 'ssf_employer')),
           other: Math.round(otherInfo.total), otherInfo,
           total, revenue, bulk: !!sales?.bulk, running,
-          pct: revenue > 0 ? (total / revenue) * 100 : null,
+          pct: hasRevenue(revenue) ? (total / revenue) * 100 : null,
         }
       }))
     } catch (e) {

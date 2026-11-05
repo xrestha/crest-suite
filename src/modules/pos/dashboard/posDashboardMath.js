@@ -10,6 +10,7 @@ import { coversTotals, isDineIn } from '../reports/coversMath'
 import { nepalHour } from '../../../shared/nepalTime'
 import { compareFigures } from '../../../shared/compareFigures'
 import { computeOrderAmounts } from '../../../utils/posBillingMath'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
 const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0 }
 
@@ -132,7 +133,8 @@ export function paymentMix(orders, legsByOrder, returns = []) {
   for (const o of orders || []) if (countsAsSale(o)) add(o, num(o.paid_amount))
   for (const r of returns || []) add(r.order, num(r.net))
   const total = [...by.values()].reduce((s, a) => s + a, 0)
-  return GROUP_ORDER.filter(g => by.has(g)).map(g => ({ method: g, amount: by.get(g), share: total > 0 ? by.get(g) / total : 0 }))
+  // A day whose bills were all credited back sums to a float residue, not 0: no shares (S887).
+  return GROUP_ORDER.filter(g => by.has(g)).map(g => ({ method: g, amount: by.get(g), share: hasRevenue(total) ? by.get(g) / total : 0 }))
 }
 
 /** Where a bill came from. There is no channel column: a delivery bill names its partner, a bill

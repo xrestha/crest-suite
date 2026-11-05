@@ -1,3 +1,5 @@
+import fs from 'fs'
+import path from 'path'
 import {
   itemNutrition, calcRecipeNutrition, calcLiveNutrition, buildNutritionPayload, mergeNutritionFill, convertQty,
   needsPieceWeight, isNotFood, confirmAllergensPayload, notFoodPayload, isPartialFigure, blankFiguresNote,
@@ -240,5 +242,96 @@ describe('a blank sugar or sodium box (S886)', () => {
     const split = calcRecipeNutrition({ id: 'r', recipe_ingredients: [line(kukhura, 50), line(jaggery, 10)] }, [])
     expect(blankFiguresNote(split)).toMatch(/^No sugar figure on kukhura\. No sodium figure on kukhura, jaggery\./)
     expect(blankFiguresNote(calcRecipeNutrition({ id: 'roti', recipe_ingredients: [line(maida, 100)] }, []))).toBeNull()
+  })
+})
+
+describe('the guest menu hides a dish with an ingredient missing figures (S887)', () => {
+  // Owner decision: no nutrition line for guests until every ingredient a dish reaches has figures.
+  // The staff data count must agree, so a sub-recipe line has data only when nothing inside it is
+  // missing. _nutrition_rollup's figures_missing, read by get_guest_menu, applies the same rule.
+  const maida = item('maida', checked({ protein_g: 10 }))
+  const chicken = item('chicken', checked({ energy_kcal: 120 }))
+  const salt = item('salt', { allergens_checked: true })
+  const cup = item('cup', notFoodPayload(), 'PCS')
+  const egg = item('egg', checked({ energy_kcal: 155 }), 'PCS')
+  const filling = (...lines) => ({ id: 'filling', yield_qty: 1, recipe_ingredients: lines })
+  const momo = (...lines) => ({ id: 'momo', recipe_ingredients: lines })
+
+  test('a complete dish, with packaging on it, counts every ingredient', () => {
+    const sub = filling(line(chicken, 50))
+    const r = calcRecipeNutrition(momo(line(maida, 100), line(cup, 1), subLine(sub, 1)), [sub])
+    expect(r.coverage).toEqual({ have: 2, total: 2 })
+    expect(r.perPortion.energy_kcal).toBeCloseTo(160)
+  })
+
+  test('an ingredient with no figures inside a sub-recipe makes that line missing, figures unchanged', () => {
+    const sub = filling(line(chicken, 50), line(salt, 5))
+    const r = calcRecipeNutrition(momo(line(maida, 100), subLine(sub, 1)), [sub])
+    expect(r.coverage).toEqual({ have: 1, total: 2 })
+    expect(r.perPortion.energy_kcal).toBeCloseTo(160)
+    // The sub-recipe on its own page counts it too.
+    expect(calcRecipeNutrition(sub, [sub]).coverage).toEqual({ have: 1, total: 2 })
+  })
+
+  test('a missing ingredient two sub-recipes down still reaches the dish', () => {
+    const base = { id: 'base', yield_qty: 1, recipe_ingredients: [line(chicken, 10), line(salt, 1)] }
+    const sauce = { id: 'sauce', yield_qty: 1, recipe_ingredients: [line(chicken, 10), subLine(base, 1)] }
+    const r = calcRecipeNutrition(momo(line(maida, 100), subLine(sauce, 1)), [base, sauce])
+    expect(r.coverage).toEqual({ have: 1, total: 2 })
+  })
+
+  test('packaging inside a sub-recipe does not make it missing; a piece item without its weight does', () => {
+    const packed = filling(line(chicken, 50), line(cup, 1))
+    expect(calcRecipeNutrition(momo(subLine(packed, 1)), [packed]).coverage).toEqual({ have: 1, total: 1 })
+    const eggy = filling(line(chicken, 50), line(egg, 1))
+    const r = calcRecipeNutrition(momo(subLine(eggy, 1)), [eggy])
+    expect(r.coverage).toEqual({ have: 0, total: 1 })
+    expect(r.needsWeight).toEqual([{ id: 'egg', name: 'egg' }])
+    const weighed = item('egg', checked({ energy_kcal: 155, grams_per_unit: 50 }), 'PCS')
+    const ok = filling(line(chicken, 50), line(weighed, 1))
+    expect(calcRecipeNutrition(momo(subLine(ok, 1)), [ok]).coverage).toEqual({ have: 1, total: 1 })
+  })
+
+  test('a sub-recipe reaching no ingredient with figures counts as missing, as before', () => {
+    const pack = { id: 'pack', yield_qty: 1, recipe_ingredients: [line(cup, 1)] }
+    expect(calcRecipeNutrition(momo(line(maida, 100), subLine(pack, 1)), [pack]).coverage).toEqual({ have: 1, total: 2 })
+  })
+
+  test('a saved line of quantity 0 counts by its figures', () => {
+    expect(calcRecipeNutrition(momo(line(maida, 100), line(salt, 0)), []).coverage).toEqual({ have: 1, total: 2 })
+    expect(calcRecipeNutrition(momo(line(maida, 0)), []).coverage).toEqual({ have: 1, total: 1 })
+  })
+
+  test('the live edit form applies the same sub-recipe rule', () => {
+    const sub = filling(line(chicken, 50), line(salt, 5))
+    const r = calcLiveNutrition(
+      [{ type: 'item', item_id: 'maida', qty_per_portion: 100 }, { type: 'sub_recipe', sub_recipe_id: 'filling', qty_per_portion: 1 }],
+      [maida], [sub])
+    expect(r.coverage).toEqual({ have: 1, total: 2 })
+  })
+})
+
+describe('the SQL copy of the missing-figures rule (S887)', () => {
+  // The roll-up exists twice (nutrition-allergens.md). The migration cannot import this file, so
+  // this reads it: if one copy changes its rule, this fails until the other does too.
+  const sql = fs.readFileSync(path.join(__dirname, '..', '..', 'supabase', 'migrations',
+    '20261105130000_nutrition_missing_ingredient_s887.sql'), 'utf8')
+    .split('\n').map(l => l.replace(/--.*$/, '')).join('\n')
+  const body = name => sql.split(`CREATE OR REPLACE FUNCTION public.${name}(`)[1].split('\n$$;')[0]
+
+  test('an ingredient is missing when it has no usable figures and is not packaging', () => {
+    const contrib = body('_nutrition_item_contribution')
+    expect(contrib).toMatch(/is_not_food := CASE WHEN jsonb_typeof\(n->'not_food'\) = 'boolean'/)
+    expect(contrib).toMatch(/'figures_missing', NOT has_data AND NOT is_not_food/)
+  })
+
+  test('a sub-recipe line is missing when its walk is, or when it covers nothing', () => {
+    const rollup = body('_nutrition_rollup')
+    expect(rollup).toMatch(/figures_missing := figures_missing OR COALESCE\(\(contrib->>'figures_missing'\)::boolean, true\)/)
+    expect(rollup).toMatch(/figures_missing := figures_missing OR NOT COALESCE\(\(sub_result->>'covered'\)::boolean, false\)\s+OR COALESCE\(\(sub_result->>'figures_missing'\)::boolean, true\)/)
+  })
+
+  test('the guest menu reads it into has_nutrition', () => {
+    expect(sql).toMatch(/has_nutrition := v_nutrition_enabled AND COALESCE\(\(roll->>'covered'\)::boolean, false\)\s+AND NOT COALESCE\(\(roll->>'figures_missing'\)::boolean, true\);/)
   })
 })

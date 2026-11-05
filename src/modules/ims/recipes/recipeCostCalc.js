@@ -2,6 +2,8 @@
 // Recipes.js, RecipeDetailView.jsx, and RecipeCostCardPrint.jsx so the on-screen list, the
 // detail view, and the printed cost card can never disagree about how a recipe's cost rolls up.
 
+import { hasRevenue } from '../../../shared/revenueFloor'
+
 export const UNITS = ['GM', 'ML', 'KG', 'LTR', 'PCS', 'PKT', 'BTL', 'BOX', 'ROLL', 'BUNCH', 'JAR', 'CTN', 'BAG', 'TIN', 'SACHET']
 
 export const EMPTY_RECIPE = { name: '', category: 'Food', recipe_code: '', selling_price: '', vat_rate: '0.13', yield_qty: '1', yield_uom: 'portion', target_fc_pct: '30', description: '', image_url: '', diet: '', is_build_your_own: false }
@@ -114,7 +116,7 @@ export function calcLiveCost(ingList, itemsList, allRecipes) {
 // allocation on, so it gets zero. `overheadData` shape: { totalOverheads, totalRevenue,
 // revenueByRecipe: {recipeId: revenue}, coversByRecipe: {recipeId: qtySold} }.
 export function allocateOverhead(recipeId, overheadData) {
-  if (!overheadData || overheadData.totalRevenue <= 0) return { ohPerPortion: 0, revenueSharePct: 0, covers: 0 }
+  if (!overheadData || !hasRevenue(overheadData.totalRevenue)) return { ohPerPortion: 0, revenueSharePct: 0, covers: 0 }
   const revenue = overheadData.revenueByRecipe[recipeId] || 0
   const covers = overheadData.coversByRecipe[recipeId] || 0
   const revenueSharePct = revenue / overheadData.totalRevenue

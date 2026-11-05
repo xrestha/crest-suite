@@ -36,6 +36,7 @@ import SwapRequestsPanel from './SwapRequestsPanel'
 import { lcBand, bandFigure, LABOR_WARN, LABOR_CRITICAL } from '../../../shared/operatingBands'
 import { useSuiteAccess, SUITE_PAGES } from '../../../components/SuiteGate'
 import { nepalBsLong } from '../../../shared/nepalTime'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -1305,7 +1306,7 @@ export default function Roster() {
     const plannedCost    = computePlannedLaborCost(col, filteredEmps, roster, shiftMap, monthDays, componentsByEmp)
     const unpricedCount  = computeUnpricedCount(col, filteredEmps, roster, shiftMap)
     const scheduledCount = computeScheduledCount(col, employees, roster, shiftMap)
-    const costPct        = f?.revenue > 0 ? (plannedCost / f.revenue) * 100 : null
+    const costPct        = hasRevenue(f?.revenue) ? (plannedCost / f.revenue) * 100 : null
     const isPast         = isPastCol(col)
     const weekday        = bsToAd(col.bsYear, col.bsMonth, col.bsDay).getDay()
     // How many hours this day NEEDS, learned from the outlet's own history. `required` is the
@@ -1355,7 +1356,7 @@ export default function Roster() {
         staffRequired: actualStaffRequired,
         coversRec: actualCoversRec,
         recommended: actualReqStaff ?? actualCoversRec,
-        costPct: revenue > 0 ? (cost / revenue) * 100 : null,
+        costPct: hasRevenue(revenue) ? (cost / revenue) * 100 : null,
       }
     }
     return { col, isPast, actual, weekday, scheduledHrs, plannedCost, unpricedCount, scheduledCount, required, staffRequired, coversRec, recommended, costPct, forecastRevenue: f?.revenue ?? null, forecastCovers: f?.covers ?? null, revenueEstimated: !!f?.revenueEstimated, holiday: f?.holiday ?? null, generatedAt: f?.generated_at ?? null }

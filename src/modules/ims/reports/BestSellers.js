@@ -21,6 +21,7 @@ import { BS_MONTHS } from '../../../utils/bsCalendar'
 import { FilterChips } from '../../../components/Tabs'
 import { extrasCostByRecipe, loadExtrasCosting } from '../recipes/extrasCost'
 import { BYO_REASON, BYO_TIP, isCostedByBuild } from '../recipes/buildYourOwnRating'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
 // Recharts SVG props (fill, tick) don't resolve CSS vars — these fixed hexes back only
 // the two chart call sites below; everything else uses the theme-token constants beneath.
@@ -216,8 +217,9 @@ export default function BestSellers() {
         const cogs     = cost == null ? null : qty * cost + (extrasMap[r.id] || 0)
         const profit   = cost == null ? null : revenue - cogs
         // Revenue must be positive for the ratio to mean anything: a fully-discounted dish, or one
-        // a Credit Note has reversed past zero, produces a percentage whose sign is noise.
-        const margin   = (cost != null && revenue > 0) ? (profit / revenue) * 100 : null
+        // a Credit Note has reversed past zero, produces a percentage whose sign is noise. One
+        // reversed exactly leaves a float residue, not 0, so it needs a paisa (S887).
+        const margin   = (cost != null && hasRevenue(revenue)) ? (profit / revenue) * 100 : null
         return {
           name: r.name, category: r.category, qty, revenue, cogs, profit, margin, byo,
           costReason: byo ? BYO_REASON : cost == null ? unratedReason(0, currentPriceMap[r.id]) : null,
@@ -361,7 +363,7 @@ export default function BestSellers() {
             smallHeight={220}
             footer={
               <div style={{ fontSize: 11, color: MUTED, marginTop: 8 }}>
-                {sortBy === 'revenue' && totalRevenueAll > 0 && (
+                {sortBy === 'revenue' && hasRevenue(totalRevenueAll) && (
                   <>Top 10 = <strong style={{ color: 'var(--theme-text1)' }}>{fmt(top10Revenue)}</strong> · <span style={{ color: INK, fontWeight: 600 }}>{((top10Revenue / totalRevenueAll) * 100).toFixed(0)}%</span> of total revenue</>
                 )}
                 {sortBy === 'qty' && totalQtyAll > 0 && (
@@ -491,7 +493,7 @@ export default function BestSellers() {
               { label: 'Gross Profit',   tip: 'Revenue − COGS across the costed dishes only.',
                 val: fmt(costedProfit), color: INK },
               { label: 'Overall Margin', tip: 'Gross Profit ÷ Revenue across the costed dishes — weighted by revenue, so a high-volume dish moves it more than a rarely-ordered one. The chart footer shows the unweighted average instead, and the two will not match.',
-                val: costedRevenue > 0 ? `${((costedProfit / costedRevenue) * 100).toFixed(1)}%` : '—', color: INK },
+                val: hasRevenue(costedRevenue) ? `${((costedProfit / costedRevenue) * 100).toFixed(1)}%` : '—', color: INK },
               { label: 'Items Sold',     tip: 'Distinct menu items with at least one sale this period.',
                 val: filteredRows.length, color: MUTED },
             ].map(s => (

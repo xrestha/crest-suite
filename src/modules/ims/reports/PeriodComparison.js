@@ -31,6 +31,7 @@ import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { findUncountedItems, gapNote, unjudgedFcFigure } from '../../../shared/uncountedItems'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { readPeriodTransfers, lineValue } from '../transfers/transferFlows'
+import { hasRevenue, REVENUE_FLOOR } from '../../../shared/revenueFloor'
 
 // Fallback categorical rotation for any recipe category beyond Food/Beverage (which get fixed
 // semantic colors): the shared CHART_COLORS, so a category reads the same colour here as on the
@@ -48,9 +49,10 @@ function periodLabel(p, short) {
 const listSig = list => (list || []).map(p => `${p.id}:${p.bs_year}:${p.bs_month}:${p.status}`).join(',')
 
 // curr vs prev as a % change — null when there's no meaningful baseline to compare against
-// (no prior period, or the prior value was zero, where a % change is undefined/infinite).
+// (no prior period, or the prior value was zero, where a % change is undefined/infinite). Under one
+// paisa counts as zero: a month whose bills were all credited back sums to a float residue (S887).
 function pctDelta(curr, prev) {
-  if (curr == null || prev == null || prev === 0) return null
+  if (curr == null || prev == null || Math.abs(prev) < REVENUE_FLOOR) return null
   return ((curr - prev) / Math.abs(prev)) * 100
 }
 
@@ -308,7 +310,7 @@ export default function PeriodComparison() {
       const tOutV    = tRows.filter(r => r.direction === 'out').reduce((s,r)=>s+lineValue(r),0)
       const netPurch = purchV - discV - retV + tInV - tOutV
       const cogs     = computeUsed({ opening: openV, purchases: netPurch, wastage: wasteV, staffMeals: staffV, closing: closeV })
-      const fcPct    = revenue > 0 ? (cogs / revenue) * 100 : null
+      const fcPct    = hasRevenue(revenue) ? (cogs / revenue) * 100 : null
       // Uncounted items for this period (S756 D6), from the rows already grouped above: a closing
       // row with physical_qty 0 is a count, a NULL or missing one is not. COGS is unchanged; the
       // period's own FC% verdict is withheld while its gap is material.

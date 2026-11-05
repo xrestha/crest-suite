@@ -16,6 +16,7 @@
 // other. The arithmetic of COGS itself stays in periodCost.js / imsFormulas.js.
 import { computeUsed } from '../../../shared/imsFormulas'
 import { isMaterialGap } from '../../../shared/uncountedItems'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
 export const FOOD_COST_LABEL = 'Food Cost %'
 export const SPEND_SO_FAR_LABEL = 'Spend % so far'
@@ -57,7 +58,8 @@ export function periodCostRatio({ status, revenue, cogs, netPurchases }) {
   const basis = fcBasisOf(status)
   const rev = num(revenue)
   const top = num(basis === 'cogs' ? cogs : netPurchases)
-  const pct = rev != null && rev > 0 && top != null ? (top / rev) * 100 : null
+  // Under one paisa of revenue is a float residue (bills all credited back), not a sale (S887).
+  const pct = hasRevenue(rev) && top != null ? (top / rev) * 100 : null
   return { basis, pct, label: basis === 'cogs' ? FOOD_COST_LABEL : SPEND_SO_FAR_LABEL }
 }
 
@@ -87,7 +89,7 @@ export function costTrendPoint(row) {
   const material = uncountedCount > 0 &&
     isMaterialGap({ presentCount: Number(row?.stock_items) || 0, uncountedCount, uncountedValue, cogs: cogs || 0 })
   return {
-    fc: revenue > 0 && cogs != null ? parseFloat(((cogs / revenue) * 100).toFixed(1)) : null,
+    fc: hasRevenue(revenue) && cogs != null ? parseFloat(((cogs / revenue) * 100).toFixed(1)) : null,
     basis: 'cogs',
     cogs: cogs != null ? Math.round(cogs) : null,
     revenue: Math.round(revenue),

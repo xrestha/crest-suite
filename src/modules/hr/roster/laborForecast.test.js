@@ -350,3 +350,17 @@ describe('summarizeLaborForecastRows', () => {
     expect(t.requiredDays).toBe(0)
   })
 })
+
+// S887: a month whose bills were all credited back sums to a float residue like 5e-13, not 0.
+describe('summarizeLaborForecastRows needs at least one paisa of revenue for Cost % (S887)', () => {
+  const pastDay = revenue => ({
+    isPast: true, scheduledHrs: 8, plannedCost: 1000,
+    actual: { recorded: true, basis: 'attendance', hours: 8, cost: 1000, revenue, covers: 0, staff: 1, recommended: null },
+  })
+  test('days whose sales were credited back on the day give no Cost %', () => {
+    expect(summarizeLaborForecastRows([pastDay(5.2e-13)]).costPct).toBeNull()
+  })
+  test('one paisa still computes', () => {
+    expect(summarizeLaborForecastRows([pastDay(0.01)]).costPct).toBeCloseTo((1000 / 0.01) * 100, 6)
+  })
+})

@@ -155,6 +155,9 @@ Three rules came out of it:
   Stock: NPR 0" in green until the real number arrived — and on a failed read it stayed there. A
   number the page has not computed yet is not a number. `ReportPage` gates `stats`/`note`/`filters`/
   `footnote` on `!loading && !error` so a new page cannot reintroduce this.
+- **A ratio over revenue or sales needs at least one paisa of it (S887).** Guard the divisor with
+  `hasRevenue()` (`src/shared/revenueFloor.js`), never `> 0`: a month whose bills were all credited
+  back sums to a float residue, not 0, and a share of it reads in billions of percent.
 - **A report that states a scope must state it everywhere the report goes.** `StockAgeing` aged every
   fiscal year against `new Date()` while its FY selector accepted any past year, so picking a past FY
   pushed every surviving batch into the 90+ band, turned the headline amber and reported the whole

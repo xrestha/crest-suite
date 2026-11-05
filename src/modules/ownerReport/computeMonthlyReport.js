@@ -19,7 +19,6 @@ import { fcThresholds } from '../../shared/imsFormulas'
 import { zeroAmounts, addAmounts, billAmounts, buildSalesEntries, buildGroupedRows, buildPaymentRows, forgoneMenuValue } from '../pos/reports/salesReportMath'
 import { coversTotals } from '../pos/reports/coversMath'
 import { posLineCosts, buildYourOwnAmong, LINE_CHOICE_STOCK } from '../pos/orders/posRecipeBook'
-import { customizationState } from '../../utils/subscription'
 import { computeMenuEngineeringSection } from './computeMenuEngineeringSection'
 import { computeLaborAnalyticsSection } from './computeLaborAnalyticsSection'
 import { computeVendorPurchasingSection } from './computeVendorPurchasingSection'
@@ -31,6 +30,7 @@ import { loadLabourEstimateInputs } from '../dashboard/loadOutletLabour'
 import { loadMonthOtherLabour } from '../dashboard/loadOtherLabourPay'
 import { loadDeliveryCommission, bsMonthWindow } from '../../shared/deliveryCommission'
 import { parseAdDateLocal } from '../../shared/nepalTime'
+import { hasRevenue, REVENUE_FLOOR } from '../../shared/revenueFloor'
 
 // ── Net purchases (pure) ─────────────────────────────────────────────────────
 // Purchases NET of bill discounts, less returns — the definition Consolidated P&L and Monthly
@@ -229,7 +229,8 @@ async function computeImsSection(clientId, period) {
   const stockMaps = periodStockMaps({ opening, closing, purchases, returns, wastages: wastagesData, staffMeals: staffMealsData, transfers })
   const cogs = valuePeriodItems(cogsItems, stockMaps)
   const cogsTotal = cogs.cogsVal
-  const foodCostPct = revenueTotal > 0 ? (cogsTotal / revenueTotal) * 100 : null
+  // Less than one paisa of revenue (bills all credited back sum to a float residue) freezes no ratio (S887).
+  const foodCostPct = hasRevenue(revenueTotal) ? (cogsTotal / revenueTotal) * 100 : null
 
   // The count COGS rests on (S756, D6): an item with stock and NO closing count is counted as all
   // used. The totals stand — they must tie to Monthly Summary — but the gap is frozen with them,
@@ -533,7 +534,7 @@ export function posSalesFigures({ orders, creditNotes, orderById = {}, itemsByOr
   }).map(r => ({ category: r.name, qty: r.qtySales - r.qtyReturn, net: r.gross - r.discount + r.vat }))
   // Payment Summary's rows: a note comes off the method(s) its bill was paid with.
   const paymentMix = buildPaymentRows(entries, paymentsByOrder)
-    .map(p => ({ method: p.method, net: p.net, pctOfNet: total.net > 0 ? (p.net / total.net) * 100 : 0 }))
+    .map(p => ({ method: p.method, net: p.net, pctOfNet: hasRevenue(total.net) ? (p.net / total.net) * 100 : 0 }))
     .sort((a, b) => b.net - a.net)
   // The Covers Report's headline: guests seated, and dine-in Net Sales after dine-in returns.
   const netOf = o => billAmounts(o, itemsByOrder[o.id], vatReg).net
@@ -567,11 +568,6 @@ async function computePosSection(clientId, period, { inventory = false } = {}) {
 
   const posResults = await Promise.all([
     supabase.from('settings').select('is_vat_registered').eq('client_id', clientId).maybeSingle(),
-    // S862 REPORTS-STOCK-1: is Crest Customization live for this client, the gate on costing a
-    // build-your-own dish by its build. The CLIENT's flags and end date (customizationState), not the
-    // viewer's; `clients` stays on raw supabase.from, and `.single()` so a failed read fails the
-    // section rather than defaulting to "off" (computeMenuEngineeringSection.js reads it the same way).
-    inventory ? supabase.from('clients').select('pos_enabled, customization_enabled, customization_ends_at').eq('id', clientId).single() : null,
     // Paged: a busy month passes 1,000 paid bills, and a bare select stopped there with no error,
     // freezing a short POS section into the snapshot.
     fetchAllRows(() => scopedFrom('pos_orders', clientId, POS_ORDER_COLUMNS)
@@ -581,8 +577,7 @@ async function computePosSection(clientId, period, { inventory = false } = {}) {
       .gte('created_at', fromTs).lte('created_at', toTs).order('id')),
   ])
   throwFirstError(posResults)
-  const [{ data: settings }, clientRes, { data: orderData }, { data: noteData }] = posResults
-  const customizationLive = !!clientRes && customizationState(clientRes.data).live
+  const [{ data: settings }, { data: orderData }, { data: noteData }] = posResults
   const vatReg = settings?.is_vat_registered ?? true
   const orders = orderData || []
   const creditNotes = noteData || []
@@ -632,13 +627,16 @@ async function computePosSection(clientId, period, { inventory = false } = {}) {
   if (compedItems.length > 0) {
     // S862 REPORTS-STOCK-1 (since schema 20): each comped dish at its plate cost WITH its choices, the
     // figure every POS comp screen shows since S838 (posLineCosts): the recipe plus the stored line's
-    // choice stock lines with Inventory, and a build-your-own dish at its fixed part plus its choices
-    // while Customization is live, never its typed Cost Price. It THROWS on a failed read, which
-    // runSection names, so a comp is never frozen at a partial cost.
+    // choice stock lines with Inventory, and a build-your-own dish at its fixed part plus its choices,
+    // never its typed Cost Price. It THROWS on a failed read, which runSection names, so a comp is
+    // never frozen at a partial cost. A past bill is costed by what it holds, never by the
+    // Customization switch on the day the month is made (S877 owner decision, here since schema 21,
+    // S887), as its Complimentary Slip and Sales Report are: a dish marked build-your-own was rung
+    // with its build, so a month regenerated after Customization lapsed still costs it by its build.
     const recipeIds = compedItems.map(i => i.recipe_id)
     const { costOf } = await posLineCosts(supabase, clientId, compedItems, {
       inventory,
-      buildYourOwn: inventory && customizationLive ? buildYourOwnAmong((t, c) => scopedFrom(t, clientId, c), recipeIds) : [],
+      buildYourOwn: inventory ? buildYourOwnAmong((t, c) => scopedFrom(t, clientId, c), recipeIds) : [],
     })
     const compGroups = new Set()
     compedItems.forEach(i => {
@@ -745,10 +743,13 @@ export function computeCombinedMetrics({ ims, hr, labour, deliveryCommission = n
   const foodCostPct = ims.foodCostPct
   const hasLabourFigure = !!lab && lab.amount != null
   // `none` (no HR and an empty Labor tab) has no Labor Cost %: 0.0% would read as a verdict.
-  const laborCostPct = hasLabourFigure && lab.source !== 'none' && revenueTotal > 0 ? (lab.amount / revenueTotal) * 100 : null
+  // A month with less than one paisa of revenue freezes no ratio (S887, hasRevenue): a float residue
+  // left by bills all credited back is not a revenue to divide by.
+  const revOk = hasRevenue(revenueTotal)
+  const laborCostPct = hasLabourFigure && lab.source !== 'none' && revOk ? (lab.amount / revenueTotal) * 100 : null
   const primeCostPct = foodCostPct != null && laborCostPct != null ? foodCostPct + laborCostPct : null
   const commission = Number(deliveryCommission?.amount) || 0
-  const netMarginPct = hasLabourFigure && !commissionFailed && revenueTotal > 0
+  const netMarginPct = hasLabourFigure && !commissionFailed && revOk
     ? ((revenueTotal - ims.cogsTotal - (ims.cogsWastageTotal || 0) - (ims.staffMealsValueTotal || 0) - commission
       - lab.amount - ims.overheadTotal - (ims.taxFeesTotal || 0)) / revenueTotal) * 100
     : null
@@ -815,7 +816,8 @@ export function buildDeltas(current, prior) {
   const moneyDelta = (curVal, priorVal) => {
     if (curVal == null || priorVal == null) return null
     const absoluteChange = curVal - priorVal
-    const pctChange = priorVal !== 0 ? (absoluteChange / Math.abs(priorVal)) * 100 : null
+    // A prior month under one paisa is no base (S887): bills all credited back leave a float residue.
+    const pctChange = Math.abs(priorVal) >= REVENUE_FLOOR ? (absoluteChange / Math.abs(priorVal)) * 100 : null
     return { absoluteChange, pctChange }
   }
   // A v9 Food Cost % is COGS ÷ revenue and a v8 one purchases ÷ revenue (D30). Across that line the
@@ -1115,7 +1117,18 @@ async function computeTrendSection(clientId, period, currentPartial) {
 //   v19 counted it in `noRecipeCount` (and left it out of Shrinkage Trend) with its loss out of the
 //   totals. And Menu Engineering rates a build-your-own dish by its build only while Customization
 //   is live (customizationState, its end date and grace week included), not on the two bare flags.
-export const CURRENT_SCHEMA_VERSION = 20
+// 21 (S887, the S877 owner decision): Comped Bills' food cost costs a build-your-own dish by its build
+//   (its fixed part plus the choices frozen on the line) whatever the Customization switch says on
+//   the day the month is made, as Sales Report, Sales Exceptions and the Complimentary Slip have since
+//   S877. v20 did that only while Customization was live at generation, so a month regenerated after
+//   it lapsed froze such a comp at its typed Cost Price. The POS section no longer reads `clients`.
+//   No marker: no page, print, workbook or Trend reads `foodCost` today. The build-your-own rating
+//   on Menu Engineering still follows Customization at generation (a rating, not a cost).
+//   Riding along: a month with less than one paisa of revenue (bills all credited back sum to a
+//   float residue like 5e-13, not 0) now freezes no ratio, where v20 froze a Food Cost %, Labor
+//   Cost % and Net Margin % divided by the residue, and the POS payment mix no shares; Trend gives
+//   no percentage change against such a month (hasRevenue / REVENUE_FLOOR, shared/revenueFloor.js).
+export const CURRENT_SCHEMA_VERSION = 21
 
 // Runs one section's computation without letting its failure take down the rest of the report —
 // a huge menu timing out Menu Engineering, or one malformed row in a new formula, must not mean

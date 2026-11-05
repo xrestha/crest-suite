@@ -42,6 +42,7 @@ import { IDENTITY_BADGE, CLOSE_TYPE_BADGE } from '../posSignals'
 import { invoiceCodeOf } from '../../../shared/invoiceCode'
 import { profileNamesRpc, namesMapOf, fillMissingNames } from '../../../shared/profileNames'
 import { readReceiptLines, receiptTotalsByBill, owedOn, isPartPaid, settledMethodLabel } from '../creditOwed'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
 const fmtNpr = npr
 const WALKIN_KEY = '__CASH_SALES__'
@@ -1239,7 +1240,7 @@ export default function SalesReport() {
         'Returns in Net (NPR)': Math.round(p.returnNet * 100) / 100,
         'Bills Collected (NPR)': Math.round((p.net - p.returnNet) * 100) / 100,
         'Net (NPR)': Math.round(p.net * 100) / 100,
-        '% of Net Total': paymentTotals.net > 0 ? `${((p.net / paymentTotals.net) * 100).toFixed(1)}%` : '0%',
+        '% of Net Total': hasRevenue(paymentTotals.net) ? `${((p.net / paymentTotals.net) * 100).toFixed(1)}%` : '0%',
       })))
       XLSX.utils.book_append_sheet(wb, ws, 'Payment Summary')
       XLSX.writeFile(wb, `payment-summary-${fromIso}-to-${toIso}.xlsx`)
@@ -1787,7 +1788,7 @@ export default function SalesReport() {
                   <td style={{ textAlign: 'right' }}>{fmtNpr(p.taxable)}</td>
                   <td style={{ textAlign: 'right' }}>{fmtNpr(p.vat)}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmtNpr(p.net)}</td>
-                  <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{paymentTotals.net > 0 ? `${((p.net / paymentTotals.net) * 100).toFixed(1)}%` : '0%'}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>{hasRevenue(paymentTotals.net) ? `${((p.net / paymentTotals.net) * 100).toFixed(1)}%` : '0%'}</td>
                   <td style={{ textAlign: 'right', color: 'var(--theme-text2)' }}>{p.returns > 0 ? fmtNpr(p.returnNet) : '—'}</td>
                 </tr>
               ))}

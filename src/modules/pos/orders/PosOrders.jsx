@@ -4937,7 +4937,8 @@ export default function PosOrders({ billingStation = false } = {}) {
     let allPrinted = true
     for (const row of rows) {
       // Logged quantities are already the delta that was fired, so each prints as a plain ×qty.
-      const lines = (row.items || []).map(i => ({ name: i.name, qty: i.qty, notes: i.notes || '', sent_qty: 0, options: i.options || null, change: i.change === true }))
+      // combo_name rides along (S887): the first paper said "↳ Test Combo" and its reprint did not.
+      const lines = (row.items || []).map(i => ({ name: i.name, qty: i.qty, notes: i.notes || '', sent_qty: 0, options: i.options || null, change: i.change === true, combo_name: i.combo_name || null }))
       if (!printTicket(row.station, lines, row.order_no ?? orderNo, { reprint: true })) allPrinted = false
     }
     setMsg(allPrinted

@@ -46,6 +46,7 @@ import PanPriceBanner from './PanPriceBanner'
 import { findRecipeCycle, isRecipeCycleError, recipeCycleText } from './recipeCycle'
 import { CHOICE_LINE_COLS, recipeNamesOf, choiceNamesOf, subRecipeInUseText } from './subRecipeInUse'
 import FcBandKey from '../../../components/FcBandKey'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
 // How long any single save request may hang before the button gives up and re-enables itself.
 // Same class of bug as Sales Entry's S449-S455: `save()` below is several sequential network
@@ -306,7 +307,7 @@ export default function Recipes() {
         totalRevenue += rev
       })
 
-      if (totalOverheads > 0 && totalRevenue > 0) {
+      if (totalOverheads > 0 && hasRevenue(totalRevenue)) {
         setAndCache(setOverheadData, 'overheadData', { totalOverheads, totalRevenue, revenueByRecipe, coversByRecipe, openPeriodId })
       } else {
         setAndCache(setOverheadData, 'overheadData', null)
@@ -2796,7 +2797,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     🍽 Nutrition ({nutriLabel})
                   </div>
                   <div style={{ fontSize: 11, color: nutri.coverage.have < nutri.coverage.total ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>
-                    <Tip width={260} text="How many ingredients have nutrition data entered. Missing ingredients contribute 0, so values below 100% are underestimates. Add data with the Nutrition button on each ingredient row, or in Item Master.">
+                    <Tip width={260} text="How many ingredients have nutrition data entered. Missing ingredients contribute 0, so values below 100% are underestimates. A sub-recipe counts once every ingredient in it has data. Add data with the Nutrition button on each ingredient row, or in Item Master.">
                       Data: {nutri.coverage.have}/{nutri.coverage.total} ingredients
                     </Tip>
                   </div>
@@ -2834,6 +2835,10 @@ Check the recipe list before saving again — if it timed out after the recipe w
                   <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 10 }}>
                     ⚠ {nutri.coverage.total - nutri.coverage.have} ingredient(s) missing nutrition data — values are estimates.
                     {nutri.needsWeight.length > 0 && ` Counted in pieces with no weight of one piece: ${nutri.needsWeight.map(i => i.name).join(', ')}.`}
+                    {/* S887 (owner decision): get_guest_menu sends has_nutrition false for such a dish. */}
+                    {isSubRec
+                      ? ' Guests see no nutrition figures for any dish using this sub-recipe until every ingredient has them.'
+                      : ' Guests see no nutrition figures for this dish until every ingredient has them.'}
                   </div>
                 )}
                 {blankNote && (

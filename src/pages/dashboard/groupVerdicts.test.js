@@ -118,3 +118,19 @@ describe('rankMarks', () => {
     expect(rankMarks([{ id: 'a', pct: 30 }, { id: 'b', pct: 30 }, { id: 'c', pct: 30 }])).toEqual({})
   })
 })
+
+// S887: a month whose bills were all credited back sums to a float residue like 5e-13, not 0.
+describe('an outlet with less than one paisa of revenue has no ratios (S887)', () => {
+  const labour = { hasFigure: true, amount: 25000, source: 'payroll', other: null, verdictWithheld: false }
+  test('a residue revenue gives no Labour % and no cost ratio', () => {
+    const r = open({ revenue: 5.2e-13, revenue_counted: 5.2e-13, labour })
+    expect(rowLabourPct(r, past)).toBeNull()
+    expect(rowLabourPct(r, running(12))).toBeNull()
+    expect(rowCostRatio(r, past).pct).toBeNull()
+  })
+  test('one paisa still computes', () => {
+    const r = open({ revenue: 0.01, net_purchases: 0.005, labour: { ...labour, amount: 0.005 } })
+    expect(rowLabourPct(r, past)).toBeCloseTo(50, 9)
+    expect(rowCostRatio(r, past).pct).toBeCloseTo(50, 9)
+  })
+})

@@ -133,6 +133,40 @@ describe('a near miss asks for the label, never ticks', () => {
   })
 })
 
+// S887: in English the thing a name is comes last, so a packaging word outranks a label word only
+// when it comes after it. "BOWL" in a food name was turning sauces and gravies into Not food, and a
+// Not food confirm marks the item checked with no allergens.
+describe('a label word after the packaging word asks for the label, never Not food', () => {
+  test('found in the real item book: a bowl gravy, a bowl sauce, a bowl marination', () => {
+    expect(suggestAllergens('KOREAN RICE BOWL GRAVY')).toMatchObject({ keys: [], notFood: null, checkLabel: ['gravy'] })
+    expect(suggestAllergens('BOWL SAUCE')).toMatchObject({ keys: [], notFood: null, checkLabel: ['sauce'] })
+    expect(suggestAllergens('BOWL MARINATION')).toMatchObject({ keys: [], notFood: null, checkLabel: ['marination'] })
+  })
+  test('the other food heads that follow a packaging word', () => {
+    for (const [name, word] of [
+      ['SALAD BOWL DRESSING', 'dressing'], ['POKE BOWL MARINADE', 'marinade'], ['BOWL GARNISH', 'garnish'],
+      ['ACAI BOWL TOPPINGS', 'toppings'], ['ACAI BOWL TOPPING', 'topping'], ['BURRITO BOWL FILLING', 'filling'],
+      ['BOWL MIX', 'mix'], ['RICE BOWL MASALA', 'masala'], ['BOX BAKING POWDER', 'baking powder'],
+    ]) {
+      const s = suggestAllergens(name)
+      expect([name, s.notFood, s.checkLabel.includes(word)]).toEqual([name, null, true])
+    }
+  })
+  test('packaging stays Not food when its word comes last, or no label word is there', () => {
+    expect(suggestAllergens('DIP CUP')).toMatchObject({ notFood: 'cup', checkLabel: [] })
+    expect(suggestAllergens('GLEN 2 - 50ML DIP CUP W/ LID (BLACK)')).toMatchObject({ notFood: 'cup', checkLabel: [] })
+    expect(suggestAllergens('750 BROWN KRAFT BOWL')).toMatchObject({ notFood: 'kraft', checkLabel: [] })
+    expect(suggestAllergens('CERAMIC BOWL 6 INCH')).toMatchObject({ notFood: 'bowl', checkLabel: [] })
+    expect(suggestAllergens('PAPER 750ML SALAD BOX WITH LID')).toMatchObject({ notFood: 'paper', checkLabel: [] })
+    // A sauce cup holds sauce: the cup comes last, so it is the cup.
+    expect(suggestAllergens('BOWL SAUCE CUP')).toMatchObject({ notFood: 'bowl', checkLabel: [] })
+    expect(suggestAllergens('SAUCE CONTAINER 100ML')).toMatchObject({ notFood: 'container', checkLabel: [] })
+  })
+  test('an allergen word still outranks both', () => {
+    expect(suggestAllergens('BOWL CHEESE SAUCE')).toMatchObject({ keys: ['milk'], notFood: null, checkLabel: ['sauce'] })
+  })
+})
+
 describe('oneEditApart', () => {
   test('one change, one added or removed letter, or one swap of neighbours', () => {
     expect(oneEditApart('crean', 'cream')).toBe(true)

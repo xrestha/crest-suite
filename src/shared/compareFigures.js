@@ -6,8 +6,12 @@
 // more discount is not). Inside the dead zone the direction is noise, so the mark is ≈ with no
 // verdict (S644): within `pct` percent OR `floor` units, whichever is more forgiving. With nothing
 // to compare against there is no comparison at all, never a 100% rise.
+import { hasRevenue } from './revenueFloor'
+
 export function compareFigures(now, then, { goodDirection = 1, pct = 5, floor = 0 } = {}) {
-  if (now == null || then == null || !(then > 0)) return null
+  // Under one paisa is no baseline: a period whose bills were all credited back sums to a float
+  // residue, and a change measured against it read as a rise of billions of percent (S887).
+  if (now == null || then == null || !hasRevenue(then)) return null
   const gap = now - then
   const gapPct = Math.abs(gap / then) * 100
   const flat = Math.abs(gap) <= Math.max(then * (pct / 100), floor)

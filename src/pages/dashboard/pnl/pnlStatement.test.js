@@ -1,6 +1,6 @@
 import {
   LINES, buildStatement, columnMarkers, fmtLine, groupColumn, labourMarker, lineColor, lineWithheld,
-  pnlNotes, statementRows, sumStatements,
+  pnlNotes, pctOf, statementRows, sumStatements,
 } from './pnlStatement'
 
 const payroll = (amount = 30000) => ({ source: 'payroll', amount, hasFigure: true, verdictWithheld: false, ignoredBucket: 0 })
@@ -176,5 +176,22 @@ describe('statementRows', () => {
     const rows = statementRows({ stmt: sumStatements([a, a]), monthCols: [{ label: 'Shrawan 2082', stmt: a }, { label: 'Bhadra 2082', stmt: a }] })
     expect(Object.keys(rows[0])).toEqual(['Line', 'Shrawan 2082', 'Bhadra 2082', 'Year (NPR)', '% of Revenue'])
     expect(rows.find(r => r.Line === 'Labour')['Year (NPR)']).toBe(-60000)
+  })
+})
+
+// S887: a month whose bills were all credited back sums to a float residue, not to 0, and dividing
+// by it printed an absurd percentage on every line of the statement.
+describe('pctOf: a share of revenue needs at least one paisa of revenue', () => {
+  test('a residue revenue gives a dash on every line', () => {
+    expect(pctOf(-12500, 5.2e-13)).toBe('—')
+    expect(pctOf(0, 5.2e-13)).toBe('—')
+    expect(pctOf(100, 0)).toBe('—')
+    expect(pctOf(100, null)).toBe('—')
+  })
+
+  test('one paisa still computes, and so does an ordinary month', () => {
+    expect(pctOf(0.005, 0.01)).toBe('50.0%')
+    expect(pctOf(35000, 100000)).toBe('35.0%')
+    expect(pctOf(null, 100000)).toBe('—')
   })
 })

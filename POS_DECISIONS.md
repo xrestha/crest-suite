@@ -70,6 +70,32 @@ Last updated: 2026-08-30 (S654)
   handing guests a "challan" before the real bill was illegal. Do not propose it again without an
   accountant's written answer.
 
+- [x] ✅ **Crest Customization — release 1 SHIPPED (S758, critique pass S759); the code follow-ups
+  **Closed S887 (2026-11-05): the last two browser checks pressed on BLOOM CAFE as Crest support** (Playwright):
+  the refused Add scrolled the choice window to Test Bowl · Base and focused its choice, with "Choose 1 more
+  from Test Bowl · Base."; Test Combo sent on T1 (#2657), its price raised 500 → 550, then a dish swapped: the
+  swap window, bill preview and total kept NPR 500, the KOT carried "↳ Test Combo", the KDS showed the pulled dish
+  struck through with its reason. Found: a KOT/BOT reprint dropped the combo line (fixed, crest-v497). The order
+  was voided as "Test order" (VOID slips carried the combo) and the price set back to NPR 500.
+  shipped S838** (comp costs with choices, the Sub-Recipes tab, the sub-recipe delete message, HQ's
+  push carrying choices; see [POS_DECISIONS.md](POS_DECISIONS.md) A). Still open:
+  - **Browser checks still to press (needs the owner, a staff PIN and a till), on BLOOM CAFE** (a test
+    outlet with Customization on; never CASA ACAI CAFE, a paying customer, since the template writes
+    onto its menu):
+    - S759's two till checks: ~~the cart's choices line~~ (passed live S853), and the choice window
+      scrolling to the short group on a refused Add (no BLOOM dish yet has a required choice without a pre-pick);
+    - a swap within a pick on a combo already on the bill, then the bill, ticket and KDS look of the
+      swapped combo; since S862, also after changing the combo's price first (the combo must keep
+      the price it was ordered at).
+    Pressed in S856 (2026-10-22) and moved to POS_DECISIONS.md A (S862 ADD-4): the S760
+    build-your-own pass (template, a Large on the till, 150 GM / 15 GM at close, the cost range fixed
+    in crest-v471), and the combo pass (Test Combo set up and rung with its own choice to the KOT and
+    BOT, moved, a discount on its non-combo dish only, comped: TI2642/TI2643; the guest QR combo to
+    Accept and the KDS, #2655). The guest steps were pressed in S767.
+  - ~~Release 2: combos~~ — shipped S839 (both kinds; see POS_DECISIONS.md A and `docs/pos-combos.md`).
+    Closed in S840: HQ's push carries combos; the combo window hides the dish's quantity stepper;
+    offline recovery matches a printed dish by its full line key.
+
 ## B. Reports — compliance-adjacent
 
 - [x] ~~Purchase-side One Lakh Above / Annexure 13 (vendor-wise)~~ — shipped S235, 2026-07-04. Now `src/modules/ims/reports/PurchaseOneLakhAboveReport.js`, `/purchase-one-lakh-report`. Reuses `buildVendorSummary` across a full BS fiscal year's `periodIds`, same missing-PAN/Annexure-13 badge convention as the POS-side report. Gated on the existing `vat_report` feature flag — no new flag/migration. **That helper moved to `src/modules/ims/reports/purchaseTaxSplit.js` in S722** (it had been exported from `VatReport.js`), and S723 gave it two properties this report depends on: `count` is BILLS rather than lines, and the row carries `vatAmt`/`invoiced` so the one-lakh threshold is tested on the ex-VAT net **and** on what the vendor actually invoiced, flagging on either.
@@ -139,6 +165,24 @@ same ground is not re-walked; full detail in README S652/S653/S654.
   `try/catch` blocks that had never once fired because supabase-js resolves with `{ error }` rather
   than throwing. The one that mattered: a dropped `sent_to_kot` write printed a ticket the server
   still considered unsent, so the next KOT press **cooked the dish twice**.
+
+- [x] ✅ **(1) pressed S856:** a Staff PIN idle 3+ minutes (screen dark) locked to the PIN screen, named the kept item, and brought it back unsent. **(2) and (4) passed live S853** on BLOOM CAFE (Start · 10m and Other time; Find a table). **(3) pressed S887:** the Shift History list and a closing report show ✓ Balanced green, △ Over amber and ▲ Short red (21st Bhadra 2083, NPR −350). **Four S776 behaviours were verified in code and tests but never pressed live** (S776,
+  2026-09-17), each for want of a real till or live service on the dummy client:
+  (1) **the idle lock on a real PIN session** — keep and restore were exercised by firing the lock
+  event by hand as the Owner, and the PIN screen's note by a render test, because the browser was not
+  an activated till; one activated tablet and a staff PIN left idle for 3 minutes answers it;
+  (2) ~~**the KDS estimate presets starting a ticket in one tap**~~ — superseded S846: Start itself is
+  one tap at 10 minutes, with presets behind "Other time" (tests press both; still not pressed live);
+  (3) **the unified variance display** (✓/▲/△) on a closed shift;
+  (4) **the Billing station's "Find a table…"**, which needs two or more open bills.
+- [x] ✅ **Pressed S853 on BLOOM CAFE:** the focus ring, Start · 10m / Other time, Close Shift and the guest
+  **Closed S887:** the payment window after S854 pressed at 390px and 768px on a combo bill: amount first, the
+  methods wrap, nothing runs off the edge; "Adjust this bill" opens full-width buyer boxes and the combo note.
+  mark key (inside Filters) passed; the payment window at 390px showed two faults, fixed S854. **Left:** the
+  payment window after S854's fix, on a phone and a tablet. **S846 was never looked at in a browser** (the Chrome extension was not connected). Worth one
+  pass on a real till: the payment window's new order and its "Adjust this bill" line on a phone and a
+  tablet, a floor tile's one-button focus ring, the KDS "Start · 10m" / "Other time" pair, Close Shift
+  before and after the first note, and the guest menu's mark key.
 
 ## C. Reports — analytics / competitor parity (confirmed non-mandatory, pure business intelligence)
 

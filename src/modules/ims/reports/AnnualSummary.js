@@ -22,6 +22,7 @@ import { useBizInfo } from '../../../shared/hooks/useBizInfo'
 import { findUncountedItems, mergeGaps, gapNote, unjudgedFcFigure } from '../../../shared/uncountedItems'
 import NoPeriodState from '../../../components/NoPeriodState'
 import { readPeriodTransfers, lineValue } from '../transfers/transferFlows'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
 // Nepal fiscal year starts Shrawan (month 4)
 // bs_month >= 4 → fiscal year = bs_year; else fiscal year = bs_year - 1
@@ -271,7 +272,7 @@ export default function AnnualSummary() {
         const price = r.unit_price != null ? parseFloat(r.unit_price) : (recipeMap[r.recipe_id] || 0)
         return s + parseFloat(r.qty_sold) * price - (parseFloat(r.discount) || 0)
       }, 0)
-      const fcPct     = revenue > 0 ? (cogs / revenue) * 100 : null
+      const fcPct     = hasRevenue(revenue) ? (cogs / revenue) * 100 : null
 
       // Uncounted items for THIS month (S756 D6), off the rows already grouped above. A closing row
       // with physical_qty 0 is a count; a NULL or missing one is not. The month's COGS is unchanged;
@@ -306,7 +307,7 @@ export default function AnnualSummary() {
     const totTOut    = rows.reduce((s, r) => s + r.tOutVal, 0)
     const totNetPurch= totPurch - totDisc - totRet + totTIn - totTOut
     const totWaste   = rows.reduce((s, r) => s + r.wasteVal, 0)
-    const totFcPct   = totRevenue > 0 ? (totCogs / totRevenue) * 100 : null
+    const totFcPct   = hasRevenue(totRevenue) ? (totCogs / totRevenue) * 100 : null
     // The year's FC% carries every month's uncounted stock, so it is judged on the year's gap as a
     // whole — item-months against item-months, value against the year's COGS (mergeGaps).
     const totGap     = mergeGaps(rows.map(r => r.gap))

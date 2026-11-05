@@ -29,8 +29,10 @@ import { compareItemPrices } from './groupItemPriceMath'
 
 const LIMIT = 10
 
+// Two decimals from NPR 1 up (S887): "650.7292 / KG" was noise beside "2,387.00 / KG" on a phone, and
+// the comparison column carries the exact rupee gap. Below NPR 1 fmtUnitRate keeps four by itself.
 const rateText = (rate, uom) => {
-  const p = unitRateParts(rate, uom, { precise: true })
+  const p = unitRateParts(rate, uom)
   return p ? `${p.primary.value}${p.primary.unit ? ` / ${p.primary.unit}` : ''}` : '—'
 }
 

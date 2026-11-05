@@ -166,13 +166,17 @@ describe('Comped Bills food cost includes the choices (v20)', () => {
     expect(pos).toMatch(/compedFoodCost \+= i\.qty \* costOf\(i\)/)
     expect(pos).not.toMatch(/computeRecipeCosts/)
   })
-  test('Inventory is the client\'s module flag and build-your-own follows the client\'s live Customization', () => {
+  test('Inventory is the module flag of the client, never the viewer', () => {
     expect(flat).toMatch(/computePosSection\(clientId, period, \{ inventory: !!modulesIncluded\.ims \}\)/)
-    expect(pos).toMatch(/supabase\.from\('clients'\)\.select\('pos_enabled, customization_enabled, customization_ends_at'\)\.eq\('id', clientId\)\.single\(\)/)
-    expect(pos).toMatch(/customizationState\(clientRes\.data\)\.live/)
-    expect(pos).toMatch(/buildYourOwn: inventory && customizationLive \? buildYourOwnAmong\(/)
-    // The clients read rides in the first batch, so a failed read fails the section.
-    expect(pos.indexOf("supabase.from('clients')")).toBeLessThan(pos.indexOf('throwFirstError(posResults)'))
+  })
+  // S887, schema v21 (the S877 owner decision): a past bill is costed by what it holds, never by the
+  // Customization switch on the day the month is made, as Sales Report and the Complimentary Slip are.
+  test('a build-your-own comp is costed by its build whatever Customization says at generation (v21)', () => {
+    expect(pos).toMatch(/buildYourOwn: inventory \? buildYourOwnAmong\(\(t, c\) => scopedFrom\(t, clientId, c\), recipeIds\) : \[\]/)
+    expect(pos).not.toMatch(/customizationLive|customizationState|customization_enabled/)
+    // Nothing else in the section needed the client row, so the read is gone with the gate.
+    expect(pos).not.toMatch(/supabase\.from\('clients'\)/)
+    expect(CURRENT_SCHEMA_VERSION).toBeGreaterThanOrEqual(21)
   })
   test('the figure is marked, and the schema version moved with its meaning', () => {
     expect(pos).toMatch(/compedBillsTotal: \{[^}]*costBasis: 'with_choices'/)

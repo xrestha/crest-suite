@@ -31,6 +31,7 @@ import ClosedPeriodBanner from '../../../components/ClosedPeriodBanner'
 import { nprPaisa } from '../../../shared/nepalMoney'
 import { nepalTime, nepalBsLong } from '../../../shared/nepalTime'
 import { salesDraftId, salesDraftSignature, readSalesDraft, saveSalesDraft, clearSalesDraft, draftBaseMoved } from './salesEntryDraft'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
 // S454 added a pre-save `getSession()` probe on an 8s clock to diagnose a hang. It served its
 // purpose and is deliberately GONE (S458): an 8s gate is *tighter* than the 15s cap that
@@ -2023,7 +2024,7 @@ export default function Sales() {
                         const sold = allDaySums[recipe.id] || 0
                         const disc = allDayDiscounts[recipe.id] || 0
                         const rev  = recipeRevenue(recipe)
-                        const revPct = baseTotalRev > 0 ? (rev / baseTotalRev) * 100 : 0
+                        const revPct = hasRevenue(baseTotalRev) ? (rev / baseTotalRev) * 100 : 0
                         // An unsold item is labelled by its "—" sold count and a slate name, never by
                         // opacity: at 0.4 the name measured 2.5:1 and the figure 1.9:1 (S682).
                         return (

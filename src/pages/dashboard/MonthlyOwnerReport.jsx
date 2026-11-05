@@ -94,7 +94,7 @@ function DirectionMark({ good, rose }) {
 // of last month (lastMonthFigures), or a dash whose Tip says why. Plain text and no band: the verdict
 // belongs to this month's figure, and nothing in a cell is a button, so it prints whole.
 function LastMonthCell({ cell, show }) {
-  if (cell?.value != null) return <td className="owner-report-last">{show(cell.value)}</td>
+  if (cell?.value != null) return <td className="owner-report-last"><span className="owner-report-nowrap">{show(cell.value)}</span></td>
   return <td className="owner-report-last">{cell?.why ? <Tip text={cell.why} width={260}>—</Tip> : '—'}</td>
 }
 
@@ -879,7 +879,9 @@ function MonthlyOwnerReportBody() {
                   <tbody>
                     <tr>
                       <td>Revenue</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700 }}>{fmt(snapshot.combined?.revenueTotal)}</td>
+                      {/* S887: each figure, figure-and-mark and target keeps to one line ("NPR" over
+                          "7,05,786" at 375px); the notes under a figure still wrap. */}
+                      <td style={{ textAlign: 'right', fontWeight: 700 }}><span className="owner-report-nowrap">{fmt(snapshot.combined?.revenueTotal)}</span></td>
                       <LastMonthCell cell={lm?.rows.revenue} show={fmt} />
                       <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>—</td>
                     </tr>
@@ -896,7 +898,7 @@ function MonthlyOwnerReportBody() {
                           </Tip>
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: fcCellOf(snapshot.combined?.foodCostPct).color }} title={fcCellOf(snapshot.combined?.foodCostPct).title}>
-                          {pct(snapshot.combined?.foodCostPct)} {fcCellOf(snapshot.combined?.foodCostPct).mark}
+                          <span className="owner-report-nowrap">{pct(snapshot.combined?.foodCostPct)} {fcCellOf(snapshot.combined?.foodCostPct).mark}</span>
                           {fcNotPositive && <span style={subStyle}>not judged: a count or a bill is missing</span>}
                         </td>
                         <LastMonthCell cell={lm?.rows.foodCost} show={pct} />
@@ -906,7 +908,7 @@ function MonthlyOwnerReportBody() {
                           <Tip text={fcFrozen
                             ? `Your Food Cost target when this report was made: up to ${fcT.warn}% is on target, above ${fcT.critical}% is critical. Saved with the report, so changing Settings later does not re-judge it.`
                             : `Your Food Cost target in Settings today (up to ${fcT.warn}%, critical above ${fcT.critical}%). This report was made before the thresholds were saved with it.`} width={260}>
-                            ≤ {fcT.warn}%
+                            <span className="owner-report-nowrap">≤ {fcT.warn}%</span>
                           </Tip>
                         </td>
                       </tr>
@@ -919,24 +921,24 @@ function MonthlyOwnerReportBody() {
                       <tr>
                         <td><Tip text={laborTip} width={280}>Labor Cost %</Tip></td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: lcBandOf(snapshot.combined?.laborCostPct).color }} title={lcBandOf(snapshot.combined?.laborCostPct).title}>
-                          {pct(snapshot.combined?.laborCostPct)} {lcBandOf(snapshot.combined?.laborCostPct).mark}
+                          <span className="owner-report-nowrap">{pct(snapshot.combined?.laborCostPct)} {lcBandOf(snapshot.combined?.laborCostPct).mark}</span>
                           {lab?.source === 'none' && <span style={subStyle}>no labour entered on Overheads</span>}
                           {labourSub && <span style={subStyle}>{labourSub}</span>}
                           {labourNotJudgedSub && <span style={subStyle}>{labourNotJudgedSub}</span>}
                         </td>
                         <LastMonthCell cell={lm?.rows.labour} show={pct} />
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>25–30%</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><span className="owner-report-nowrap">25–30%</span></td>
                       </tr>
                     )}
                     {snapshot.ims && labourShown && (
                       <tr>
                         <td><Tip text="Food Cost % + Labor Cost % — the number operators benchmark against." width={240}>Prime Cost %</Tip></td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: pcCellOf(snapshot.combined?.primeCostPct).color }} title={pcCellOf(snapshot.combined?.primeCostPct).title}>
-                          {pct(snapshot.combined?.primeCostPct)} {pcCellOf(snapshot.combined?.primeCostPct).mark}
+                          <span className="owner-report-nowrap">{pct(snapshot.combined?.primeCostPct)} {pcCellOf(snapshot.combined?.primeCostPct).mark}</span>
                           {snapshot.combined?.primeCostPct != null && labourSub && <span style={subStyle}>{labourSub}</span>}
                         </td>
                         <LastMonthCell cell={lm?.rows.prime} show={pct} />
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>≤60–65%</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><span className="owner-report-nowrap">≤60–65%</span></td>
                       </tr>
                     )}
                     {snapshot.ims && labourShown && (
@@ -948,7 +950,7 @@ function MonthlyOwnerReportBody() {
                         <td style={{ textAlign: 'right', fontWeight: 700, color: nmCellOf(snapshot.combined?.netMarginPct).color }} title={nmCellOf(snapshot.combined?.netMarginPct).title}>
                           {snapshot.combined?.netMarginPct == null && !canOverheads
                             ? `Requires Overheads (${overheadsTier})`
-                            : <>{pct(snapshot.combined?.netMarginPct)} {nmCellOf(snapshot.combined?.netMarginPct).mark}</>}
+                            : <span className="owner-report-nowrap">{pct(snapshot.combined?.netMarginPct)} {nmCellOf(snapshot.combined?.netMarginPct).mark}</span>}
                           {snapshot.combined?.netMarginPct != null && <>
                             {lab?.source === 'none' && <span style={subStyle}>no labour entered on Overheads</span>}
                             {labourSub && <span style={subStyle}>{labourSub}</span>}
@@ -959,7 +961,7 @@ function MonthlyOwnerReportBody() {
                           )}
                         </td>
                         <LastMonthCell cell={lm?.rows.netMargin} show={pct} />
-                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}>≥20%</td>
+                        <td style={{ textAlign: 'right', color: 'var(--theme-text3)' }}><span className="owner-report-nowrap">≥20%</span></td>
                       </tr>
                     )}
                   </tbody>

@@ -29,6 +29,7 @@ import {
   FC_CUTOFF, QUADRANT_KEYS, classify, median, menuFcPct, unratedReason,
 } from '../../../shared/menuEngineering'
 import { BYO_REASON, BYO_TIP, isCostedByBuild } from './buildYourOwnRating'
+import { hasRevenue } from '../../../shared/revenueFloor'
 
 const QUADRANTS = {
   Star:      { color: 'var(--theme-green-text)', bg: 'color-mix(in srgb, var(--theme-green) 10%, transparent)', border: 'color-mix(in srgb, var(--theme-green) 30%, transparent)', icon: '★', desc: 'High profit · High popularity' },
@@ -642,7 +643,7 @@ export default function MenuEngineering() {
               footer={topItems.length > 0 && (
                 <div style={{ fontSize: 11, color: 'var(--theme-text2)', marginTop: 8 }}>
                   Top {topItems.length} = <strong style={{ color: 'var(--theme-text1)' }}>NPR {topItemsRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong>
-                  {allItemsRevenue > 0 && <> · <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{((topItemsRevenue / allItemsRevenue) * 100).toFixed(0)}%</span> of total menu revenue</>}
+                  {hasRevenue(allItemsRevenue) && <> · <span style={{ color: 'var(--theme-text1)', fontWeight: 600 }}>{((topItemsRevenue / allItemsRevenue) * 100).toFixed(0)}%</span> of total menu revenue</>}
                 </div>
               )}
               renderChart={h => topItems.length === 0 ? (
