@@ -19,6 +19,14 @@
 .owner-report-table td {
   padding: 6px 8px;
 }
+/* S887: with each figure kept on one line, the four-column Financial Summary ran 8px past a 375px phone
+   and clipped its Target column; 5px a side gives the row back 24px. Screen only, so paper keeps 8px. */
+@media screen and (max-width: 420px) {
+  .owner-report-table th,
+  .owner-report-table td {
+    padding: 6px 5px;
+  }
+}
 
 .owner-report-section {
   margin-bottom: 18px;
