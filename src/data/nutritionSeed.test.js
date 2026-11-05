@@ -36,14 +36,14 @@ describe('the regional tables (foodTables.json, built by scripts/food-tables)', 
   })
 
   test('a Nepal row has sugar and sodium only when borrowed, and never more sugar than carbohydrate', () => {
-    TABLES.filter(r => r.source === 'DFTQC Nepal').forEach(r => {
-      if (r.borrowed) {
-        expect(Number.isFinite(r.sugar_g) && Number.isFinite(r.sodium_mg)).toBe(true)
-        expect(r.sugar_g).toBeLessThanOrEqual(r.carbs_g)
-      } else {
-        expect(r.sugar_g).toBeNull()
-        expect(r.sodium_mg).toBeNull()
-      }
+    const nepal = TABLES.filter(r => r.source === 'DFTQC Nepal')
+    nepal.filter(r => r.borrowed).forEach(r => {
+      expect(Number.isFinite(r.sugar_g) && Number.isFinite(r.sodium_mg)).toBe(true)
+      expect(r.sugar_g).toBeLessThanOrEqual(r.carbs_g)
+    })
+    nepal.filter(r => !r.borrowed).forEach(r => {
+      expect(r.sugar_g).toBeNull()
+      expect(r.sodium_mg).toBeNull()
     })
     TABLES.filter(r => r.source === 'IFCT 2017').forEach(r => {
       expect(Number.isFinite(r.sugar_g) && Number.isFinite(r.sodium_mg)).toBe(true)
@@ -69,7 +69,9 @@ describe('the regional tables (foodTables.json, built by scripts/food-tables)', 
 describe('the USDA list after the S887 check', () => {
   const REPLACED = ['Beaten rice (chiura)', 'Paneer / cheese (soft)', 'Khuwa / mawa', 'Jaggery (gud/sakhar)',
     'Fish (freshwater, raw)']
-  const REMOVED = ['Garam masala / mixed spice', 'Tea leaves (dry)']
+  // S890: FDC prints no sugar for these three; the regional tables do, and already ranked first.
+  const REMOVED = ['Garam masala / mixed spice', 'Tea leaves (dry)', 'Semolina (suji)', 'Black gram (maas/urad)',
+    'Coriander (dhaniya)']
   const usda = NUTRITION_SEED.filter(r => r.source === 'USDA')
 
   test('no USDA row is a food that went to a regional table or was removed', () => {
@@ -83,9 +85,10 @@ describe('the USDA list after the S887 check', () => {
   })
 
   test('every USDA figure is a number or left out, never text', () => {
-    usda.forEach(r => ['energy_kcal', 'protein_g', 'carbs_g', 'fat_g', 'sugar_g', 'sodium_mg'].forEach(k => {
-      if (r[k] != null) expect(Number.isFinite(r[k]) && r[k] >= 0).toBe(true)
-    }))
+    const figures = usda.flatMap(r => ['energy_kcal', 'protein_g', 'carbs_g', 'fat_g', 'sugar_g', 'sodium_mg']
+      .map(k => r[k]).filter(v => v != null))
+    expect(figures.length).toBeGreaterThan(0)
+    figures.forEach(v => expect(Number.isFinite(v) && v >= 0).toBe(true))
   })
 
   test('a kitchen name points at a table row that exists, and adds no row', () => {
@@ -138,6 +141,31 @@ describe('matching', () => {
     expect(top(lib, 'WHITE JAGGERY')?.id).toBe('NP-O13')
     expect(top(lib, 'CHAKU')?.id).toBe('NP-O14')
     expect(top(lib, 'TUNA FISH')?.name).toBe('Tuna')
+  })
+
+  // S890 (owner): a sugar FDC never measured is not a 0; the regional row with a real figure fills.
+  test.each([
+    ['SUJI', 'IN-A022', 1.6], ['SEMOLINA', 'IN-A022', 1.6], ['RAVA', 'IN-A022', 1.6],
+    ['MAAS DAL', 'IN-B003', 0.8], ['URAD DAL', 'IN-B003', 0.8],
+  ])('%s fills from %s with a measured sugar', (item, id, sugar) => {
+    const row = top(lib, item)
+    expect(row?.id).toBe(id)
+    expect(row.sugar_g).toBe(sugar)
+  })
+
+  test('chia keeps its USDA row and a sugar of 0 (owner, S890: chia packs print 0 g)', () => {
+    expect(top(lib, 'CHIA SEED')).toMatchObject({ name: 'Chia seed', source: 'USDA', sugar_g: 0 })
+  })
+
+  // S890 (owner): plain coriander is the fresh leaf; seed and powder are the dried seed.
+  test.each([
+    ['CORIANDER', 'NP-C20'], ['DHANIYA', 'NP-C20'], ['DHANIA', 'NP-C20'], ['HARIYO DHANIYA', 'NP-C20'],
+    ['GREEN CORIANDER', 'NP-C20'], ['FRESH CORIANDER', 'NP-C20'], ['CILANTRO', 'NP-C20'],
+    ['CORIANDER LEAVES', 'NP-C20'],
+    ['CORIANDER SEED', 'IN-G024'], ['DHANIYA SEED', 'IN-G024'], ['CORIANDER POWDER', 'IN-G024'],
+    ['DHANIYA POWDER', 'IN-G024'], ['DHANIA POWDER', 'IN-G024'],
+  ])('%s fills from %s', (item, id) => {
+    expect(top(lib, item)?.id).toBe(id)
   })
 
   test('neither FDC nor the regional tables have garam masala or dry tea, so nothing fills them', () => {

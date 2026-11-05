@@ -26,6 +26,9 @@ import { NUTRIENTS, defaultBasisUnit } from '../utils/nutrition'
 // food in the Nepal or Indian table (beaten rice, paneer, khuwa, jaggery, freshwater fish), or
 // removed where neither table has it (garam masala, dry tea leaves). A figure FDC does not print
 // stays out, never 0, except where it is plainly 0 (no sugar in meat, fish or oil).
+// S890 (owner, 2026-11-05): semolina, black gram and coriander were removed because FDC prints no
+// sugar for them while the regional tables do and already ranked first. Chia keeps a sugar of 0
+// (no table measures it; chia packs print 0 g).
 
 export const NUTRITION_SEED = [
   // ════════════════════════ USDA (FoodData Central) ════════════════════════
@@ -36,7 +39,6 @@ export const NUTRITION_SEED = [
   { name: 'Whole wheat flour (atta)', match: ['atta', 'whole wheat', 'gahu'], unit: 'GM', source: 'USDA', energy_kcal: 340, protein_g: 13, carbs_g: 72, fat_g: 2.5, sugar_g: 0.4, sodium_mg: 2, allergens: 'gluten' },
   { name: 'Gram flour (besan)',     match: ['besan', 'gram flour', 'chickpea flour'], unit: 'GM', source: 'USDA', energy_kcal: 387, protein_g: 22, carbs_g: 58, fat_g: 6.7, sugar_g: 11, sodium_mg: 64, allergens: '' },
   { name: 'Cornflour / cornstarch', match: ['cornflour', 'cornstarch', 'corn flour'], unit: 'GM', source: 'USDA', energy_kcal: 381, protein_g: 0.3, carbs_g: 91, fat_g: 0.1, sugar_g: 0, sodium_mg: 9, allergens: '' },
-  { name: 'Semolina (suji)',        match: ['suji', 'semolina', 'rava'], unit: 'GM', source: 'USDA', energy_kcal: 360, protein_g: 13, carbs_g: 73, fat_g: 1.1, sugar_g: 0, sodium_mg: 1, allergens: 'gluten' },
   // Plain wheat noodles: FDC 169736 "Pasta, dry, enriched". FDC files an egg-free noodle as pasta (its
   // dry "Noodles" rows are egg noodles), so this is the same wheat-and-water dough, with no egg.
   { name: 'Noodles (dry)',          match: ['noodle', 'chowmein', 'chow mein'], unit: 'GM', source: 'USDA', energy_kcal: 371, protein_g: 13, carbs_g: 75, fat_g: 1.5, sugar_g: 2.7, sodium_mg: 6, allergens: 'gluten' },
@@ -50,7 +52,6 @@ export const NUTRITION_SEED = [
   { name: 'Lentils (dal, raw)',     match: ['dal', 'daal', 'lentil', 'masoor'], unit: 'GM', source: 'USDA', energy_kcal: 352, protein_g: 25, carbs_g: 63, fat_g: 1.1, sugar_g: 2, sodium_mg: 6, allergens: '' },
   { name: 'Chickpeas (chana, raw)', match: ['chana', 'chickpea', 'kabuli'], unit: 'GM', source: 'USDA', energy_kcal: 364, protein_g: 19, carbs_g: 61, fat_g: 6, sugar_g: 11, sodium_mg: 24, allergens: '' },
   { name: 'Kidney beans (rajma)',   match: ['rajma', 'kidney bean'], unit: 'GM', source: 'USDA', energy_kcal: 333, protein_g: 24, carbs_g: 60, fat_g: 0.8, sugar_g: 2.1, sodium_mg: 12, allergens: '' },
-  { name: 'Black gram (maas/urad)', match: ['maas', 'urad', 'black gram'], unit: 'GM', source: 'USDA', energy_kcal: 341, protein_g: 25, carbs_g: 59, fat_g: 1.6, sugar_g: 0, sodium_mg: 38, allergens: '' },
   { name: 'Soybean (raw)',          match: ['soybean', 'soya', 'bhatmas'], unit: 'GM', source: 'USDA', energy_kcal: 446, protein_g: 36, carbs_g: 30, fat_g: 20, sugar_g: 7, sodium_mg: 2, allergens: 'soy' },
   { name: 'Green peas',             match: ['peas', 'matar', 'kerau'], unit: 'GM', source: 'USDA', energy_kcal: 81, protein_g: 5.4, carbs_g: 14, fat_g: 0.4, sugar_g: 5.7, sodium_mg: 5, allergens: '' },
 
@@ -112,7 +113,7 @@ export const NUTRITION_SEED = [
   { name: 'Blueberry',              match: ['blueberry'], unit: 'GM', source: 'USDA', energy_kcal: 57, protein_g: 0.7, carbs_g: 14, fat_g: 0.3, sugar_g: 10, sodium_mg: 1, allergens: '' },
   { name: 'Granola',                match: ['granola', 'muesli'], unit: 'GM', source: 'USDA', energy_kcal: 489, protein_g: 13.7, carbs_g: 53.9, fat_g: 24.3, sugar_g: 19.8, sodium_mg: 26, allergens: 'gluten, tree nuts' }, // FDC 171646
   { name: 'Peanut butter',          match: ['peanut butter'], unit: 'GM', source: 'USDA', energy_kcal: 588, protein_g: 25, carbs_g: 20, fat_g: 50, sugar_g: 9, sodium_mg: 17, allergens: 'peanuts' },
-  { name: 'Chia seed',              match: ['chia'], unit: 'GM', source: 'USDA', energy_kcal: 486, protein_g: 17, carbs_g: 42, fat_g: 31, sugar_g: 0, sodium_mg: 16, allergens: '' },
+  { name: 'Chia seed',              match: ['chia'], unit: 'GM', source: 'USDA', energy_kcal: 486, protein_g: 17, carbs_g: 42, fat_g: 31, sugar_g: 0, sodium_mg: 16, allergens: '' }, // FDC prints no sugar; 0 by owner decision (2026-11-05): chia packs print 0 g
 
   // ── Sugars & sweeteners ──
   { name: 'Sugar (white)',          match: ['sugar', 'chini', 'chinni'], unit: 'GM', source: 'USDA', energy_kcal: 387, protein_g: 0, carbs_g: 100, fat_g: 0, sugar_g: 100, sodium_mg: 1, allergens: '' },
@@ -129,7 +130,6 @@ export const NUTRITION_SEED = [
   { name: 'Salt',                   match: ['salt', 'nun'], unit: 'GM', source: 'USDA', energy_kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, sugar_g: 0, sodium_mg: 38758, allergens: '' },
   { name: 'Turmeric (besar)',       match: ['turmeric', 'besar', 'haldi'], unit: 'GM', source: 'USDA', energy_kcal: 312, protein_g: 9.7, carbs_g: 67, fat_g: 3.3, sugar_g: 3.2, sodium_mg: 27, allergens: '' },
   { name: 'Cumin (jeera)',          match: ['cumin', 'jeera', 'jira'], unit: 'GM', source: 'USDA', energy_kcal: 375, protein_g: 18, carbs_g: 44, fat_g: 22, sugar_g: 2.3, sodium_mg: 168, allergens: '' },
-  { name: 'Coriander (dhaniya)',    match: ['coriander', 'dhaniya'], unit: 'GM', source: 'USDA', energy_kcal: 298, protein_g: 12, carbs_g: 55, fat_g: 18, sugar_g: 0, sodium_mg: 35, allergens: '' },
   // Plain ground red chilli: FDC 170932 "Spices, pepper, red or cayenne". The US "chili powder" is a salted blend.
   { name: 'Chilli powder',          match: ['chilli powder', 'chili powder', 'red chilli'], unit: 'GM', source: 'USDA', energy_kcal: 318, protein_g: 12, carbs_g: 56.6, fat_g: 17.3, sugar_g: 10.3, sodium_mg: 30, allergens: '' },
   { name: 'Black pepper',           match: ['pepper', 'marich'], unit: 'GM', source: 'USDA', energy_kcal: 251, protein_g: 10, carbs_g: 64, fat_g: 3.3, sugar_g: 0.6, sodium_mg: 20, allergens: '' },
@@ -154,9 +154,18 @@ export const NUTRITION_SEED = [
 // here as keywords and goes first in its table, which is what wins a tie (suggestSeeds: strong,
 // score, regional first, then table order). It stays one row, with its own table figures and label;
 // nothing is added to foodTables.json.
+//
+// Coriander (S890, owner: plain coriander is the fresh leaf). IFCT's seed row carries the local name
+// "Dhania", so CORIANDER and DHANIYA used to suggest the dried seed (269 kcal) over the leaf (44).
+// The leaf row takes DHANIYA, not CORIANDER: CORIANDER must stay a qualifier of "Coriander leaves"
+// (it scores +4, the same as on the seed row), and the tie then goes to the Nepal table. Hariyo
+// dhaniya and green coriander name the leaf outright. Powder is the ground seed, so the seed row
+// takes the powder names.
 export const REGIONAL_KITCHEN_NAMES = {
   'NP-O17': ['jaggery', 'gud', 'sakhar'], // DFTQC Nepal: Jaggery, cane (sakhar)
   'IN-S006': ['fish', 'machha'],          // IFCT 2017: Rohu
+  'NP-C20': ['dhaniya', 'hariyo dhaniya', 'green coriander', 'cilantro'], // DFTQC Nepal: Coriander leaves
+  'IN-G024': ['coriander powder', 'dhaniya powder', 'dhania powder'],     // IFCT 2017: Coriander seeds
 }
 
 // The library picker's three sources, regional first (most relevant for Nepal).
