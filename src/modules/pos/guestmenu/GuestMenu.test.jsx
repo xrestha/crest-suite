@@ -602,3 +602,21 @@ describe('a cart checked against the choices just read', () => {
     expect(screen.getByText('Veg Momo is no longer on the menu, so it was taken off your order.')).toBeInTheDocument()
   })
 })
+
+// S886: an ingredient with a blank sugar or sodium box makes the server send that figure empty, and
+// the guest line leaves it off rather than print a total that is too low.
+describe('a sugar or sodium figure the server sends empty (S886)', () => {
+  const FIGURES = { nutrition_enabled: true, has_nutrition: true, energy_kcal: 310, protein_g: 18, carbs_g: 30, fat_g: 12 }
+  it('leaves the empty figures off and prints the rest', async () => {
+    mockAnswers.get_guest_menu = { data: [{ ...ROWS[0], ...FIGURES, sugar_g: null, sodium_mg: null }], error: null }
+    renderMenu()
+    await screen.findByText('Veg Momo')
+    expect(screen.getByText(/^Energy 310 kcal/).textContent).toBe('Energy 310 kcal · Protein 18.0 g · Carbs 30.0 g · Fat 12.0 g')
+  })
+  it('prints all six when every figure came back, a real 0 included', async () => {
+    mockAnswers.get_guest_menu = { data: [{ ...ROWS[0], ...FIGURES, sugar_g: 0, sodium_mg: 180 }], error: null }
+    renderMenu()
+    await screen.findByText('Veg Momo')
+    expect(screen.getByText(/^Energy 310 kcal/).textContent).toMatch(/· Sugar 0\.0 g · Sodium 180 mg$/)
+  })
+})

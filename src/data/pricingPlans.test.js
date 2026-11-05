@@ -79,6 +79,15 @@ describe('an override', () => {
     // Nine lines: the card shows every one without a "Show more" (Pricing.js COLLAPSE_AFTER + 2).
     expect(CUSTOMIZATION_PRICING.features.length).toBeLessThanOrEqual(9)
   })
+
+  // S886, owner decision: the POS price stays flat and the card says what a billing app cannot do.
+  // Both lines carry the Crest IMS qualifier they are honest only with, and sit in the first seven
+  // lines, which the collapsed card shows (Pricing.js COLLAPSE_AFTER).
+  it('names what POS does that a billing app cannot, where the collapsed card shows it', () => {
+    const firstSeven = POS_PRICING.features.slice(0, 7)
+    expect(firstSeven).toContain('With Crest IMS Growth or Pro, every bill takes its ingredients off your stock by itself')
+    expect(firstSeven).toContain('With Crest IMS, a free dish shows what it cost you, not just NPR 0')
+  })
 })
 
 describe('values that are not prices', () => {

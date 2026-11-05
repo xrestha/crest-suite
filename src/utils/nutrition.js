@@ -22,6 +22,13 @@ export const NUTRIENTS = [
   { key: 'sodium_mg',   label: 'Sodium',  unit: 'mg',   dp: 0 },
 ]
 
+// S886 (owner decision): the two figures an ingredient may carry blank while it has the rest. 350
+// of the Nepal foods have no sugar or sodium (no Indian twin), and a typed form can leave either box
+// empty. A blank is unknown, never 0: the walk names those ingredients (`blankFigures`), the staff
+// label shows the known part as "at least", and the guest menu leaves the figure off the dish
+// (_nutrition_rollup returns it empty). A typed 0 is a figure.
+export const PARTIAL_NUTRIENTS = ['sugar_g', 'sodium_mg']
+
 // Blank nutrition object for forms.
 export const EMPTY_NUTRITION = {
   basis_qty: 100, basis_unit: '',
@@ -99,13 +106,14 @@ export function isNotFood(n) {
 }
 
 // Nutrition contribution of `qty` (in the item's uom) of a single item.
-// → { has, checked, values:{...nutrient keys}, allergens:[] }
+// → { has, checked, values:{...nutrient keys}, allergens:[], blank:[PARTIAL_NUTRIENTS left blank] }
+// `blank` is filled only when the item contributes, as _nutrition_item_contribution does.
 export function itemNutrition(item, qty) {
   const n = item?.nutrition
   const q = parseFloat(qty)
   const checked = allergensChecked(n)
   if (!hasNutrition(n) || !Number.isFinite(q) || q <= 0) {
-    return { has: hasNutrition(n) && !needsPieceWeight(item), checked, values: ZERO(), allergens: itemAllergens(n) }
+    return { has: hasNutrition(n) && !needsPieceWeight(item), checked, values: ZERO(), allergens: itemAllergens(n), blank: [] }
   }
   const basis = parseFloat(n.basis_qty) > 0 ? parseFloat(n.basis_qty) : 100
   const basisUnit = n.basis_unit || item?.uom
@@ -113,7 +121,7 @@ export function itemNutrition(item, qty) {
   let qtyInBasis
   if (pieceDim) {
     const perPiece = parseFloat(n.grams_per_unit)
-    if (!(perPiece > 0)) return { has: false, checked, values: ZERO(), allergens: itemAllergens(n) }
+    if (!(perPiece > 0)) return { has: false, checked, values: ZERO(), allergens: itemAllergens(n), blank: [] }
     qtyInBasis = convertQty(q * perPiece, pieceDim === 'mass' ? 'GM' : 'ML', basisUnit)
   } else {
     qtyInBasis = convertQty(q, item?.uom, basisUnit) // KG→GM, LTR→ML, etc.
@@ -123,7 +131,8 @@ export function itemNutrition(item, qty) {
     o[def.key] = (parseFloat(n[def.key]) || 0) * factor
     return o
   }, {})
-  return { has: true, checked, values, allergens: itemAllergens(n) }
+  const blank = PARTIAL_NUTRIENTS.filter(key => !Number.isFinite(parseFloat(n[key])))
+  return { has: true, checked, values, allergens: itemAllergens(n), blank }
 }
 
 // The allergen check for one walk (S870): every ingredient item reached, and whether the walk hit
@@ -133,11 +142,15 @@ function newCheck() {
   return { items: new Map(), broken: false }
 }
 // `id` comes from the ingredient row (recipe_ingredients.item_id): the recipes page joins items
-// without their id.
-function noteItem(check, id, item) {
-  if (check && id && !check.items.has(id)) {
-    check.items.set(id, { id, name: item?.name, checked: allergensChecked(item?.nutrition), needsWeight: needsPieceWeight(item) })
+// without their id. `blank` is itemNutrition's, merged when the item is reached on two paths.
+function noteItem(check, id, item, blank = []) {
+  if (!check || !id) return
+  const seen = check.items.get(id)
+  if (seen) {
+    blank.forEach(key => { if (!seen.blank.includes(key)) seen.blank.push(key) })
+    return
   }
+  check.items.set(id, { id, name: item?.name, checked: allergensChecked(item?.nutrition), needsWeight: needsPieceWeight(item), blank: [...blank] })
 }
 function summariseCheck(check) {
   const all = Array.from(check.items.values())
@@ -147,6 +160,45 @@ function summariseCheck(check) {
 // The ingredients reached whose calories need the weight of one piece (S870).
 function weightsMissing(check) {
   return Array.from(check.items.values()).filter(i => i.needsWeight).map(({ id, name }) => ({ id, name }))
+}
+// The ingredients reached that left a sugar or sodium box blank, per figure (S886).
+// → { sugar_g:[{id,name}], sodium_mg:[{id,name}] }
+function blankFiguresOf(check) {
+  const all = Array.from(check.items.values())
+  return PARTIAL_NUTRIENTS.reduce((o, key) => {
+    o[key] = all.filter(i => i.blank.includes(key)).map(({ id, name }) => ({ id, name }))
+    return o
+  }, {})
+}
+
+// True when the walk's figure for `key` is only the known part (an ingredient left it blank).
+// `result` is calcRecipeNutrition's or calcLiveNutrition's answer.
+export function isPartialFigure(result, key) {
+  return (result?.blankFigures?.[key] || []).length > 0
+}
+
+// How many ingredients left a sugar or sodium box blank (each counted once).
+export function blankFigureCount(result) {
+  return new Set(PARTIAL_NUTRIENTS.flatMap(key => (result?.blankFigures?.[key] || []).map(i => i.id))).size
+}
+
+// The staff label's note naming the ingredients with a blank sugar or sodium box, or null (S886).
+// A sub-recipe never shows on the guest menu itself, so its note speaks of the dishes using it.
+// `brief` keeps only the names (the printed cost card).
+export function blankFiguresNote(result, { subRecipe = false, brief = false } = {}) {
+  const lists = PARTIAL_NUTRIENTS
+    .map(key => ({ key, names: (result?.blankFigures?.[key] || []).map(i => i.name || 'an unnamed item') }))
+    .filter(l => l.names.length > 0)
+  if (lists.length === 0) return null
+  const label = key => NUTRIENTS.find(d => d.key === key).label.toLowerCase()
+  const same = lists.length === 2 && lists[0].names.join('\u0000') === lists[1].names.join('\u0000')
+  const parts = same
+    ? [`No ${label(lists[0].key)} or ${label(lists[1].key)} figure on ${lists[0].names.join(', ')}.`]
+    : lists.map(l => `No ${label(l.key)} figure on ${l.names.join(', ')}.`)
+  if (brief) return parts.join(' ')
+  const where = subRecipe ? 'every dish that uses this sub-recipe' : 'this dish'
+  const it = lists.length > 1 ? 'them' : 'it'
+  return `${parts.join(' ')} Shown here as at least the known amount; the guest menu leaves ${it} off ${where} until every ingredient has a figure. Type 0 where the food has none.`
 }
 
 function addInto(target, values) {
@@ -171,7 +223,7 @@ export function calcSubRecipeNutritionPerUnit(sub, allRecipes, seen = new Set(),
     if (ri.item_id && ri.items) {
       const r = itemNutrition(ri.items, ri.qty_per_portion)
       if (r.has) covered = true
-      noteItem(check, ri.item_id, ri.items)
+      noteItem(check, ri.item_id, ri.items, r.blank)
       addInto(total, r.values)
       r.allergens.forEach(a => allergens.add(a))
     } else if (ri.sub_recipe_id) {
@@ -195,7 +247,9 @@ export function calcSubRecipeNutritionPerUnit(sub, allRecipes, seen = new Set(),
 
 // Full per-portion nutrition of a recipe.
 // → { perPortion:{...nutrient keys}, allergens:[], coverage:{ have, total },
-//     allergenCheck:{ total, unchecked:[{id,name}], broken, complete } }
+//     allergenCheck:{ total, unchecked:[{id,name}], broken, complete }, needsWeight:[{id,name}],
+//     blankFigures:{ sugar_g:[{id,name}], sodium_mg:[{id,name}] } }
+// perPortion keeps the known part of a blank figure; isPartialFigure says when it is only that.
 export function calcRecipeNutrition(recipe, allRecipes) {
   const perPortion = ZERO()
   const allergens = new Set()
@@ -208,7 +262,7 @@ export function calcRecipeNutrition(recipe, allRecipes) {
       if (!isNotFood(ri.items.nutrition)) total += 1
       const r = itemNutrition(ri.items, ri.qty_per_portion)
       if (r.has) have += 1
-      noteItem(check, ri.item_id, ri.items)
+      noteItem(check, ri.item_id, ri.items, r.blank)
       addInto(perPortion, r.values)
       r.allergens.forEach(a => allergens.add(a))
     } else if (ri.sub_recipe_id) {
@@ -226,7 +280,7 @@ export function calcRecipeNutrition(recipe, allRecipes) {
     }
   })
 
-  return { perPortion, allergens: sortAllergens(Array.from(allergens)), coverage: { have, total }, allergenCheck: summariseCheck(check), needsWeight: weightsMissing(check) }
+  return { perPortion, allergens: sortAllergens(Array.from(allergens)), coverage: { have, total }, allergenCheck: summariseCheck(check), needsWeight: weightsMissing(check), blankFigures: blankFiguresOf(check) }
 }
 
 // Live per-portion nutrition from the edit-form ingredient rows (mirrors calcLiveCost).
@@ -245,7 +299,7 @@ export function calcLiveNutrition(ingList, itemsList, allRecipes) {
       if (!isNotFood(item.nutrition)) total += 1
       const r = itemNutrition(item, ing.qty_per_portion)
       if (r.has) have += 1
-      noteItem(check, item.id, item)
+      noteItem(check, item.id, item, r.blank)
       addInto(perPortion, r.values)
       r.allergens.forEach(a => allergens.add(a))
     } else {
@@ -261,7 +315,7 @@ export function calcLiveNutrition(ingList, itemsList, allRecipes) {
     }
   })
 
-  return { perPortion, allergens: sortAllergens(Array.from(allergens)), coverage: { have, total }, allergenCheck: summariseCheck(check), needsWeight: weightsMissing(check) }
+  return { perPortion, allergens: sortAllergens(Array.from(allergens)), coverage: { have, total }, allergenCheck: summariseCheck(check), needsWeight: weightsMissing(check), blankFigures: blankFiguresOf(check) }
 }
 
 // Build a nutrition object from form fields for saving. S870: always an object, because saving the

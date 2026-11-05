@@ -10,7 +10,9 @@
 // lists Sub-Recipe recipes as stock lines, so the choice kept taking it off stock through a line
 // nobody could see any more. Hiding it is not that: since S862 (SETUP-7) Option Groups keeps a
 // hidden sub-recipe visible on the choice line that holds it, labelled, and offers only shown ones
-// to add.
+// to add. So since S886 (owner decision) a refusal that names a choice also offers Hide, for a
+// reader who only wants it out of the recipe lists: it frees nothing for the delete, but the
+// choice keeps working and keeps taking it off stock.
 //
 // Who can clear a choice's line matters to the sentence, because the database decides it
 // (guard_pos_option_edit): only the Owner, a POS or IMS manager, or Crest support, and only while
@@ -54,6 +56,19 @@ function choiceAccessOf({ customizationLive, isAdmin, canEditChoices }) {
 // The way out, once the reader knows what holds it.
 function nextStep(hasRecipes, hasChoices, access) {
   if (!hasChoices) return 'Remove it from those recipes first.'
+  return `${removeFromChoices(hasRecipes, access)} ${hideStep(hasRecipes)}`
+}
+
+// The other way out once a choice holds it (S886, owner decision). Offered in every access case:
+// Hide is an Inventory action on this recipe row, so it needs neither Customization nor the rank
+// that edits choices.
+function hideStep(hasRecipes) {
+  return hasRecipes
+    ? 'Or use Hide if you just want it out of your recipe lists: those recipes and choices keep using it and keep taking it off stock.'
+    : 'Or use Hide if you just want it out of your recipe lists: those choices keep working and keep taking it off stock.'
+}
+
+function removeFromChoices(hasRecipes, access) {
   const fromBoth = hasRecipes
     ? 'Remove it from those recipes, and from those choices in Choice Groups, first.'
     : 'Remove it from those choices in Choice Groups first.'
@@ -91,9 +106,9 @@ export function subRecipeInUseText({ action, name, recipeNames = [], choiceNames
 
   if (action === 'recategorise') {
     // Recipes alone keep the S714 sentence word for word, Hide included. Once a choice holds it the
-    // sentence offers no Hide. Until S862 that was because hiding it hid the line too; Option Groups
-    // now keeps a hidden one visible and labelled, so that reason is gone; leaving Hide out is still
-    // true, only less helpful. "Disappeared from Option Groups" is about leaving the category, which
+    // sentence offered no Hide until S886, because before S862 hiding it hid the line too. Option
+    // Groups now keeps a hidden one visible and labelled, so nextStep offers Hide here as well
+    // (S886, owner decision). "Disappeared from Option Groups" is about leaving the category, which
     // still drops it from the stock-line list.
     if (!hasChoices) {
       return `"${name}" is an ingredient in ${recipes}, so it can't stop being a Sub-Recipe — those recipes would keep consuming it while it disappeared from their ingredient pickers. Remove it from them first, or use Hide if you just want it off the menu.`

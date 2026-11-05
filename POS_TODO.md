@@ -114,8 +114,9 @@ charge, sizes included.
   untouched price, which since SETUP-1 sends no price; it could be relaxed.~~
 - [x] ✅ S877 (OptionGroups names it "no longer a sub-recipe", OptionModal shows it and keeps Remove): ~~A choice stock line on a recipe no longer in the Sub-Recipe category (rows from before the
   recategorise guard) still opens as a blank box.~~
-- [ ] Owner decision, if wanted: offer Hide (not only recategorise) for a sub-recipe used by choices,
-  now that a hidden one stays visible on its line.
+- [x] ✅ S886 (owner: yes, offer it; `subRecipeInUse.js`): ~~Owner decision, if wanted: offer Hide (not only
+  recategorise) for a sub-recipe used by choices, now that a hidden one stays visible on its line.~~ Both refusals
+  now add Hide, saying the choices keep working and keep taking it off stock.
 
 ---
 

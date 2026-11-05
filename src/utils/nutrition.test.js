@@ -1,6 +1,6 @@
 import {
   itemNutrition, calcRecipeNutrition, calcLiveNutrition, buildNutritionPayload, mergeNutritionFill, convertQty,
-  needsPieceWeight, isNotFood, confirmAllergensPayload, notFoodPayload,
+  needsPieceWeight, isNotFood, confirmAllergensPayload, notFoodPayload, isPartialFigure, blankFiguresNote,
 } from './nutrition'
 
 // The guest menu hides a dish from a guest filtering out an allergen when any ingredient was never
@@ -184,5 +184,61 @@ describe('not food and the Check allergens list (S870)', () => {
     expect(confirmAllergensPayload(existing, ['milk']))
       .toEqual({ basis_qty: 100, basis_unit: 'GM', energy_kcal: 265, allergens: 'milk', allergens_checked: true })
     expect(confirmAllergensPayload(null, [])).toEqual({ allergens_checked: true })
+  })
+})
+
+describe('a blank sugar or sodium box (S886)', () => {
+  // 350 Nepal foods carry no sugar or sodium. A blank is unknown: the walk names the ingredient,
+  // keeps the known part, and the guest menu leaves the figure off (_nutrition_rollup).
+  const full = { basis_qty: 100, basis_unit: 'GM', energy_kcal: 100, sugar_g: 2, sodium_mg: 50, allergens_checked: true }
+  const kukhura = item('kukhura', { basis_qty: 100, basis_unit: 'GM', energy_kcal: 120, allergens_checked: true })
+  const maida = item('maida', full)
+
+  test('an ingredient with figures names the boxes it left blank; a typed 0 is a figure', () => {
+    expect(itemNutrition(kukhura, 100).blank).toEqual(['sugar_g', 'sodium_mg'])
+    expect(itemNutrition(maida, 100).blank).toEqual([])
+    const zero = item('water', { basis_qty: 100, basis_unit: 'ML', energy_kcal: 1, sugar_g: 0, sodium_mg: 0 }, 'ML')
+    expect(itemNutrition(zero, 100).blank).toEqual([])
+    const sugarOnly = item('jaggery', { basis_qty: 100, basis_unit: 'GM', energy_kcal: 380, sugar_g: 85 })
+    expect(itemNutrition(sugarOnly, 10).blank).toEqual(['sodium_mg'])
+  })
+
+  test('an item with no figures, no quantity or no piece weight is a coverage gap, not a blank', () => {
+    expect(itemNutrition(item('salt', null), 1).blank).toEqual([])
+    expect(itemNutrition(kukhura, 0).blank).toEqual([])
+    expect(itemNutrition(item('eggs', { basis_qty: 100, basis_unit: 'GM', energy_kcal: 155 }, 'PCS'), 2).blank).toEqual([])
+  })
+
+  test('the dish keeps the known part and names the ingredient, through a sub-recipe too', () => {
+    const filling = { id: 'filling', yield_qty: 1, recipe_ingredients: [line(kukhura, 50)] }
+    const momo = { id: 'momo', recipe_ingredients: [line(maida, 100), subLine(filling, 1)] }
+    const r = calcRecipeNutrition(momo, [filling])
+    expect(r.perPortion.sugar_g).toBeCloseTo(2)
+    expect(r.blankFigures).toEqual({ sugar_g: [{ id: 'kukhura', name: 'kukhura' }], sodium_mg: [{ id: 'kukhura', name: 'kukhura' }] })
+    expect(isPartialFigure(r, 'sugar_g')).toBe(true)
+    expect(isPartialFigure(r, 'energy_kcal')).toBe(false)
+    const plain = calcRecipeNutrition({ id: 'roti', recipe_ingredients: [line(maida, 100)] }, [])
+    expect(plain.blankFigures).toEqual({ sugar_g: [], sodium_mg: [] })
+    expect(isPartialFigure(plain, 'sugar_g')).toBe(false)
+  })
+
+  test('the live edit form names it the same way', () => {
+    const r = calcLiveNutrition(
+      [{ type: 'item', item_id: 'kukhura', qty_per_portion: 100 }, { type: 'item', item_id: 'maida', qty_per_portion: 50 }],
+      [kukhura, maida], [])
+    expect(r.blankFigures.sugar_g).toEqual([{ id: 'kukhura', name: 'kukhura' }])
+  })
+
+  test('the note names the ingredients once when both boxes are blank on the same ones', () => {
+    const r = calcRecipeNutrition({ id: 'momo', recipe_ingredients: [line(kukhura, 50), line(maida, 100)] }, [])
+    const note = blankFiguresNote(r)
+    expect(note).toMatch(/^No sugar or sodium figure on kukhura\. /)
+    expect(note).toMatch(/guest menu leaves them off this dish/)
+    expect(blankFiguresNote(r, { subRecipe: true })).toMatch(/every dish that uses this sub-recipe/)
+    expect(blankFiguresNote(r, { brief: true })).toBe('No sugar or sodium figure on kukhura.')
+    const jaggery = item('jaggery', { basis_qty: 100, basis_unit: 'GM', energy_kcal: 380, sugar_g: 85 })
+    const split = calcRecipeNutrition({ id: 'r', recipe_ingredients: [line(kukhura, 50), line(jaggery, 10)] }, [])
+    expect(blankFiguresNote(split)).toMatch(/^No sugar figure on kukhura\. No sodium figure on kukhura, jaggery\./)
+    expect(blankFiguresNote(calcRecipeNutrition({ id: 'roti', recipe_ingredients: [line(maida, 100)] }, []))).toBeNull()
   })
 })

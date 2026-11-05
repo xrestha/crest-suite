@@ -122,13 +122,20 @@ export const HR_PRICING = {
   ],
 }
 
+// The price stays flat, about what a plain billing app charges, and the card says what such an app
+// cannot do (S886, owner decision; PRODUCT.md). The two Crest IMS lines are honest only with that
+// qualifier, and they sit in the first seven so the collapsed card still shows them (Pricing.js
+// COLLAPSE_AFTER). The third difference, who gave each discount, void or free dish, is in the
+// tagline of the POS card in Pricing.js.
 export const POS_PRICING = {
   monthly: 2000, annual: 1500,
   features: [
     'Table Management & Order Taking',
+    'Billing — Discounts, Complimentary, Credit Notes',
+    'With Crest IMS Growth or Pro, every bill takes its ingredients off your stock by itself',
+    'With Crest IMS, a free dish shows what it cost you, not just NPR 0',
     'Table Reservations & Online Booking QR',
     'KOT/BOT to Kitchen & Bar',
-    'Billing — Discounts, Complimentary, Credit Notes',
     'Shift Reconciliation (X/Z Reports)',
     'Staff PIN Login & Role-Based Access',
     'Sales Reports & Exceptions Tracking',

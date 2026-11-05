@@ -65,8 +65,10 @@ const FAQS = [
 // :hover rule latches it until the visitor taps somewhere else, so a card would open and then
 // refuse to close. Hover is a bonus for people holding a mouse, never the only way in.
 //
-// It collapses only where it saves more than two lines, so Pro (8), POS (8), HR (7) and Suite (6)
-// stay whole: a control that hides two lines costs more attention than the two lines it saves.
+// It collapses only where it saves more than two lines, so Pro (8), HR (8), Customization (9) and
+// Suite (6) stay whole: a control that hides two lines costs more attention than the two lines it
+// saves. POS (11 since S886) collapses, with the lines that say what a billing app cannot do inside
+// the first seven.
 const COLLAPSE_AFTER = 7
 
 // `color` is the check marks' and the toggle's colour; it rides in as a custom property so the
@@ -330,7 +332,7 @@ export default function Pricing() {
       <div className="pricing-wrap pricing-wrap--section pricing-grid pricing-grid--modules">
         {[
           { key: 'hr',  name: 'Crest HR',  tagline: 'Nepal-compliant payroll, attendance, and staff management.', pricing: pricing.hr },
-          { key: 'pos', name: 'Crest POS', tagline: 'Tables, orders, billing, and shift reconciliation.',             pricing: pricing.pos },
+          { key: 'pos', name: 'Crest POS', tagline: 'More than a billing app: tables, orders, billing and shift reconciliation, with every discount, void and free dish saved under the name of who gave it.', pricing: pricing.pos },
           { key: 'customization', name: 'Crest Customization', tagline: 'Let guests build their dish — sizes, add-ons, spice, build-your-own bowls — and sell combos at one price, on the till and the QR menu. Requires Crest POS.', pricing: pricing.customization },
         ].map(mod => {
           const price = annual ? mod.pricing.annual : mod.pricing.monthly

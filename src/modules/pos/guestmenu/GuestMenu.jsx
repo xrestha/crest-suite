@@ -1772,7 +1772,9 @@ function MenuItemRow({ item, nutritionEnabled, orderingEnabled, vatRegistered, q
         )}
         {showNutrition && (
           <p className="gm-nutrition">
-            {NUTRIENTS.map(def => `${def.label} ${fmtNutrient(def, item[def.key])}`).join(' · ')}
+            {/* S886: the server sends sugar or sodium empty when an ingredient left it blank, and an
+                unknown figure is left off rather than printed as a total that is too low. */}
+            {NUTRIENTS.filter(def => item[def.key] != null).map(def => `${def.label} ${fmtNutrient(def, item[def.key])}`).join(' · ')}
           </p>
         )}
       </div>

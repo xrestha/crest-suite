@@ -1,4 +1,4 @@
-import { NUTRIENTS, calcRecipeNutrition } from '../../../utils/nutrition'
+import { NUTRIENTS, calcRecipeNutrition, isPartialFigure, blankFiguresNote } from '../../../utils/nutrition'
 import { allergenLabel } from '../../../shared/constants/allergens'
 import { calcRecipeCost, calcSubRecipeCostPerUnit, vatOf, fmtNutrient, allocateOverhead } from './recipeCostCalc'
 import { recipeCostOf, menuFcPct } from '../../../shared/imsFormulas'
@@ -172,10 +172,15 @@ export default function RecipeCostCardPrint({ recipe, recipes, settings, overhea
             {NUTRIENTS.map(def => (
               <div key={def.key}>
                 <div style={{ fontSize: 9, color: '#777', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>{def.label}</div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#000' }}>{fmtNutrient(def, nutriValues[def.key])}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#000' }}>{isPartialFigure(nutri, def.key) ? '≥ ' : ''}{fmtNutrient(def, nutriValues[def.key])}</div>
               </div>
             ))}
           </div>
+          {blankFiguresNote(nutri, { brief: true }) && (
+            <div style={{ fontSize: 10, color: '#555', marginTop: 8 }}>
+              ≥ at least the known amount. {blankFiguresNote(nutri, { brief: true })}
+            </div>
+          )}
           {nutri.allergens.length > 0 && (
             <div style={{ fontSize: 10, color: '#555', marginTop: 8 }}>
               Allergens: {nutri.allergens.map(allergenLabel).join(', ')}

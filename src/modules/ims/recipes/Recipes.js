@@ -14,7 +14,7 @@ import ReportLoadError from '../../../components/ReportLoadError'
 import { firstError } from '../../../shared/queryError'
 import { fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { nprInt } from '../../../shared/nepalMoney'
-import { NUTRIENTS, calcRecipeNutrition, calcLiveNutrition, hasNutrition, allergensChecked, mergeNutritionFill, needsPieceWeight, isNotFood } from '../../../utils/nutrition'
+import { NUTRIENTS, calcRecipeNutrition, calcLiveNutrition, hasNutrition, allergensChecked, mergeNutritionFill, needsPieceWeight, isNotFood, isPartialFigure, blankFiguresNote, blankFigureCount } from '../../../utils/nutrition'
 import { allergenLabel } from '../../../shared/constants/allergens'
 import { getSuggestedPrice } from '../../../utils/recipeCost'
 import { printWithTitle } from '../../../utils/printTitle'
@@ -2414,7 +2414,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
                 🍽 {isSubRecipeForm ? 'total batch' : 'per portion'}
               </span>
               {NUTRIENTS.map(def => (
-                <span key={def.key} style={{ color: 'var(--theme-text1)' }}>{def.label} <strong>{fmtNutrient(def, liveNutri.perPortion[def.key])}</strong></span>
+                <span key={def.key} style={{ color: 'var(--theme-text1)' }}>{def.label} <strong>{isPartialFigure(liveNutri, def.key) ? 'at least ' : ''}{fmtNutrient(def, liveNutri.perPortion[def.key])}</strong></span>
               ))}
               <span style={{ color: liveNutri.coverage.have < liveNutri.coverage.total ? 'var(--theme-text1)' : 'var(--theme-text2)', fontSize: 12 }}>
                 · data {liveNutri.coverage.have}/{liveNutri.coverage.total}
@@ -2422,6 +2422,11 @@ Check the recipe list before saving again — if it timed out after the recipe w
               {liveNutri.allergenCheck.unchecked.length > 0 && (
                 <span style={{ color: 'var(--theme-amber-text)', fontSize: 12 }}>
                   · △ allergens not checked on {liveNutri.allergenCheck.unchecked.length}
+                </span>
+              )}
+              {blankFigureCount(liveNutri) > 0 && (
+                <span style={{ color: 'var(--theme-amber-text)', fontSize: 12 }}>
+                  · △ sugar or sodium blank on {blankFigureCount(liveNutri)}
                 </span>
               )}
             </div>
@@ -2630,6 +2635,7 @@ Check the recipe list before saving again — if it timed out after the recipe w
         // still rolls up into parent recipes via calcSubRecipeNutritionPerUnit.
         const nutriLabel = isSubRec ? 'total batch' : 'per portion'
         const nutriValues = nutri ? nutri.perPortion : null
+        const blankNote = nutri ? blankFiguresNote(nutri, { subRecipe: isSubRec }) : null
 
         // Qty-per-portion total for the cost breakdown table's footer row — only meaningful when
         // every ingredient shares one UOM (summing grams + ml + "each" would be nonsense), so a
@@ -2799,7 +2805,10 @@ Check the recipe list before saving again — if it timed out after the recipe w
                   {NUTRIENTS.map(def => (
                     <div key={def.key}>
                       <div style={{ fontSize: 11, color: 'var(--theme-text2)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>{def.label}</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)' }}>{fmtNutrient(def, nutriValues[def.key])}</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--theme-text1)', whiteSpace: 'nowrap' }}>
+                        {isPartialFigure(nutri, def.key) && <span style={{ fontSize: 12, fontWeight: 600 }}>at least </span>}
+                        {fmtNutrient(def, nutriValues[def.key])}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -2826,6 +2835,9 @@ Check the recipe list before saving again — if it timed out after the recipe w
                     ⚠ {nutri.coverage.total - nutri.coverage.have} ingredient(s) missing nutrition data — values are estimates.
                     {nutri.needsWeight.length > 0 && ` Counted in pieces with no weight of one piece: ${nutri.needsWeight.map(i => i.name).join(', ')}.`}
                   </div>
+                )}
+                {blankNote && (
+                  <div style={{ fontSize: 11, color: 'var(--theme-amber-text)', marginTop: 10 }}>△ {blankNote}</div>
                 )}
               </div>
             )}

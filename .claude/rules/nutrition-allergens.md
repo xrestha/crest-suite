@@ -66,5 +66,11 @@ once. Decisions and verification: CHANGELOG S870, S871, S877.
   its Indian twin's or null, and null is never written as 0. A pick's basis follows the ingredient
   (`basisUnitFor`): a GM basis on a LTR item is never converted. Recipes' auto-fill takes only a
   strong match (`suggestSeeds` `strongOnly`) and lists each one for unticking (`AutoFillList`).
+- **A blank sugar or sodium box is unknown, never 0 (S886, owner decision).** `PARTIAL_NUTRIENTS`:
+  an ingredient with figures that left either blank is named by the walk (`itemNutrition`'s `blank`,
+  `blankFigures`); the staff label shows the known part as "at least" with `blankFiguresNote`, and
+  `_nutrition_rollup` returns that figure as JSON null (known part in `sugar_known`/`sodium_known`),
+  so the guest menu leaves it off. A typed 0 is a figure. An ingredient with no figures at all is
+  still only the coverage count, and the guest menu still prints its dish's other figures too low.
 - Known gap: a choice's allergens are typed on the choice, not rolled up from its stock lines, and
   a choice has no checked flag.

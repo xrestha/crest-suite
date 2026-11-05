@@ -54,13 +54,13 @@ Three rules follow, and each was broken once before it was written down:
 
 **Moving a feature to a higher plan.** Clients who already use it must keep it: grant it to them through their feature switches in the same release.
 
-**Open question: the POS price (recorded 2026-11-04, nothing decided).** POS is one flat monthly fee, about what a plain billing app charges in this market. But Crest's POS does things a billing app cannot:
+**The POS price (decided 2026-11-05, S886).** POS is one flat monthly fee, about what a plain billing app charges in this market. But Crest's POS does things a billing app cannot:
 
 - each closed bill takes its stock down by the recipe;
 - a free dish is valued at what it cost;
 - the database itself records who gave each discount, void or free dish.
 
-Whether the price should say so is a decision for the owner. The figure itself is changed on the Plan Pricing screen, with no code change.
+The owner decided to keep the flat price and have the Pricing page say what POS does that a billing app cannot: the POS card in `src/pages/Pricing.js` and `POS_PRICING` in `src/data/pricingPlans.js`. The figure itself is still changed on the Plan Pricing screen, with no code change.
 
 ## Origins
 

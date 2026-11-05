@@ -254,7 +254,8 @@ for the fix, so the failure message can say exactly which command resolves it.
 **DONE — S879, 2026-11-04.** `PRODUCT.md` → "Plans and packaging": what is sold, the tier thesis and its three
 rules, where prices and plan gates live, no figures (owner decision: describe, do not price). The tier thesis had
 already left `CLAUDE.md` for `.claude/rules/access-control.md` in S663; the root keeps its one-line placement. The
-POS price question below is recorded there as open (owner decision, 2026-11-04).
+POS price question below was recorded there as open (owner decision, 2026-11-04) and decided in S886: the price
+stays flat and the Pricing page says what POS does that a billing app cannot.
 
 `PRODUCT.md` is a good positioning document. It covers users, purpose, competitors, brand, design
 principles, data ownership. It contains zero occurrences of `NPR` and no plan table.
@@ -302,7 +303,8 @@ deciding what to charge will not look.
 at NPR 2,000/mo, roughly what a standalone billing app charges in this market — while POS's actual
 differentiator (recipe-level depletion on bill close, comps valued at food cost, attribution enforced
 at the database) is something no billing app can do. Worth a deliberate decision rather than
-inheriting the number.
+inheriting the number. **Decided S886 (owner, 2026-11-05): same price, say why.** The POS card on the
+Pricing page names the three differences; `PRODUCT.md` → "The POS price" holds the record.
 
 ### T2c — Entity name
 

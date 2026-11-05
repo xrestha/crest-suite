@@ -105,3 +105,12 @@ test('the Customization card sells combos and build-your-own dishes', () => {
   expect(screen.getByText('Combos and set meals at one price, on the till and the QR menu')).toBeInTheDocument()
   expect(screen.getByText('Build-your-own dishes, walked step by step, costed as a range with IMS')).toBeInTheDocument()
 })
+
+// S886, owner decision: the POS card keeps its price and says what a billing app cannot do. The two
+// Crest IMS lines are found without pressing Show more, so the collapsed card shows them.
+test('the POS card says what a billing app cannot do', () => {
+  renderPricing()
+  expect(screen.getByText(/^More than a billing app: .*every discount, void and free dish saved under the name of who gave it\.$/)).toBeInTheDocument()
+  expect(screen.getByText('With Crest IMS Growth or Pro, every bill takes its ingredients off your stock by itself')).toBeInTheDocument()
+  expect(screen.getByText('With Crest IMS, a free dish shows what it cost you, not just NPR 0')).toBeInTheDocument()
+})
