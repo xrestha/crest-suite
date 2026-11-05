@@ -18,9 +18,10 @@ import { runForecast } from '../../../utils/demandForecastData'
 import { splitDishList, totalQtyByRecipe, aggregateIngredientDemand, ingredientBuyList, scaleForecastDays, addDemand, SAMPLES_PER_WEEKDAY, OCCASIONAL_THRESHOLD } from '../../../utils/demandForecastMath'
 import { packsFor, packText } from './reorderPacks'
 import { plateAverageLine, occasionalAverageLine, printedAverage } from './forecastAverageNote'
-import { useSettings } from '../../../context/SettingsContext'
-import { useWeatherStrip } from '../../dashboard/useWeatherStrip'
-import { rainFactorForMonth, rainPctValue, isRainyDay } from '../../dashboard/weatherEffect'
+import { rainFactorForMonth } from '../../dashboard/weatherEffect'
+import { useForecastRainFactor } from './useForecastRainFactor'
+import { useForecastAutoRefresh } from './useForecastAutoRefresh'
+import { canAutoRefresh, AUTO_HORIZON } from './forecastFreshness'
 import { readPeriodTransfers } from '../transfers/transferFlows'
 import { loadRecipeBook } from '../../../utils/recipeCost'
 import { startBuyingListReads, loadBuyingList, countUndatedRows, SUPPLIER_LOOKBACK } from './demandForecastLoad'
@@ -100,8 +101,7 @@ export default function DemandForecast() {
 }
 
 function DemandForecastBody() {
-  const { clientId, hasImsAccess, clientModules, hasFeature, customizationEnabled } = useAuth()
-  const { settings } = useSettings()
+  const { clientId, isAdmin, hasImsAccess, clientModules, hasFeature, customizationEnabled } = useAuth()
   const navigate = useNavigate()
   const { scopedFrom } = useScopedDb()
   const horizonReq = useLatestRequest()
@@ -270,22 +270,10 @@ function DemandForecastBody() {
 
   // Rainy days (S800, owner decision): the dashboard's own rule — the Growth weather feature, the
   // Owner's rain percentage, rain forecast within the next seven days (rainFactorForMonth). A day it
-  // touches has its expected dishes scaled before the list is worked out.
-  const weatherFeature = hasFeature('weather_forecast')
-  const { weather, weatherByAd, own: weatherOwn, located: weatherLocated, stripState } = useWeatherStrip({})
-  const rainPct = weatherOwn ? rainPctValue(settings?.rain_sales_pct) : null
-  // The rain setting applies (S849, FORECAST-4): the Growth weather feature, a percentage, a city.
-  // Then a Recompute learns how rainy each day's samples were, and waits for the weather while it
-  // is still loading, so a run made a second too early does not store "unknown" for a wet fortnight.
-  const rainApplies = weatherFeature && rainPct != null && weatherLocated
-  const weatherPending = rainApplies && stripState === 'loading'
-  // One sample day's rain factor: the Owner's % on a recorded rainy day, else 1. A day older than
-  // the weather store's 60 days has no row, so it counts as dry, which is the finding's own answer.
-  const sampleFactorOf = useMemo(() => (
-    rainApplies && weatherByAd
-      ? sample => (isRainyDay(weatherByAd[formatAd(sample.date)]) ? rainPct / 100 : 1)
-      : null
-  ), [rainApplies, weatherByAd, rainPct])
+  // touches has its expected dishes scaled before the list is worked out. The rule and a run's
+  // sample factor live in useForecastRainFactor since S888, so the Roster's automatic refresh builds
+  // exactly what Recompute builds.
+  const { weather, weatherByAd, weatherFeature, rainPct, rainApplies, weatherPending, sampleFactorOf } = useForecastRainFactor()
   const rainByMonth = useMemo(() => {
     if (!weatherFeature || !weatherByAd || rainPct == null || forecast.length === 0) return null
     const todayAd = weather?.today || formatAd(nepalCivilDate(Date.now()))
@@ -469,6 +457,30 @@ function DemandForecastBody() {
     }
   }
 
+  // The forecast refreshes itself once it is a week old or runs out within a week (S888, owner
+  // decision): the 30-day forecast, for the Owner and an inventory supervisor or manager, never for
+  // Crest support viewing an outlet. It says so here and shows the run it made.
+  const autoRefresh = useForecastAutoRefresh({
+    clientId,
+    enabled: !!clientId,
+    canRun: canAutoRefresh({ isAdmin, imsSupervisor: hasImsAccess('supervisor'), forecastAllowed: true }),
+    sampleFactorOf,
+    weatherPending,
+    onRefreshed: (res, fresh) => {
+      const lead = fresh?.reason === 'none' ? 'No forecast had been made yet, so one was made just now for the next 30 days.'
+        : fresh?.reason === 'running_out' ? 'The forecast was running out, so it was refreshed just now for the next 30 days.'
+          : 'The forecast was a week old, so it was refreshed just now for the next 30 days.'
+      setMsg('ok:' + lead + ' ' + rebuiltText(res))
+      if (horizon === AUTO_HORIZON) loadStored(); else setHorizon(AUTO_HORIZON)
+    },
+    onFailed: err => {
+      setMsg('error:' + (isTimeout(err)
+        ? 'The forecast was out of date and the automatic refresh took too long to answer, so it is not known whether a new forecast was saved. Reload the page to see which forecast is stored.'
+        : 'The forecast was out of date and the automatic refresh did not finish. ' + errorText(err, 'operator') + ' Press Recompute Forecast to try again.'))
+    },
+  })
+  const autoBusy = autoRefresh.status === 'refreshing'
+
   async function handleExport() {
     const XLSX = await import('xlsx')
     const wb = XLSX.utils.book_new()
@@ -569,8 +581,8 @@ function DemandForecastBody() {
         <FilterChips
           label="Forecast horizon"
           options={[
-            { key: 7, label: 'Next 7 Days', disabled: recomputing },
-            { key: 30, label: 'Next 30 Days', disabled: recomputing },
+            { key: 7, label: 'Next 7 Days', disabled: recomputing || autoBusy },
+            { key: 30, label: 'Next 30 Days', disabled: recomputing || autoBusy },
           ]}
           active={horizon}
           onChange={setHorizon}
@@ -578,9 +590,9 @@ function DemandForecastBody() {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <Tip text={weatherPending
             ? 'Waiting for the weather, so the rebuild can allow for the rainy days in your sales history. It takes a moment.'
-            : 'Rebuilds the forecast from your latest sales data. Run this whenever you want an up-to-date prediction — it does not run automatically. The Owner and an inventory supervisor or manager can run it.'}>
-            <button className="btn btn-primary" onClick={handleRecompute} disabled={recomputing || weatherPending}>
-              {recomputing ? 'Recomputing…' : weatherPending ? 'Loading weather…' : 'Recompute Forecast'}
+            : 'Rebuilds the forecast from your latest sales data. The 30-day forecast also refreshes itself once it is a week old or running out, when the Owner or an inventory supervisor or manager opens this page or the Roster. Run this whenever you want the newest prediction. The Owner and an inventory supervisor or manager can run it.'}>
+            <button className="btn btn-primary" onClick={handleRecompute} disabled={recomputing || weatherPending || autoBusy}>
+              {recomputing ? 'Recomputing…' : autoBusy ? 'Refreshing…' : weatherPending ? 'Loading weather…' : 'Recompute Forecast'}
             </button>
           </Tip>
           <LetterheadButton ready={biz.ready} error={biz.error} onClick={handleExport} disabled={emitBlocked || !!ingredients.error}>Export Excel</LetterheadButton>

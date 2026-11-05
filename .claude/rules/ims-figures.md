@@ -266,6 +266,13 @@ once leave the newer run. A refused clear after the insert landed is a success w
 `demand_forecast_run_log_stamp` (who and when, by the server); the browser never sends `run_at`.
 `rows_written` 0 with no error = refused for no history.
 
+**The 30-day forecast refreshes itself, weekly (S888, owner decision).** `useForecastAutoRefresh`
+on Demand Forecast and the Roster rebuilds horizon 30 when `forecastFreshness` (newest run 7+ days
+old, or the last forecast day under 7 days away, across every horizon) says so, for `canAutoRefresh`
+(Owner or IMS supervisor+, never the operator); one attempt per outlet per tab, waiting for the
+weather so the rain allowance (`useForecastRainFactor`, the one copy) matches Recompute's. Never
+auto-run horizon 7: a 7-day run is "running out" the day after it is made.
+
 **The buying list does not count rain twice (S849, FORECAST-4).** At Recompute the page's
 `sampleFactorOf` gives each sample day the Owner's rain % / 100 on a recorded rainy day, else 1;
 `forecastByWeekday` stores the recency-weighted mean (the qty average's own weights) as

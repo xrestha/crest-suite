@@ -5,6 +5,9 @@ import { supabase } from '../../../supabaseClient'
 import { useAuth } from '../../../context/AuthContext'
 import { useTheme } from '../../../context/ThemeContext'
 import { useSettings } from '../../../context/SettingsContext'
+import { useForecastRainFactor } from '../../ims/stockcount/useForecastRainFactor'
+import { useForecastAutoRefresh } from '../../ims/stockcount/useForecastAutoRefresh'
+import { canAutoRefresh, staffingForecastNote } from '../../ims/stockcount/forecastFreshness'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
 import { adToBs, adToBsSafe, bsToAd, daysInBsMonth, getBsToday, BS_MONTHS, BS_MONTHS_SHORT, formatAd, formatBsDay, bsDiffDays } from '../../../utils/bsCalendar'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -160,7 +163,7 @@ const COVERS_COUNT_TIP = 'Seated guests on dine-in bills, and each takeaway or d
 // ── Main Roster ───────────────────────────────────────────────────────────────
 
 export default function Roster() {
-  const { clientId, profile, hasHrAccess, clientModules } = useAuth()
+  const { clientId, profile, hasHrAccess, clientModules, isAdmin, hasImsAccess } = useAuth()
   // The VIEWED client's POS subscription, not `posEnabled` — that one is true for every admin
   // session regardless of which client is on screen, and would have read zero bills from a client
   // with no till as "0 covers served, 0 staff needed, covered". Covers exist only where POS does:
@@ -318,6 +321,22 @@ export default function Roster() {
   }, [clientId, viewMode, weekStart, bsYear, bsMonth, scopedFrom, forecastReq])
 
   useEffect(() => { loadForecast() }, [loadForecast])
+
+  // The 30-day Demand Forecast refreshes itself once it is a week old or runs out within a week
+  // (S888, owner decision), for the Owner and an inventory supervisor or manager, never for Crest
+  // support viewing an outlet; the board re-reads it when the run lands. Anyone else is told, in one
+  // line, when the recommendations are missing or about to be, and who refreshes them.
+  const forecastRain = useForecastRainFactor()
+  const canRefreshForecast = canAutoRefresh({ isAdmin, imsSupervisor: hasImsAccess('supervisor'), forecastAllowed: forecastAccess.allowed })
+  const forecastAuto = useForecastAutoRefresh({
+    clientId,
+    enabled: !!forecastAccess.allowed,
+    canRun: canRefreshForecast,
+    sampleFactorOf: forecastRain.sampleFactorOf,
+    weatherPending: forecastRain.weatherPending,
+    onRefreshed: () => loadForecast(),
+  })
+  const forecastNote = forecastAuto.status === 'stale' && !canRefreshForecast ? staffingForecastNote(forecastAuto.fresh) : null
 
   // Drag-to-select: mousedown starts a selection anchor, mouseenter while dragging extends
   // it, global mouseup finalizes and opens the shift picker for every cell in the rectangle —
@@ -1415,6 +1434,19 @@ export default function Roster() {
 
       {/* Top tab bar */}
       <ActionError error={boardError} className="no-print" />
+      {forecastNote && (
+        <div className="note-banner no-print" role="status" style={{ marginBottom: 12 }}>{forecastNote}</div>
+      )}
+      {forecastAuto.status === 'refreshing' && (
+        <p role="status" className="no-print" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-text2)' }}>
+          Refreshing the Demand Forecast for the next 30 days, so the staffing recommendations are up to date…
+        </p>
+      )}
+      {forecastAuto.status === 'failed' && (
+        <p role="status" className="no-print" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-amber-text)' }}>
+          The Demand Forecast is out of date and refreshing it did not finish. Open Demand Forecast and press Recompute Forecast.
+        </p>
+      )}
       {leaveGuardUnavailable && (
         <p role="status" className="no-print" style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--theme-amber-text)' }}>
           Approved-leave conflicts cannot be checked right now — the leave requests could not be loaded. Reload to try again.
