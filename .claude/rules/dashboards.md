@@ -1,6 +1,5 @@
 ---
 paths:
-  - "src/pages/dashboard/**"
   - "src/modules/dashboard/**"
   - "src/modules/hr/dashboard/**"
   - "src/pages/Dashboard.js"
@@ -154,7 +153,7 @@ History: docs/rules-archive/dashboards.md#s756-overheads-bucket-trap
 
 - `/pnl` (`ConsolidatedPnl.jsx`, `SUITE_PAGES.consolidatedPnl`) runs Revenue → COGS → Gross Profit → operating costs → Net Profit for one BS month, or for a fiscal year (Shrawan → Ashadh, one statement per month, added up by `sumStatements`, S849 PNL-16).
 - Its revenue and COGS come from `periodCost.js`, the functions MonthlySummary calls, so it never becomes a third definition (S774). Its reads must match MonthlySummary's, paging included (`summaryReads.test.js`). The group view's `get_group_pnl` is the SQL copy, kept in step by hand and pinned by `getGroupPnlSql.test.js`. Detail: `.claude/rules/ims-figures.md`.
-- The statement's arithmetic, line list and notes live in `src/pages/dashboard/pnl/pnlStatement.js`: `LINES` is one declaration feeding the single-outlet table, the group matrix and the Excel export, and `pnlNotes()` builds every sentence once for the screen and the export. Never write a second label, tip or note list.
+- The statement's arithmetic, line list and notes live in `src/modules/dashboard/pnl/pnlStatement.js`: `LINES` is one declaration feeding the single-outlet table, the group matrix and the Excel export, and `pnlNotes()` builds every sentence once for the screen and the export. Never write a second label, tip or note list.
 - Delivery commission is its own line after Staff Meals (`loadDeliveryCommission`, POS only; `delivery_commission` on the group RPC), counted in the month the bill was sold, with unsettled delivery bills named (S849 PNL-1). Depreciation from posted Fixed Asset runs is a memo under Net Profit, never subtracted (`loadDepreciationMemo`, PNL-3).
 - Gross and Net Profit carry no colour while a month or column is open (PNL-10), or has a material uncounted-stock gap (`isMaterialGap`, PNL-2); the consolidated column is unjudged while any column is.
 - Labour is the one rule above per outlet, before consolidating: `resolveOutletLabour` (single) and `groupOutletLabour` over `get_group_labour_inputs` (group). An outlet with no labour figure prints "—", gets no Net Profit colour, and is named; a group Labour % waits for every outlet (`groupLabourRatio`). Never read `get_group_summary.payroll` as labour: it is 0 for "no run" (S798 2e).

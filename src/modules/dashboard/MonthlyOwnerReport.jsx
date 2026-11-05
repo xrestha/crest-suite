@@ -23,11 +23,11 @@ import MonthStepper, { neighboursOf } from '../../components/MonthStepper'
 import { printWithTitle } from '../../utils/printTitle'
 import { useLatestRequest } from '../../shared/hooks/useLatestRequest'
 import { usePeriodList } from '../../shared/hooks/usePeriodList'
-import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '../../modules/ownerReport/generateMonthlyReport'
-import { buildExecutiveSummary } from '../../modules/ownerReport/reportNarrative'
-import { reportMadeText } from '../../modules/ownerReport/reportMadeLine'
-import { failedSectionKeys, sectionLabel, sectionList, newlyMissingSections, trendUnavailableText, priorFailedSections } from '../../modules/ownerReport/sectionNames'
-import { lastMonthFigures } from '../../modules/ownerReport/lastMonthFigures'
+import { generateMonthlyReport, saveGeneratedReport, regenerateReport } from '../ownerReport/generateMonthlyReport'
+import { buildExecutiveSummary } from '../ownerReport/reportNarrative'
+import { reportMadeText } from '../ownerReport/reportMadeLine'
+import { failedSectionKeys, sectionLabel, sectionList, newlyMissingSections, trendUnavailableText, priorFailedSections } from '../ownerReport/sectionNames'
+import { lastMonthFigures } from '../ownerReport/lastMonthFigures'
 import { loadProfileNames, fillMissingNames } from '../../shared/profileNames'
 import './MonthlyOwnerReport.css'
 
@@ -248,13 +248,13 @@ function MonthlyOwnerReportBody() {
   useEffect(() => {
     if (!selectedPeriodId || searchParams.get('period') === selectedPeriodId) return
     setSearchParams(prev => { const next = new URLSearchParams(prev); next.set('period', selectedPeriodId); return next }, { replace: true })
-  }, [selectedPeriodId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedPeriodId]) // eslint-disable-line react-hooks/exhaustive-deps -- follows the month; the address is written here, not watched
 
   useEffect(() => {
     if (!clientId) { setLoading(false); return }
     namesRef.current = loadProfileNames(supabase, clientId, undefined, { ms: READ_MS, label: 'Reading who made the report' })
     return loadMonths()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loads per outlet; loadMonths is rebuilt each render
   }, [clientId])
 
   // The month list, with the report it will open on read beside it (S859, S876 PERF-10). Claims the
@@ -426,7 +426,7 @@ function MonthlyOwnerReportBody() {
     // Lazy-generate — a closed period from before this feature shipped, a close by someone who
     // cannot write the report (D42), or a report-gen call that failed at close time.
     await makeReport(period, key)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the helpers it calls read only clientId, refs and setters
   }, [selectedPeriodId, periods, clientId, isAdmin])
 
   useEffect(() => { if (selectedPeriodId) loadReport() }, [selectedPeriodId, loadReport])
@@ -549,7 +549,7 @@ function MonthlyOwnerReportBody() {
   async function handleExport() {
     setExportError(null)
     try {
-      const { exportMonthlyReportExcel } = await import('../../modules/ownerReport/monthlyReportExcel')
+      const { exportMonthlyReportExcel } = await import('../ownerReport/monthlyReportExcel')
       exportMonthlyReportExcel(report, { name: biz.name, vat: biz.vat, address: biz.address, vatReg: biz.vatReg, madeLine: made?.line })
     } catch (e) {
       // A chunk that no longer exists after a deploy is the likeliest cause: the reload fixes it.

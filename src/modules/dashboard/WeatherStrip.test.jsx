@@ -1,5 +1,5 @@
 import { dayTip } from './WeatherStrip'
-import { weatherLook } from '../../modules/dashboard/weatherEffect'
+import { weatherLook } from './weatherEffect'
 
 // The Tip is where the strip explains itself, so its sentences are claims about the code (S785).
 const tip = (w, extra = {}) => dayTip({ iso: '2026-09-24', isToday: false, w, look: weatherLook(w), tagPct: null, ...extra })

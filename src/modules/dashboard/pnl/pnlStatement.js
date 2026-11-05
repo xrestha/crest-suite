@@ -10,7 +10,7 @@
 import { computeUsed, COGS_FORMULA } from '../../../shared/imsFormulas'
 import { npr } from '../../../shared/nepalMoney'
 import { gapHeadline, isMaterialGap, mergeGaps } from '../../../shared/uncountedItems'
-import { outletLabourNotes } from '../../../modules/dashboard/labourSource'
+import { outletLabourNotes } from '../labourSource'
 import { hasRevenue } from '../../../shared/revenueFloor'
 
 // A line as a share of revenue. A month with less than one paisa of revenue (bills all credited back

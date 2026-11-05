@@ -42,7 +42,7 @@ jest.mock('../../shared/profileNames', () => ({
   fillMissingNames: (s, c, map) => Promise.resolve({ map, error: null }),
 }))
 const mockGenerate = jest.fn()
-jest.mock('../../modules/ownerReport/generateMonthlyReport', () => ({
+jest.mock('../ownerReport/generateMonthlyReport', () => ({
   generateMonthlyReport: (...args) => mockGenerate(...args),
   saveGeneratedReport: () => Promise.resolve({ error: null }),
   regenerateReport: () => Promise.resolve({ error: null, updated: true }),

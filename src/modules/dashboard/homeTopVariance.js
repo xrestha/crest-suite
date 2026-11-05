@@ -16,11 +16,11 @@
 // settings can land after the load. So the load keeps the candidates: judged rows that used more
 // than recipes explain, largest value first. An item without a count is never one of them.
 import { computeUsed } from '../../shared/imsFormulas'
-import { selectDepletingSales } from '../../modules/ims/sales/salesDepletion'
-import { buildUsageMap, transferNetQtyMap } from '../../modules/ims/stockcount/stockReportCalc'
+import { selectDepletingSales } from '../ims/sales/salesDepletion'
+import { buildUsageMap, transferNetQtyMap } from '../ims/stockcount/stockReportCalc'
 import {
   closingCountMap, linkedItemIdsOf, judgedRows, isUncountedGap, varianceRowBand,
-} from '../../modules/ims/variance/variancePopulation'
+} from '../ims/variance/variancePopulation'
 
 /** The cached shape's version: a pre-S852 cache held a bare array of rows built the old way; 3 (S862)
  *  links an item to the client's choice stock lines, so a view cached before it is not reused. */

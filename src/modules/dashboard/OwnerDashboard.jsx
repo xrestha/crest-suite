@@ -25,17 +25,17 @@ import ActionError, { asActionError } from '../../components/ActionError'
 import SupportContactLine from '../../components/SupportContactLine'
 import { explodeRecipeIngredients, loadRecipeBook } from '../../utils/recipeCost'
 import { bookCoversDeltas, loadDeltaExplosion } from '../../utils/orderLineIngredients'
-import { buildStockRows, summarizeReorder } from '../../modules/ims/stockcount/stockReportCalc'
-import { periodWastageValue } from '../../modules/ims/reports/periodCost'
-import { SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../../modules/ims/reports/foodCostBasis'
+import { buildStockRows, summarizeReorder } from '../ims/stockcount/stockReportCalc'
+import { periodWastageValue } from '../ims/reports/periodCost'
+import { SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP } from '../ims/reports/foodCostBasis'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
-import { splitOverheadBuckets, resolveOutletLabour, outletLabourNotes, labourNotJudgedText } from '../../modules/dashboard/labourSource'
-import { loadOutletLabour } from '../../modules/dashboard/loadOutletLabour'
-import { mtdClock, countedDaysText } from '../../modules/dashboard/mtdClock'
+import { splitOverheadBuckets, resolveOutletLabour, outletLabourNotes, labourNotJudgedText } from './labourSource'
+import { loadOutletLabour } from './loadOutletLabour'
+import { mtdClock, countedDaysText } from './mtdClock'
 import {
   tileState, revenueOf, netSpendOf, operatingFigures, cashCreditSplit, loadOverdueCreditBills, trendWithBasis,
-} from '../../modules/dashboard/ownerDashboardData'
-import { startFirstWave, startMonthBatch } from '../../modules/dashboard/ownerDashboardLoad'
+} from './ownerDashboardData'
+import { startFirstWave, startMonthBatch } from './ownerDashboardLoad'
 import { loadDeliveryCommission, bsMonthWindow } from '../../shared/deliveryCommission'
 import { hasRevenue } from '../../shared/revenueFloor'
 
@@ -123,7 +123,7 @@ export default function OwnerDashboard() {
   useEffect(() => {
     if (!canLoad || !effectiveClientId) return
     loadEverything()
-  }, [canLoad, effectiveClientId, posOn]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [canLoad, effectiveClientId, posOn]) // eslint-disable-line react-hooks/exhaustive-deps -- reloads on gate, outlet or POS change; loadEverything is rebuilt each render
 
   function loadEverything() {
     // The month read starts in this tick with every read that needs nothing from it (S853,

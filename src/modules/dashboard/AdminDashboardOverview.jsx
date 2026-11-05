@@ -52,7 +52,7 @@ export default function AdminDashboardOverview() {
   // Which attention KPI card is currently narrowing the table below. null = show everything.
   const [filter, setFilter]               = useState(null)
 
-  useEffect(() => { loadAdminStats() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadAdminStats() }, [])
 
   async function loadAdminStats() {
     // The latest load wins (S852): a Retry pressed during a load supersedes it.

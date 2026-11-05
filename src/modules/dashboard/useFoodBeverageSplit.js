@@ -64,7 +64,7 @@ export function useFoodBeverageSplit({ activePeriod, includeManual, includePos }
       setBuckets({})
       setLoading(false)
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the period id; scopedFrom follows clientId
   }, [clientId, activePeriod?.id, includeManual, includePos])
 
   return { buckets, loading, error }

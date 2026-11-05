@@ -44,7 +44,7 @@ describe('Overheads adopts the shared labour rule', () => {
 })
 
 describe('OwnerDashboard reads labour through the one rule (S849)', () => {
-  const src = readSource('pages', 'dashboard', 'OwnerDashboard.jsx')
+  const src = readSource('modules', 'dashboard', 'OwnerDashboard.jsx')
   test('loadOutletLabour, never the old inline estimate', () => {
     expect(src).toMatch(/loadOutletLabour\(/)
     expect(src).not.toMatch(/resolveOwnerLabour|estimateLaborCost|finalizedPayrollCost/)
@@ -61,7 +61,7 @@ describe('OwnerDashboard reads labour through the one rule (S849)', () => {
 
 // D22 is silent when it regresses — a margin a little too healthy — so pin the Dashboard's wiring.
 describe('ClientDashboard counts labour through the one rule', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'pages', 'dashboard', 'ClientDashboard.jsx'), 'utf8')
+  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'modules', 'dashboard', 'ClientDashboard.jsx'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
   test('reads labour with loadOutletLabour and resolves with resolveOutletLabour', () => {
     expect(src).toMatch(/loadOutletLabour\(/)
@@ -225,8 +225,8 @@ describe('groupOutletLabour and groupLabourRatio', () => {
 })
 
 describe('the group screens read labour through the shared rule (S798 2e)', () => {
-  const group = readSource('pages', 'dashboard', 'GroupDashboard.jsx')
-  const pnl = readSource('pages', 'dashboard', 'ConsolidatedPnl.jsx')
+  const group = readSource('modules', 'dashboard', 'GroupDashboard.jsx')
+  const pnl = readSource('modules', 'dashboard', 'ConsolidatedPnl.jsx')
   test('Group Dashboard: no labour from get_group_summary.payroll, no bare payroll ratio', () => {
     expect(group).toMatch(/groupOutletLabour\(/)
     expect(group).toMatch(/groupLabourRatio\(/)
@@ -329,9 +329,9 @@ describe('other labour paid (H18)', () => {
 describe('every labour reader reads payslips with the absence deduction and the other labour', () => {
   const files = {
     Overheads: ['modules', 'ims', 'reports', 'Overheads.js'],
-    ClientDashboard: ['pages', 'dashboard', 'ClientDashboard.jsx'],
-    OwnerDashboard: ['pages', 'dashboard', 'OwnerDashboard.jsx'],
-    ConsolidatedPnl: ['pages', 'dashboard', 'ConsolidatedPnl.jsx'],
+    ClientDashboard: ['modules', 'dashboard', 'ClientDashboard.jsx'],
+    OwnerDashboard: ['modules', 'dashboard', 'OwnerDashboard.jsx'],
+    ConsolidatedPnl: ['modules', 'dashboard', 'ConsolidatedPnl.jsx'],
     HrLabourPanel: ['modules', 'hr', 'dashboard', 'HrLabourPanel.jsx'],
     computeMonthlyReport: ['modules', 'ownerReport', 'computeMonthlyReport.js'],
   }

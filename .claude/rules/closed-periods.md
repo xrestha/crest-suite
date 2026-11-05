@@ -2,7 +2,7 @@
 paths:
   - "src/pages/Periods.js"
   - "src/pages/periods/**"
-  - "src/pages/dashboard/ClientDashboard.jsx"
+  - "src/modules/dashboard/ClientDashboard.jsx"
   - "src/modules/ims/purchases/**"
   - "src/modules/ims/sales/**"
   - "src/modules/ims/stockcount/**"

@@ -21,10 +21,10 @@ import { lcBand, bandFigure } from '../../shared/operatingBands'
 import {
   withGroupCogs, fcBasisOf,
   FOOD_COST_LABEL, SPEND_SO_FAR_LABEL, FOOD_COST_TIP, SPEND_SO_FAR_TIP,
-} from '../../modules/ims/reports/foodCostBasis'
-import { groupOutletLabour, groupLabourRatio, outletLabourNotes } from '../../modules/dashboard/labourSource'
-import { loadGroupLabourInputs } from '../../modules/dashboard/loadOutletLabour'
-import { mtdClock, nepalBsToday, countedDaysText } from '../../modules/dashboard/mtdClock'
+} from '../ims/reports/foodCostBasis'
+import { groupOutletLabour, groupLabourRatio, outletLabourNotes } from './labourSource'
+import { loadGroupLabourInputs } from './loadOutletLabour'
+import { mtdClock, nepalBsToday, countedDaysText } from './mtdClock'
 import {
   SETTLE_DAY, FIRST_DAY_TEXT, rowFigure, ratioPair, rowCostRatio, groupRatioOf,
   rowLabourPct, labourWithheld, labourBandWithheld, revenueChange, rankMarks,
@@ -154,7 +154,7 @@ export default function GroupDashboard() {
     const value = `${bsYear}-${String(bsMonth).padStart(2, '0')}`
     if (searchParams.get('month') === value) return
     setSearchParams(prev => { const next = new URLSearchParams(prev); next.set('month', value); return next }, { replace: true })
-  }, [bsYear, bsMonth]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bsYear, bsMonth]) // eslint-disable-line react-hooks/exhaustive-deps -- follows the month; the address is written here, not watched
   const [rows, setRows] = useState([])
   // The clock the rows were computed on, kept with them so a figure and its rules cannot disagree.
   const [clock, setClock] = useState(() => mtdClock({ bs_year: today.year, bs_month: today.month }, today))
@@ -267,7 +267,7 @@ export default function GroupDashboard() {
     setLabourError(labourIn.error || null)
     setClock(c)
     setLoading(false)
-  }, [bsYear, bsMonth, groupId, readGroupId, canLoad]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bsYear, bsMonth, groupId, readGroupId, canLoad]) // eslint-disable-line react-hooks/exhaustive-deps -- monthReq from useLatestRequest is stable across renders
 
   useEffect(() => { if (canLoad) load() }, [canLoad, load])
 

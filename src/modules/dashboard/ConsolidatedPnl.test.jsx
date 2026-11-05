@@ -47,11 +47,11 @@ jest.mock('../../components/SuiteGate', () => ({
   SUITE_PAGES: { consolidatedPnl: { featureKey: 'consolidated_pnl' } },
   useSuiteAccess: () => ({ allowed: true }),
 }))
-jest.mock('../../modules/dashboard/loadOutletLabour', () => ({
+jest.mock('./loadOutletLabour', () => ({
   loadOutletLabour: () => Promise.resolve({ labour: null, parts: { hrOn: true, fenced: false, payroll: 30000, payrollReadFailed: false, estimate: null, estimateReadFailed: false, otherPay: null }, error: null }),
   loadGroupLabourInputs: () => Promise.resolve(mockGroupLabour),
 }))
-jest.mock('../../modules/ims/reports/depreciationMemo', () => ({
+jest.mock('../ims/reports/depreciationMemo', () => ({
   loadDepreciationMemo: () => Promise.resolve({ amount: 40000, count: 1, prorated: false }),
 }))
 

@@ -3,7 +3,7 @@ paths:
   - "src/shared/sessionDataCache.js"
   - "src/utils/offlineQueue.js"
   - "src/context/AuthContext.js"
-  - "src/pages/dashboard/dashboardCache.js"
+  - "src/modules/dashboard/dashboardCache.js"
   - "src/modules/hr/employees/EmployeeList.jsx"
   - "src/modules/hr/roster/Roster.jsx"
   - "src/modules/ims/assets/AssetRegisterTab.js"

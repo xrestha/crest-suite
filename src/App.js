@@ -21,11 +21,11 @@ const Login = lazy(() => import('./pages/Login'))
 const Signup = lazy(() => import('./pages/Signup'))
 const ResetPassword = lazy(() => import('./pages/ResetPassword'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
-const ClientDashboard = lazy(() => import('./pages/dashboard/ClientDashboard'))
-const OwnerDashboard = lazy(() => import('./pages/dashboard/OwnerDashboard'))
-const GroupDashboard = lazy(() => import('./pages/dashboard/GroupDashboard'))
-const MonthlyOwnerReport = lazy(() => import('./pages/dashboard/MonthlyOwnerReport'))
-const ConsolidatedPnl = lazy(() => import('./pages/dashboard/ConsolidatedPnl'))
+const ClientDashboard = lazy(() => import('./modules/dashboard/ClientDashboard'))
+const OwnerDashboard = lazy(() => import('./modules/dashboard/OwnerDashboard'))
+const GroupDashboard = lazy(() => import('./modules/dashboard/GroupDashboard'))
+const MonthlyOwnerReport = lazy(() => import('./modules/dashboard/MonthlyOwnerReport'))
+const ConsolidatedPnl = lazy(() => import('./modules/dashboard/ConsolidatedPnl'))
 const Periods = lazy(() => import('./pages/Periods'))
 const Items = lazy(() => import('./modules/ims/items/Items'))
 const Vendors = lazy(() => import('./modules/ims/vendors/Vendors'))
@@ -137,8 +137,8 @@ const SubscriptionAgreement = lazy(() => import('./pages/SubscriptionAgreement')
 // read in their `lazy(() => import(...))` form.)
 const BOOT_PAGES = {
   '/dashboard': () => import('./pages/Dashboard'),
-  '/ims/dashboard': () => import('./pages/dashboard/ClientDashboard'),
-  '/owner-dashboard': () => import('./pages/dashboard/OwnerDashboard'),
+  '/ims/dashboard': () => import('./modules/dashboard/ClientDashboard'),
+  '/owner-dashboard': () => import('./modules/dashboard/OwnerDashboard'),
   '/hr/dashboard': () => import('./modules/hr/dashboard/HrDashboard'),
   '/pos/dashboard': () => import('./modules/pos/dashboard/PosDashboard'),
 }

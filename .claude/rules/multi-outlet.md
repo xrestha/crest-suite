@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/context/AuthContext.js"
-  - "src/pages/dashboard/GroupDashboard.jsx"
+  - "src/modules/dashboard/GroupDashboard.jsx"
   - "src/shared/scopedDb.js"
   - "src/shared/hooks/useScopedDb.js"
   # S770: `adminClients/**` narrowed to the drawer (the one file there with the Group tab), and

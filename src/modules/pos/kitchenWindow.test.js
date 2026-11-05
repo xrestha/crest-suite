@@ -16,8 +16,8 @@ const ROOT = path.join(__dirname, '..', '..', '..')
 const FILES = [
   'src/modules/pos/kds/KitchenDisplay.jsx',
   'src/modules/pos/dashboard/PosDashboard.jsx',
-  'src/pages/dashboard/HomeAttention.jsx',
-  'src/pages/dashboard/ClientDashboard.jsx',
+  'src/modules/dashboard/HomeAttention.jsx',
+  'src/modules/dashboard/ClientDashboard.jsx',
   'src/modules/pos/orders/PosOrders.jsx',
 ]
 const DAY_WINDOWED = new Set(FILES.slice(0, 4))

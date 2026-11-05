@@ -64,7 +64,7 @@ const PAPER_9PX = [
   { path: 'modules/ims/reports/VendorBalanceConfirmationPrint.jsx', reason: 'The A4 vendor balance confirmation letter, rendered print-only.' },
   { path: 'pages/SubscriptionAgreement.css', reason: 'The printable contract. Black on white on screen as well, so the preview is the paper.' },
   {
-    path: 'pages/dashboard/MonthlyOwnerReport.jsx',
+    path: 'modules/dashboard/MonthlyOwnerReport.jsx',
     from: /function pageFooterCss/,
     to: /^}/,
     reason: 'The @page footer of the printed Owner Report, drawn in the paper margin boxes.',

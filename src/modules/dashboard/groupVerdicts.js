@@ -16,7 +16,7 @@
 //   - the revenue change against last month compares part of a month with a whole one, so it is
 //     shown without a verdict and says "so far vs all of <month>". A like-for-like day comparison is
 //     not built: a Bulk month is one bs_day 0 row, so last month's "same days" would be all of it.
-import { periodCostRatio, groupCostRatio, fcBasisOf } from '../../modules/ims/reports/foodCostBasis'
+import { periodCostRatio, groupCostRatio, fcBasisOf } from '../ims/reports/foodCostBasis'
 import { compareFigures } from '../../shared/compareFigures'
 import { hasRevenue } from '../../shared/revenueFloor'
 

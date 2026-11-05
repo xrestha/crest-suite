@@ -7,7 +7,7 @@ import { settleWithin } from '../../utils/withTimeout'
 import { fetchAllRows } from '../../shared/fetchAllRows'
 import { npr } from '../../shared/nepalMoney'
 import { unitRateParts } from '../../shared/unitRate'
-import { fmtQty } from '../../modules/ims/stockcount/reorderPacks'
+import { fmtQty } from '../ims/stockcount/reorderPacks'
 import { BS_MONTHS } from '../../utils/bsCalendar'
 import { compareItemPrices } from './groupItemPriceMath'
 
@@ -59,7 +59,7 @@ export default function GroupItemPrices({ bsYear, bsMonth, readGroupId = null, r
       if (res.error) setState({ loading: false, error: res.error, rows: [] })
       else setState({ loading: false, error: null, rows: res.data || [] })
     })()
-  }, [bsYear, bsMonth, readGroupId, refreshKey, retryRun]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bsYear, bsMonth, readGroupId, refreshKey, retryRun]) // eslint-disable-line react-hooks/exhaustive-deps -- latest from useLatestRequest is stable across renders
 
   const cmp = useMemo(() => compareItemPrices(state.rows), [state.rows])
   // One column per outlet that bought any compared item, in name order.

@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/modules/ownerReport/**"
-  - "src/pages/dashboard/MonthlyOwnerReport.jsx"
+  - "src/modules/dashboard/MonthlyOwnerReport.jsx"
   - "src/pages/Periods.js"
 ---
 

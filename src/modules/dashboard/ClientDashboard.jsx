@@ -13,21 +13,21 @@ import {
   projectMonth, makeSnapshot, isCurrentSnapshot, staleSnapshotFilter, targetValue, splitAtToday,
   monthFestivals, salesFestivalFactor, salesFestivalJudged, purchFestivalJudged, targetTotal, dayRanges, canCaptureTarget,
   festivalLearnRuns, emptyDays, purchClosedFactor,
-} from '../../modules/dashboard/dailyForecast'
+} from './dailyForecast'
 import { holidaysByKeyOf } from '../../utils/demandForecastMath'
 import {
   adDateOf, adDateBack, rainPctValue, rainFactorForMonth, rainAhead, measuredRainEffect,
   WEATHER_HORIZON_DAYS, RAIN_MM, MIN_MEASURE_DAYS,
-} from '../../modules/dashboard/weatherEffect'
-import { useWeatherStrip } from '../../modules/dashboard/useWeatherStrip'
-import { isPayrollFenced, resolveOutletLabour, outletLabourNotes, labourNotJudgedText, splitOverheadBuckets } from '../../modules/dashboard/labourSource'
-import { loadOutletLabour } from '../../modules/dashboard/loadOutletLabour'
-import { mtdClock, nepalBsToday, countedDaysText, prorate } from '../../modules/dashboard/mtdClock'
-import { revenueOf, netSpendOf, operatingFigures } from '../../modules/dashboard/ownerDashboardData'
-import { readPeriodTransfers, transferValueByItem } from '../../modules/ims/transfers/transferFlows'
+} from './weatherEffect'
+import { useWeatherStrip } from './useWeatherStrip'
+import { isPayrollFenced, resolveOutletLabour, outletLabourNotes, labourNotJudgedText, splitOverheadBuckets } from './labourSource'
+import { loadOutletLabour } from './loadOutletLabour'
+import { mtdClock, nepalBsToday, countedDaysText, prorate } from './mtdClock'
+import { revenueOf, netSpendOf, operatingFigures } from './ownerDashboardData'
+import { readPeriodTransfers, transferValueByItem } from '../ims/transfers/transferFlows'
 import { loadDeliveryCommission, bsMonthWindow } from '../../shared/deliveryCommission'
 import { settleWithin, withTimeout } from '../../utils/withTimeout'
-import { fcTrendView, MIN_COMPARED_MONTHS } from '../../modules/dashboard/fcTrendMath'
+import { fcTrendView, MIN_COMPARED_MONTHS } from './fcTrendMath'
 import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom'
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip,
@@ -41,39 +41,39 @@ import Tip from '../../components/Tip'
 import ChartCard from '../../components/ChartCard'
 import StatPill from '../../components/StatPill'
 import ConfirmModal from '../../components/ConfirmModal'
-import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailuresText, closerMakesReport, deferredReportNote, nextBsMonth, tillWaitingPreflight, tillWaitingNote } from '../periods/closePeriod'
-import { backfillLeaveText } from '../../modules/hr/leave/backfillApprovedLeave'
-import { closingCountNote } from '../periods/closingCountNote'
-import CloseConfirmBody from '../periods/CloseConfirmBody'
+import { closingCountPreflight, payrollPreflight, payrollNote, performPeriodClose, closeFailuresText, closerMakesReport, deferredReportNote, nextBsMonth, tillWaitingPreflight, tillWaitingNote } from '../../pages/periods/closePeriod'
+import { backfillLeaveText } from '../hr/leave/backfillApprovedLeave'
+import { closingCountNote } from '../../pages/periods/closingCountNote'
+import CloseConfirmBody from '../../pages/periods/CloseConfirmBody'
 import { BS_MONTHS, BS_MONTHS_SHORT, daysInBsMonth, bsToAd, formatAd, bsDayBoundaryIso } from '../../utils/bsCalendar'
 import { nepalBs, nepalCivilDate, serviceDayStartIso } from '../../shared/nepalTime'
-import { carryOverFrom, stillInPlay } from '../../modules/pos/reservations/reservationStatus'
+import { carryOverFrom, stillInPlay } from '../pos/reservations/reservationStatus'
 import { getSubStatus } from '../../utils/subscription'
 import { explodeRecipeIngredients, getSuggestedPrice, loadRecipeBook } from '../../utils/recipeCost'
-import { buildStockRows } from '../../modules/ims/stockcount/stockReportCalc'
+import { buildStockRows } from '../ims/stockcount/stockReportCalc'
 import { loadDeltaExplosion, bookCoversDeltas } from '../../utils/orderLineIngredients'
-import { allocateBillDiscounts, returnCostValue } from '../../modules/ims/reports/supplierAttribution'
-import { periodWastageValue, WASTAGE_VALUE_SELECT } from '../../modules/ims/reports/periodCost'
-import { FOOD_COST_LABEL, SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP, costTrendPoint } from '../../modules/ims/reports/foodCostBasis'
+import { allocateBillDiscounts, returnCostValue } from '../ims/reports/supplierAttribution'
+import { periodWastageValue, WASTAGE_VALUE_SELECT } from '../ims/reports/periodCost'
+import { FOOD_COST_LABEL, SPEND_SO_FAR_LABEL, SPEND_SO_FAR_TIP, costTrendPoint } from '../ims/reports/foodCostBasis'
 import { FEATURE_TIER } from '../../shared/featureCatalog'
-import { useHrApprovalCounts } from '../../modules/hr/dashboard/useHrApprovalCounts'
-import SalesPivot from '../../modules/dashboard/SalesPivot'
-import { useFoodBeverageSplit } from '../../modules/dashboard/useFoodBeverageSplit'
+import { useHrApprovalCounts } from '../hr/dashboard/useHrApprovalCounts'
+import SalesPivot from './SalesPivot'
+import { useFoodBeverageSplit } from './useFoodBeverageSplit'
 import { readDashboardCache, writeDashboardCache } from './dashboardCache'
 import SetupGuideCard from '../../components/SetupGuideCard'
 import HomeAttention from './HomeAttention'
-import ImsPriceMovers from '../../modules/ims/dashboard/ImsPriceMovers'
+import ImsPriceMovers from '../ims/dashboard/ImsPriceMovers'
 import SupportContactLine from '../../components/SupportContactLine'
 import WeatherHeaderSlot from './WeatherHeaderSlot'
 import { CHART_COLORS, COST_BREAKDOWN_COLORS, costSliceColor } from '../../shared/chartColors'
 import { dashboardModules, IMS_DASHBOARD_PATH } from '../../shared/dashboardHome'
 import { npr } from '../../shared/nepalMoney'
-import { KDS_LATE_MS } from '../../modules/pos/posSignals'
-import { KOT_CHANGE_ITEMS } from '../../modules/pos/kitchenNotes'
-import { summariseBills, returnsOf } from '../../modules/pos/dashboard/posDashboardMath'
+import { KDS_LATE_MS } from '../pos/posSignals'
+import { KOT_CHANGE_ITEMS } from '../pos/kitchenNotes'
+import { summariseBills, returnsOf } from '../pos/dashboard/posDashboardMath'
 import { HOME_POS_READS, HOME_KITCHEN_READS, anyReadFailed, keepLastGood, readUnavailable } from './homePosStats'
 import { buildTopVariance, topVarianceRows, isTopVarianceView } from './homeTopVariance'
-import { loadChoiceLinkedItemIds } from '../../modules/ims/variance/variancePopulation'
+import { loadChoiceLinkedItemIds } from '../ims/variance/variancePopulation'
 import { waitingRequests } from '../../shared/reservationSeen'
 import { hasRevenue } from '../../shared/revenueFloor'
 // 'growth' → 'Growth', for an upsell naming the plan a feature is sold on (FEATURE_TIER).
@@ -600,7 +600,7 @@ export default function ClientDashboard({ scope = 'home' }) {
     if (clientModules.ims) loadStats(myId); else setLoading(false)
     if (clientModules.hr && !imsScope) loadHrStats(myId); else setHrStats(null)
     if (clientModules.pos && !imsScope) { posIsStationTeam ? loadKitchenPosStats(myId) : loadPosStats(myId) } else setPosStats(null)
-  }, [authLoading, effectiveClientId, clientModules.ims, clientModules.hr, clientModules.pos, posIsStationTeam, payrollFenced, location.key, imsScope]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authLoading, effectiveClientId, clientModules.ims, clientModules.hr, clientModules.pos, posIsStationTeam, payrollFenced, location.key, imsScope]) // eslint-disable-line react-hooks/exhaustive-deps -- loaders are rebuilt each render; these are the reload triggers
 
   // A close's outcome sentence names one outlet's month; it must not follow an outlet switch.
   useEffect(() => { setPeriodCloseNotice(null) }, [effectiveClientId])

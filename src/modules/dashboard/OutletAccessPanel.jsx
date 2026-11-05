@@ -106,7 +106,7 @@ export default function OutletAccessPanel({ outlets, readGroupId = null, readOnl
       return out
     })
     setLoaded(true)
-  }, [readGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [readGroupId]) // eslint-disable-line react-hooks/exhaustive-deps -- req from useLatestRequest is stable across renders
 
   useEffect(() => { load() }, [load])
 

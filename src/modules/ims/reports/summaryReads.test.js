@@ -26,7 +26,7 @@ const FILES = [
   ['AnnualSummary.js',    path.join(__dirname, 'AnnualSummary.js')],
   ['PeriodComparison.js', path.join(__dirname, 'PeriodComparison.js')],
   ['BudgetVsActual.js',   path.join(__dirname, 'BudgetVsActual.js')],
-  ['ConsolidatedPnl.jsx', path.join(__dirname, '../../../pages/dashboard/ConsolidatedPnl.jsx')],
+  ['ConsolidatedPnl.jsx', path.join(__dirname, '../../dashboard/ConsolidatedPnl.jsx')],
 ]
 
 // 4. ONE ARITHMETIC (S774). Monthly Summary and Consolidated P&L each carried their own copy of the

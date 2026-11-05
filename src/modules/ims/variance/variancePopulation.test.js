@@ -226,7 +226,7 @@ describe('the three pages share the population (S792)', () => {
     const readFrom = (dir, f) => fs.readFileSync(path.join(__dirname, dir, f), 'utf8')
     expect(readFrom('../../../modules/ownerReport', 'computeInventoryVariance.js')).toMatch(/loadChoiceLinkedItemIds\(supabase, \(t, c\) => scopedFrom\(t, clientId, c\)\)/)
     expect(read('shrinkageCalc.js')).toMatch(/linkedItemIdsOf\([^\n]*, choiceItemIds\)/)
-    expect(readFrom('../../../pages/dashboard', 'homeTopVariance.js')).toMatch(/linkedItemIdsOf\(breakdown, depleting, explosion, choiceItemIds\)/)
+    expect(readFrom('../../dashboard', 'homeTopVariance.js')).toMatch(/linkedItemIdsOf\(breakdown, depleting, explosion, choiceItemIds\)/)
   })
   test('the pages feeding the pure builders read the choice lines beside their recipe walk', () => {
     const readFrom = (dir, f) => fs.readFileSync(path.join(__dirname, dir, f), 'utf8')
@@ -236,7 +236,7 @@ describe('the three pages share the population (S792)', () => {
     const trend = readFrom('../../../modules/ownerReport', 'computeInventoryShrinkageTrend.js')
     expect(trend).toMatch(/loadChoiceLinkedItemIds\(supabase, \(t, c\) => scopedFrom\(t, clientId, c\)\)/)
     expect(trend).toMatch(/settings, transfers, choiceItemIds \}\)/)
-    const dash = readFrom('../../../pages/dashboard', 'ClientDashboard.jsx')
+    const dash = readFrom('../../dashboard', 'ClientDashboard.jsx')
     expect(dash).toMatch(/withTimeout\(loadChoiceLinkedItemIds\(supabase, scopedFrom\), WALK_TIMEOUT_MS/)
     expect(dash).toMatch(/variance: shelfFailed \|\| choiceItemIds === null/)
     expect(dash).toMatch(/transfers: transfersData,\s*choiceItemIds,/)

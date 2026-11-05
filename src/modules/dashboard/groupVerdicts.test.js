@@ -3,7 +3,7 @@ import {
   rowLabourPct, labourWithheld, labourBandWithheld, revenueChange, rankMarks,
   closedWithoutCount, rowCostWithheld, groupCostVerdict, coverageHeadline,
 } from './groupVerdicts'
-import { mtdClock } from '../../modules/dashboard/mtdClock'
+import { mtdClock } from './mtdClock'
 
 // Kartik 2083 (a 30-day month in the BS table) — the clock is built from a fixed "today".
 const PERIOD = { bs_year: 2083, bs_month: 7 }

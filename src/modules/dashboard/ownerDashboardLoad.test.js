@@ -211,7 +211,7 @@ describe('labour and Overdue Payables, one round trip after their inputs (S859)'
   })
 
   test('the option stock lines take the recipe book from memory when it covers them (no read of their own)', () => {
-    const page = fs.readFileSync(path.join(__dirname, '..', '..', 'pages', 'dashboard', 'OwnerDashboard.jsx'), 'utf8')
+    const page = fs.readFileSync(path.join(__dirname, '..', '..', 'modules', 'dashboard', 'OwnerDashboard.jsx'), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ').replace(/\s+/g, ' ')
     expect(page).toMatch(/loadDeltaExplosion\(supabase, deltaLists, bookCoversDeltas\(book, deltaLists\) \? \{ book \} : \{\}\)/)
   })

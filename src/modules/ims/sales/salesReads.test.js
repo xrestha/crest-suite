@@ -56,7 +56,7 @@ const FILES = [
   ['ShrinkageReport.js', path.join(__dirname, '..', 'variance', 'ShrinkageReport.js')],
   // Joined in S747 with its grouped path, get_group_pnl, which had the SQL form of the same filter.
   // Revenue is the top line of the statement and the denominator of every margin beneath it.
-  ['ConsolidatedPnl.jsx', path.join(__dirname, '..', '..', '..', 'pages', 'dashboard', 'ConsolidatedPnl.jsx')],
+  ['ConsolidatedPnl.jsx', path.join(__dirname, '..', '..', '..', 'modules', 'dashboard', 'ConsolidatedPnl.jsx')],
   // The frozen Monthly Owner Report joined in S792 (FIGURES-8). Its revenue is the denominator of
   // Food Cost %, Labour %, Prime % and Net Margin %, and its Menu Engineering qty map sets the
   // popularity median — both FROZEN, so a dropped legacy row stays dropped. The two rebuilt

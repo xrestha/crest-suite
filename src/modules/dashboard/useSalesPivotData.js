@@ -173,7 +173,7 @@ export function useSalesPivotData({ activePeriod, posEnabled, refreshKey = 0 }) 
       setRows([])
       setLoading(false)
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the period id; scopedFrom follows clientId
   }, [clientId, activePeriod?.id, posEnabled, refreshKey])
 
   return { rows, loading, error, asOf, refreshError }

@@ -30,7 +30,7 @@ paths:
   - "src/modules/ims/items/**"
   - "src/modules/pos/reports/**"
   - "src/modules/hr/reports/**"
-  - "src/pages/dashboard/**"
+  - "src/modules/dashboard/**"
 ---
 
 # Report pages: the six states, and never showing an uncomputed number

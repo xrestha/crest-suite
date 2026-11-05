@@ -21,7 +21,7 @@ import {
   Sun, CloudSun, Cloud, CloudDrizzle, CloudRain, CloudRainWind, CloudLightning,
 } from 'lucide-react'
 import Tip from '../../components/Tip'
-import { weatherLook, datesFrom, STRIP_DAYS } from '../../modules/dashboard/weatherEffect'
+import { weatherLook, datesFrom, STRIP_DAYS } from './weatherEffect'
 import { adToBsSafe, formatBsDay } from '../../utils/bsCalendar'
 import { nepalTime } from '../../shared/nepalTime'
 

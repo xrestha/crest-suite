@@ -31,9 +31,9 @@ import { firstError } from '../../shared/queryError'
 import { npr } from '../../shared/nepalMoney'
 import {
   periodRevenue, periodStockMaps, valuePeriodItems, periodRowIds, periodValuationItems, periodGap,
-} from '../../modules/ims/reports/periodCost'
-import { loadDepreciationMemo } from '../../modules/ims/reports/depreciationMemo'
-import { readPeriodTransfers } from '../../modules/ims/transfers/transferFlows'
+} from '../ims/reports/periodCost'
+import { loadDepreciationMemo } from '../ims/reports/depreciationMemo'
+import { readPeriodTransfers } from '../ims/transfers/transferFlows'
 import { loadDeliveryCommission, bsMonthWindow } from '../../shared/deliveryCommission'
 import { sheetWithLetterhead } from '../../shared/excelLetterhead'
 import { useBizInfo } from '../../shared/hooks/useBizInfo'
@@ -50,12 +50,12 @@ import { printWithTitle } from '../../utils/printTitle'
 import { withTimeout, settleWithin } from '../../utils/withTimeout'
 import { suiteLive } from '../../utils/subscription'
 import { BS_MONTHS } from '../../utils/bsCalendar'
-import { fiscalYearOf } from '../../modules/hr/payroll/tds'
+import { fiscalYearOf } from '../hr/payroll/tds'
 import {
   groupOutletLabour, isPayrollFenced, labourFigure, resolveOutletLabour,
-} from '../../modules/dashboard/labourSource'
-import { loadOutletLabour, loadGroupLabourInputs } from '../../modules/dashboard/loadOutletLabour'
-import { mtdClock, nepalBsToday } from '../../modules/dashboard/mtdClock'
+} from './labourSource'
+import { loadOutletLabour, loadGroupLabourInputs } from './loadOutletLabour'
+import { mtdClock, nepalBsToday } from './mtdClock'
 import {
   LINES, buildStatement, columnMarkers, fmtLine, groupColumn, lineColor, lineWithheld, pctOf, pnlNotes,
   statementRows, sumStatements,
@@ -468,7 +468,7 @@ export default function ConsolidatedPnl() {
     if (authLoading || !canLoad) return
     if (!effectiveClientId) { setLoading(false); setLoadError('No client selected. Pick one from the outlet switcher in the sidebar.'); return }
     init()
-  }, [authLoading, canLoad, effectiveClientId, grouped, groupArg]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authLoading, canLoad, effectiveClientId, grouped, groupArg]) // eslint-disable-line react-hooks/exhaustive-deps -- init changes as periods load, so listing it would loop
 
   async function handleSelect(key) {
     periodReq.begin(key)   // claim the page before any await
@@ -497,7 +497,7 @@ export default function ConsolidatedPnl() {
       next.set(kind, value)
       return next
     }, { replace: true })
-  }, [selectedKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedKey]) // eslint-disable-line react-hooks/exhaustive-deps -- follows the pick; the address is written here, not watched
 
   /* ── Derived render state ──────────────────────────────────────────────────────────────────── */
   const sel = describe(selectedKey)

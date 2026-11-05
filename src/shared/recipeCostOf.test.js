@@ -85,7 +85,7 @@ const COST_SITES = [
   ['MenuEngineering.js', path.join(__dirname, '..', 'modules', 'ims', 'recipes', 'MenuEngineering.js')],
   ['ComboBuilder.js', path.join(__dirname, '..', 'modules', 'ims', 'recipes', 'ComboBuilder.js')],
   ['computeMenuEngineeringSection.js', path.join(__dirname, '..', 'modules', 'ownerReport', 'computeMenuEngineeringSection.js')],
-  ['ClientDashboard.jsx', path.join(__dirname, '..', 'pages', 'dashboard', 'ClientDashboard.jsx')],
+  ['ClientDashboard.jsx', path.join(__dirname, '..', 'modules', 'dashboard', 'ClientDashboard.jsx')],
 ]
 
 describe.each(COST_SITES)('%s resolves a recipe cost through the shared decision', (_name, file) => {

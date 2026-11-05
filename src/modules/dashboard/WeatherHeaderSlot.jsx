@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react'
 import { CloudSun } from 'lucide-react'
 import Modal from '../../components/Modal'
 import WeatherStrip from './WeatherStrip'
-import WeatherCityPicker from '../../modules/dashboard/WeatherCityPicker'
+import WeatherCityPicker from './WeatherCityPicker'
 
 export default function WeatherHeaderSlot({ strip, rainTagByAd = null }) {
   const [open, setOpen] = useState(false)

@@ -14,7 +14,7 @@ import PayrollMonthStatus from '../payroll/PayrollMonthStatus'
 import { ssfDeadline } from '../payroll/monthStatus'
 import { fetchMonthDepositExtras, monthDeposit } from '../payroll/monthDeposit'
 import { useWeatherStrip } from '../../dashboard/useWeatherStrip'
-import WeatherHeaderSlot from '../../../pages/dashboard/WeatherHeaderSlot'
+import WeatherHeaderSlot from '../../dashboard/WeatherHeaderSlot'
 import HrLabourPanel from './HrLabourPanel'
 import { settleWithin } from '../../../utils/withTimeout'
 
@@ -170,7 +170,7 @@ export default function HrDashboard() {
     // downstream of the thing it was guarding.
     if (!hasHrAccess('supervisor')) { setLoading(false); return }
     load(++loadIdRef.current)
-  }, [clientId]) // eslint-disable-line
+  }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps -- loads on client switch; load is rebuilt each render
 
   async function load(myId) {
     setLoading(true)
