@@ -69,7 +69,8 @@ describe('the letter reconciles to itself', () => {
   // vendor asked to verify the letter finds two figures that disagree.
   function assertReconciles(result) {
     const { openingBalance, closingBalance, totals, schedule } = result
-    const stated = openingBalance + totals.totalPurchasesFy - totals.totalPaymentsFy - totals.totalReturnsFy
+    // S885: the letter states "− Written off" when a leftover was cleared without paying.
+    const stated = openingBalance + totals.totalPurchasesFy - totals.totalPaymentsFy - totals.totalReturnsFy - (totals.totalWrittenOffFy || 0)
     expect(stated).toBeCloseTo(closingBalance, 2)
 
     const movement = schedule.reduce(
@@ -168,6 +169,47 @@ describe('the letter reconciles to itself', () => {
     expect(creditLines.every(e => e.paymentMode === 'Supplier credit')).toBe(true)
     expect(withPair.totals.totalPaymentsFy).toBeCloseTo(1000, 2)
     expect(withPair.totals.totalCreditAppliedFy).toBeCloseTo(300, 2)
+  })
+
+  // S885, owner decision 3. A leftover of NPR 10 or less cleared without paying is a payable_payments
+  // row with payment_mode 'Write-off'. It lowers the balance like a payment and it is NOT money paid:
+  // it prints as its own "Written off" line, stays out of "Payments (FY)", and is totalled on its own
+  // so the printed sentence still adds up to the closing balance.
+  test('a cleared leftover: balance settles, the line is Written off, never inside Payments (FY)', () => {
+    const creditEntries = [line('w1', 'gW', IN_FY, { qty: 1, rate: 1004.5, ref: 'W' })]
+    const payments = [
+      payment('w1', 40, 1000, { mode: 'Cheque', note: 'Cheque 7' }),
+      payment('w1', 40, 4.5, { mode: 'Write-off' }),
+    ]
+    const result = computeVendorBalance({ creditEntries, cashEntries: [], payments, returns: [], fyStart: FY_START, fyEnd: FY_END })
+    expect(result.closingBalance).toBeCloseTo(0, 2)
+    expect(result.totals.totalPaymentsFy).toBeCloseTo(1000, 2)
+    expect(result.totals.totalWrittenOffFy).toBeCloseTo(4.5, 2)
+    // Its own line on the same day as the cheque: the mode is in the grouping key, so it never merges.
+    const lines = result.schedule.filter(e => e.type === 'payment')
+    expect(lines).toHaveLength(2)
+    expect(lines.find(e => e.writtenOff)).toMatchObject({ amount: 4.5, paymentMode: 'Write-off' })
+    expect(lines.find(e => !e.writtenOff)).toMatchObject({ amount: 1000, paymentMode: 'Cheque' })
+    assertReconciles(result)
+  })
+
+  test('a letter with no write-off has a zero Written off total and reads as before', () => {
+    const creditEntries = [line('a1', 'g1', IN_FY, { qty: 2, rate: 1000 })]
+    const result = computeVendorBalance({ creditEntries, cashEntries: [], payments: [payment('a1', 40, 800)], returns: [], fyStart: FY_START, fyEnd: FY_END })
+    expect(result.totals.totalWrittenOffFy).toBe(0)
+    expect(result.schedule.some(e => e.writtenOff)).toBe(false)
+  })
+
+  test('a leftover cleared before the year is in the opening balance, not on the year schedule', () => {
+    const creditEntries = [line('p1', 'gP', PRE_FY, { qty: 1, rate: 508 })]
+    const before = new Date(FY_START); before.setDate(before.getDate() - 10)
+    const pre = d => ({ purchase_entry_id: 'p1', paid_at: before.toISOString().slice(0, 10), amount: d.amount, note: null, payment_mode: d.mode })
+    const result = computeVendorBalance({
+      creditEntries, cashEntries: [], payments: [pre({ amount: 500, mode: 'Cash' }), pre({ amount: 8, mode: 'Write-off' })],
+      returns: [], fyStart: FY_START, fyEnd: FY_END,
+    })
+    expect(result.openingBalance).toBeCloseTo(0, 2)
+    expect(result.totals.totalWrittenOffFy).toBe(0)
   })
 
   // S792, owner decision D33 (PURCHASES-3). A return is credited at the price the supplier charged,

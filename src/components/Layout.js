@@ -32,7 +32,7 @@ import { imsCountPathReachable, IMS_COUNT_LOGIN, IMS_COUNT_IDLE_LOCK_MS } from '
 import { dashboardModules, isOverviewHome, IMS_DASHBOARD_PATH } from '../shared/dashboardHome'
 import {
   Activity, ArrowRightLeft, ArrowUpDown, Banknote, BarChart3, BookUser, Boxes, Briefcase,
-  Building2, Calculator, CalendarCheck, CalendarClock, CalendarDays, CalendarHeart, CalendarRange,
+  Building2, Calculator, CalendarCheck, ChartSpline, CalendarClock, CalendarDays, CalendarHeart, CalendarRange,
   Blend, CalendarX2, ChefHat, ChevronDown, ClipboardCheck, ClipboardList, Clock, Coins, Combine,
   ConciergeBell, Contact, CreditCard, Crown, FileBarChart, FileCheck2, FileDigit,
   FileSignature, FileStack, Gift, GitCompare, HandCoins, Handshake, HelpCircle, Hexagon, House, LifeBuoy,
@@ -121,6 +121,7 @@ const REPORTS = [
   { to: '/combo-builder',        label: 'Combo Builder',        icon: Combine, featureKey: 'combo_builder',  cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
   { to: '/menu-repricing',       label: 'Menu Repricing',       icon: Tags, featureKey: 'menu_repricing', cat: 'menu', minPlan: 'growth', minImsRole: 'manager' },
   { to: '/supplier-prices',      label: 'Price Tracker',        icon: Activity, featureKey: 'price_tracker',  cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
+  { to: '/dish-cost-history',    label: 'Dish Cost History',    icon: ChartSpline, featureKey: 'dish_cost_history', cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
   { to: '/vendors-report',       label: 'Vendor Report',        icon: BookUser, featureKey: 'vendor_report',  cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
   { to: '/supplier-contribution', label: 'Supplier Contribution', icon: Handshake, featureKey: 'supplier_contribution', cat: 'menu', minPlan: 'pro', minImsRole: 'manager' },
 ]

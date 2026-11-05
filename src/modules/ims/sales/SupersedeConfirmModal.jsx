@@ -7,8 +7,11 @@ const CONFIRM_WORD = 'DELETE'
 //
 // Deliberately a typing gate rather than a plain OK/Cancel: this deletes an unbounded number of
 // rows the user cannot see from the screen they're on (a Bulk save wipes that item's entire month
-// of daily entries), it is irreversible, and sales_entries has no audit trail to recover from.
-// A one-click confirm gets muscle-memoried away; retyping the word forces the count to be read.
+// of daily entries), and no button puts them back. A one-click confirm gets muscle-memoried away;
+// retyping the word forces the count to be read. Since S885 the removed figures are not lost
+// without trace: sales_entry_history keeps each one (day, dish, quantity, value, who), and the
+// Change history tab shows them to the Owner and IMS managers. That is a record to re-enter from,
+// not an undo, so the gate stays.
 export default function SupersedeConfirmModal({ mode, superseded, recipeNames, onCancel, onConfirm }) {
   const [typed, setTyped] = useState('')
   const armed = typed.trim().toUpperCase() === CONFIRM_WORD
@@ -25,7 +28,8 @@ export default function SupersedeConfirmModal({ mode, superseded, recipeNames, o
         background: 'color-mix(in srgb, var(--theme-red) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-red) 25%, transparent)',
         borderRadius: 'var(--radius-sm)', padding: '12px 14px', marginBottom: 16, fontSize: 13, color: 'var(--theme-red-text)',
       }}>
-        This cannot be undone. Deleted sales entries are not recoverable.
+        This cannot be undone here. The removed figures are kept in Change history on this page, where the owner and
+        inventory managers can see them and type them back in if needed.
       </div>
 
       <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--theme-text2)', lineHeight: 1.6 }}>{because}</p>

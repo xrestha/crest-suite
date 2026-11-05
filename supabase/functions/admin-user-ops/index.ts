@@ -348,6 +348,11 @@ async function deleteClientDataFor(admin: ReturnType<typeof createClient>, clien
     await del(admin.from('sales_entries').delete().in('period_id', periodIds), 'sales_entries')
     await del(admin.from('budgets').delete().in('period_id', periodIds), 'budgets')
   }
+  // S885: who changed the sales and what they said before. Both its FKs (client, month) cascade, but
+  // it is named so the sequence lists every table it clears (the S382 lesson). After sales_entries,
+  // before monthly_periods. The service role is not a signed-in person, so the deletes above wrote
+  // no history rows of their own.
+  await del(admin.from('sales_entry_history').delete().eq('client_id', clientId), 'sales_entry_history')
 
   // S849 (PNL-8): stock transfers. This outlet's own lines first (sent, received, returned), then the
   // transfers it SENT. A sister outlet's received lines stay and keep counting there, unlinked
@@ -2757,6 +2762,9 @@ Deno.serve(async (req) => {
             .or(`source.is.null,source.in.(${IMS_SALES_SOURCES.join(',')})`), 'sales_entries')
           await del(admin.from('budgets').delete().in('period_id', periodIds), 'budgets')
         }
+        // S885: the Sales Entry change history goes with the hand-entered sales it describes. Every row
+        // of the client, by client_id; the months are kept, so the month FK cascades nothing here.
+        await del(admin.from('sales_entry_history').delete().eq('client_id', clientId), 'sales_entry_history')
 
         // The manual Sales Entry depletion only; the till's movements stay with its bills (DATABASE-2).
         await del(admin.from('stock_movements').delete().eq('client_id', clientId).in('source', IMS_MOVEMENT_SOURCES), 'stock_movements')

@@ -123,6 +123,19 @@ describe('RESTORE_ORDER', () => {
   })
 })
 
+// S885: the Sales Entry change history is audit-like. Not exported (no client role can read it; only
+// get_sales_history does), so a backup never carries it and restoreCoverage never has to name it.
+describe('sales_entry_history', () => {
+  it('is neither exported nor restored, so no restore reports it', () => {
+    const exported = [...CLIENT_SCOPED_TABLES, ...PERIOD_SCOPED_TABLES, ...PARENT_SCOPED_TABLES.map(t => t.table)]
+    expect(exported).not.toContain('sales_entry_history')
+    expect(RESTORE_ORDER).not.toContain('sales_entry_history')
+    expect(RESTORED_ELSEWHERE).not.toContain('sales_entry_history')
+    // Were it ever added to the export, the restore would say plainly that it was not put back.
+    expect(restoreCoverage({ sales_entry_history: [{ id: 1 }] }).unknown).toEqual([{ table: 'sales_entry_history', rows: 1 }])
+  })
+})
+
 describe('restoreCoverage', () => {
   it('notes a left-out table with rows, and names a table no step restores', () => {
     const { leftOut, unknown } = restoreCoverage({

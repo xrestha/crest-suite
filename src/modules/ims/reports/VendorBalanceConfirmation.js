@@ -207,6 +207,8 @@ export default function VendorBalanceConfirmation() {
       `Purchases (FY): NPR ${fmt(result.totals.totalPurchasesFy)}`,
       `Payments (FY): NPR ${fmt(result.totals.totalPaymentsFy)}`,
       `Returns (FY): NPR ${fmt(result.totals.totalReturnsFy)}`,
+      // S885: only when a leftover was cleared without paying, so the four lines still add up.
+      ...(Math.abs(result.totals.totalWrittenOffFy || 0) >= 0.005 ? [`Written off (FY): NPR ${fmt(result.totals.totalWrittenOffFy)}`] : []),
       '',
       `*${balanceLabel}: NPR ${fmt(Math.abs(result.closingBalance))}*`,
     ].join('\n')

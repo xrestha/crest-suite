@@ -55,6 +55,7 @@ const DEFAULT_FLAGS = {
   fifo_report: false,
   reorder_report: false,
   price_tracker: false,
+  dish_cost_history: false,
   recipe_costing: false,
   menu_engineering: false,
   nutrition_facts: false,

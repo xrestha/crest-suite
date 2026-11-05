@@ -189,6 +189,27 @@ describe('Overdue Payables — bills, valued as Outstanding Payables (OWNER-DASH
     expect(r.overdueCount).toBe(1)
     expect(r.overdueTotal).toBeCloseTo(15200, 2)
   })
+  // S885 (owner decision 2): overdue follows the supplier's own payment days, read off each line's
+  // vendors embed; none set is the 60-day default, 0 is due on delivery.
+  test('the supplier days decide overdue: 30 days, 120 days, due on delivery, none set', () => {
+    const withDays = days => lines.map(l => ({ ...l, vendors: { id: 'v', pay_within_days: days } }))
+    const at = n => new Date(bsToAd(2083, 3, 1).getTime() + n * 86400000)
+    expect(overdueFromLines(withDays(30), {}, {}, at(31)).overdueCount).toBe(1)
+    expect(overdueFromLines(withDays(30), {}, {}, at(30)).overdueCount).toBe(0)
+    expect(overdueFromLines(withDays(120), {}, {}, today)).toEqual({ overdueTotal: 0, overdueCount: 0 })
+    expect(overdueFromLines(withDays(0), {}, {}, at(1)).overdueCount).toBe(1)
+    expect(overdueFromLines(withDays(0), {}, {}, at(0)).overdueCount).toBe(0)
+    expect(overdueFromLines(withDays(null), {}, {}, at(61)).overdueCount).toBe(1)
+    expect(overdueFromLines(withDays(null), {}, {}, at(60)).overdueCount).toBe(0)
+  })
+  test('a bill cleared by a write-off is not overdue', () => {
+    const pmts = { l1: [{ amount: 11300 }], l2: [{ amount: 11300 }], l3: [{ amount: 11300 }], l4: [{ amount: 11295 }, { amount: 5, payment_mode: 'Write-off' }] }
+    expect(overdueFromLines(lines, pmts, {}, today)).toEqual({ overdueTotal: 0, overdueCount: 0 })
+  })
+  test('the bill read carries the supplier days as an embed, so no read is added', () => {
+    const src = require('fs').readFileSync(require('path').join(__dirname, 'ownerDashboardData.js'), 'utf8')
+    expect(src).toMatch(/OVERDUE_BILL_COLUMNS = '[^']*vendors\(id, pay_within_days\)/)
+  })
   test('a fully returned bill is not overdue; a young bill is not overdue', () => {
     const returned = Object.fromEntries(lines.map(l => [l.id, 10000]))
     expect(overdueFromLines(lines, {}, returned, today)).toEqual({ overdueTotal: 0, overdueCount: 0 })

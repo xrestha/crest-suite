@@ -358,10 +358,18 @@ export async function computeRecipeCosts(supabase, recipeIds, { book } = {}) {
   return costMapOf(recipeIds, breakdown, rateMap, manualMap)
 }
 
+// The multiply step on its own: one dish's exploded raw items (`explodeRecipeIngredients` output for
+// that dish) priced at `rateMap` (item id → rate per base unit). Exported for Dish Cost History
+// (S885), which prices the same exploded recipe at a different rate map per month; it must reuse
+// this rather than write a third recipe walk (recipes-and-subrecipes.md).
+export function ingredientCostOf(rows, rateMap) {
+  return (rows || []).reduce((sum, { item_id, qty }) => sum + qty * (rateMap[item_id] || 0), 0)
+}
+
 function costMapOf(recipeIds, breakdown, rateMap, manualMap) {
   const costMap = {}
   for (const recipeId of recipeIds) {
-    const ingredientCost = (breakdown[recipeId] || []).reduce((sum, { item_id, qty }) => sum + qty * (rateMap[item_id] || 0), 0)
+    const ingredientCost = ingredientCostOf(breakdown[recipeId], rateMap)
     costMap[recipeId] = ingredientCost > 0 ? ingredientCost : (manualMap[recipeId] || 0)
   }
   return costMap

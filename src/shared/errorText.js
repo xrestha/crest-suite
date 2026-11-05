@@ -1264,6 +1264,44 @@ const rules = [
     staff: 'These codes belong to another outlet than the one you are signed in to. Nothing was changed.',
     operator: 'These codes belong to a different outlet than the one you are signed in to, so nothing was changed. Switch to that outlet first, then renumber.',
   },
+  // S885 (migrations 20261104160000–20261104190000), by hint, above the generic 42501 rule. The
+  // category and write-off refusals are raised before anything is written, in one transaction, so
+  // each may say nothing changed.
+  {
+    test: e => hasCode(e, 'category_protected'),
+    staff: 'The Sub-Recipes category is kept by the app for sub-recipes, so it cannot be renamed or removed. Nothing was changed.',
+    operator: 'The Sub-Recipes category is where Recipe Costing files every sub-recipe, and the app finds it by that name, so it cannot be renamed or removed. Nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'category_remove_rank'),
+    staff: 'Removing a category needs the owner or an inventory manager. Nothing was changed.',
+    operator: 'Removing a category moves its items, budgets and stock count sections, so it needs the account owner or an inventory manager. Nothing was changed.',
+  },
+  {
+    test: e => hasCode(e, 'category_needs_target'),
+    staff: 'This category still has items or budgets, so pick a category to move them to first. Nothing was changed.',
+    operator: 'This category still holds items or monthly budgets, so it can only be removed by moving them to another category. Nothing was changed. Pick where they should go.',
+  },
+  {
+    test: e => hasCode(e, 'category_same', 'category_missing'),
+    staff: 'That category could not be moved as asked. Reload the page and try again. Nothing was changed.',
+    operator: 'One of the two categories no longer exists, or both are the same one, so nothing was moved or removed. Reload the page and pick again.',
+  },
+  {
+    test: e => hasCode(e, 'write_off_over_cap'),
+    staff: 'Only a leftover of NPR 10 or less on a bill can be cleared. Nothing was recorded.',
+    operator: 'A bill can have at most NPR 10 cleared in total, and this would go over that, so nothing was recorded. Record a payment for the rest instead.',
+  },
+  {
+    test: e => hasCode(e, 'write_off_mode_locked'),
+    staff: 'A cleared leftover cannot be turned into a payment, and a payment cannot be turned into a cleared leftover. Nothing was changed.',
+    operator: 'A cleared leftover is not money paid, so it cannot be relabelled as a payment, and a real payment cannot be relabelled as cleared. Nothing was changed. Delete the entry and record it again the right way.',
+  },
+  {
+    test: e => hasCode(e, 'sales_history_rank'),
+    staff: 'The sales change history is for the owner and inventory managers.',
+    operator: 'The sales change history can be read by the account owner and inventory managers only, so it was not shown.',
+  },
   {
     test: e => hasCode(e, 'renumber_no_prefix', 'renumber_bad_kind'),
     staff: 'The codes could not be renumbered as asked. Nothing was changed. Ask your manager.',

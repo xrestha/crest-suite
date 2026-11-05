@@ -16,8 +16,16 @@ import {
   EPS, SUPPLIER_CREDIT_MODE, isCreditRow, valueBillLines, groupIntoBills, allocatePayment,
   planSupplierLumpSum, supplierCreditSlots, billPaymentProblems, planBillPayment,
   expandCreditPartners, linesToReopen, linesToCloseByReturns, paymentsMovedSince, paymentsMovedText,
-  paymentRecordArgs,
+  paymentRecordArgs, planWriteOff,
 } from './payablesAllocation'
+import { isWriteOff, recordedByOf, clearableAmount, WRITE_OFF_MAX_NPR } from './writeOff'
+import { billStatus, billBalance, vendorGroups, payablesScopeLine, payablesSheetRows, payablesSheetNotes } from './payablesView'
+import { payTermsLabel, parsePayTerms, DEFAULT_PAY_WITHIN_DAYS, MAX_PAY_WITHIN_DAYS } from '../vendors/payTerms'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { useConfirm } from '../../../shared/hooks/useConfirm'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import LetterheadButton from '../../../components/LetterheadButton'
+import { printWithTitle } from '../../../utils/printTitle'
 import { fmtLineRate } from '../purchases/purchaseLines'
 import { unitRateCell } from '../../../shared/unitRate'
 import { withTimeout, isTimeout } from '../../../utils/withTimeout'
@@ -57,6 +65,8 @@ function fmtBsDate(adIso) {
 }
 // How a Credit bill's settlement was actually paid — distinct from purchase_entries.payment_method
 // (Cash/Credit/FonePay), which describes the ORIGINAL purchase, not its later settlement.
+// 'Supplier credit' and 'Write-off' (S885) are deliberately absent: each is written only by its own
+// action, and the database refuses a change of mode into or out of either.
 const PAYMENT_MODES = ['Cash', 'FonePay', 'Bank Transfer', 'Cheque']
 
 const INPUT = {
@@ -70,6 +80,8 @@ export default function OutstandingPayables() {
   const { clientId, profile, loading: authLoading, hasImsAccess } = useAuth()
   const effectiveClientId = clientId || profile?.client_id
   const { scopedFrom, scopedDelete, scopedUpdate } = useScopedDb()
+  const biz = useBizInfo()
+  const { ask: askConfirm, confirmEl } = useConfirm()
 
   const [entries, setEntries]           = useState([])
   const [paymentsMap, setPaymentsMap]   = useState({})
@@ -122,15 +134,15 @@ export default function OutstandingPayables() {
   // mis-entered payments, same reasoning as bulk-pay above.
   const [selectedPayments, setSelectedPayments] = useState(new Set())
 
-  // Per-vendor payment terms (free text, e.g. "Net 30", "COD") — quick-editable right from this
-  // page's vendor group header instead of only via the Vendors page. Fetched as its own small,
-  // separately-erroring query (not folded into the main entries select) so a client whose DB
-  // predates the payment_terms migration still gets a fully working Outstanding Payables page —
-  // same reasoning as setupNeeded above, just scoped to this one optional column.
+  // Per-vendor payment terms — quick-editable right from this page's vendor group header instead of
+  // only via the Vendors page: `{ [vendorId]: { payment_terms, pay_within_days } }`. Since S885
+  // pay_within_days decides which bills are overdue (owner decision 2: NULL = the 60-day default,
+  // 0 = due on delivery); payment_terms stays a free-text note. A failed read of it is a failed
+  // page now, never every supplier silently on the default (load()).
   const [vendorTerms, setVendorTerms]         = useState({})
-  const [termsSetupNeeded, setTermsSetupNeeded] = useState(false)
   const [editingTermsVendor, setEditingTermsVendor] = useState(null)
-  const [termsForm, setTermsForm]             = useState('')
+  const [termsForm, setTermsForm]             = useState({ days: '', note: '' })
+  const [termsDaysErr, setTermsDaysErr]       = useState('')
   const [termsSaving, setTermsSaving]         = useState(false)
   const [termsError, setTermsError]           = useState('')
 
@@ -241,7 +253,7 @@ export default function OutstandingPayables() {
     // trips on every load, and this page reloads after every recorded payment.
     const [vtRes, pmtRes, retRes] = await Promise.all([
       vendorIds.length > 0
-        ? supabase.from('vendors').select('id, payment_terms').in('id', vendorIds)
+        ? supabase.from('vendors').select('id, payment_terms, pay_within_days').in('id', vendorIds)
         : Promise.resolve({ data: null, error: null }),
       // Paged and chunked (S723). The bills read above is carefully paged, with a comment saying
       // this page is the likeliest in the app to cross PostgREST's silent 1000-row cap — and the
@@ -258,16 +270,14 @@ export default function OutstandingPayables() {
     ])
     if (!tabReq.isCurrent(tab)) return
 
-    if (vendorIds.length > 0) {
-      if (vtRes.error) {
-        if (vtRes.error.code === '42703') setTermsSetupNeeded(true)
-      } else {
-        const map = {}
-        ;(vtRes.data || []).forEach(v => { map[v.id] = v.payment_terms })
-        setVendorTerms(map)
-        setTermsSetupNeeded(false)
-      }
-    }
+    // S885: a supplier's payment days decide which bills are overdue, so this read now fails the
+    // page like the two beside it. It used to be skipped quietly (only a missing payment_terms
+    // column was named), which today would put every supplier on the 60-day default with nothing
+    // to say so.
+    if (vtRes.error) { setLoadError(vtRes.error); setEntries([]); setPaymentsMap({}); setLoading(false); return }
+    const termsMap = {}
+    ;(vtRes.data || []).forEach(v => { termsMap[v.id] = { payment_terms: v.payment_terms, pay_within_days: v.pay_within_days } })
+    setVendorTerms(termsMap)
 
     // A failed payments read would render every credit bill as fully unpaid (S612).
     if (pmtRes.error) { setLoadError(pmtRes.error); setEntries([]); setPaymentsMap({}); setLoading(false); return }
@@ -391,7 +401,8 @@ export default function OutstandingPayables() {
   // Returns null when the payment landed, else { text, detail } for the caller's slot. A refusal the
   // server raised rolled the whole transaction back, so it may say nothing was recorded; no answer
   // (a timeout or a dropped connection) proves nothing either way (S619), so it says to reload first.
-  async function recordPayments(bills, rows, settleIds, date, paying) {
+  // `writeOff` words the two general failures for clearing a leftover (S885), which is not a payment.
+  async function recordPayments(bills, rows, settleIds, date, paying, { writeOff = false } = {}) {
     let res
     try {
       res = await withTimeout(supabase.rpc('record_payable_payments',
@@ -414,8 +425,10 @@ export default function OutstandingPayables() {
       return { text: `Nothing was recorded. Crest could not mark every line of ${many ? 'these bills' : 'this bill'} as paid, and this login may not be allowed to change some of them. ${text}`, detail }
     }
     if (isTimeout(err) || isNetworkError(err) || !err.code) {
+      if (writeOff) return { text: `Crest could not confirm the leftover was cleared. Reload the page before trying again: if it reached the server before the connection dropped, the bill already shows under Paid History. ${text}`, detail }
       return { text: `The payment could not be confirmed as saved. Reload the page before trying again: if it reached the server before the connection dropped, it already shows against ${many ? 'these bills' : 'the bill'}, and saving again would record it twice. ${text}`, detail }
     }
+    if (writeOff) return { text: `The leftover was not cleared, so this bill still shows what it owed before. ${text}`, detail }
     return { text: `The payment was not recorded, so ${many ? 'these bills still show' : 'this bill still shows'} what was owed before. ${text}`, detail }
   }
 
@@ -541,6 +554,54 @@ export default function OutstandingPayables() {
     load(activeTab)
   }
 
+  // ── S885 (owner decision 3): clear a leftover of NPR 10 or less without paying it ─────────────
+  //
+  // The page is manager-gated, so this is the Owner or an IMS manager. The amount is spread over the
+  // bill's open lines exactly as "Pay in full" spreads a payment (planWriteOff → allocatePayment) and
+  // recorded by the same server step, so the bill settles and moves to Paid History. The rows carry
+  // payment_mode 'Write-off': the balance letter and Vendor Report show them as written off, never
+  // as money paid, and they never become supplier credit. The NPR 10 cap is per bill and the server
+  // holds it too (write_off_over_cap); the button is offered only inside it (clearableAmount).
+  function askClearLeftover(bill) {
+    const amount = clearableAmount(bill)
+    if (amount == null) return
+    setPayError('')
+    askConfirm({
+      title: `Clear ${fmt2(amount)} without paying`,
+      confirmLabel: `Clear ${fmt2(amount)}`,
+      busyLabel: 'Clearing…',
+      body: (
+        <>
+          <p style={{ margin: '0 0 8px' }}>
+            Bill #{bill.invoice_ref || '—'} from {bill.vendorName} has <strong>{fmt2(amount)}</strong> left to pay. Clearing it records {fmt2(amount)} as written off, dated today, and the bill moves to Paid History.
+          </p>
+          <p style={{ margin: 0 }}>
+            This is not money paid. It shows as written off on the balance letter and in Vendor Report, it can never be changed into a payment, and it is never counted as supplier credit. To undo it, delete the written off entry from the payment history of the bill.
+          </p>
+        </>
+      ),
+      run: () => clearLeftover(bill),
+    })
+  }
+
+  async function clearLeftover(bill) {
+    if (!effectiveClientId) { setPayError('No client selected. Pick a client in the top-left switcher before saving.'); return }
+    const date = todayIso()
+    const plan = planWriteOff(bill, date)
+    if (!plan) {
+      setPayError(`Only a leftover of ${fmt2(WRITE_OFF_MAX_NPR)} or less on a bill can be cleared, so this bill was not changed.`)
+      return
+    }
+    setSettleWarn(null)
+    const paying = { [bill.key]: plan.amount }
+    // The same fresh read and the same server step every payment takes (S792, S877).
+    const moved = await paymentsMovedCheck([bill], paying)
+    if (moved) { setPayError(moved); return }
+    const fail = await recordPayments([bill], plan.rows, plan.settleIds, date, paying, { writeOff: true })
+    if (fail) { setPayError(fail); return }
+    load(activeTab)
+  }
+
   // ── D9: one lump sum for a supplier, oldest bill first ─────────────────────────────────────────
   //
   // A manager paying a supplier "40,000 against what we owe" used to have to work out by hand which
@@ -581,35 +642,50 @@ export default function OutstandingPayables() {
   }
 
   function openEditTerms(vendor) {
+    const t = vendorTerms[vendor.id] || {}
     setEditingTermsVendor(vendor)
-    setTermsForm(vendorTerms[vendor.id] || '')
-    // Surface the one-time-setup message immediately on open (rather than only after a failed
-    // save) when the payment_terms column isn't deployed yet — keeps the button itself always
-    // visible/discoverable instead of hiding the whole feature until someone runs the migration.
-    setTermsError(termsSetupNeeded
-      ? 'Needs a one-time database setup. Run this in Supabase → SQL Editor, then try again: ALTER TABLE vendors ADD COLUMN IF NOT EXISTS payment_terms text;'
-      : '')
+    setTermsForm({ days: Number.isInteger(t.pay_within_days) ? String(t.pay_within_days) : '', note: t.payment_terms || '' })
+    setTermsDaysErr('')
+    setTermsError('')
   }
 
+  // S885: the number of days decides what is overdue; the note is kept as it was. Blank days is the
+  // 60-day default (NULL), 0 is due on delivery. Writing vendors needs IMS supervisor or above, so
+  // this manager-gated page always may; the database still decides.
   async function saveTerms() {
     if (!editingTermsVendor) return
+    const raw = String(termsForm.days ?? '').trim()
+    let days = null
+    if (raw !== '') {
+      const n = Number(raw)
+      if (!Number.isInteger(n) || n < 0 || n > MAX_PAY_WITHIN_DAYS) {
+        setTermsDaysErr(`Enter a whole number of days from 0 to ${MAX_PAY_WITHIN_DAYS}, or leave it blank for ${DEFAULT_PAY_WITHIN_DAYS} days.`)
+        return
+      }
+      days = n
+    }
+    setTermsDaysErr('')
     setTermsSaving(true)
     setTermsError('')
-    const trimmed = termsForm.trim() || null
+    const note = String(termsForm.note ?? '').trim() || null
     // `.select('id')` (S756): zero rows back with no error is a save that did not land.
-    const { data: updated, error } = await scopedUpdate('vendors', { payment_terms: trimmed }).eq('id', editingTermsVendor.id).select('id')
+    let res
+    try {
+      res = await withTimeout(scopedUpdate('vendors', { payment_terms: note, pay_within_days: days }).eq('id', editingTermsVendor.id).select('id'), 20000, 'Saving payment terms')
+    } catch (err) {
+      res = { error: err }
+    }
     setTermsSaving(false)
-    if (error) {
-      setTermsError(error.code === '42703'
-        ? 'Needs a one-time database setup. Run this in Supabase → SQL Editor, then try again: ALTER TABLE vendors ADD COLUMN IF NOT EXISTS payment_terms text;'
-        : asActionError(error))
+    if (res.error) {
+      const { text, detail } = asActionError(res.error)
+      setTermsError({ text: `${editingTermsVendor.name} may still show its previous payment terms. ${text}`, detail })
       return
     }
-    if (!updated?.length) {
-      setTermsError(`The payment terms were not saved — ${editingTermsVendor.name} still shows its previous terms. This login may not be allowed to change vendors; ask your manager or the Owner.`)
+    if (!res.data?.length) {
+      setTermsError(`The payment terms were not saved, so ${editingTermsVendor.name} still shows its previous terms. This login may not be allowed to change suppliers; ask your manager or the Owner.`)
       return
     }
-    setVendorTerms(prev => ({ ...prev, [editingTermsVendor.id]: trimmed }))
+    setVendorTerms(prev => ({ ...prev, [editingTermsVendor.id]: { payment_terms: note, pay_within_days: days } }))
     setEditingTermsVendor(null)
   }
 
@@ -647,6 +723,9 @@ export default function OutstandingPayables() {
     // the pair goes together and the dialog says so (S756 D11). The database refuses a lone half.
     const { ids, linkIds } = expandCreditPartners(toDelete)
     const creditRows = toDelete.filter(isCreditRow)
+    // A cleared leftover (S885) is not a payment: deleting one puts that amount back on the bill.
+    const writeOffRows = toDelete.filter(isWriteOff)
+    const writeOffTotal = writeOffRows.reduce((s, p) => s + parseFloat(p.amount), 0)
     setPendingConfirm({
       title: `Delete ${n} payment${n === 1 ? '' : 's'}`,
       confirmLabel: 'Delete',
@@ -656,6 +735,11 @@ export default function OutstandingPayables() {
           <p style={{ margin: '0 0 8px' }}>
             Removes {n} payment{n === 1 ? '' : 's'} totaling <strong>{fmt(total)}</strong> from the history of bill #{bill.invoice_ref || '—'} ({bill.vendorName}).
           </p>
+          {writeOffRows.length > 0 && (
+            <p style={{ margin: '0 0 8px' }}>
+              {writeOffRows.length === 1 ? 'One of these is' : `${writeOffRows.length} of these are`} a leftover cleared without paying (written off), not money paid. Deleting {writeOffRows.length === 1 ? 'it' : 'them'} puts {fmt2(writeOffTotal)} back on the bill as owed.
+            </p>
+          )}
           {creditRows.length > 0 && (
             <p style={{ margin: '0 0 8px' }}>
               {creditRows.length === 1 ? 'One of these is' : `${creditRows.length} of these are`} supplier credit. Each also removes its matching entry on the other bill ({creditRows.map(p => p.note).filter(Boolean).join('; ')}), so the credit goes back to the bill it came from and the bill it was used on owes that amount again.
@@ -760,10 +844,12 @@ export default function OutstandingPayables() {
   // letter instead of a blank Payment Mode cell.
   function openEditMode(bill) {
     // A supplier-credit entry's mode is what marks it as half of a pair — the database refuses a
-    // change to it — so it is left out rather than offered and then refused (S756 D11).
-    const targets = bill.payments.filter(p => selectedPayments.has(p.id) && !isCreditRow(p))
+    // change to it — so it is left out rather than offered and then refused (S756 D11). A written
+    // off entry is the same (S885): its mode is what says it is not money paid, and the database
+    // refuses a change into or out of it (write_off_mode_locked).
+    const targets = bill.payments.filter(p => selectedPayments.has(p.id) && !isCreditRow(p) && !isWriteOff(p))
     if (targets.length === 0) {
-      setPayError('Supplier-credit entries keep "Supplier credit" as their payment mode. Select an ordinary payment to change its mode.')
+      setPayError('Supplier credit and written off entries keep their own payment mode, so neither can be changed here. Select an ordinary payment to change its mode.')
       return
     }
     setEditingModePayments({ ids: targets.map(p => p.id), count: targets.length })
@@ -849,7 +935,7 @@ export default function OutstandingPayables() {
   // Memoized: this rebuilds and re-sorts the whole bill ledger (every credit line, unbounded by
   // period), and it used to re-run on every keystroke of the payment-amount and note boxes —
   // exactly while someone is entering money.
-  const { vendors, vendorByName, bills, periodOptions, filteredBills, byVendor, totalRemaining, overdueBills, urgentValue, creditValue, lastSettled } = useMemo(() => {
+  const { vendors, vendorByName, bills, periodOptions, filteredBills, groups, totalRemaining, overdueBills, urgentValue, creditValue, lastSettled } = useMemo(() => {
     const vendors = [...new Map(entries.map(e => [e.vendors?.name, e.vendors])).values()].filter(Boolean)
     const vendorByName = Object.fromEntries(vendors.map(v => [v.name, v]))
 
@@ -874,22 +960,52 @@ export default function OutstandingPayables() {
       return matchV && matchA && matchP
     })
 
-    const byVendor = {}
-    filteredBills.forEach(b => { (byVendor[b.vendorName] = byVendor[b.vendorName] || []).push(b) })
+    // Supplier by supplier, in the order the page draws them; the Print and the Excel export read
+    // the same list, so the workbook is the table on screen (payablesView.js, S885).
+    const groups = vendorGroups(filteredBills, activeTab)
 
-    const totalRemaining = filteredBills.reduce((s, b) => s + (activeTab === 'outstanding' ? b.remaining : b.total), 0)
-    const overdueBills   = filteredBills.filter(b => b.daysOld > 60 && b.remaining > EPS).length
+    const totalRemaining = filteredBills.reduce((s, b) => s + (activeTab === 'outstanding' ? billBalance(b) : b.total), 0)
+    // S885 (owner decision 2): overdue follows each supplier's own payment days, 60 when none is
+    // set and 0 for due on delivery. The age buckets below still describe age, not lateness.
+    const overdueBills   = filteredBills.filter(b => billStatus(b, vendorTerms[b.vendorId]).key === 'overdue').length
     const urgentValue    = filteredBills.filter(b => b.daysOld > 90).reduce((s, b) => s + Math.max(0, b.remaining), 0)
-    // Vendor credits, shown as a positive amount owed back to us.
-    const creditValue    = -filteredBills.filter(b => b.isCredit).reduce((s, b) => s + b.remaining, 0)
+    // Vendor credits, shown as a positive amount owed back to us — money only, never a cleared
+    // leftover (groupIntoBills' `credit`, S885).
+    const creditValue    = filteredBills.filter(b => b.isCredit).reduce((s, b) => s + b.credit, 0)
     // Explicit max rather than "the first bill in fetch order" — that only held while `entries`
     // arrived in paid_at-descending order, which stopped being true once a bill's lines are
     // merged from two reads (S723).
     const lastSettled    = filteredBills.reduce((best, b) =>
       (b.settledOn && (!best || b.settledOn > best.settledOn) ? b : best), null)
 
-    return { vendors, vendorByName, bills, periodOptions, filteredBills, byVendor, totalRemaining, overdueBills, urgentValue, creditValue, lastSettled }
-  }, [entries, paymentsMap, filterVendor, filterAging, filterPeriod, activeTab])
+    return { vendors, vendorByName, bills, periodOptions, filteredBills, groups, totalRemaining, overdueBills, urgentValue, creditValue, lastSettled }
+  }, [entries, paymentsMap, filterVendor, filterAging, filterPeriod, activeTab, vendorTerms])
+
+  // What a printed or exported copy covers, every filter on the page stated (S885, S725's rule).
+  const monthFilterLabel = filterPeriod === 'all' ? null : (periodOptions.find(o => o.key === filterPeriod)?.label || null)
+  const scopeLine = payablesScopeLine({
+    tab: activeTab, vendor: filterVendor, aging: filterAging, monthLabel: monthFilterLabel, asOf: fmtBsDate(todayIso()),
+  })
+
+  async function exportExcel() {
+    const XLSX = await import('xlsx')
+    const outstanding = activeTab === 'outstanding'
+    const rows = payablesSheetRows(groups, {
+      tab: activeTab,
+      vendorOf: id => vendorTerms[id] || null,
+      settledLabel: iso => fmtBsDate(iso) || '',
+    })
+    const ws = sheetWithLetterhead(XLSX, {
+      title: outstanding ? 'Outstanding Payables' : 'Outstanding Payables: Paid History',
+      biz,
+      scopeLine,
+      rows,
+      notes: payablesSheetNotes(activeTab),
+    })
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, outstanding ? 'Outstanding' : 'Paid History')
+    XLSX.writeFile(wb, `outstanding-payables-${outstanding ? 'unpaid' : 'paid'}-${todayIso()}.xlsx`)
+  }
 
   const selectedBillObjs = bills.filter(b => selectedBills.has(b.key) && b.remaining > EPS)
   const selectedTotal    = selectedBillObjs.reduce((s, b) => s + b.remaining, 0)
@@ -898,14 +1014,30 @@ export default function OutstandingPayables() {
 
   return (
     <div>
-      <div className="page-header">
+      <div className="page-header page-header--split">
         <div>
           <h1 className="page-title">Outstanding Payables</h1>
           <p className="page-subtitle">
             {activeTab === 'outstanding' ? 'Unpaid credit bills — pay the whole invoice in one go' : 'Settled credit bills — payment history'}
           </p>
         </div>
+        {/* S885 (owner decision 1): Print and Excel of the bills on screen, gated on the load like
+            every report export (S728), Excel also on the business name (LetterheadButton, S877). */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="btn btn-ghost" style={{ fontSize: 12 }}
+            disabled={loading || !!loadError || setupNeeded || filteredBills.length === 0}
+            onClick={() => printWithTitle(`Outstanding Payables — ${scopeLine}`)}>🖨 Print</button>
+          <LetterheadButton ready={biz.ready} error={biz.error} style={{ fontSize: 12 }} onClick={exportExcel}
+            disabled={loading || !!loadError || setupNeeded || filteredBills.length === 0}>↓ Export Excel</LetterheadButton>
+        </div>
       </div>
+      {/* The filters are no-print, so what the printed copy covers prints here. */}
+      <p className="print-only" style={{ fontSize: 12, margin: '0 0 12px' }}>{scopeLine}</p>
+      {biz.error && (
+        <p role="alert" className="no-print" style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--theme-amber-text)' }}>
+          The name of this outlet could not be loaded, so Excel is switched off rather than exporting a sheet with a blank company name. The list below is unaffected. Reload the page to try again.
+        </p>
+      )}
 
       <Tabs
         idBase="payables"
@@ -937,27 +1069,27 @@ export default function OutstandingPayables() {
           <div className="stat-card">
             <div className="stat-label"><Tip text="Total remaining balance across all outstanding credit bills, less any payments already recorded. Bill amounts match the vendor's invoice: less any bill discount, less goods returned at the discounted price the supplier charged for them, plus 13% VAT on VAT-inclusive lines. A bill over-settled by a late return counts against this as a credit." width={280}>Total Remaining</Tip></div>
             <div className="stat-value" style={{ fontSize: 18, color: totalRemaining > 0 ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{fmt(totalRemaining)}</div>
-            <div className="stat-sub">{filteredBills.length} bill{filteredBills.length !== 1 ? 's' : ''} · {Object.keys(byVendor).length} vendor{Object.keys(byVendor).length !== 1 ? 's' : ''}</div>
+            <div className="stat-sub">{filteredBills.length} bill{filteredBills.length !== 1 ? 's' : ''} · {groups.length} vendor{groups.length !== 1 ? 's' : ''}</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label"><Tip text="Bills with a remaining balance older than 60 days." width={230}>Overdue Bills</Tip></div>
+            <div className="stat-label"><Tip text={`Bills with money still owed that are older than the number of days their supplier gives to pay, counted from the bill date. A supplier with no days set gets ${DEFAULT_PAY_WITHIN_DAYS} days, and 0 days means due on delivery. Set them with Edit Terms on each supplier.`} width={290}>Overdue Bills</Tip></div>
             <div className="stat-value" style={{ color: overdueBills > 0 ? 'var(--theme-amber-text)' : 'var(--theme-text2)' }}>{overdueBills}</div>
-            <div className="stat-sub">&gt;60 days outstanding</div>
+            <div className="stat-sub">Past their supplier payment days</div>
           </div>
           <div className="stat-card">
-            <div className="stat-label"><Tip text="Remaining value on bills over 90 days old. Urgent settlement needed." width={240}>90+ Day Value</Tip></div>
+            <div className="stat-label"><Tip text="Remaining value on bills over 90 days old, counted from the bill date whatever the supplier payment days are. Urgent settlement needed." width={260}>90+ Day Value</Tip></div>
             <div className="stat-value" style={{ fontSize: 16, color: urgentValue > 0 ? 'var(--theme-red-text)' : 'var(--theme-text2)' }}>{urgentValue > 0 ? fmt(urgentValue) : '—'}</div>
             <div className="stat-sub">Urgent settlement</div>
           </div>
         </>) : (<>
           <div className="stat-card">
-            <div className="stat-label"><Tip text="Total invoiced value of all fully settled credit bills — net of returns and discount, including VAT where applicable." width={260}>Total Paid</Tip></div>
+            <div className="stat-label"><Tip text="Total invoiced value of all fully settled credit bills — net of returns and discount, including VAT where applicable. A small leftover cleared without paying (written off) is part of it." width={260}>Total Paid</Tip></div>
             <div className="stat-value" style={{ fontSize: 18, color: 'var(--theme-text1)' }}>{fmt(totalRemaining)}</div>
             <div className="stat-sub">{filteredBills.length} settled bill{filteredBills.length !== 1 ? 's' : ''}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Vendors Paid</div>
-            <div className="stat-value">{Object.keys(byVendor).length}</div>
+            <div className="stat-value">{groups.length}</div>
             <div className="stat-sub">Unique vendors settled</div>
           </div>
           <div className="stat-card">
@@ -979,7 +1111,7 @@ export default function OutstandingPayables() {
       )}
 
       {!loadError && (
-      <div style={{ display: 'flex', gap: 20, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="no-print" style={{ display: 'flex', gap: 20, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <select aria-label="Filter by vendor" className="form-select" value={filterVendor} onChange={e => setFilterVendor(e.target.value)}>
             <option value="all">All Vendors</option>
@@ -1009,7 +1141,7 @@ export default function OutstandingPayables() {
       )}
 
       {!loadError && activeTab === 'outstanding' && selectedBills.size > 0 && (
-        <div className="card" style={{
+        <div className="card no-print" style={{
           marginBottom: 20, padding: '14px 20px', display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap',
           border: '1px solid color-mix(in srgb, var(--theme-accent) 40%, transparent)',
           background: 'color-mix(in srgb, var(--theme-accent) 6%, transparent)',
@@ -1058,32 +1190,27 @@ export default function OutstandingPayables() {
           </div>
         </div>
       ) : (
-        Object.entries(byVendor)
-          .sort(([, a], [, b]) =>
-            b.reduce((s, x) => s + x.remaining, 0) - a.reduce((s, x) => s + x.remaining, 0))
-          .map(([vName, vBills]) => {
-            const vendorTotal = vBills.reduce((s, b) => s + (activeTab === 'outstanding' ? b.remaining : b.total), 0)
-            // Paid History reads newest-settled first; it used to inherit the fetch order, which
-            // no longer survives merging a bill's lines from two reads (S723).
-            const sorted = activeTab === 'outstanding'
-              ? [...vBills].sort((a, b) => b.daysOld - a.daysOld)
-              : [...vBills].sort((a, b) => (b.settledOn || '').localeCompare(a.settledOn || ''))
+        // Supplier groups in the page's order (vendorGroups: owed most first; Paid History reads
+        // newest-settled first, since the fetch order no longer survives merging a bill's lines
+        // from two reads, S723). The Print and the Excel export read the same list.
+        groups.map(({ vName, bills: sorted }) => {
+            const vendorTotal = sorted.reduce((s, b) => s + (activeTab === 'outstanding' ? billBalance(b) : b.total), 0)
             const cols = activeTab === 'outstanding' ? 10 : 6
             const vKeys = sorted.map(b => b.key)
             const vBillTotal = sorted.reduce((s, b) => s + b.total, 0)
             const vPaidTotal = sorted.reduce((s, b) => s + b.paid, 0)
-            const vRemainingTotal = sorted.reduce((s, b) => s + b.remaining, 0)
+            const vRemainingTotal = sorted.reduce((s, b) => s + billBalance(b), 0)
+            const vTerms = vendorByName[vName] ? vendorTerms[vendorByName[vName].id] : null
             return (
               <div key={vName} className="card" style={{ marginBottom: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--theme-border)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--theme-text1)' }}>{vName}</span>
                     {vendorByName[vName] && (<>
-                      {!termsSetupNeeded && (
-                        <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
-                          {vendorTerms[vendorByName[vName].id] ? `Terms: ${vendorTerms[vendorByName[vName].id]}` : 'No payment terms set'}
-                        </span>
-                      )}
+                      {/* S885: the days decide what is overdue on this card; the note is kept. */}
+                      <span style={{ fontSize: 12, color: 'var(--theme-text3)' }}>
+                        {payTermsLabel(vTerms)}{vTerms?.payment_terms ? ` · Note: ${vTerms.payment_terms}` : ''}
+                      </span>
                       <button className="btn btn-ghost btn-sm"
                         onClick={() => openEditTerms(vendorByName[vName])}>
                         Edit Terms
@@ -1105,7 +1232,7 @@ export default function OutstandingPayables() {
                     <thead>
                       <tr>
                         {activeTab === 'outstanding' && (
-                          <th style={{ width: 28 }}>
+                          <th className="no-print" style={{ width: 28 }}>
                             <input type="checkbox"
                               checked={vKeys.length > 0 && vKeys.every(k => selectedBills.has(k))}
                               onChange={() => toggleSelectKeys(vKeys)}
@@ -1117,14 +1244,14 @@ export default function OutstandingPayables() {
                         <th style={{ textAlign: 'right' }}>Items</th>
                         <th style={{ textAlign: 'right' }}><Tip text="What the vendor actually invoiced, computed the same way as the printed purchase voucher: line values net of any goods returned, minus the bill discount, plus 13% VAT on VAT-inclusive lines." width={290}>Bill Total</Tip></th>
                         {activeTab === 'outstanding' ? (<>
-                          <th style={{ textAlign: 'right' }}>Paid</th>
+                          <th style={{ textAlign: 'right' }}><Tip text="Money paid and supplier credit used on this bill, plus any small leftover cleared without paying (written off), which is named under the figure." width={260}>Paid</Tip></th>
                           <th style={{ textAlign: 'right' }}>Remaining</th>
                           <th style={{ textAlign: 'right' }}><Tip text="Calendar days since the bill date." width={180}>Days</Tip></th>
-                          <th>Status</th>
-                          <th></th>
+                          <th><Tip text={`Overdue once a bill is older than the days its supplier gives to pay (${DEFAULT_PAY_WITHIN_DAYS} when none is set, 0 for due on delivery). Partial means some of it is paid and it is not overdue yet.`} width={280}>Status</Tip></th>
+                          <th className="no-print"></th>
                         </>) : (<>
                           <th>Settled On</th>
-                          <th></th>
+                          <th className="no-print"></th>
                         </>)}
                       </tr>
                     </thead>
@@ -1147,7 +1274,7 @@ export default function OutstandingPayables() {
                                 The control lives in a cell instead — see components/RowDisclosure.jsx (S595). */}
                             <tr style={{ cursor: 'pointer' }} onClick={() => toggleBill(b.key, b)}>
                               {activeTab === 'outstanding' && (
-                                <td onClick={ev => ev.stopPropagation()}>
+                                <td className="no-print" onClick={ev => ev.stopPropagation()}>
                                   <input type="checkbox" checked={selectedBills.has(b.key)} onChange={() => toggleSelectBill(b.key)}
                                     aria-label={`Select bill ${b.invoice_ref || ''}`} />
                                 </td>
@@ -1170,33 +1297,39 @@ export default function OutstandingPayables() {
                                   {/* Supplier credit is part of Paid, but it is not money that left the
                                       bank, so the cell says how much of it was (S756 D11). */}
                                   {b.creditIn > EPS && <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>incl. {fmt(b.creditIn)} credit</span>}
+                                  {/* A cleared leftover is in Paid because it lowers what is owed, and
+                                      it is not money paid, so the cell names it (S885). */}
+                                  {b.writtenOff > EPS && <span style={{ display: 'block', fontSize: 11, color: 'var(--theme-text2)', whiteSpace: 'nowrap' }}>incl. {fmt2(b.writtenOff)} written off</span>}
                                 </td>
-                                <td style={{ textAlign: 'right', fontWeight: 700, color: b.isCredit ? 'var(--theme-text1)' : 'var(--theme-text1)' }}>
-                                  {b.isCredit ? `${fmt(-b.remaining)} cr` : fmt(b.remaining)}
+                                <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>
+                                  {b.isCredit ? `${fmt(b.credit)} cr` : fmt(billBalance(b))}
                                 </td>
                                 <td style={{ textAlign: 'right', fontWeight: 700, color: b.aging.color }}>{b.daysOld}</td>
                                 <td>
                                   {/* Supplier credit is a state the word names, not a verdict (S796): grey, as
-                                      Vendor Report shows the same Credit in plain ink. */}
-                                  {b.isCredit
-                                    ? <span className="badge badge-gray" style={{ whiteSpace: 'nowrap' }}>Credit</span>
-                                    // Not an aging chip (S792, PURCHASES-8): a red "90+ days" on a
-                                    // bill that owes nothing reads as the most urgent bill on the page.
-                                    : b.remaining <= EPS
-                                    ? <span className="badge badge-gray" style={{ whiteSpace: 'nowrap' }}>Nothing owed</span>
-                                    : b.isPartial
-                                    ? <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 40%, transparent)', borderRadius: 'var(--radius-xs)', padding: '2px 8px', whiteSpace: 'nowrap' }}>Partial</span>
-                                    : <span style={{ fontSize: 11, fontWeight: 700, color: b.aging.color, background: `color-mix(in srgb, ${b.aging.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${b.aging.color} 40%, transparent)`, borderRadius: 'var(--radius-xs)', padding: '2px 8px', whiteSpace: 'nowrap' }}>{b.aging.label}</span>
-                                  }
+                                      Vendor Report shows the same Credit in plain ink. Not an aging chip on
+                                      a bill owing nothing (S792, PURCHASES-8). Since S885 an unpaid bill
+                                      is judged against its supplier payment days, not a fixed 60. */}
+                                  {(() => {
+                                    const st = billStatus(b, vendorTerms[b.vendorId])
+                                    const chip = { whiteSpace: 'nowrap' }
+                                    const tipStyle = { display: 'inline-flex', borderBottom: 'none', cursor: 'default' }
+                                    const tip = `${payTermsLabel(vendorTerms[b.vendorId])}. This bill is ${b.daysOld} day${b.daysOld === 1 ? '' : 's'} old.`
+                                    if (st.key === 'credit' || st.key === 'nothing') return <span className="badge badge-gray" style={chip}>{st.label}</span>
+                                    if (st.key === 'overdue') return <Tip text={tip} width={240} style={tipStyle}><span className="badge badge-amber" style={chip}>{st.label}</span></Tip>
+                                    if (st.key === 'partial') return <Tip text={`${tip} ${st.dueIn === 0 ? 'The rest is due today.' : `The rest is due in ${st.dueIn} day${st.dueIn === 1 ? '' : 's'}.`}`} width={240} style={tipStyle}><span style={{ fontSize: 11, fontWeight: 700, color: 'var(--theme-amber-text)', background: 'color-mix(in srgb, var(--theme-amber) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--theme-amber) 40%, transparent)', borderRadius: 'var(--radius-xs)', padding: '2px 8px', whiteSpace: 'nowrap' }}>Partial</span></Tip>
+                                    return <Tip text={tip} width={240} style={tipStyle}><span className="badge badge-gray" style={chip}>{st.label}</span></Tip>
+                                  })()}
                                 </td>
-                                <td style={{ color: 'var(--theme-accent-ink)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Hide' : b.remaining <= EPS ? '▼ Details' : '＋ Pay Bill'}</td>
+                                <td className="no-print" style={{ color: 'var(--theme-accent-ink)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Hide' : b.remaining <= EPS ? '▼ Details' : '＋ Pay Bill'}</td>
                               </>) : (<>
                                 <td style={{ color: 'var(--theme-text2)', fontWeight: 600, fontSize: 13 }}>
                                   {fmtBsDate(b.settledOn) || '—'}
-                                  {b.isCredit && <span className="badge badge-gray" style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>{fmt(-b.remaining)} credit</span>}
+                                  {b.isCredit && <span className="badge badge-gray" style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>{fmt(b.credit)} credit</span>}
+                                  {b.writtenOff > EPS && <Tip text="A small leftover on this bill was cleared without paying it. It is not money paid; the payment history shows who cleared it." width={260} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}><span className="badge badge-gray" style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>{fmt2(b.writtenOff)} written off</span></Tip>}
                                   {b.creditOut > EPS && <Tip text={`${fmt(b.creditOut)} of this bill's credit has been used to pay other bills from ${b.vendorName}. See the Supplier credit entries in its payment history.`} width={260} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}><span className="badge badge-gray" style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>{fmt(b.creditOut)} credit used</span></Tip>}
                                 </td>
-                                <td style={{ color: 'var(--theme-text3)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Hide' : '▼ Details'}</td>
+                                <td className="no-print" style={{ color: 'var(--theme-text3)', fontSize: 12, whiteSpace: 'nowrap' }}>{isExpanded ? '▲ Hide' : '▼ Details'}</td>
                               </>)}
                             </tr>
 
@@ -1266,18 +1399,18 @@ export default function OutstandingPayables() {
                                         <table style={{ borderCollapse: 'collapse', fontSize: 13, minWidth: 400 }}>
                                           <thead>
                                             <tr>
-                                              <th style={{ padding: '0 16px 5px 0' }}>
+                                              <th className="no-print" style={{ padding: '0 16px 5px 0' }}>
                                                 <input type="checkbox" checked={selectedHere.length === paymentIds.length}
                                                   onChange={ev => { ev.stopPropagation(); toggleSelectPayments(paymentIds) }}
                                                   onClick={ev => ev.stopPropagation()} aria-label="Select all payments in this bill" title="Select all payments in this bill" />
                                               </th>
-                                              <th /><th /><th /><th />
+                                              <th /><th /><th /><th /><th />
                                             </tr>
                                           </thead>
                                           <tbody>
                                             {b.payments.map(p => (
                                               <tr key={p.id}>
-                                                <td style={{ padding: '5px 16px 5px 0' }}>
+                                                <td className="no-print" style={{ padding: '5px 16px 5px 0' }}>
                                                   <input type="checkbox" checked={selectedPayments.has(p.id)}
                                                     onChange={ev => { ev.stopPropagation(); toggleSelectPayment(p.id) }}
                                                     onClick={ev => ev.stopPropagation()} aria-label={`Select payment of ${fmt(p.amount)} on ${fmtBsDate(p.paid_at) || p.paid_at}`} />
@@ -1294,18 +1427,39 @@ export default function OutstandingPayables() {
                                                         width={280} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
                                                         <span className="badge badge-gray" style={{ whiteSpace: 'nowrap' }}>{SUPPLIER_CREDIT_MODE}</span>
                                                       </Tip>
+                                                    : isWriteOff(p)
+                                                    // S885: a cleared leftover, never shown as a payment mode.
+                                                    ? <Tip text="A small leftover cleared without paying it. It lowers what the bill owes but it is not money paid, so it never counts as a payment or as supplier credit, and its mode cannot be changed. Delete it to put the amount back on the bill."
+                                                        width={280} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default' }}>
+                                                        <span className="badge badge-gray" style={{ whiteSpace: 'nowrap' }}>Written off</span>
+                                                      </Tip>
                                                     : (p.payment_mode || '—')}
                                                 </td>
-                                                <td style={{ padding: '5px 0 5px 16px', color: 'var(--theme-text3)' }}>{p.note || '—'}</td>
+                                                <td style={{ padding: '5px 16px', color: 'var(--theme-text3)' }}>{p.note || '—'}</td>
+                                                {/* Who recorded it, stamped by the server since S885; older rows have no name. */}
+                                                <td style={{ padding: '5px 0 5px 16px', color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>{recordedByOf(p) ? `by ${recordedByOf(p)}` : ''}</td>
                                               </tr>
                                             ))}
+                                            {/* Money paid and supplier credit, then what was cleared, on its own line:
+                                                a written off amount is not money paid (S885). */}
                                             <tr style={{ borderTop: '1px solid var(--theme-border)' }}>
-                                              <td />
+                                              <td className="no-print" />
                                               <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)', fontSize: 11 }}>Total paid</td>
-                                              <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{fmt(b.paid)}</td>
+                                              <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{fmt2(b.paid - b.writtenOff)}</td>
+                                              <td />
                                               <td />
                                               <td />
                                             </tr>
+                                            {b.writtenOff > EPS && (
+                                              <tr>
+                                                <td className="no-print" />
+                                                <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)', fontSize: 11 }}>Written off</td>
+                                                <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>{fmt2(b.writtenOff)}</td>
+                                                <td />
+                                                <td />
+                                                <td />
+                                              </tr>
+                                            )}
                                           </tbody>
                                         </table>
                                       </div>
@@ -1318,9 +1472,9 @@ export default function OutstandingPayables() {
                                         does nothing silently, since allocatePayment skips every
                                         line at or under EPS. Say which of the two states it is. */}
                                     {activeTab === 'outstanding' && b.remaining <= EPS && (
-                                      <div style={{ fontSize: 12, color: b.isCredit ? 'var(--theme-text2)' : 'var(--theme-text2)' }}>
+                                      <div className="no-print" style={{ fontSize: 12, color: 'var(--theme-text2)' }}>
                                         {b.isCredit
-                                          ? `Over-settled by ${fmt(-b.remaining)} — goods were returned after this bill was paid, so the supplier owes that back. There is nothing to pay here. To use the credit, open another unpaid bill from ${b.vendorName} and fill in "Use supplier credit", or ask the supplier for a credit note.`
+                                          ? `Over-settled by ${fmt(b.credit)} — goods were returned after this bill was paid, so the supplier owes that back. There is nothing to pay here. To use the credit, open another unpaid bill from ${b.vendorName} and fill in "Use supplier credit", or ask the supplier for a credit note.`
                                           : 'Nothing left to pay on this bill — the goods on it were returned, or what was paid already covers what is owed.'}
                                         {/* S792 (PURCHASES-8): no payment can ever close a bill like this,
                                             so it gets its own way off this tab. */}
@@ -1341,7 +1495,7 @@ export default function OutstandingPayables() {
                                     )}
 
                                     {activeTab === 'outstanding' && b.remaining > EPS && (
-                                      <div>
+                                      <div className="no-print">
                                         <div style={{ fontSize: 11, color: 'var(--theme-text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
                                           {b.payments.length === 0 ? 'Pay this bill' : 'Add payment'}
                                           <span style={{ textTransform: 'none', letterSpacing: 0, color: 'var(--theme-text2)', marginLeft: 8 }}>· applied across all {b.entries.length} item{b.entries.length !== 1 ? 's' : ''}</span>
@@ -1387,6 +1541,17 @@ export default function OutstandingPayables() {
                                               Pay in full
                                             </button>
                                           </Tip>
+                                          {/* S885 (owner decision 3): a leftover of NPR 10 or less, within what this
+                                              bill may still have cleared, can be cleared without paying. */}
+                                          {clearableAmount(b) != null && (
+                                            <Tip text={`Clears the last ${fmt2(clearableAmount(b))} on this bill without paying it, for a leftover the supplier will not collect. It is recorded as written off, not as money paid, and the bill moves to Paid History. At most ${fmt2(WRITE_OFF_MAX_NPR)} a bill.`} width={300}>
+                                              <button className="btn btn-ghost" style={{ padding: '8px 14px', fontSize: 12 }}
+                                                disabled={savingPayment}
+                                                onClick={ev => { ev.stopPropagation(); askClearLeftover(b) }}>
+                                                Clear {fmt2(clearableAmount(b))}
+                                              </button>
+                                            </Tip>
+                                          )}
                                           <button className="btn btn-primary" style={{ padding: '8px 18px', fontSize: 13 }}
                                             disabled={!(typedCash > 0 || typedCredit > 0) || savingPayment}
                                             onClick={ev => { ev.stopPropagation(); payBill(b) }}>
@@ -1457,16 +1622,21 @@ export default function OutstandingPayables() {
                         )
                       })}
                       <tr style={{ borderTop: '2px solid var(--theme-border)' }}>
+                        {/* The checkbox and action columns do not print, so their cells are their
+                            own here and the printed totals stay under their columns (S885). */}
                         {activeTab === 'outstanding' ? (<>
-                          <td colSpan={4} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
+                          <td className="no-print" style={{ paddingTop: 12 }} />
+                          <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>{fmt(vBillTotal)}</td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>{vPaidTotal > 0 ? fmt(vPaidTotal) : '—'}</td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>{fmt(vRemainingTotal)}</td>
-                          <td colSpan={3} style={{ paddingTop: 12 }}></td>
+                          <td colSpan={2} style={{ paddingTop: 12 }}></td>
+                          <td className="no-print" style={{ paddingTop: 12 }} />
                         </>) : (<>
                           <td colSpan={3} style={{ fontWeight: 700, color: 'var(--theme-text2)', paddingTop: 12 }}>Total</td>
                           <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)', paddingTop: 12 }}>{fmt(vBillTotal)}</td>
-                          <td colSpan={2} style={{ paddingTop: 12 }}></td>
+                          <td style={{ paddingTop: 12 }}></td>
+                          <td className="no-print" style={{ paddingTop: 12 }} />
                         </>)}
                       </tr>
                     </tbody>
@@ -1570,27 +1740,57 @@ export default function OutstandingPayables() {
         )
       })()}
 
-      {editingTermsVendor && (
-        <Modal onClose={() => setEditingTermsVendor(null)} title={`Payment Terms — ${editingTermsVendor.name}`}>
+      {editingTermsVendor && (() => {
+        // A number read from the note ("Net 30", "COD"), offered while the days box is blank; the
+        // same reading the supplier form and the Excel import use (parsePayTerms, S885).
+        const rawDays = String(termsForm.days ?? '').trim()
+        const suggested = rawDays === '' ? parsePayTerms(termsForm.note) : null
+        const typedDays = rawDays === '' ? null : Number(rawDays)
+        const previewOk = typedDays === null || (Number.isInteger(typedDays) && typedDays >= 0 && typedDays <= MAX_PAY_WITHIN_DAYS)
+        return (
+        <Modal onClose={() => { if (!termsSaving) setEditingTermsVendor(null) }} title={`Payment Terms — ${editingTermsVendor.name}`}>
           <div className="form-field">
-            <label htmlFor="outsta-f1">Payment Terms</label>
-            <input id="outsta-f1"
-              value={termsForm}
-              onChange={e => setTermsForm(e.target.value)}
-              placeholder="e.g. Net 30, COD, 50% Advance"
+            <label htmlFor="outsta-days"><Tip text={`How many days ${editingTermsVendor.name} gives you to pay a bill, counted from the bill date. A bill older than that shows as overdue. Leave it blank for ${DEFAULT_PAY_WITHIN_DAYS} days; enter 0 if bills are due on delivery.`} width={280}>Pay within (days)</Tip></label>
+            <input id="outsta-days" type="number" min="0" max={MAX_PAY_WITHIN_DAYS} step="1" inputMode="numeric"
+              value={termsForm.days}
+              onChange={e => { setTermsDaysErr(''); setTermsForm(f => ({ ...f, days: e.target.value })) }}
+              placeholder={`Blank = ${DEFAULT_PAY_WITHIN_DAYS} days`}
               autoFocus
+              {...fieldAria('outsta-days', termsDaysErr)}
+              style={invalidStyle({ ...INPUT, width: '100%' }, termsDaysErr)}
+            />
+            <FieldError id="outsta-days" message={termsDaysErr} />
+            {suggested != null && (
+              <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 6 }}
+                onClick={() => { setTermsDaysErr(''); setTermsForm(f => ({ ...f, days: String(suggested) })) }}>
+                {suggested === 0 ? 'Use 0 days (due on delivery) from the note' : `Use ${suggested} days from the note`}
+              </button>
+            )}
+          </div>
+          <div className="form-field">
+            <label htmlFor="outsta-f1"><Tip text="A free-text note kept with the supplier, such as Net 30 or 50% advance. Only the number of days above decides what is overdue." width={260}>Note (optional)</Tip></label>
+            <input id="outsta-f1"
+              value={termsForm.note}
+              onChange={e => setTermsForm(f => ({ ...f, note: e.target.value }))}
+              placeholder="e.g. Net 30, COD, 50% Advance"
               style={{ ...INPUT, width: '100%' }}
             />
           </div>
+          {previewOk && (
+            <p style={{ fontSize: 12, color: 'var(--theme-text3)', margin: '4px 0 0' }}>
+              Bills from {editingTermsVendor.name} will read: {payTermsLabel({ pay_within_days: typedDays })}.
+            </p>
+          )}
           <ActionError error={termsError} />
           <div className="form-actions">
-            <button className="btn btn-ghost" onClick={() => setEditingTermsVendor(null)}>Cancel</button>
+            <button className="btn btn-ghost" onClick={() => setEditingTermsVendor(null)} disabled={termsSaving}>Cancel</button>
             <button className="btn btn-primary" onClick={saveTerms} disabled={termsSaving}>
               {termsSaving ? 'Saving…' : 'Save'}
             </button>
           </div>
         </Modal>
-      )}
+        )
+      })()}
 
       {editingNotePayments && (
         <Modal onClose={() => setEditingNotePayments(null)} title={`Edit Note — ${editingNotePayments.count} payment${editingNotePayments.count === 1 ? '' : 's'}`}>
@@ -1655,6 +1855,7 @@ export default function OutstandingPayables() {
           {pendingConfirm.body}
         </ConfirmModal>
       )}
+      {confirmEl}
     </div>
   )
 }

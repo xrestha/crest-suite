@@ -7,8 +7,9 @@ import {
   billPaymentProblems, planBillPayment, compareBillsOldestFirst, expandCreditPartners,
   linesToReopen, isCreditRow, SUPPLIER_CREDIT_MODE, billOwedAfterReturns, linesToCloseByReturns,
   returnChangeReopensBill, returnEditReopensBill, paymentsMovedSince, paymentsMovedText,
-  paymentRecordArgs,
+  paymentRecordArgs, planWriteOff, billCreditOf,
 } from './payablesAllocation'
+import { WRITE_OFF_MODE } from './writeOff'
 import { billPayables } from './purchaseTaxSplit'
 
 const P = (y, m) => ({ bs_year: y, bs_month: m, client_id: 'c1' })
@@ -670,5 +671,93 @@ describe('paymentRecordArgs', () => {
 
   test('a bill with no payments loaded sends an empty seen list, not a missing one', () => {
     expect(paymentRecordArgs('c1', [billB], rows.slice(1), [], null).p_seen).toEqual([])
+  })
+})
+
+// S885, owner decision 3: a leftover of NPR 10 or less cleared without paying. A 'Write-off' row
+// lowers what a bill owes exactly as a payment does, and is never money paid: never supplier credit.
+describe('S885 — clearing a leftover (write-off)', () => {
+  const wo = (id, amount) => ({ purchase_entry_id: id, amount, payment_mode: WRITE_OFF_MODE })
+  const two = () => [
+    row('w1', 'gW', P(2083, 4), { rate: 600.25, ref: 'W' }),
+    row('w2', 'gW', P(2083, 4), { rate: 400.25, ref: 'W' }),
+  ]
+
+  test('a bill with 4.50 left: one plan that writes exactly 4.50, positive, spread like Pay in full, settling every line', () => {
+    const [bill] = billsOf(two(), [{ purchase_entry_id: 'w1', amount: 600.25 }, { purchase_entry_id: 'w2', amount: 395.75 }])
+    expect(bill.remaining).toBeCloseTo(4.5, 2)
+    const plan = planWriteOff(bill, '2026-11-04')
+    expect(plan.amount).toBe(4.5)
+    expect(sumAmounts(plan.rows)).toBe(4.5)
+    expect(plan.rows.every(r => r.amount > 0 && r.amount <= 10 && r.payment_mode === WRITE_OFF_MODE && !r.credit_link_id && r.note === null)).toBe(true)
+    expect(plan.settleIds.sort()).toEqual(['w1', 'w2'])
+    // The same rows "Pay in full" would write, only the mode differs.
+    expect(plan.rows.map(r => [r.purchase_entry_id, r.amount])).toEqual(allocatePayment(bill.entries, 4.5, 'd', null, 'Cash').rows.map(r => [r.purchase_entry_id, r.amount]))
+  })
+
+  test('nothing to clear: over NPR 10 left, nothing left, or a credit bill', () => {
+    const [owesMore] = billsOf(two(), [{ purchase_entry_id: 'w1', amount: 590 }])
+    expect(planWriteOff(owesMore, 'd')).toBeNull()
+    const [paid] = billsOf(two(), [{ purchase_entry_id: 'w1', amount: 600.25 }, { purchase_entry_id: 'w2', amount: 400.25 }])
+    expect(planWriteOff(paid, 'd')).toBeNull()
+    const [credit] = billsOf(two(), [{ purchase_entry_id: 'w1', amount: 600.25 }, { purchase_entry_id: 'w2', amount: 400.25 }],
+      [{ purchase_entry_id: 'w2', qty: 1, rate: 100 }])
+    expect(credit.isCredit).toBe(true)
+    expect(planWriteOff(credit, 'd')).toBeNull()
+  })
+
+  test('the NPR 10 cap is per bill: 6 already cleared leaves room for 4, not 5', () => {
+    // 6 already cleared on this bill (by an earlier clear on a line since reopened).
+    const pays = [{ purchase_entry_id: 'w1', amount: 600.25 }, { purchase_entry_id: 'w2', amount: 389.25 }, wo('w2', 6)]
+    const [four] = billsOf(two(), pays)
+    expect(four.writtenOff).toBe(6)
+    expect(four.remaining).toBeCloseTo(5, 2)
+    expect(planWriteOff(four, 'd')).toBeNull()
+    const [ok] = billsOf(two(), [...pays.slice(0, 2), { purchase_entry_id: 'w2', amount: 1 }, wo('w2', 6)])
+    expect(ok.remaining).toBeCloseTo(4, 2)
+    expect(planWriteOff(ok, 'd').amount).toBe(4)
+  })
+
+  test('a write-off is in Paid and named on its own; the bill settles and is not partial', () => {
+    const [bill] = billsOf(two(), [{ purchase_entry_id: 'w1', amount: 600.25 }, { purchase_entry_id: 'w2', amount: 396 }, wo('w2', 4.25)])
+    expect(bill.paid).toBeCloseTo(1000.5, 2)
+    expect(bill.writtenOff).toBe(4.25)
+    expect(bill.remaining).toBeCloseTo(0, 2)
+    expect(bill.isPartial).toBe(false)
+    expect(bill.isCredit).toBe(false)
+    expect(bill.entries.find(e => e.id === 'w2').writtenOff).toBe(4.25)
+  })
+
+  test('a return after a clear: the cleared rupees are never credit the supplier owes back', () => {
+    // 1,000 bill, 995 paid in money, 5 cleared, then 3 of goods returned: owed 997, settled 1,000.
+    // Money paid (995) is less than owed, so the supplier owes NOTHING back.
+    const rows = [row('k1', 'gK', P(2083, 3), { rate: 1000, ref: 'K', paid_at: '2026-07-01' })]
+    const [small] = billsOf(rows, [{ purchase_entry_id: 'k1', amount: 995 }, wo('k1', 5)], [{ purchase_entry_id: 'k1', qty: 1, rate: 3 }])
+    expect(small.remaining).toBeCloseTo(-3, 2)
+    expect(small.isCredit).toBe(false)
+    expect(small.credit).toBe(0)
+    expect(supplierCreditSlots([small]).available).toBe(0)
+    // 100 returned instead: money paid 995 against 900 owed, so 95 is credit — not 100.
+    const [big] = billsOf(rows, [{ purchase_entry_id: 'k1', amount: 995 }, wo('k1', 5)], [{ purchase_entry_id: 'k1', qty: 1, rate: 100 }])
+    expect(big.isCredit).toBe(true)
+    expect(big.credit).toBeCloseTo(95, 2)
+    const slots = supplierCreditSlots([big])
+    expect(slots.available).toBeCloseTo(95, 2)
+    expect(slots.slots.map(x => x.capPaisa)).toEqual([9500])
+  })
+
+  test('billCreditOf: money only, and a row from before S885 (no writtenOff) reads as before', () => {
+    expect(billCreditOf({ remaining: -40 })).toBe(40)
+    expect(billCreditOf({ remaining: -40, writtenOff: 10 })).toBe(30)
+    expect(billCreditOf({ remaining: -4, writtenOff: 10 })).toBe(0)
+    expect(billCreditOf({ remaining: 12 })).toBe(0)
+  })
+
+  test('the plan goes to record_payable_payments as Write-off rows with no credit link', () => {
+    const [bill] = billsOf(two(), [{ purchase_entry_id: 'w1', amount: 600.25 }, { purchase_entry_id: 'w2', amount: 396 }])
+    const plan = planWriteOff(bill, '2026-11-04')
+    const args = paymentRecordArgs('c1', [bill], plan.rows, plan.settleIds, '2026-11-04')
+    expect(args.p_rows.every(r => r.payment_mode === WRITE_OFF_MODE && r.credit_link_id === null && r.amount > 0)).toBe(true)
+    expect(args.p_settle_ids.sort()).toEqual(['w1', 'w2'])
   })
 })

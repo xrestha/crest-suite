@@ -11,9 +11,11 @@
 // instead, same principle computeImsSection's payables figure already uses — otherwise an
 // outstanding bill's aging bucket would keep drifting after the snapshot is supposed to be frozen.
 // The aging is also what is still OWED (VAT included, `billAging.basis: 'owed'`), so Unpaid Credit
-// can be larger than the Credit column, which leaves VAT out. No `vendors.credit_terms`/due-date
-// column exists anywhere in the schema — this is bill-age-since-purchase, not payment-terms-SLA
-// compliance.
+// can be larger than the Credit column, which leaves VAT out. This table ages bills from the
+// purchase date and is deliberately NOT judged against supplier payment terms: since S885 each
+// supplier carries its own payment days (`vendors.pay_within_days`), and which bills are past them
+// is shown live on Outstanding Payables and the Owner Dashboard. The frozen snapshot keeps its
+// age buckets (owner decision S885, no schema bump, no figure change).
 import { supabase } from '../../supabaseClient'
 import { throwFirstError } from '../../shared/queryError'
 import { scopedFrom } from '../../shared/scopedDb'

@@ -103,6 +103,7 @@ Needs the module switched on (ModuleGate).
 | `/supplier-contribution` | SupplierContribution | Pro (`supplier_contribution`) | IMS reports: IMS manager |  |
 | `/vendor-balance-confirmation` | VendorBalanceConfirmation | Starter (`vendor_balance_confirmation`) | IMS reports: IMS manager |  |
 | `/supplier-prices` | SupplierPriceTracker | Pro (`price_tracker`) | IMS reports: IMS manager |  |
+| `/dish-cost-history` | DishCostHistory | Pro (`dish_cost_history`) | IMS reports: IMS manager |  |
 | `/overheads` | Overheads | Growth (`overheads`) | IMS: IMS manager |  |
 | `/theoretical-variance` | TheoreticalVariance | Pro (`theoretical_variance`) | IMS reports: IMS supervisor+ |  |
 | `/ims/staff` | ImsStaff |  | IMS: IMS manager |  |

@@ -14,6 +14,7 @@
 // from their own rows. Migration 20260918120000 refuses a pair that does not balance.
 import { bsToAd } from '../../../utils/bsCalendar'
 import { calcBillTotals, billKeyOf, aging } from '../purchases/purchasesHelpers'
+import { writtenOffOf, clearableAmount, WRITE_OFF_MODE } from './writeOff'
 
 export const EPS = 0.001
 // Written to payable_payments.payment_mode. The migration's CHECK spells the same string: a row
@@ -92,7 +93,10 @@ export function valueBillLines(rows, paymentsByEntry, returnedByEntry, today = n
     // bill's total comes from billOwedAfterReturns.
     const netLine = Math.max(0, parseFloat(e.qty) * parseFloat(e.rate) - (returnedByEntry[e.id] || 0))
     const paidTotal = (paymentsByEntry[e.id] || []).reduce((s, p) => s + parseFloat(p.amount), 0)
-    return { ...e, period: pr, netLine, paidTotal, daysOld, aging: aging(daysOld), billKey: billKeyOf(e, pr) }
+    // A cleared leftover (S885) is inside paidTotal, because it lowers what the line owes, and is
+    // also carried on its own: it is not money paid, so it never becomes supplier credit.
+    const writtenOff = writtenOffOf(paymentsByEntry[e.id])
+    return { ...e, period: pr, netLine, paidTotal, writtenOff, daysOld, aging: aging(daysOld), billKey: billKeyOf(e, pr) }
   })
 
   // What this page shows must be what the vendor actually invoiced. `value` used to be a bare
@@ -166,14 +170,32 @@ export function groupIntoBills(lines, paymentsByEntry) {
     const settledOn = b.entries.map(e => e.paid_at).filter(Boolean).sort().slice(-1)[0] || null
     const creditIn  = payments.filter(p => isCreditRow(p) && parseFloat(p.amount) > 0).reduce((s, p) => s + parseFloat(p.amount), 0)
     const creditOut = -payments.filter(p => isCreditRow(p) && parseFloat(p.amount) < 0).reduce((s, p) => s + parseFloat(p.amount), 0)
+    // S885: what was cleared without paying. It is in `paid` (it lowers what is owed) and stays out
+    // of `credit`: a return landing after a clear can leave the bill over-settled by at most the
+    // cleared amount, and the supplier owes nothing back for money nobody paid.
+    const writtenOff = writtenOffOf(payments)
+    const credit = billCreditOf({ remaining, writtenOff })
     return {
       ...b, total, paid, remaining, daysOld, aging: aging(daysOld), payments, settledOn,
       // Supplier credit this bill received from another bill, and credit taken out of it.
-      creditIn, creditOut,
+      creditIn, creditOut, writtenOff,
+      // What the supplier owes back on this bill, money only (0 unless isCredit).
+      credit,
       isPartial: paid > EPS && remaining > EPS,
-      isCredit: remaining < -EPS,
+      isCredit: credit > EPS,
     }
   })
+}
+
+/**
+ * What the supplier owes back on a bill or a line, money only: −(remaining + writtenOff), never
+ * below 0. `remaining` counts a cleared leftover as paid, so a bill over-settled by a late return
+ * would otherwise offer the cleared rupees back as credit (S885, owner decision 3). A row with no
+ * `writtenOff` (built before S885) reads as before.
+ */
+export function billCreditOf(b) {
+  const c = -((Number(b?.remaining) || 0) + (Number(b?.writtenOff) || 0))
+  return c > EPS ? Math.round(c * 100) / 100 : 0
 }
 
 /** Oldest bill first: bill date, then the earliest line's entry time, then key (stable). */
@@ -250,6 +272,22 @@ export function allocatePayment(entries, amount, date, note, paymentMode) {
 }
 
 /**
+ * Clearing a bill's leftover without paying it (S885, owner decision 3): the payable_payments rows
+ * that write `amount` off, spread across the open lines exactly as "Pay in full" spreads a payment,
+ * and the lines that settles (every unstamped line, since the bill then owes nothing), or null when
+ * the bill cannot be cleared (clearableAmount: nothing owed, over NPR 10, or past NPR 10 cleared in
+ * all). The rows are recorded through record_payable_payments like any payment, so the bill moves
+ * to Paid History. They carry no note and no credit_link_id, and every one is positive.
+ */
+export function planWriteOff(bill, date) {
+  const amount = clearableAmount(bill)
+  if (amount == null) return null
+  const { rows, settleIds } = allocatePayment(bill.entries, amount, date, null, WRITE_OFF_MODE)
+  if (rows.length === 0) return null
+  return { amount, rows, settleIds }
+}
+
+/**
  * The lines to stamp when a bill with nothing left to pay is closed by hand (S792, PURCHASES-8):
  * every line not stamped yet, or [] when the bill still owes something.
  *
@@ -321,20 +359,24 @@ export function planSupplierLumpSum(bills, amount, { date, note, paymentMode } =
  * one still-owed line, and taking the over-paid line's whole excess would turn the bill back into
  * one that is owed money.
  *
+ * A cleared leftover is not money paid, so it is never credit (S885): bill and line credit are
+ * billCreditOf, which leaves the write-off out. The server's pair check makes the same cut, so a
+ * credit offered here is one the database accepts.
+ *
  * Returns { available, bills: [{ bill, credit }], slots: [{ line, bill, capPaisa }] }.
  */
 export function supplierCreditSlots(bills) {
-  const creditBills = (bills || []).filter(b => b.remaining < -EPS).sort(compareBillsOldestFirst)
+  const creditBills = (bills || []).filter(b => billCreditOf(b) > EPS).sort(compareBillsOldestFirst)
   const slots = []
   const out = []
   let availablePaisa = 0
   for (const b of creditBills) {
-    let billLeft = toPaisa(-b.remaining)
+    let billLeft = toPaisa(billCreditOf(b))
     const billCredit = billLeft
-    const lines = b.entries.filter(l => l.remaining < -EPS).sort((x, y) => x.remaining - y.remaining)
+    const lines = b.entries.filter(l => billCreditOf(l) > EPS).sort((x, y) => billCreditOf(y) - billCreditOf(x))
     for (const l of lines) {
       if (billLeft <= 0) break
-      const cap = Math.min(toPaisa(-l.remaining), billLeft)
+      const cap = Math.min(toPaisa(billCreditOf(l)), billLeft)
       if (cap <= 0) continue
       slots.push({ line: l, bill: b, capPaisa: cap })
       billLeft -= cap

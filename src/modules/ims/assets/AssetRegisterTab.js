@@ -16,12 +16,18 @@ import { fetchAllRows } from '../../../shared/fetchAllRows'
 import { settleWithin } from '../../../utils/withTimeout'
 import { bookPositionsByAsset, bookValue } from './depreciationCompute'
 import { formatAdAsBs } from '../../../utils/bsCalendar'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import LetterheadButton from '../../../components/LetterheadButton'
+import { nepalBsLong } from '../../../shared/nepalTime'
+import { registerSheetRows, REGISTER_NOTES, ASSET_STATUS_LABEL, fileSafe } from './fixedAssetsExcel'
 
 const fmt = nprInt
 // A stored AD date as the BS date it was picked as, never the runtime's AD rendering (S792, COSTS-11).
 const fmtDate = d => formatAdAsBs(d)
 // A status is a state, not a verdict (S852): every one is a grey chip, and the word says which.
-const STATUS_LABEL = { active: 'Active', disposed: 'Disposed', written_off: 'Written Off' }
+// One list with the workbook (S885).
+const STATUS_LABEL = ASSET_STATUS_LABEL
 
 // GAPS-12: what the operator's Delete asset does, from the posted lines this tab read.
 function deleteConsequence(asset, linesByAssetId, chargedByAssetId) {
@@ -37,6 +43,9 @@ function deleteConsequence(asset, linesByAssetId, chargedByAssetId) {
 export default function AssetRegisterTab({ categories, assets, onReload }) {
   const { clientId, isAdmin } = useAuth()
   const { scopedFrom } = useScopedDb()
+  const biz = useBizInfo()
+  // An export that could not be written (the spreadsheet code failed to load, say) says so (S885).
+  const [exportError, setExportError] = useState(null)
   // Depreciation charged per asset (net of reversals), not a closing NBV (S792, COSTS-2): the NBV
   // is cost less this, so a cost edited since posting shows at once. A new cache section, so a
   // pre-S792 'nbv' entry (closing NBVs) is never read back as charges.
@@ -115,6 +124,32 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
 
   function handleSaved() { setShowForm(false); setEditingAsset(null); onReload() }
 
+  // S885: the register as filtered on screen, with the figures the table shows. Held while Current
+  // NBV is not known (still loading, or a failed read), since the sheet would carry figures the
+  // screen does not have.
+  const statusLabel = filterStatus === 'all' ? 'All statuses' : STATUS_LABEL[filterStatus]
+  const categoryLabel = filterCategory === 'all' ? 'All categories' : (categories.find(c => c.id === filterCategory)?.name || 'One category')
+  const locationLabel = filterLocation === 'all' ? 'All locations' : filterLocation
+  async function exportExcel() {
+    setExportError(null)
+    try {
+      const XLSX = await import('xlsx')
+      const asAt = nepalBsLong(new Date())
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+        title: 'Fixed Asset Register',
+        biz,
+        scopeLine: `${statusLabel} · ${categoryLabel} · ${locationLabel} · Current NBV as at ${asAt}`,
+        rows: registerSheetRows(filtered, nbvOf),
+        notes: REGISTER_NOTES,
+      }), 'Register')
+      XLSX.writeFile(wb, `fixed-asset-register-${fileSafe(statusLabel)}-${fileSafe(asAt)}.xlsx`)
+    } catch (e) {
+      const a = asActionError(e)
+      setExportError({ text: 'The Excel file could not be made. ' + a.text, detail: a.detail })
+    }
+  }
+
   // Admin-only, never exposed to any client login (not even Owner rank) — a posted asset's
   // depreciation history is blocked by the DB's immutability trigger for every normal session,
   // so this routes through admin-user-ops' service-role client (same mechanism Danger Zone uses)
@@ -151,9 +186,12 @@ export default function AssetRegisterTab({ categories, assets, onReload }) {
           <option value="all">All Locations</option>
           {locations.map(l => <option key={l} value={l}>{l}</option>)}
         </select>
-        <button className="btn btn-ghost" style={{ fontSize: 12, marginLeft: 'auto' }} onClick={() => setShowCategories(true)}>Manage Categories</button>
+        <LetterheadButton ready={biz.ready} error={biz.error} style={{ fontSize: 12, marginLeft: 'auto' }} onClick={exportExcel}
+          disabled={filtered.length === 0 || !chargesReady || !!nbvError}>↓ Export Excel</LetterheadButton>
+        <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setShowCategories(true)}>Manage Categories</button>
         <Fab onClick={() => setShowForm(true)} label="+ Add Asset" />
       </div>
+      {exportError && <ActionError error={exportError} className="action-error--top" />}
 
       {/* Above the table, where it is read before the figures it explains (S852). It sat below a
           table that can run to hundreds of rows. */}

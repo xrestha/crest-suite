@@ -16,8 +16,17 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { panWarning } from '../reports/purchaseTaxSplit'
+import { payTermsLabel, hasOwnPayTerms, DEFAULT_PAY_WITHIN_DAYS } from './payTerms'
+import { nextVendorCodeAfter, payWithinError, payWithinValue, suggestedPayWithin, suggestionLabel } from './vendorFormRules'
+import VendorImportButton from './VendorImportButton'
 
-const EMPTY_FORM = { name: '', contact_person: '', phone: '', address: '', pan_vat_no: '', payment_terms: '' }
+// Moved to vendorFormRules.js (S885) so the Excel import mints codes the same way; kept exported
+// from here for Vendors.test.js.
+export { nextVendorCodeAfter }
+
+// `pay_within_days` (S885, owner decision 3) is the box's text: blank saves NULL, the 60-day default.
+// `payment_terms` stays, relabelled Terms note.
+const EMPTY_FORM = { name: '', contact_person: '', phone: '', address: '', pan_vat_no: '', pay_within_days: '', payment_terms: '' }
 
 // Every table that points at a vendor. A vendor with any of these attached must not be hard-deleted,
 // and the two reasons are different: purchase_entries and purchase_orders hold a plain FK, so
@@ -45,24 +54,6 @@ function usagePhrase(counts) {
   const total = VENDOR_REF_TABLES.reduce((sum, t) => sum + (counts[t.table] || 0), 0)
   const text = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
   return { text, total }
-}
-
-// S756: the prefix is a free-text setting and went into `new RegExp` raw — "V.N" matched "VXN-004",
-// "A+" meant "one or more A", and "(" threw, taking Add Vendor down with it.
-function escapeRegExp(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-/** The next `PREFIX-NNN` after the highest one in `codes`. Exported for Vendors.test.js. */
-export function nextVendorCodeAfter(rawPrefix, codes) {
-  const prefix = String(rawPrefix).toUpperCase()
-  const re = new RegExp(`^${escapeRegExp(prefix)}-(\\d+)$`)
-  let maxNum = 0
-  ;(codes || []).forEach(code => {
-    const match = String(code || '').match(re)
-    if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10))
-  })
-  return `${prefix}-${String(maxNum + 1).padStart(3, '0')}`
 }
 
 // S756 (D25): a zero-row write is not a save. Every write on this page updates one vendor by id, and
@@ -102,9 +93,9 @@ export default function Vendors() {
   const [editing, setEditing] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  // Per-field validation. `error` above stays the form-level channel (no client selected, a write
-  // the server rejected); a message about one box belongs under that box (S603).
-  const [fieldErr, setFieldErr] = useState('')
+  // Per-field validation, `{ name, pay }`. `error` above stays the form-level channel (no client
+  // selected, a write the server rejected); a message about one box belongs under that box (S603).
+  const [fieldErr, setFieldErr] = useState({})
   // The PAN warning waits for the box to be left (or an existing PAN to be opened), so it does not
   // nag at "6", "60", "601" while someone is still typing (S792, TAX-11).
   const [panTouched, setPanTouched] = useState(false)
@@ -207,7 +198,7 @@ export default function Vendors() {
     setEditing(null)
     setForm(EMPTY_FORM)
     setError('')
-    setFieldErr('')
+    setFieldErr({})
     setPanTouched(false)
     setShowForm(true)
   }
@@ -220,10 +211,11 @@ export default function Vendors() {
       phone: vendor.phone || '',
       address: vendor.address || '',
       pan_vat_no: vendor.pan_vat_no || '',
+      pay_within_days: vendor.pay_within_days != null ? String(vendor.pay_within_days) : '',
       payment_terms: vendor.payment_terms || ''
     })
     setError('')
-    setFieldErr('')
+    setFieldErr({})
     setPanTouched(!!vendor.pan_vat_no)   // a PAN already on file is checked as soon as it is opened
     setShowForm(true)
   }
@@ -233,19 +225,26 @@ export default function Vendors() {
   // the form may be pressed again (save(), MASTER-8).
   async function doSave({ holdBusy = false } = {}) {
     if (!clientId) { setError('No client selected. Pick a client in the top-left switcher before saving.'); return false }
-    if (!form.name.trim()) { setFieldErr('Vendor name is required.'); return false }
-    setFieldErr('')
+    const fe = {}
+    if (!form.name.trim()) fe.name = 'Vendor name is required.'
+    const payErr = payWithinError(form.pay_within_days)
+    if (payErr) fe.pay = payErr
+    setFieldErr(fe)
+    if (fe.name || fe.pay) return false
     setSaving(true)
     setError('')
+    // S885: NULL when blank, so the supplier keeps the 60-day default (vendors_pay_within_days_range).
+    const fields = {
+      name: form.name.trim(),
+      contact_person: form.contact_person.trim(),
+      phone: form.phone.trim(),
+      address: form.address.trim(),
+      pan_vat_no: form.pan_vat_no.trim(),
+      pay_within_days: payWithinValue(form.pay_within_days),
+      payment_terms: form.payment_terms.trim() || null
+    }
     if (editing) {
-      const { data, error } = await supabase.from('vendors').update({
-        name: form.name.trim(),
-        contact_person: form.contact_person.trim(),
-        phone: form.phone.trim(),
-        address: form.address.trim(),
-        pan_vat_no: form.pan_vat_no.trim(),
-        payment_terms: form.payment_terms.trim() || null
-      }).eq('id', editing).select('id')
+      const { data, error } = await supabase.from('vendors').update(fields).eq('id', editing).select('id')
       if (error) { setError(asActionError(error)); setSaving(false); return false }
       // S756: zero rows back is proof nothing was written — and the dialog used to close as a save.
       if (!data?.length) {
@@ -254,15 +253,7 @@ export default function Vendors() {
         return false
       }
     } else {
-      const { data, error } = await scopedInsert('vendors', {
-        vendor_code: getNextVendorCode(),
-        name: form.name.trim(),
-        contact_person: form.contact_person.trim(),
-        phone: form.phone.trim(),
-        address: form.address.trim(),
-        pan_vat_no: form.pan_vat_no.trim(),
-        payment_terms: form.payment_terms.trim() || null
-      })
+      const { data, error } = await scopedInsert('vendors', { vendor_code: getNextVendorCode(), ...fields })
       if (error) { setError(asActionError(error)); setSaving(false); return false }
       // The new row joins the list the next code is minted from straight away (MASTER-8), so even a
       // reload that fails cannot hand the next Add this vendor's code again.
@@ -398,6 +389,9 @@ export default function Vendors() {
 
   if (!hasImsAccess('supervisor')) return <Navigate to="/dashboard" replace />
 
+  // S885: the days a typed terms note offers while the Pay within box is blank.
+  const suggestion = showForm ? suggestedPayWithin(form) : null
+
   // Archived vendors are off the page by default and visible only to the Owner and the operator
   // (S756, D25 — was operator-only). They stay in
   // `vendors` (so getNextVendorCode still sees their codes and can't reuse one) and are split out here.
@@ -480,7 +474,8 @@ export default function Vendors() {
           <h1 className="page-title">Vendors</h1>
           <p className="page-subtitle">Manage your supplier list — linked to daily purchase entries</p>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <VendorImportButton codePrefix={settings?.vendor_code_prefix || 'VND'} onImported={() => loadVendors()} />
           <button className="btn btn-ghost" onClick={() => printWithTitle('Vendors')}>Print</button>
           <Fab onClick={openNew} label="+ Add Vendor" show={!showForm} />
         </div>
@@ -506,12 +501,12 @@ export default function Vendors() {
               <label htmlFor="vendor-f1">Vendor Name *</label>
               <input id="vendor-f1"
                 value={form.name}
-                onChange={e => { setFieldErr(''); setForm({ ...form, name: e.target.value }) }}
+                onChange={e => { setFieldErr(fe => ({ ...fe, name: '' })); setForm({ ...form, name: e.target.value }) }}
                 placeholder="e.g. Big Mart, Arawat Suppliers"
                 autoFocus
-                {...fieldAria('vendor-f1', fieldErr)}
+                {...fieldAria('vendor-f1', fieldErr.name)}
               />
-              <FieldError id="vendor-f1" message={fieldErr} />
+              <FieldError id="vendor-f1" message={fieldErr.name} />
             </div>
             <div className="form-field">
               <label htmlFor="vendor-f2"><Tip text="Name of the sales rep or account manager at this supplier. Useful for direct contact on order issues.">Contact Person</Tip></label>
@@ -558,12 +553,36 @@ export default function Vendors() {
             </div>
           </div>
           <div className="form-grid form-grid-3" style={{ marginTop: 18 }}>
+            {/* S885 (owner decision 3): the number Outstanding Payables judges overdue by. Text with a
+                numeric keypad, never type="number", which hands back "" for "abc" and would save
+                the default with nothing said; payWithinError checks it on Save. */}
             <div className="form-field">
-              <label htmlFor="vendor-f6"><Tip text="Standard credit period or payment arrangement agreed with this supplier, e.g. 'Net 30', 'COD', '50% Advance'. Shown on Outstanding Payables for reference.">Payment Terms</Tip></label>
+              <label htmlFor="vendor-f7"><Tip width={280} text={`Bills from this supplier count as overdue after this many days. Leave blank for ${DEFAULT_PAY_WITHIN_DAYS}. Use 0 for cash on delivery.`}>Pay within (days)</Tip></label>
+              <input id="vendor-f7"
+                value={form.pay_within_days}
+                onChange={e => { setFieldErr(fe => ({ ...fe, pay: '' })); setForm({ ...form, pay_within_days: e.target.value }) }}
+                placeholder={`Blank = ${DEFAULT_PAY_WITHIN_DAYS}`}
+                inputMode="numeric"
+                {...fieldAria('vendor-f7', fieldErr.pay)}
+              />
+              <FieldError id="vendor-f7" message={fieldErr.pay} />
+              {/* The note already says a number ("Net 30", "COD"): offered, never filled in silently. */}
+              {suggestion != null && !fieldErr.pay && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6, fontSize: 12, color: 'var(--theme-text2)' }}>
+                  The terms note says {suggestion === 0 ? 'due on delivery' : `${suggestion} day${suggestion === 1 ? '' : 's'}`}.
+                  <button type="button" className="btn btn-ghost btn-sm"
+                    onClick={() => { setFieldErr(fe => ({ ...fe, pay: '' })); setForm({ ...form, pay_within_days: String(suggestion) }) }}>
+                    {suggestionLabel(suggestion)}
+                  </button>
+                </span>
+              )}
+            </div>
+            <div className="form-field" style={{ gridColumn: 'span 2' }}>
+              <label htmlFor="vendor-f6"><Tip width={280} text="Anything else agreed with this supplier, like 50% advance or a cheque on the 5th. Shown on the supplier list. The overdue check reads Pay within, not this note.">Terms note</Tip></label>
               <input id="vendor-f6"
                 value={form.payment_terms}
                 onChange={e => setForm({ ...form, payment_terms: e.target.value })}
-                placeholder="e.g. Net 30, COD"
+                placeholder="e.g. Net 30, COD, 50% advance"
               />
             </div>
           </div>
@@ -671,7 +690,7 @@ export default function Vendors() {
                   <th style={{ minWidth: 180 }}><Tip width={300} text="The vendor's name, with its auto-generated code underneath — that code is the short reference used on purchase entries and reports. A 🔗 chip beside the code means this vendor already has records: it names the first two places (Purchases, Purchase Orders, Vendor Returns, Gate Passes); hover it for the full list. No chip means nothing has ever been bought from or issued against it.">Vendor</Tip></th>
                   <th><Tip text="Phone, with the sales rep or account manager's name underneath when one is recorded.">Phone / Contact</Tip></th>
                   <th><Tip text="Supplier's PAN or VAT registration number — needed for VAT invoice reconciliation." width={260}>PAN/VAT<span style={{ display: 'block' }}>No.</span></Tip></th>
-                  <th><Tip text="Standard credit period or payment arrangement agreed with this supplier.">Payment<span style={{ display: 'block' }}>Terms</span></Tip></th>
+                  <th><Tip width={300} text={`How many days you have to pay this supplier before a bill counts as overdue on Outstanding Payables. (default) means none is set, so the usual ${DEFAULT_PAY_WITHIN_DAYS} days apply. The line under it is the terms note.`}>Payment<span style={{ display: 'block' }}>Terms</span></Tip></th>
                   <th>Address</th>
                   <th><Tip text="Blank means active: the vendor appears in purchase entry dropdowns. Inactive vendors are hidden but their purchase history is preserved." width={280}>Status</Tip></th>
                   <th></th>
@@ -694,7 +713,10 @@ export default function Vendors() {
                       {v.contact_person && <span className="cell-sub">{v.contact_person}</span>}
                     </td>
                     <td style={{ whiteSpace: 'nowrap' }}>{v.pan_vat_no || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
-                    <td>{v.payment_terms || <span style={{ color: 'var(--theme-text3)' }}>—</span>}</td>
+                    <td>
+                      <span style={{ whiteSpace: 'nowrap', color: hasOwnPayTerms(v) ? 'var(--theme-text1)' : 'var(--theme-text2)' }}>{payTermsLabel(v)}</span>
+                      {v.payment_terms && <span className="cell-sub">{v.payment_terms}</span>}
+                    </td>
                     {/* The column that absorbs the squeeze: everything else here is a name, a number or
                         a control, all of which a line break either corrupts or cuts (S649). */}
                     <td style={{ maxWidth: 180 }}>

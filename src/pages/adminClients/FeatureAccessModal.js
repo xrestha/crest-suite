@@ -20,6 +20,7 @@ const DEFAULT_FLAGS = {
   supplier_contribution: null,
   consolidated_pnl: null,
   reorder_report: null, price_tracker: null, recipe_costing: null,
+  dish_cost_history: null,
   menu_engineering: null, overheads: null, budget_vs_actual: null,
   best_sellers: null, vat_report: null, non_vat_report: null,
   purchase_orders: null, requisitions: null, wastage_report: null,

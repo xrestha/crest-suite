@@ -70,3 +70,30 @@ describe('the module clears split Inventory by source', () => {
     }
   })
 })
+
+// S885: sales_entry_history (who changed a day's sales, and what it said before). Clear IMS
+// Transactions takes it with the hand-entered sales, and Clear Client Data names it before the months
+// it hangs off. Not exported or restored, like audit_logs (restoreClientData.test.js).
+describe('the Sales Entry change history is cleared with the sales', () => {
+  const imsBlock = clearBlock.slice(clearBlock.indexOf("if (module === 'ims')"), clearBlock.indexOf("if (module === 'hr')"))
+  const deleteAll = (() => {
+    const start = fn.indexOf('async function deleteClientDataFor(')
+    return fn.slice(start, fn.indexOf('\n}\n', start))
+  })()
+  const historyDelete = "from('sales_entry_history').delete().eq('client_id', clientId)"
+
+  it('finds both sequences at all', () => {
+    expect(imsBlock.length).toBeGreaterThan(500)
+    expect(deleteAll).toMatch(/from\('monthly_periods'\)\.delete\(\)/)
+  })
+
+  it('Clear IMS Transactions deletes every history row of the client', () => {
+    expect(imsBlock).toContain(historyDelete)
+  })
+
+  it('Clear Client Data deletes them after the sales and before the months', () => {
+    const at = deleteAll.indexOf(historyDelete)
+    expect(at).toBeGreaterThan(deleteAll.indexOf("from('sales_entries').delete()"))
+    expect(at).toBeLessThan(deleteAll.indexOf("from('monthly_periods').delete()"))
+  })
+})

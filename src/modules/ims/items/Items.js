@@ -29,6 +29,13 @@ import NutritionEditorModal from '../nutrition/NutritionEditorModal'
 import AllergenReviewModal from '../nutrition/AllergenReviewModal'
 import { allergensChecked, isNotFood } from '../../../utils/nutrition'
 import { normaliseAllergens, allergenLabel } from '../../../shared/constants/allergens'
+import { UNITS, nextCodeAfter, perUnitOf } from './itemFormRules'
+import ItemImportButton from './ItemImportButton'
+import CategoryManagerModal from './CategoryManagerModal'
+
+// Moved to itemFormRules.js (S885) so the Excel import mints codes the same way; kept exported
+// from here for Items.test.js.
+export { nextCodeAfter }
 
 const DEFAULT_CATEGORIES = [
   'Dairy & Bakery',
@@ -39,8 +46,6 @@ const DEFAULT_CATEGORIES = [
   'Misc. Items'
 ]
 
-const UNITS = ['GM', 'ML', 'KG', 'LTR', 'PCS', 'PKT', 'BTL', 'BOX', 'ROLL', 'BUNCH', 'JAR', 'CTN', 'BAG', 'TIN', 'SACHET']
-
 // `rate` here is the price of ONE base unit — the only price the form collects and the exact value
 // written to items.rate. There is no pack size on the form or in the row; see the note on `pack`.
 // No `base_unit`: it is always the item's own UOM, so a box for it was a choice that only had one
@@ -49,25 +54,6 @@ const EMPTY_FORM = {
   name: '', category_id: '', uom: 'GM',
   rate: '', yield_pct: '100',
   purchase_unit: '', conversion_factor: ''
-}
-
-// S756: the code prefix is a free-text setting, and it went into `new RegExp` raw — so "A+" made
-// the pattern mean "one or more A", and "V.N" matched "VXN-004" too. A misparse mints off the wrong
-// max (a duplicate code); a prefix like "(" throws and takes Add Item down with it.
-function escapeRegExp(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-/** The next `PREFIX-NNN` after the highest one in `codes`. Exported for Items.test.js. */
-export function nextCodeAfter(rawPrefix, codes) {
-  const prefix = String(rawPrefix).toUpperCase()
-  const re = new RegExp(`^${escapeRegExp(prefix)}-(\\d+)$`)
-  let maxNum = 0
-  ;(codes || []).forEach(code => {
-    const match = String(code || '').match(re)
-    if (match) maxNum = Math.max(maxNum, parseInt(match[1], 10))
-  })
-  return `${prefix}-${String(maxNum + 1).padStart(3, '0')}`
 }
 
 /**
@@ -89,7 +75,7 @@ export function bookWith(book, row, previousName) {
 }
 
 export default function Items() {
-  const { clientId, isAdmin, hasImsAccess, hasFeature } = useAuth()
+  const { clientId, isAdmin, hasImsAccess, hasFeature, groupId } = useAuth()
   // S870: each ingredient's nutrition and allergens, edited here as well as from a recipe row. The
   // page guard below is IMS supervisor, the same rank ims_items_guard needs to write the item.
   const showNutrition = hasFeature('nutrition_facts')
@@ -135,6 +121,9 @@ export default function Items() {
   const [reviewOpen, setReviewOpen] = useState(false)
   const [nutriGuess, setNutriGuess] = useState(null)
   const [initingCats, setInitingCats] = useState(false)
+  // S885 (owner decision 2): Manage categories. Add and rename for the page's own rank (IMS
+  // supervisor and above); remove for the Owner or an IMS manager, which hasImsAccess resolves.
+  const [showCategories, setShowCategories] = useState(false)
   // Every referencing row, whatever its quantity — `{ [itemId]: ['CS', 'P'] }`. ONE map drives the
   // Used In chip, the Used In filters and the delete guard, so the column can never show "—" for an
   // item the guard will refuse. There were two until S766: the chip skipped zero-quantity rows, and
@@ -462,6 +451,24 @@ export default function Items() {
     writePageCache('items', 'items', forClient, data || [])
   }
 
+  // After a category is added, renamed or removed, or an import ran: the cached lists are dropped
+  // first, so a reload that fails cannot leave the old names repainting on the next visit, then
+  // both lists are read again (a rename changes the category name every item row shows).
+  async function reloadCategoriesAndItems() {
+    writePageCache('items', 'categories', clientId, null)
+    writePageCache('items', 'items', clientId, null)
+    await Promise.all([loadCategories(), loadItems()])
+  }
+
+  // S885: an Excel import wrote items and maybe categories. The codes it handed out join this
+  // visit's minted codes (a lost answer may still have landed), and the usage scan runs again,
+  // which also rebuilds `book` from a fresh read.
+  function handleImported({ codes = [] } = {}) {
+    mintedCodesRef.current.push(...codes)
+    reloadCategoriesAndItems()
+    checkAllUsage()
+  }
+
   async function initDefaultCategories() {
     // scopedUpsert refuses (and returns an error) if no client is selected, instead of
     // seeding a null-client_id row — see memory: bug-null-client-id.
@@ -483,12 +490,8 @@ export default function Items() {
   // directly, so neither multiplication nor division survives at save time.
   // ONE derivation feeds both the "→ NPR x per uom" preview and the rate written into the form —
   // they briefly had independent copies of this division with different rounding, which is how a
-  // preview comes to state a price the form did not save. Number(), not parseFloat: a prefix
-  // parse of a not-quite-numeric string ("5oo" → 5, "1,200" → 1) must never price an item.
-  function perUnitOf(qty, total) {
-    const q = Number(qty), t = Number(total)
-    return q > 0 && t > 0 ? Number((t / q).toFixed(6)) : null
-  }
+  // preview comes to state a price the form did not save. Since S885 it is `perUnitOf` in
+  // itemFormRules.js, the same division the Excel import runs on a pack row.
   const packPerUnit = perUnitOf(pack.qty, pack.total)
   // Both boxes filled but the division can't run (zero, negative, unparseable): the rate box
   // above deliberately KEEPS its last value in that state, so it must be flagged here or the
@@ -1001,12 +1004,23 @@ export default function Items() {
           <h1 className="page-title">Item Master</h1>
           <p className="page-subtitle">{items.length} ingredients across {categories.length} categories</p>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {categories.length === 0 && (
             <button className="btn btn-ghost" onClick={initDefaultCategories} disabled={initingCats}>
               {initingCats ? 'Setting up…' : '⚡ Load Default Categories'}
             </button>
           )}
+          <Tip width={280} text="Add your own categories, rename them, or remove one by moving its items and monthly budgets into another. Removing needs the account owner or an inventory manager.">
+            <button type="button" className="btn btn-ghost" onClick={() => setShowCategories(true)} disabled={loading && categories.length === 0}>
+              Manage categories
+            </button>
+          </Tip>
+          <ItemImportButton
+            categories={categories} vatMode={vatMode}
+            codePrefix={settings?.item_code_prefix || 'ITM'}
+            extraCodes={() => mintedCodesRef.current}
+            onImported={handleImported}
+          />
           {isAdmin && items.some(i => i.purchase_unit) && (
             <button
               className="btn btn-ghost"
@@ -1033,7 +1047,7 @@ export default function Items() {
       {categories.length === 0 && !loading && (
         <div className="note-banner">
           <p style={{ margin: 0 }}>
-            You have no item categories yet, so there is nothing to file a new item under. Click <strong>⚡ Load Default Categories</strong> to add the {DEFAULT_CATEGORIES.length} Crest starts with — {DEFAULT_CATEGORIES.slice(0, -1).join(', ')} and {DEFAULT_CATEGORIES[DEFAULT_CATEGORIES.length - 1]}. Rename them or add your own afterwards.
+            You have no item categories yet, so there is nothing to file a new item under. Click <strong>⚡ Load Default Categories</strong> to add the {DEFAULT_CATEGORIES.length} Crest starts with — {DEFAULT_CATEGORIES.slice(0, -1).join(', ')} and {DEFAULT_CATEGORIES[DEFAULT_CATEGORIES.length - 1]} — or add your own with <strong>Manage categories</strong>. Either way, you can rename them or add more there afterwards.
           </p>
         </div>
       )}
@@ -1551,6 +1565,15 @@ export default function Items() {
       {nutriItem && (
         <NutritionEditorModal key={nutriItem.id} item={nutriItem} onClose={closeNutri} onSaved={handleNutriSaved}
           initialAllergens={nutriGuess?.keys ?? null} guessNote={nutriGuess?.note || ''} />
+      )}
+      {showCategories && (
+        <CategoryManagerModal
+          categories={categories} items={items}
+          inGroup={!!groupId} canRemove={hasImsAccess('manager')}
+          askConfirm={askConfirm}
+          onChanged={reloadCategoriesAndItems}
+          onClose={() => setShowCategories(false)}
+        />
       )}
       {confirmEl}
     </div>

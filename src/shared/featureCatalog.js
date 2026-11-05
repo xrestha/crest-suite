@@ -82,6 +82,7 @@ export const FEATURE_GROUPS = [
     { key: 'fifo_report',          label: 'FIFO / Expiry' },
     { key: 'stock_ageing',         label: 'Stock Ageing' },
     { key: 'price_tracker',        label: 'Price Tracker' },
+    { key: 'dish_cost_history',    label: 'Dish Cost History' },
     { key: 'theoretical_variance', label: 'Theoretical Variance' },
     { key: 'period_comparison',    label: 'Period Comparison' },
     { key: 'shrinkage_report',     label: 'Shrinkage Report' },

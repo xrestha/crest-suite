@@ -20,6 +20,8 @@ import { priorPoolRun, buildTaxPoolLines, schedulesToPostAgain, postedLinePayloa
 import { POOL_LABELS, POOL_EXAMPLES, POOL_RATES, DISCLAIMER_TEXT } from './taxPoolConstants'
 import TaxPoolOpeningsCard from './TaxPoolOpeningsCard'
 import { readRegister, answerLost, refusedWith, ASSET_CALL_MS } from './assetReads'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import { taxPoolSheetRows, taxPoolSheetNotes, fileSafe } from './fixedAssetsExcel'
 
 const poolTip = pool => pool === 'E'
   ? POOL_EXAMPLES.E
@@ -222,6 +224,8 @@ export default function TaxPoolTab() {
   const repostSeq = useRef(0)
   // Bumped after a post, so the openings card re-reads which values the new schedule has locked.
   const [cardRefresh, setCardRefresh] = useState(0)
+  // An Excel file that could not be made (S885).
+  const [exportErr, setExportErr] = useState(null)
 
   const fyLabel = getBsFiscalYear(fyStart, 4)
   const canPost = hasImsAccess('manager')
@@ -247,6 +251,32 @@ export default function TaxPoolTab() {
     }
   }, [previewInputs, built])
   const { openingGap, openingTyped, poolEDisposed, poolECapped } = notes
+
+  // S885 (owner decision: Excel on every Fixed Assets report). The schedule exists only as the
+  // preview on screen (nothing reads a posted one back), so the workbook is that preview, named a
+  // Preview in its title, scope and first note, with every note the screen shows and the disclaimer.
+  async function exportExcel() {
+    if (!lines || !built) return
+    setExportErr(null)
+    try {
+      const XLSX = await import('xlsx')
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+        title: `Tax Depreciation Schedule (Preview) — FY ${fyLabel}`,
+        biz,
+        scopeLine: `FY ${fyLabel} (Shrawan to Ashadh) · Preview worked out ${nepalBsLong(new Date())}, ${nepalTime(new Date())} · not a posted schedule`,
+        rows: taxPoolSheetRows(lines),
+        notes: taxPoolSheetNotes({
+          fyLabel, lines, built, notes, closedPools, disclaimer: DISCLAIMER_TEXT,
+          zeroPoolsText: openingGap ? poolsOpeningAtZero(openingGap.pools) : '',
+        }),
+      }), 'Tax Pools (Preview)')
+      XLSX.writeFile(wb, `tax-depreciation-preview-${fileSafe(`FY ${fyLabel}`)}.xlsx`)
+    } catch (e) {
+      const a = asActionError(e)
+      setExportErr({ text: 'The Excel file could not be made. ' + a.text, detail: a.detail })
+    }
+  }
 
   // Any change to what a preview is built from throws the preview away.
   function inputsChanged() {
@@ -637,12 +667,17 @@ ${text}`, detail })
             // before then says why (LetterheadButton, S877).
             <LetterheadButton ready={biz.ready} error={biz.error} onClick={() => printWithTitle(`Tax Depreciation Schedule - FY ${fyLabel}`)}>Print</LetterheadButton>
           )}
+          {lines && (
+            <LetterheadButton ready={biz.ready} error={biz.error} onClick={exportExcel} disabled={loading}
+              tip="The schedule previewed below, with its notes, as a spreadsheet marked Preview." tipWidth={240}>↓ Export Excel</LetterheadButton>
+          )}
           {msg && <span style={{ fontSize: 12, color: 'var(--theme-green-text)' }}>{msg.split(':').slice(1).join(':')}</span>}
         </div>
         {lines && biz.error && (
-          <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>The business name for the printed heading could not be read, so Print is held. Reload the page to try again.</p>
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--theme-text2)' }}>The business name for the printed heading could not be read, so Print and Excel are held. Reload the page to try again.</p>
         )}
         <ActionError error={err} />
+        <ActionError error={exportErr} />
         {recheck && (
           <p role="status" className="note-banner" style={{ margin: '10px 0 0' }}>
             {recheck.error

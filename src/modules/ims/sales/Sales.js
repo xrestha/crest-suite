@@ -17,6 +17,7 @@ import { printWithTitle } from '../../../utils/printTitle'
 import { persistSalesDay, findSupersededRows, depleteManualSales, repostSupersededMovements, SAVE_TIMEOUT_MS, stockUpdateBusy, stockUpdateWaitingText } from './persistSalesDay'
 import { isManualSource, bulkTillHandover } from './salesDepletion'
 import SupersedeConfirmModal from './SupersedeConfirmModal'
+import SalesChangeHistory from './SalesChangeHistory'
 import { useConfirm } from '../../../shared/hooks/useConfirm'
 import { readPageCache, writePageCache } from '../../../shared/sessionDataCache'
 import { useLatestRequest } from '../../../shared/hooks/useLatestRequest'
@@ -48,6 +49,11 @@ const TAB_LABELS = { bulk: 'Bulk Entry', daily: 'Daily Entry', breakdown: 'Daily
 // two are read-only views of whatever POS has already posted, so they stay available.
 const ENTRY_TABS = ['bulk', 'daily']
 const READ_ONLY_TAB = 'summary'
+// S885: who changed the sales and what they said before, for the Owner and IMS managers only. Not in
+// TAB_LABELS, so a login below manager never gets the tab; read-only, so it is in no entry list, and
+// every entry grid, Save and Clear on this page renders only on its own tab (=== checks), never here.
+const HISTORY_TAB = 'history'
+const HISTORY_LABEL = 'Change history'
 // Whether a month row is unchanged in what a load reads off it (S855): its status decides whether
 // a Bulk draft is kept, and its year and month date the till hand-over.
 const sameMonthRow = (a, b) => !!a && !!b && a.id === b.id && a.status === b.status
@@ -310,6 +316,13 @@ export default function Sales() {
     if (viewMode === 'daily' && (tillHandover === null || preTillOpen)) return
     setViewMode(READ_ONLY_TAB)
   }, [posOwnsSales, viewMode, tillHandover, preTillOpen])
+
+  // The history tab is the Owner's and an IMS manager's (S885). A login that loses the rank while on
+  // it lands on the read-only summary rather than on a tab it can no longer see.
+  const canSeeHistory = hasImsAccess('manager')
+  useEffect(() => {
+    if (viewMode === HISTORY_TAB && !canSeeHistory) setViewMode(READ_ONLY_TAB)
+  }, [viewMode, canSeeHistory])
 
   // A month entered day by day has nothing on Bulk Entry, and opening there showed a column of
   // empty boxes under "Items Sold 274" (S796). Until someone picks a tab, a period whose sales are
@@ -1215,7 +1228,8 @@ export default function Sales() {
   // stat cards, which sit above the tab strip. The rest is per tab, so a Daily Breakdown that could
   // not load stops blocking Bulk Entry the moment you leave it: the previous single shared slot
   // meant one tab's failure blanked all four with no way back except a period change or a reload.
-  const TAB_LOAD_KEY = { bulk: 'sales', daily: 'daily', breakdown: 'monthly', summary: null }
+  // The history tab reads for itself and shows its own error (SalesChangeHistory), so it has no key.
+  const TAB_LOAD_KEY = { bulk: 'sales', daily: 'daily', breakdown: 'monthly', summary: null, [HISTORY_TAB]: null }
   const loadError = loadErrors.init || loadErrors.allDay || loadErrors[TAB_LOAD_KEY[viewMode]] || null
 
   // Admin and the Owner edit a closed month in place (S756); everyone else is read-only.
@@ -1242,7 +1256,9 @@ export default function Sales() {
   // client has none or the read failed — left a live Save over nothing. Both payload builders
   // iterate `recipes`, and save_sales_day reads an empty payload as "clear this day".
   const noMenu = recipes.length === 0
-  const tabPrintLabel = `${TAB_LABELS[viewMode]} — ${periodLabel}${viewMode === 'daily' ? `, Day ${selectedDay}` : ''}`
+  // The tabs this login sees: the four for everyone with the page, Change history for a manager (S885).
+  const tabLabels = canSeeHistory ? { ...TAB_LABELS, [HISTORY_TAB]: HISTORY_LABEL } : TAB_LABELS
+  const tabPrintLabel = `${tabLabels[viewMode] || ''} — ${periodLabel}${viewMode === 'daily' ? `, Day ${selectedDay}` : ''}`
 
   // Mirror the Bulk grid into localStorage as it is typed (salesEntryDraft.js). Two triggers, as on
   // the purchase bill: a 400 ms debounce for ordinary typing, and visibilitychange/pagehide write at
@@ -1418,7 +1434,7 @@ export default function Sales() {
             so a locked tab is passed over rather than trapping the arrow. */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }} role="tablist" aria-label="Sales entry views"
           onKeyDown={e => { moveRovingFocus(e, '[role="tab"]')?.click() }}>
-          {Object.entries(TAB_LABELS).map(([key, label]) => {
+          {Object.entries(tabLabels).map(([key, label]) => {
             // Daily Entry stays open for a hand-started month's pre-till days (D35, `preTillOpen`).
             const tabDisabled = posOwnsSales && ENTRY_TABS.includes(key) && !(key === 'daily' && preTillOpen)
             // aria-disabled, NOT the disabled attribute: a disabled <button> swallows mouse events
@@ -1945,6 +1961,11 @@ export default function Sales() {
               </div>
             )
           })()}
+
+          {/* CHANGE HISTORY (S885): read-only, its own reads, paging and error card. */}
+          {!loadError && viewMode === HISTORY_TAB && canSeeHistory && (
+            <SalesChangeHistory period={selectedPeriod} />
+          )}
 
           {/* PERIOD SUMMARY */}
           {!loadError && viewMode === 'summary' && (() => {

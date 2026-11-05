@@ -229,6 +229,8 @@ export async function exportClientData(clientId, onProgress = () => {}) {
     notes: [
       'staff_pin_vault holds AES-GCM ciphertext only; the key stays in the database.',
       'client_secrets, pos_devices (per-tablet POS keys), pos_print_devices and pos_print_jobs (printer computers and their minutes-long print queue) and audit_logs are deliberately excluded.',
+      // S885: no client role can read it (only get_sales_history), and a restore is not a change.
+      'sales_entry_history (who changed Sales Entry, and what it said before) is excluded like audit_logs: a restored client starts a new change record.',
       '*_by_name columns are resolved at export time and are not database columns.',
       'The .json artifact is the restorable one. The .xlsx is for reading.',
     ],

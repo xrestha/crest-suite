@@ -501,6 +501,11 @@ export function assetHeldOn(asset, asOf) {
 // S849 (ASSETS-6, owner decision SU6 a): an asset with a personal-use share counts in full, as it
 // does in the runs, the Overheads memo and the tax pools. It used to drop out of the valuation
 // entirely at any share above 0, so the one report that left it out disagreed with all the others.
+//
+// S885 (owner decision: the valuation workbook lists every asset as well as the category totals):
+// `assets` is the same rows the totals are summed from, one per asset held on the date, with what
+// identifies it. Nothing is re-derived for it, so the per-asset sheet adds up to the category sheet
+// by construction. The totals are computed exactly as before.
 export function computeValuationAsOf({ assets, postedRows, asOf }) {
   const positions = bookPositionsByAsset(postedRows, asOf)
   const rows = (assets || [])
@@ -509,6 +514,19 @@ export function computeValuationAsOf({ assets, postedRows, asOf }) {
       categoryName: a.assets_categories?.name || 'Uncategorized',
       totalCost: parseFloat(a.total_cost) || 0,
       nbv: bookValue(a, positions[a.id], asOf),
+      id: a.id,
+      assetCode: a.asset_code || '',
+      name: a.name || '',
+      acquisitionDate: a.acquisition_date || null,
+      status: a.status || null,
+      disposalDate: a.status === 'active' ? null : (a.disposal_date || null),
     }))
-  return computePortfolioValuation(rows)
+  const valuation = computePortfolioValuation(rows)
+  const order = new Map(valuation.byCategory.map((c, i) => [c.categoryName, i]))
+  const byAsset = rows
+    .map(r => ({ ...r, accumulatedDepreciation: r2(r.totalCost - r.nbv) }))
+    .sort((x, y) => (order.get(x.categoryName) - order.get(y.categoryName))
+      || x.assetCode.localeCompare(y.assetCode, undefined, { numeric: true })
+      || x.name.localeCompare(y.name))
+  return { ...valuation, assets: byAsset }
 }

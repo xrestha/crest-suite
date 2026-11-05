@@ -48,6 +48,7 @@ const VendorBalanceConfirmation = lazy(() => import('./modules/ims/reports/Vendo
 const ReorderReport = lazy(() => import('./modules/ims/stockcount/ReorderReport'))
 const StockMovements = lazy(() => import('./modules/ims/stockcount/StockMovements'))
 const SupplierPriceTracker = lazy(() => import('./modules/ims/purchases/SupplierPriceTracker'))
+const DishCostHistory = lazy(() => import('./modules/ims/reports/DishCostHistory'))
 const MenuEngineering = lazy(() => import('./modules/ims/recipes/MenuEngineering'))
 const AdminClients = lazy(() => import('./pages/AdminClients'))
 const AuditLog = lazy(() => import('./pages/AuditLog'))
@@ -346,6 +347,10 @@ export default function App() {
                 element={<ModuleGate module="ims"><PremiumGate featureKey="vendor_balance_confirmation" minPlan="starter"><VendorBalanceConfirmation /></PremiumGate></ModuleGate>} />
               <Route path="/supplier-prices"
                 element={<ModuleGate module="ims"><PremiumGate featureKey="price_tracker" minPlan="pro"><SupplierPriceTracker /></PremiumGate></ModuleGate>} />
+              {/* S885: Price Tracker read through today's recipes, so it carries the same gate (Pro) and the
+                  page holds the same rank guard (IMS manager, and the Owner). */}
+              <Route path="/dish-cost-history"
+                element={<ModuleGate module="ims"><PremiumGate featureKey="dish_cost_history" minPlan="pro"><DishCostHistory /></PremiumGate></ModuleGate>} />
               {/* Data-entry page behind Fixed Costs %/Est. Net Margin on ClientDashboard and
                   Recipes' True Cost allocation — it must not sit above the tier of figures that
                   consume it, or those render blank with no explanation. */}

@@ -704,9 +704,10 @@ export default function OwnerDashboard() {
               key: 'payables',
               tile: tPayables,
               count: payables?.overdueCount,
+              // S885: overdue is past each supplier's own payment days (60 when none is set).
               text: payables?.overdueCount > 0
-                ? <>supplier {payables.overdueCount === 1 ? 'bill is' : 'bills are'} over 60 days unpaid · {npr(payables.overdueTotal)} owed</>
-                : 'No supplier bill is over 60 days unpaid.',
+                ? <>supplier {payables.overdueCount === 1 ? 'bill is' : 'bills are'} past the supplier payment days · {npr(payables.overdueTotal)} owed</>
+                : 'No supplier bill is past its supplier payment days.',
               to: '/payables',
               linkText: 'Outstanding Payables',
             })}

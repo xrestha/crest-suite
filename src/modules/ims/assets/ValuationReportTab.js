@@ -2,8 +2,11 @@ import { nprInt } from '../../../shared/nepalMoney'
 import { useEffect, useMemo, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { chartMotion } from '../../../shared/chartMotion'
-import { useAuth } from '../../../context/AuthContext'
 import { useScopedDb } from '../../../shared/hooks/useScopedDb'
+import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import LetterheadButton from '../../../components/LetterheadButton'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import ChartCard from '../../../components/ChartCard'
 import StatPill from '../../../components/StatPill'
 import Tip from '../../../components/Tip'
@@ -15,6 +18,7 @@ import { formatAdAsBs } from '../../../utils/bsCalendar'
 import { nepalBsLong } from '../../../shared/nepalTime'
 import { settleWithin } from '../../../utils/withTimeout'
 import { ASSET_CALL_MS } from './assetReads'
+import { valuationAssetRows, valuationCategoryRows, valuationNotes, fileSafe } from './fixedAssetsExcel'
 
 const fmt = nprInt
 // A stored AD date (a period end) as the BS date it falls on (S792, COSTS-11).
@@ -26,8 +30,12 @@ const fmtDate = d => formatAdAsBs(d)
 // with a personal-use share counts in full here, as in the runs and the tax pools; a footnote says
 // how many there are.
 export default function ValuationReportTab({ assets }) {
-  const { profile } = useAuth()
   const { scopedFrom } = useScopedDb()
+  // The letterhead's business name (S885). The printed footer read profile.clients.name, the
+  // login's own client row, which is not always the outlet on screen; Print and Excel now take the
+  // name from useBizInfo and wait for it, like every other export.
+  const biz = useBizInfo()
+  const [exportError, setExportError] = useState(null)
   const [posted, setPosted] = useState([]) // all posted schedule rows, client-wide
   const [asOf, setAsOf] = useState('')
   const [loading, setLoading] = useState(true)
@@ -58,9 +66,32 @@ export default function ValuationReportTab({ assets }) {
   const valuation = useMemo(() => (asOf ? computeValuationAsOf({ assets, postedRows: posted, asOf }) : null), [assets, posted, asOf])
   const personalUse = useMemo(() => (asOf ? assets.filter(a => (parseFloat(a.personal_use_percent) || 0) > 0 && assetHeldOn(a, asOf)).length : 0), [assets, asOf])
 
+  // S885 (owner decision): every asset held on the date, and the category totals that match the
+  // screen, from the one computeValuationAsOf result the page renders.
+  async function exportExcel() {
+    if (!valuation) return
+    setExportError(null)
+    try {
+      const XLSX = await import('xlsx')
+      const scopeLine = `As of ${fmtDate(asOf)} (the end of a period with a posted depreciation run)`
+      const notes = valuationNotes(personalUse)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+        title: 'Asset Valuation Report: Assets', biz, scopeLine, rows: valuationAssetRows(valuation), notes,
+      }), 'Assets')
+      XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+        title: 'Asset Valuation Report: By Category', biz, scopeLine, rows: valuationCategoryRows(valuation), notes,
+      }), 'By Category')
+      XLSX.writeFile(wb, `asset-valuation-${fileSafe(fmtDate(asOf))}.xlsx`)
+    } catch (e) {
+      const a = asActionError(e)
+      setExportError({ text: 'The Excel file could not be made. ' + a.text, detail: a.detail })
+    }
+  }
+
   return (
     <div>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 16 }} className="no-print">
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }} className="no-print">
         <div className="form-field">
           <label htmlFor="valuat-f1"><Tip text="The end of a period with a posted depreciation run. Every asset owned on that date counts, even one sold later, at its cost less the depreciation up to that date." width={290}>As Of</Tip></label>
           <select id="valuat-f1" className="form-select" value={asOf} onChange={e => setAsOf(e.target.value)} disabled={periodOptions.length === 0}>
@@ -69,9 +100,18 @@ export default function ValuationReportTab({ assets }) {
           </select>
         </div>
         {valuation && (
-          <button className="btn btn-primary" style={{ marginLeft: 'auto' }} onClick={() => printWithTitle(`Asset Valuation Report - ${fmtDate(asOf)}`)}>Print</button>
+          // Both name the business, so both wait for its name (LetterheadButton, S877), and both are
+          // held while a reload is in flight or after it failed (S885).
+          <>
+            <LetterheadButton ready={biz.ready} error={biz.error} style={{ marginLeft: 'auto' }} onClick={exportExcel}
+              disabled={loading || !!loadError}>↓ Export Excel</LetterheadButton>
+            <LetterheadButton ready={biz.ready} error={biz.error} className="btn btn-primary"
+              disabled={loading || !!loadError}
+              onClick={() => printWithTitle(`Asset Valuation Report - ${fmtDate(asOf)}`)}>Print</LetterheadButton>
+          </>
         )}
       </div>
+      {exportError && <ActionError error={exportError} className="action-error--top" />}
 
       {loading ? (
         <p style={{ color: 'var(--theme-text2)', fontSize: 13 }}>Loading…</p>
@@ -156,7 +196,7 @@ export default function ValuationReportTab({ assets }) {
           )}
 
           <div style={{ marginTop: 32, fontSize: 10, color: '#aaa', borderTop: '1px solid #eee', paddingTop: 12, textAlign: 'center' }} className="print-only">
-            Asset Valuation Report — {profile?.clients?.name || ''} — As of {fmtDate(asOf)} · Generated by Crest Suite · {nepalBsLong(new Date())}
+            Asset Valuation Report{biz.name ? ` — ${biz.name}` : ''} — As of {fmtDate(asOf)} · Generated by Crest Suite · {nepalBsLong(new Date())}
           </div>
         </div>
       )}

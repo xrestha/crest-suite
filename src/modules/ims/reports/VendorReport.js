@@ -7,6 +7,7 @@ import { fetchAllRows, fetchAllRowsChunked } from '../../../shared/fetchAllRows'
 import { firstError } from '../../../shared/queryError'
 import { calcBillTotals, methodOf, aging } from '../purchases/purchasesHelpers'
 import { billOwedAfterReturns } from './payablesAllocation'
+import { isWriteOff, writtenOffOf, recordedByOf } from './writeOff'
 import { vatCostFactor } from './supplierAttribution'
 import { returnLinesOutsidePeriod } from './purchaseTaxSplit'
 import { vendorNetBasis, netForMethod } from './vendorNetBasis'
@@ -459,6 +460,11 @@ export default function VendorReport() {
         ? billEntries.reduce((s, p) =>
           s + (paymentsMap[p.id] || []).reduce((s2, pm) => s2 + parseFloat(pm.amount), 0), 0)
         : 0
+      const payments = billEntries.flatMap(p => paymentsMap[p.id] || []).sort((x, y) => (x.paid_at > y.paid_at ? 1 : -1))
+      // S885: a leftover cleared without paying (payment_mode 'Write-off'). It is inside `paid`,
+      // because it lowers what the bill owes, and is shown on its own line: it is not money paid,
+      // and it is never part of a credit the supplier owes back.
+      const writtenOff = isCreditBill ? writtenOffOf(payments) : 0
 
       let status, remaining = 0
       if (!isCreditBill) {
@@ -466,10 +472,12 @@ export default function VendorReport() {
       } else {
         // No Math.max(0, …) — S723. A return against an already-settled bill makes the vendor owe
         // US, and clamping that to zero deletes the state rather than reporting it. Outstanding
-        // Payables dropped the same clamp for the same reason and surfaces it as a Credit.
+        // Payables dropped the same clamp for the same reason and surfaces it as a Credit. What
+        // the supplier owes back is money only (S885): a cleared leftover never becomes credit.
         remaining = Math.round((owed - paid) * 100) / 100
-        if (remaining < -EPS) status = { label: 'Credit', color: 'var(--theme-text1)' }
-        else if (remaining <= EPS) status = { label: 'Paid', color: 'var(--theme-green-text)' }
+        const creditBack = Math.round(-(remaining + writtenOff) * 100) / 100
+        if (creditBack > EPS) { status = { label: 'Credit', color: 'var(--theme-text1)' }; remaining = -creditBack }
+        else if (remaining <= EPS) { status = { label: 'Paid', color: 'var(--theme-green-text)' }; remaining = Math.max(0, remaining) }
         else if (paid > EPS) status = { label: 'Partial', color: 'var(--theme-amber-text)' }
         else if (selectedPeriod) {
           const adDate = bsToAd(selectedPeriod.bs_year, selectedPeriod.bs_month, e.bs_day || 1)
@@ -480,13 +488,11 @@ export default function VendorReport() {
         }
       }
 
-      const payments = billEntries.flatMap(p => paymentsMap[p.id] || []).sort((x, y) => (x.paid_at > y.paid_at ? 1 : -1))
-
       bills.push({
         key: gid, vendor_id: e.vendor_id, vendorName: e.vendors?.name || 'Unassigned',
         day: e.bs_day, invoice: e.invoice_ref, itemCount: billEntries.length,
         total, discount: disc, returned: returnedAmt, net, owed, paymentMethod, status, remaining,
-        paid, returnedLater, entries: billEntries, billReturns, payments,
+        paid, writtenOff, returnedLater, entries: billEntries, billReturns, payments,
       })
     })
 
@@ -524,7 +530,7 @@ export default function VendorReport() {
           status: line
             ? { label: 'Earlier bill', color: 'var(--theme-text2)' }
             : { label: 'No bill', color: 'var(--theme-amber-text)' },
-          remaining: 0, paid: 0, returnedLater: 0, entries: [], billReturns: [], payments: [],
+          remaining: 0, paid: 0, writtenOff: 0, returnedLater: 0, entries: [], billReturns: [], payments: [],
         })
       }
       const v = ix.retValueOf(r)
@@ -1439,15 +1445,28 @@ export default function VendorReport() {
                                           {b.payments.map(p => (
                                             <tr key={p.id}>
                                               <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)' }}>{p.paid_at}</td>
-                                              <td style={{ padding: '5px 16px', textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {parseFloat(p.amount).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                                              <td style={{ padding: '5px 0 5px 16px', color: 'var(--theme-text3)' }}>{p.note || '—'}</td>
+                                              <td style={{ padding: '5px 16px', textAlign: 'right', color: 'var(--theme-text1)', fontWeight: 600 }}>NPR {parseFloat(p.amount).toLocaleString('en-IN', { maximumFractionDigits: isWriteOff(p) ? 2 : 0 })}</td>
+                                              {/* A cleared leftover is named, never shown as a payment (S885). */}
+                                              <td style={{ padding: '5px 16px', color: 'var(--theme-text3)' }}>
+                                                {isWriteOff(p) ? <span className="badge badge-gray" style={{ whiteSpace: 'nowrap' }}>Written off</span> : (p.payment_mode || '—')}
+                                              </td>
+                                              <td style={{ padding: '5px 16px', color: 'var(--theme-text3)' }}>{p.note || '—'}</td>
+                                              {/* Who recorded it, stamped by the server since S885; older rows have none. */}
+                                              <td style={{ padding: '5px 0 5px 16px', color: 'var(--theme-text3)', whiteSpace: 'nowrap' }}>{recordedByOf(p) ? `by ${recordedByOf(p)}` : ''}</td>
                                             </tr>
                                           ))}
                                           <tr style={{ borderTop: '1px solid var(--theme-border)' }}>
                                             <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)', fontSize: 11 }}>Total paid</td>
-                                            <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {b.paid.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                                            <td />
+                                            <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {(b.paid - b.writtenOff).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                                            <td /><td /><td />
                                           </tr>
+                                          {b.writtenOff > EPS && (
+                                            <tr>
+                                              <td style={{ padding: '5px 16px 5px 0', color: 'var(--theme-text2)', fontSize: 11 }}>Written off</td>
+                                              <td style={{ padding: '5px 16px', textAlign: 'right', fontWeight: 700, color: 'var(--theme-text1)' }}>NPR {b.writtenOff.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                              <td /><td /><td />
+                                            </tr>
+                                          )}
                                         </tbody>
                                       </table>
                                     </div>

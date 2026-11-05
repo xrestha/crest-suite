@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { nprInt } from '../../../shared/nepalMoney'
 import { useBizInfo } from '../../../shared/hooks/useBizInfo'
+import { sheetWithLetterhead } from '../../../shared/excelLetterhead'
+import ActionError, { asActionError } from '../../../components/ActionError'
 import { printWithTitle } from '../../../utils/printTitle'
 import Tip from '../../../components/Tip'
 import LetterheadButton from '../../../components/LetterheadButton'
@@ -8,6 +10,7 @@ import { formatAd, formatAdAsBs, getBsFiscalYear, getBsFiscalYearStart, getBsTod
 import { nepalBsLong } from '../../../shared/nepalTime'
 import { getFiscalYearAdRange } from '../reports/vendorBalanceHelpers'
 import { fiscalYearStartOfAdDate } from './taxPoolCompute'
+import { disposalSheetRows, DISPOSAL_NOTES, fileSafe } from './fixedAssetsExcel'
 
 const fmt = nprInt
 // A stored AD date as the BS date it was picked as (S792, COSTS-11).
@@ -23,6 +26,7 @@ export default function DisposalReportTab({ assets }) {
   const today = getBsToday()
   const currentFy = getBsFiscalYearStart(today.year, today.month)
   const [fy, setFy] = useState(currentFy)
+  const [exportError, setExportError] = useState(null)
 
   const everDisposed = useMemo(() => assets
     .filter(a => a.status === 'disposed' || a.status === 'written_off')
@@ -51,6 +55,26 @@ export default function DisposalReportTab({ assets }) {
   const scope = fyLabel ? `FY ${fyLabel}` : 'All years'
   const title = `Asset Disposal Report — ${scope}`
 
+  // S885: the year's (or every year's) list as on screen, with its totals.
+  async function exportExcel() {
+    setExportError(null)
+    try {
+      const XLSX = await import('xlsx')
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, sheetWithLetterhead(XLSX, {
+        title: 'Asset Disposal Report',
+        biz,
+        scopeLine: fyLabel ? `FY ${fyLabel} (Shrawan to Ashadh), by disposal date` : 'All years, by disposal date',
+        rows: disposalSheetRows(disposed),
+        notes: DISPOSAL_NOTES,
+      }), 'Disposals')
+      XLSX.writeFile(wb, `asset-disposals-${fileSafe(scope)}.xlsx`)
+    } catch (e) {
+      const a = asActionError(e)
+      setExportError({ text: 'The Excel file could not be made. ' + a.text, detail: a.detail })
+    }
+  }
+
   return (
     <div>
       <div className="no-print" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 16 }}>
@@ -62,14 +86,18 @@ export default function DisposalReportTab({ assets }) {
           </select>
         </div>
         {disposed.length > 0 && (
-          // The printed heading names the business, so Print waits for its name (S845); a press
-          // before then says why (LetterheadButton, S877).
-          <LetterheadButton ready={biz.ready} error={biz.error} className="btn btn-primary" style={{ marginLeft: 'auto' }} onClick={() => printWithTitle(title)}>Print</LetterheadButton>
+          // The printed heading and the workbook name the business, so both wait for its name
+          // (S845); a press before then says why (LetterheadButton, S877).
+          <>
+            <LetterheadButton ready={biz.ready} error={biz.error} style={{ marginLeft: 'auto' }} onClick={exportExcel}>↓ Export Excel</LetterheadButton>
+            <LetterheadButton ready={biz.ready} error={biz.error} className="btn btn-primary" onClick={() => printWithTitle(title)}>Print</LetterheadButton>
+          </>
         )}
       </div>
       {disposed.length > 0 && biz.error && (
-        <p className="no-print" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-text2)' }}>The business name for the printed heading could not be read, so Print is held. Reload the page to try again.</p>
+        <p className="no-print" style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--theme-text2)' }}>The business name for the printed heading could not be read, so Print and Excel are held. Reload the page to try again.</p>
       )}
+      {exportError && <ActionError error={exportError} className="action-error--top" />}
 
       {disposed.length === 0 ? (
         <div className="card"><div className="empty-state"><p className="empty-state-text">

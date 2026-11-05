@@ -47,6 +47,19 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
   // touched the balance, so it was a figure that reconciled to nothing on a letter whose entire
   // purpose is being reconciled.
   const amountTotal = rows.reduce((s, e) => s + (e.signedAmount || 0), 0)
+  // S885: leftovers cleared without paying. Named in the sentence and the boxes only when there
+  // are any, so a letter with none reads exactly as it did; when there are, the printed figures
+  // still add up to the closing balance.
+  const writtenOffFy = Number(totals.totalWrittenOffFy) || 0
+  const hasWrittenOff = Math.abs(writtenOffFy) >= 0.005
+  const headline = [
+    ['Opening Balance', openingBalance],
+    ['Purchases (FY)', totals.totalPurchasesFy],
+    ['Payments (FY)', totals.totalPaymentsFy],
+    ['Returns (FY)', totals.totalReturnsFy],
+    ...(hasWrittenOff ? [['Written off (FY)', writtenOffFy]] : []),
+    [balanceLabel, Math.abs(closingBalance)],
+  ]
 
   return (
     // White "paper" background — this renders as a persistent on-screen preview (not just at
@@ -83,7 +96,7 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
           <strong>{fmtBs(fyEnd)} (BS)</strong> is <strong>NPR {roundedClosingAbs.toLocaleString('en-IN')}</strong> ({numberToWordsNpr(roundedClosingAbs)} only).
         </p>
         <p style={{ margin: '0 0 10px' }}>
-          Opening Balance NPR {fmt(openingBalance)} + Purchases NPR {fmt(totals.totalPurchasesFy)} − Payments NPR {fmt(totals.totalPaymentsFy)} − Returns NPR {fmt(totals.totalReturnsFy)} = {balanceLabel} NPR {fmt(Math.abs(closingBalance))}.
+          Opening Balance NPR {fmt(openingBalance)} + Purchases NPR {fmt(totals.totalPurchasesFy)} − Payments NPR {fmt(totals.totalPaymentsFy)} − Returns NPR {fmt(totals.totalReturnsFy)}{hasWrittenOff ? ` − Written off NPR ${fmt(writtenOffFy)}` : ''} = {balanceLabel} NPR {fmt(Math.abs(closingBalance))}.
         </p>
         <p style={{ margin: 0 }}>
           Kindly confirm the above balance by signing and returning a copy of this letter within 7 days. Please inform us in writing of any discrepancy.
@@ -91,14 +104,8 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
       </div>
 
       {/* Headline figures */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginBottom: 18, fontSize: 12 }}>
-        {[
-          ['Opening Balance', openingBalance],
-          ['Purchases (FY)', totals.totalPurchasesFy],
-          ['Payments (FY)', totals.totalPaymentsFy],
-          ['Returns (FY)', totals.totalReturnsFy],
-          [balanceLabel, Math.abs(closingBalance)],
-        ].map(([label, val]) => (
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${headline.length}, 1fr)`, gap: 8, marginBottom: 18, fontSize: 12 }}>
+        {headline.map(([label, val]) => (
           <div key={label} style={{ border: '1px solid #ccc', borderRadius: 4, padding: '8px 10px' }}>
             <div style={{ fontSize: 9, color: '#000', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</div>
             <div style={{ fontWeight: 700, fontSize: 13 }}>{fmt(val)}</div>
@@ -125,7 +132,8 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
               <td style={{ padding: '5px 6px' }}>
                 {/* A supplier credit moved from one bill to another is not money paid (S756, D11) —
                     the supplier checking this letter must be able to tell the two apart. */}
-                {e.creditApplied ? 'Supplier credit applied' : EVENT_LABEL[e.type]}{(e.type === 'bill' || e.type === 'settlement') && e.method !== 'Credit' ? ` (${e.method})` : ''}
+                {/* A leftover cleared without paying is not a payment either (S885). */}
+                {e.creditApplied ? 'Supplier credit applied' : e.writtenOff ? 'Written off' : EVENT_LABEL[e.type]}{(e.type === 'bill' || e.type === 'settlement') && e.method !== 'Credit' ? ` (${e.method})` : ''}
               </td>
               <td style={{ padding: '5px 6px' }}>
                 {/* Invoice number bolded on its own line — a free-text payment note (e.g. "Fonepay
@@ -135,7 +143,7 @@ export default function VendorBalanceConfirmationPrint({ bizInfo, vendor, fyLabe
                 {e.note && <div style={{ fontSize: 10, marginTop: e.ref ? 2 : 0 }}>{e.note}</div>}
                 {!e.ref && !e.note && '—'}
               </td>
-              <td style={{ padding: '5px 6px' }}>{e.type === 'bill' ? e.method : (e.type === 'payment' || e.type === 'settlement') ? (e.paymentMode || '—') : '—'}</td>
+              <td style={{ padding: '5px 6px' }}>{e.type === 'bill' ? e.method : e.writtenOff ? '—' : (e.type === 'payment' || e.type === 'settlement') ? (e.paymentMode || '—') : '—'}</td>
               <td style={{ padding: '5px 6px', textAlign: 'right' }}>
                 {e.signedAmount === null ? '—' : fmtSigned(e.signedAmount)}
               </td>

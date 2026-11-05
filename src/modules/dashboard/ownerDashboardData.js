@@ -21,6 +21,7 @@ import { BS_MONTHS_SHORT } from '../../utils/bsCalendar'
 import { allocateBillDiscounts, returnCostValue } from '../ims/reports/supplierAttribution'
 import { billPayables } from '../ims/reports/purchaseTaxSplit'
 import { valueBillLines, groupIntoBills, EPS } from '../ims/reports/payablesAllocation'
+import { isOverdue } from '../ims/vendors/payTerms'
 import { transferTotals } from '../ims/transfers/transferFlows'
 import { foodCostBasisOf, netMarginTaxFeesOf, labourBasisOf } from '../ownerReport/computeMonthlyReport'
 import { inCountedDays, prorate } from './mtdClock'
@@ -176,13 +177,16 @@ export function returnsAgainstEarlierBills(returns, periodId) {
 
 // ── Overdue Payables ─────────────────────────────────────────────────────────────────────────────
 
-const OVERDUE_BILL_COLUMNS = 'id, created_at, bs_day, qty, rate, invoice_ref, paid_at, vat_inclusive, discount_amount, purchase_group_id, vendor_id, monthly_periods!inner(client_id, bs_year, bs_month)'
+// The supplier's payment days ride on each line (S885): an embed in the reads this tile already
+// makes, so judging overdue by the supplier's own days costs no extra round trip.
+const OVERDUE_BILL_COLUMNS = 'id, created_at, bs_day, qty, rate, invoice_ref, paid_at, vat_inclusive, discount_amount, purchase_group_id, vendor_id, vendors(id, pay_within_days), monthly_periods!inner(client_id, bs_year, bs_month)'
 const PAYMENT_COLUMNS = 'id, purchase_entry_id, amount, paid_at, payment_mode, credit_link_id'
 const RETURN_COLUMNS = 'purchase_entry_id, qty, rate'
-export const OVERDUE_DAYS = 60
 
 /**
- * Credit BILLS with money still owed more than 60 days after the bill date, valued exactly as
+ * Credit BILLS with money still owed past their supplier's payment days (S885, owner decision 2:
+ * `vendors.pay_within_days`, the 60-day default when none is set, 0 = due on delivery, through
+ * payTerms.js `isOverdue`, the rule Outstanding Payables uses), valued exactly as
  * Outstanding Payables values them (its load, its `valueBillLines` + `groupIntoBills`): the supplier's
  * invoice after the bill discount and returns, VAT included, less what has been paid. The tile counted
  * LINES at qty × rate before (S747): 24 lines for 2 bills, ex-VAT and before returns.
@@ -252,10 +256,14 @@ export async function loadOverdueCreditBills({ supabase, scopedFrom, clientId, t
   return { ...overdueFromLines(lines, pmtMap, returnedByEntry, today), error: null }
 }
 
-/** The pure half: value the lines, group them into bills, keep the overdue ones. */
+/**
+ * The pure half: value the lines, group them into bills, keep the overdue ones. A bill is overdue
+ * once it is older than its supplier's days (each line carries `vendors.pay_within_days`; one bill
+ * has one supplier).
+ */
 export function overdueFromLines(lines, pmtMap, returnedByEntry, today = new Date()) {
   const bills = groupIntoBills(valueBillLines(lines || [], pmtMap || {}, returnedByEntry || {}, today), pmtMap || {})
-  const overdue = bills.filter(b => b.daysOld > OVERDUE_DAYS && b.remaining > EPS)
+  const overdue = bills.filter(b => b.remaining > EPS && isOverdue(b.daysOld, b.entries[0]?.vendors))
   return {
     overdueTotal: overdue.reduce((s, b) => s + b.remaining, 0),
     overdueCount: overdue.length,

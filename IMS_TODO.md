@@ -269,15 +269,32 @@ Designs: `docs/ims-review-s792/STAGE4-DESIGN.md`; owner took every recommendatio
 - ✅ D40 Opening pool WDV and per-asset "depreciation already taken" (schema and UI).
 - ✅ D37 Two-location count prompt (a fresh server read on save).
 
-**GAPs the reviewers raised, not scheduled yet.** Each area file has its own list. The strongest:
-- no Item and Vendor Excel import;
-- item categories cannot be added or renamed;
-- no print or export on Outstanding Payables;
-- "Overdue" ignores supplier terms;
-- no small-balance write-off;
-- no dish cost history;
-- no Fixed Assets export;
-- sales_entries has no audit trail.
+**GAPs the reviewers raised.** Each area file has its own list. The strongest eight shipped in S885
+(2026-11-05), all in one release; the owner decisions are below the list:
+- ✅ S885 ~~no Item and Vendor Excel import~~
+- ✅ S885 ~~item categories cannot be added or renamed~~ (`merge_item_category`, `20261104160000`)
+- ✅ S885 ~~no print or export on Outstanding Payables~~
+- ✅ S885 ~~"Overdue" ignores supplier terms~~ (`vendors.pay_within_days`, `20261104170000`, `20261105100000`)
+- ✅ S885 ~~no small-balance write-off~~ (`20261104180000`)
+- ✅ S885 ~~no dish cost history~~ (`/dish-cost-history`, Pro, `20261104200000`)
+- ✅ S885 ~~no Fixed Assets export~~
+- ✅ S885 ~~sales_entries has no audit trail~~ (`sales_entry_history`, `20261104190000`)
+
+**S885 owner decisions (2026-11-04 and -05, asked in plain words; do not re-ask):** an import skips a
+name already held (any capitals, hidden or archived included) and lists it; a category named in a file
+that does not exist is created; a supplier with a bad or shared PAN is imported with a warning.
+Supervisors add and rename categories, the Owner or an IMS manager removes one, and removing moves its
+items, stock-count sections and budgets (two budgets in one month are added together) to a category
+picked at the time; Sub-Recipes can never be renamed or removed. A supplier's pay-within days: blank =
+60, 0 = cash on delivery; old notes read once ("Net 30" = 30, "COD" = 0, "Weekly credit" = 7,
+"Monthly credit" = 30, a bare "credit" stays on 60); the age columns stay age and the frozen Owner
+Report keeps ageing by purchase date. A bill with NPR 10 or less left can be cleared by the Owner or an
+IMS manager, at most NPR 10 per bill, never money paid and never supplier credit. Dish Cost History is
+Pro, beside Price Tracker: each month's quantity-weighted average paid price (Price Tracker basis) on
+today's recipe, the last price carried into a month with no purchase, today's Item Master price marked
+estimated before the first. Fixed Assets Excel on all four tabs, the valuation sheet per asset plus
+totals. Sales change history for the Owner and IMS managers, every hand change logged, the till's own
+rows not, from the day it went live (2026-11-04).
 
 ---
 

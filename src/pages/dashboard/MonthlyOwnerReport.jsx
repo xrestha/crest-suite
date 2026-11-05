@@ -1585,7 +1585,7 @@ function MonthlyOwnerReportBody() {
                       <Row label="Unpaid Credit — 31–60 days" value={fmt(vp.billAging.d31_60)} color={vp.billAging.d31_60 > 0 ? 'var(--theme-amber-text)' : undefined} />
                       <Row label="Unpaid Credit — 61–90 days" value={fmt(vp.billAging.d61_90)} color={vp.billAging.d61_90 > 0 ? 'var(--theme-amber-text)' : undefined} />
                       <Row label="Unpaid Credit — 90+ days" value={fmt(vp.billAging.d90plus)} color={vp.billAging.d90plus > 0 ? 'var(--theme-red-text)' : undefined}
-                        tip="Bill age from the purchase date, as it was when the report was made. Crest does not record supplier payment terms, so an old bill is not always a late one." />
+                        tip="Bill age from the purchase date, as it was when the report was made. This table ages bills by date, not by the days each supplier gives to pay, so an old bill is not always a late one. Which bills are past their supplier payment days is shown on Outstanding Payables." />
                     </tbody></table>
                   </div>
                 </div>

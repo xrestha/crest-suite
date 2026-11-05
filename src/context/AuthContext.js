@@ -76,6 +76,10 @@ const PRO_KEYS = new Set([
   // figure comes from recipe explosion, and recipe_costing is Growth — the same defect S551
   // corrected on reorder_report/stock_movement_log.
   'supplier_contribution',
+  // Strategy altitude (S885): how each dish's cost moved month by month as purchase prices moved.
+  // It is Price Tracker read through the recipes, so it sits beside Price Tracker; it could not sit
+  // lower anyway, since its figure comes from recipe explosion and recipe_costing is Growth.
+  'dish_cost_history',
 ])
 // Crest Suite Pro (clients.suite_plan) — NOT an IMS tier. These must never be added to the three
 // sets above: SuiteGate passes on `tierOk || overridden` where overridden is hasFeature(key), so a

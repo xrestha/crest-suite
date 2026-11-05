@@ -426,6 +426,34 @@ describe('assetHeldOn / computeValuationAsOf', () => {
     const v = computeValuationAsOf({ assets: [assets[4]], postedRows: [], asOf: '2025-07-15' })
     expect(v.totalCost).toBe(40000)
   })
+
+  // S885: the workbook's per-asset sheet. One row per asset held, and they add up to the totals.
+  test.each(['2025-07-15', '2026-01-09', '2026-07-15'])('as of %s the per-asset rows sum to every category total and the portfolio', asOf => {
+    const v = computeValuationAsOf({ assets, postedRows: rows, asOf })
+    expect(v.assets.map(a => a.id).sort()).toEqual(assets.filter(a => assetHeldOn(a, asOf)).map(a => a.id).sort())
+    for (const c of v.byCategory) {
+      const mine = v.assets.filter(a => a.categoryName === c.categoryName)
+      expect(mine.length).toBeGreaterThan(0)
+      expect(mine.reduce((s, a) => s + a.totalCost, 0)).toBeCloseTo(c.totalCost, 6)
+      expect(mine.reduce((s, a) => s + a.nbv, 0)).toBeCloseTo(c.nbv, 6)
+      expect(mine.reduce((s, a) => s + a.accumulatedDepreciation, 0)).toBeCloseTo(c.accumulatedDepreciation, 6)
+    }
+    expect(v.assets.reduce((s, a) => s + a.totalCost, 0)).toBeCloseTo(v.totalCost, 6)
+    expect(v.assets.reduce((s, a) => s + a.nbv, 0)).toBeCloseTo(v.nbv, 6)
+    expect(v.assets.reduce((s, a) => s + a.accumulatedDepreciation, 0)).toBeCloseTo(v.accumulatedDepreciation, 6)
+  })
+
+  test('each per-asset row is cost less what was charged by the date, in category order', () => {
+    const v = computeValuationAsOf({ assets, postedRows: rows, asOf: '2025-07-15' })
+    expect(v.assets.map(a => [a.id, a.categoryName, a.totalCost, a.accumulatedDepreciation, a.nbv])).toEqual([
+      ['A', 'Kitchen', 100000, 10000, 90000],
+      ['B', 'Kitchen', 50000, 5000, 45000],
+      ['E', 'Furniture', 40000, 0, 40000],
+    ])
+    // B was still owned on that date and left the books later; the row says when.
+    expect(v.assets.find(a => a.id === 'B').disposalDate).toBe('2026-01-10')
+    expect(v.assets.find(a => a.id === 'A').disposalDate).toBeNull()
+  })
 })
 
 // S792 (COSTS-8): which depreciation inputs an asset edit moves.
