@@ -1191,8 +1191,13 @@ export default function Roster() {
   const [stdError, setStdError] = useState(null)
   const [stdLoading, setStdLoading] = useState(false)
   const stdReq = useLatestRequest()
+  // Read on the Board too whenever the outlet has Demand Forecast (S888): the Board's "Rec" is
+  // staffRequired ?? coversRec, and with the standard read only on the Labor Forecast tab an outlet
+  // with no till (no covers) showed no "Rec" on the Board at all, and a till outlet's Board showed
+  // the covers figure while the tab beside it showed the sales-based one. Cached per tab as before.
   const loadLaborStandard = useCallback(async () => {
-    if (!clientId || tab !== 'labor' || shiftTypes.length === 0) return
+    if (!clientId || shiftTypes.length === 0) return
+    if (tab !== 'labor' && !(tab === 'board' && forecastOpen)) return
     const cached = readPageCache('roster', 'laborStandard', clientId)
     if (cached) { setLaborStd(cached); setStdError(null); return }
     stdReq.begin(clientId)
@@ -1306,7 +1311,7 @@ export default function Roster() {
     writePageCache('roster', 'laborStandard', clientId, std)
     setLaborStd(std)
     setStdLoading(false)
-  }, [clientId, tab, hasPos, shiftTypes, scopedFrom, stdReq])
+  }, [clientId, tab, hasPos, shiftTypes, scopedFrom, stdReq, forecastOpen])
   useEffect(() => { loadLaborStandard() }, [loadLaborStandard])
 
   // Past days count everyone who worked them (ROSTER-7): the board's list plus anyone with
