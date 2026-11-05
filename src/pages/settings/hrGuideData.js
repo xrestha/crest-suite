@@ -175,7 +175,7 @@ export const HR_GUIDE_GROUPS = [
           'A Seed that fails part-way re-reads the calendar and names what landed before it stopped ("3 added, but …") (S803). Seeding again is safe, because it skips what is there.',
           'In a fiscal year that holds both, the holidays still to come are listed first under Coming up and the ones already passed fold under Already passed (S806); today\'s own holiday counts as coming up. A past or future year stays one list, so it never opens folded away. Remove and Delete for good are ghost buttons: the red is on their confirm, not on every row.',
         ],
-        connections: 'Public entries → Overtime\'s holiday-rate auto-suggest → payroll OT amounts. Demand multipliers → Demand Forecast and Roster planning.',
+        connections: 'Public entries → Overtime\'s holiday-rate auto-suggest → payroll OT amounts. Demand multipliers → Demand Forecast and Roster planning. Every holiday not removed → the Roster Board day headings (S889).',
       },
     ],
   },
@@ -195,6 +195,7 @@ export const HR_GUIDE_GROUPS = [
         workflow: [
           'S888: the board refreshes the 30-day Demand Forecast itself (useForecastAutoRefresh) once its newest run is 7 days old or it covers under 7 days ahead, for the Owner or an IMS supervisor or manager; others get a note-banner (staffingForecastNote) naming the last day covered. Crest support never triggers it.',
           'S888 (crest-v501): the Board reads the labour standard too when the outlet has Demand Forecast, so its Rec is the sales-based figure the Labor Forecast tab shows, and an outlet with no till (no covers) gets one at all.',
+          'S889 (crest-v502): the Board day headings mark Holiday Calendar days, a grey chip under the date (the name on Weekly, "Hol" on Monthly; its Tip names every holiday that day and labels an optional one). Removed holidays are left out, as in every other reader. Information only: no cell is filled. A failed calendar read says so above the board.',
           'Define shift types once (name, start/end, colour, and Normal hours for a long shift — a 12-hour Full Day with 9 normal hours carries 3 hours of overtime) in the shift settings panel; assign them to cells by click or drag-select (touch devices get an explicit tap-first/tap-last "Select range" mode).',
           'Publish when a stretch is ready — publishing is per DAY, and only scheduled staff on those days are notified (web push where enabled).',
           '"Suggest" ranks unscheduled employees by fewest hours already scheduled this period, within whatever the Department filter shows.',

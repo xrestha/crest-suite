@@ -798,6 +798,36 @@ export default function Roster() {
     return out
   }, [viewMode, weekStart, bsYear, bsMonth])
 
+  // The Holiday Calendar's days, marked in the board's day headers (S889). The board never read the
+  // calendar, so a week holding Tihar looked like any other week. A removed holiday is not a holiday
+  // for anything (`removed_at`, hr-payroll.md), so it is left out here as everywhere else. The mark
+  // is information only: it fills no cell, because who works a holiday is the manager's call.
+  // A year holds ~40 rows, so one read per BS year on screen needs no paging.
+  const holidayYears = useMemo(() => [...new Set(columns.map(c => c.bsYear))].sort().join(','), [columns])
+  const [holidaysByDay,     setHolidaysByDay]     = useState({})
+  const [holidayReadFailed, setHolidayReadFailed] = useState(false)
+  useEffect(() => {
+    if (!clientId || !holidayYears) return
+    let current = true
+    settleWithin(scopedFrom('hr_holiday_calendar', 'bs_year, bs_month, bs_day, name, holiday_type')
+      .in('bs_year', holidayYears.split(',').map(Number)).is('removed_at', null)
+      .order('bs_month').order('bs_day').order('name'), ROSTER_READ_MS, 'Reading the holiday calendar')
+      .then(({ data, error }) => {
+        if (!current) return
+        // A failed read is not "no holidays": keep what was drawn and say so above the board.
+        if (error) { console.error('holiday calendar read failed:', error); setHolidayReadFailed(true); return }
+        const next = {}
+        for (const h of data || []) {
+          const k = `${h.bs_year}:${h.bs_month}:${h.bs_day}`
+          if (!next[k]) next[k] = []
+          next[k].push(h)
+        }
+        setHolidayReadFailed(false)
+        setHolidaysByDay(next)
+      })
+    return () => { current = false }
+  }, [clientId, holidayYears, scopedFrom])
+
   const colChunks = useMemo(() => viewMode === 'monthly'
     ? [columns.slice(0, 16), columns.slice(16)]
     : [columns], [viewMode, columns])
@@ -1642,6 +1672,11 @@ export default function Roster() {
                     : 'Tap the first cell of the block, then the last one. Works on touch and keyboard as well as mouse.')
                 : 'Tip: click and drag across cells to assign the same shift to multiple days at once — or use Select range on a tablet.'}
             </p>
+            {holidayReadFailed && (
+              <p role="status" className="page-footnote" style={{ margin: 0, color: 'var(--theme-amber-text)' }}>
+                △ The Holiday Calendar could not be read, so holidays may be missing from the day headings. Reload the page to try again.
+              </p>
+            )}
           </div>
 
           {/* Board */}
@@ -1684,6 +1719,7 @@ export default function Roster() {
                             {cols.map((col, i) => {
                               const fr = forecastRowByKey[`${col.bsYear}:${col.bsMonth}:${col.bsDay}`]
                               const short = fr?.recommended != null && fr.scheduledCount < fr.recommended
+                              const dayHolidays = holidaysByDay[`${col.bsYear}:${col.bsMonth}:${col.bsDay}`] || []
                               return (
                               <th key={i} style={{
                                 padding: viewMode === 'weekly' ? '8px 4px' : '6px 2px',
@@ -1694,6 +1730,26 @@ export default function Roster() {
                               }}>
                                 <div style={{ fontSize: viewMode === 'weekly' ? 12 : 11, color: 'var(--theme-text2)' }}>{col.label}</div>
                                 <div style={{ fontSize: 10, color: 'var(--theme-text3)' }}>{col.sublabel}</div>
+                                {dayHolidays.length > 0 && (
+                                  // A category chip, so badge-gray with the word (S804). Weekly has room for
+                                  // the name; a 38px Monthly column says "Hol" and the Tip names the day.
+                                  <div style={{ marginTop: 3, maxWidth: '100%' }}>
+                                    <Tip width={240} style={{ display: 'inline-flex', borderBottom: 'none', cursor: 'default', maxWidth: '100%' }}
+                                      text={`${dayHolidays.map(h => h.holiday_type === 'optional' ? `${h.name} (optional holiday)` : h.name).join(' · ')}, from the Holiday Calendar. The roster is not changed for it, so who works that day is still up to you.`}>
+                                      {/* The name wraps rather than widening the column (a nowrap chip sets
+                                          the column's minimum width to the whole name). */}
+                                      <span className="badge-gray" style={{
+                                        fontSize: 10, lineHeight: 1.3, minWidth: 0,
+                                        whiteSpace: viewMode === 'weekly' ? 'normal' : 'nowrap',
+                                        padding: viewMode === 'weekly' ? '1px 6px' : '1px 3px',
+                                      }}>
+                                        {viewMode === 'weekly'
+                                          ? `${dayHolidays[0].name}${dayHolidays.length > 1 ? ` +${dayHolidays.length - 1}` : ''}`
+                                          : 'Hol'}
+                                      </span>
+                                    </Tip>
+                                  </div>
+                                )}
                                 {fr?.recommended != null && (
                                   <div className="no-print" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: 2 }}>
                                     <Tip text={fr.staffRequired
