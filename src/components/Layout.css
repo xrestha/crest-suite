@@ -1958,6 +1958,14 @@ tr.interactive-row:focus-visible {
     padding: 2px 4px 10px;
     margin: 0 -4px;
   }
+  /* A stat tile's label wraps once the tiles sit two across on a phone (S889: "GROUP SPEND % SO
+     FAR" on the Group Console). Inline, each wrapped line kept its own 10px pad and dashed rule, so
+     the first line's rule ran through the second. As one box the label draws one rule under its
+     last line, and the small pad keeps the figure where it was. */
+  .stat-label .tip-trigger[style*="display: inline;"] {
+    display: inline-block !important;
+    padding: 2px 4px 3px;
+  }
 }
 
 .btn:focus-visible,
