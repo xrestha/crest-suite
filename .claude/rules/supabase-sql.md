@@ -301,9 +301,10 @@ only as wide as the caller's policies.
 mirrored inside two SQL functions, and the server cannot import a `.js` module.
 `itemRefTables.test.js` parses the migration and asserts membership *and* order. Strip `--` comments
 before asserting on a function body — a header explaining why the sibling is `SECURITY DEFINER` will
-otherwise fail the assertion that this one is not. **`VENDOR_REF_TABLES` has no such test** — it
-is inline in `Vendors.js` and mirrored in `vendor_reference_counts`, correct today and held together
-by nothing, so a fifth table with a `vendor_id` FK reaches neither copy on its own.
+otherwise fail the assertion that this one is not. **`VENDOR_REF_TABLES` has one since S890**
+(`vendors/vendorRefTables.js` + `.test.js`): every `REFERENCES vendors(id)` in the migrations must
+parse into an FK on the list, with its ON DELETE action, and the latest `vendor_reference_counts`
+must read the same tables.
 
 ## A money ledger a function writes is written only by that function (S753)
 

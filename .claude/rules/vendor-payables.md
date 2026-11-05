@@ -637,8 +637,9 @@ operator included; the service role stays the escape hatch that keeps Danger Zon
 
 `vendor_reference_counts(p_ids uuid[])` is also the one-round-trip answer to "what points at these
 vendors", where `loadUsage()` currently transfers every purchase line the client has ever entered
-to count them. **The SQL table list is the twin of `VENDOR_REF_TABLES` in `Vendors.js`** — unlike
-`ITEM_REF_TABLES` there is no test holding the two together yet, so change both.
+to count them. **The SQL table list is the twin of `VENDOR_REF_TABLES` (`vendors/vendorRefTables.js`
+since S890)**, and `vendorRefTables.test.js` holds the two and the migrations' foreign keys together,
+so a new `vendor_id` FK fails there until both lists name it.
 
 ### Still open on vendors, as decisions rather than omissions (S708)
 
