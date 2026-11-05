@@ -13,49 +13,15 @@ When an entry is paid off, delete it from this file and record the payoff in the
 
 **Why it is left.** Moving to another build tool (Vite is the usual choice) is a large change no client would see, it would land in the middle of a launch, and CLAUDE.md's Stack line records the setup as CRA with "no Vite". Nothing is blocked today.
 
+**Owner decision (2026-11-05, S890, asked in plain words): leave it until the trigger below.**
+
 **Trigger:** When an upgrade you actually need cannot be installed or built under `react-scripts` 5 (a security fix in code that ships to the browser, or a library the product needs), plan the migration as its own change, with the owner's approval and the CLAUDE.md Stack line updated in the same change. The new setup must still fail the build on a lint error, and `npm run build` must stay what Vercel runs. An `npm audit` warning is not the trigger on its own: read the dependency path it prints first, because the ones that trace back to `react-scripts` are usually build and dev-server tooling that never reaches the browser.
 
 **Where to look:** `package.json` (`react-scripts`, `scripts`, `jest`), `src/setupTests.js`, `scripts/build-verify.mjs`, `.claude/rules/legal-documents.md` (the "Two Jest fixes" section).
 
 ---
 
-## 2. Page files are split between `src/pages/` and `src/modules/`
-
-**What it is.** Module code lives under `src/modules/` (`ims/`, `hr/`, `pos/`, `customization/`, `dashboard/`, `ownerReport/`, `admin/`), each area keeping its pages, helpers and tests together. `src/pages/` holds the screens that belong to no single module: sign-in and sign-up, Settings, Help, Periods, Pricing, Legal, the operator's admin screens, and the dashboards in `src/pages/dashboard/`.
-
-**What the record says.** No plan to empty `src/pages/` is recorded anywhere. S249 moved every IMS page out of it into `src/modules/ims/` and deliberately left the app-shell and admin pages behind as "not module-specific" (`CHANGELOG/S200-S249.md`). The untidy part is the dashboards: their screens sit in `src/pages/dashboard/` while their data and arithmetic helpers sit in `src/modules/dashboard/` and `src/modules/ownerReport/`, so one feature spans two trees. Separately, `src/pages/Placeholders.js` is an early scaffold ("Coming in Session 2") that nothing imports.
-
-**Convention for new code** (what the code follows; no rules file states it): a page or helper that belongs to one module goes in `src/modules/<module>/<area>/`, shared hooks and helpers in `src/shared/`, shared components in `src/components/`, and `src/pages/` only for app-shell or cross-module screens.
-
-**Why it is left.** A move changes no behaviour, and it costs more than the renames: several `.claude/rules/*.md` files name `src/pages/dashboard/` paths in their `paths:` globs or pointers, and a glob left pointing at the old place silently stops loading its rule.
-
-**Trigger:** When dashboard work is about to touch most of `src/pages/dashboard/` anyway, move that folder under `src/modules/dashboard/` as its own commit: a pure move, no behaviour change, every rules glob and pointer updated, `npm run check:docs` clean. Never move files as a side effect of another change. When anyone next edits in `src/pages/`, confirm `Placeholders.js` is still unimported and delete it.
-
-**Where to look:** `ls src/pages src/modules`; `grep -rln "src/pages/dashboard" .claude/rules`; `grep -rn "import.*Placeholders" src`.
-
----
-
-## 3. Switched-off "missing dependency" warnings in React effects
-
-**What it is.** Many `useEffect` and `useMemo` calls carry `// eslint-disable-line react-hooks/exhaustive-deps` (or the `-next-line` form). That comment silences React's lint check that every value an effect reads is listed in its dependency array. Most are deliberate.
-
-**The usual reasons**, from a sample across IMS, HR, POS, the dashboards and the shared components:
-- The effect calls a loader declared inside the component (`init()`, `load()`, `loadUsers()`). That function is a new object on every render and it sets state, so listing it would re-run the effect after every render and the page would reload in a loop. The early CHANGELOG (`CHANGELOG/S023-S099.md`) gives exactly this as the reason for the `[clientId]` arrays.
-- The effect should run on a narrower trigger than everything it reads: a client switch (`[clientId]`), a period or tab change, a reload counter.
-- Mount-only focus handling (`Modal.js`, `ChartCard.js`, `Calculator.js`): the parent passes a fresh `onClose` arrow on every render, and depending on it would pull focus back on every keystroke.
-- A helper the linter cannot tell is stable (`AuthContext.js`).
-
-**Why it is left.** Each site is a decision about when a load should run. Not every one is right: `src/components/Layout.js` records (S852) a missing dependency that kept offering the previous outlet's pages after an outlet switch. So a site is either deliberate or a bug, and only reading it tells which. Most sites carry no comment; the few that explain themselves do so on the line above.
-
-**Do not "fix" one by adding the missing dependency without understanding why it was left out.** Adding the loader function is the classic way to make a page reload forever and hammer the database.
-
-**Trigger:** When a page shows stale figures after a switch of outlet, period or client and the cause is an effect that did not re-run, fix that one site: add the missing value (never the loader function itself), or move the loader inside the effect, or wrap it in `useCallback` with its own dependencies. Then open the page with the browser's Network tab and confirm it does not keep re-requesting. Never sweep these in bulk.
-
-**Where to look:** `grep -rn "react-hooks/exhaustive-deps" src` (add `| wc -l` for the current count).
-
----
-
-## 4. Three POS screens read by date with no index on that date
+## 2. Three POS screens read by date with no index on that date
 
 **What it is.** Three POS screens fetch rows by a date range from tables that grow with every sale, and the database has no index on (outlet, that date). Postgres finds all of the outlet's rows through the `client_id` index and then checks the date on each one, so these reads slow down as the outlet's history grows, however short the chosen range. They are still fast today because the tables are young.
 
@@ -75,23 +41,13 @@ When an entry is paid off, delete it from this file and record the payoff in the
 
 ---
 
-## 5. The supplier delete check keeps two lists that nothing compares
-
-**What it is.** Before a supplier can be deleted, both the Vendors page and the database count the records that still name it. The list of tables to count is written twice, once in JavaScript and once in SQL, and no test compares them. They agree today. In detail: `VENDOR_REF_TABLES` in `src/modules/ims/vendors/Vendors.js` and the body of `vendor_reference_counts()` (migration `20260909140000`, used by the `vendors_guard_referenced_delete` trigger). Items have the same pair with a guard: `src/modules/ims/items/itemRefTables.test.js` parses the migration and fails on a mismatch. Vendors have no such test (`.claude/rules/supabase-sql.md`).
-
-**Why it is left.** Correct today, and only a new table with a foreign key to `vendors` can break it.
-
-**Trigger:** When a new table gets a foreign key to `vendors`, add it to both lists in the same change and write the missing test, modelled on `itemRefTables.test.js`.
-
-**Where to look:** the two places above; list the foreign keys with `supabase db query --linked "SELECT conrelid::regclass FROM pg_constraint WHERE contype = 'f' AND confrelid = 'public.vendors'::regclass"`.
-
----
-
-## 6. The food tables were extracted once, from a PDF, by Python scripts
+## 3. The food tables were extracted once, from a PDF, by Python scripts
 
 **What it is.** `src/data/foodTables.json` (the nutrition library's 1,115 Nepal and Indian foods, S884) is built by three Python scripts in `scripts/food-tables/`, the only Python in the repo. The Nepal half is read out of the 2012 PDF with `pdftotext`, by page position, and 332 display names (wrapped, misspelt or unclear in the book) are set by hand in a CSV. The 225 Nepal-to-Indian pairs that supply sugar and sodium were judged one by one. Nothing in `npm` or CI runs any of it; the reviewed CSVs and the JSON are committed.
 
 **Why it is left.** Both books are fixed editions, so the extraction runs once per edition. A Node port would add nothing a reader can see.
+
+**Owner decision (2026-11-05, S890): leave the scripts in Python.** A rewrite would change nothing anyone sees.
 
 **Trigger:** When either table publishes a new edition, or a figure in the library is reported wrong. Re-run the README's rebuild steps, diff the CSVs and re-check the pairs, rather than editing the JSON.
 

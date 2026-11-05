@@ -14,11 +14,11 @@ them sits the S793 load-time backlog (PERF-n), from measuring the module on a sl
   the 11 piece-counted items, and tick Mustard on mustard oil ingredients filled before S870.~~ BLOOM 34 of 35 and CASA 110 of
   117 unchecked ingredients checked, 10 wrongly checked CASA items fixed (Soy Milk was milk, Paratha and Roti
   Roll had no gluten, Prawns were molluscs too), 12 piece weights entered, Mustard on CASA's Mustard Oil (BLOOM has
-  none). Still unchecked on purpose, until someone reads the pack: BLOOM's Curry Spice Mix; CASA's Buldak Sauce Black
-  and Pink, Chicken Ham Slice, Peri Peri Mix, Salami Chicken, Icehot Bev (Richs) and Tomato Pest.
-- Owner follow-up, not code: CASA's checked Breakfast Sausage, Ham Pork Slice, BBQ Sauce, Chocolate Syrup, Chicken
+  none). ✅ Owner, 2026-11-05: ~~Still unchecked on purpose, until someone reads the pack: BLOOM's Curry Spice Mix; CASA's Buldak Sauce Black
+  and Pink, Chicken Ham Slice, Peri Peri Mix, Salami Chicken, Icehot Bev (Richs) and Tomato Pest.~~ The owner read the packs and checked them.
+- ✅ Owner, 2026-11-05: ~~Owner follow-up, not code: CASA's checked Breakfast Sausage, Ham Pork Slice, BBQ Sauce, Chocolate Syrup, Chicken
   Masala and Butterfly Pea Powder were left as ticked before S870, though such products often carry allergens; read
-  their packs when convenient.
+  their packs when convenient.~~ The owner read the packs.
 
 **S884 (2026-11-04) nutrition library, left open on purpose** (rules: `.claude/rules/nutrition-allergens.md`, data: `scripts/food-tables/README.md`):
 - ✅ S886 (owner: hide it for guests; `20261105110000`) — ~~A blank sugar or sodium counts as 0 in a recipe's totals,
@@ -35,9 +35,12 @@ them sits the S793 load-time backlog (PERF-n), from measuring the module on a sl
   the figures of the FDC food their name describes (raw meats were cooked figures), noodles split into plain and
   instant and cheddar got its own row; beaten rice, paneer, khuwa, jaggery and freshwater fish now fill from the
   Nepal or Indian table (`REGIONAL_KITCHEN_NAMES` carries the names jaggery and fish needed); garam masala and dry
-  tea removed; acai kept on an FDC Branded Foods pulp (2161316). Still open: semolina, black gram, chia and
+  tea removed; acai kept on an FDC Branded Foods pulp (2161316). ✅ S890 (owner, asked in plain words): ~~Still open: semolina, black gram, chia and
   coriander type a sugar of 0 where FDC has no figure (S886 says blank, but blank drops sugar from every dal dish on
-  the guest menu, so it needs an owner word).
+  the guest menu, so it needs an owner word).~~ The USDA semolina, black gram and coriander rows are removed (the
+  regional rows, with measured sugar, already ranked first); chia keeps 0 g (no table measures it, packs print 0 g).
+  Found on the way and fixed by owner decision: a plain CORIANDER or HARIYO DHANIYA suggested the dried seed
+  (269 kcal); it now suggests the fresh leaf, and seed or powder names keep the seed (`REGIONAL_KITCHEN_NAMES`).
 - ✅ S887 (pressed live on BLOOM CAFE) — ~~Owner follow-up, not code: on a real client, open an ingredient's Nutrition form (search "kukhura", press DFTQC
   Nepal) and Recipes' Auto-fill (untick one line) once; neither was clicked through live in S884.~~ "kukhura" in DFTQC
   Nepal lists chicken dishes only (the 2012 table has no plain chicken meat; IFCT carries the cuts) and a pick fills the
@@ -413,7 +416,7 @@ access. High-severity claims were spot-checked against source before any decisio
 - ✅ S756 stage 3 — Move `serviceDayStartIso` (POS parking) into `src/shared/nepalTime.js`; GatePasses imports it from the POS modal. Decide whether POS parking's auto-close should use the actual 6 AM like gate passes (it cuts off at the service day's midnight).
 - ✅ S756 stage 4 — Disposals recorded before S756 keep a gain/loss measured at the last posted run — left as recorded (owner decision).
 - ✅ S756 stage 4 — 1L report: an UNLINKED return is still deducted from its supplier's total — kept, and the page says so (owner decision).
-- ⚪ Demand Forecast Recompute now skips past holidays, which changes what Roster's Labor Forecast reads.
+- ✅ S890, closed as intended: ~~Demand Forecast Recompute now skips past holidays, which changes what Roster's Labor Forecast reads.~~ That is owner decision D21 (past holidays are left out of the averages; coming ones carry the multiplier), documented in Help; since S888 the forecast also refreshes itself weekly, and the Roster's own labour standard trims festival days by its outlier rule.
 
 **Stage 1 (security + closed months) shipped in S756** — migration `20260918100000`, `admin-user-ops`, `ims-staff-login`. Assets were fenced to match the page (register/categories/repairs supervisor; disposal and posting manager), not all-manager. Known gaps it left: a staff login can add lines to an issued requisition over REST; Sales, Stock Count, Overheads and Requisitions show no amber "editing a closed month" banner to the Owner; Roster's labour-actuals reads still hit tables fenced from HR logins (`recipes`, `sales_entries`, `pos_orders`) — ✅ closed S798 stage 2e (crest-v371): both Labor Forecast loaders read the day's totals from the caller-checked `hr_labour_actuals` (migration `20261001200000`, HR_TODO.md ROSTER-9).
 
