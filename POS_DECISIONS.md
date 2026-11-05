@@ -131,6 +131,14 @@ by design, so an admin session proves nothing about them.
 
 ## B3. Quality passes on POS itself (added S652–S654, 2026-08-30)
 
+- [x] ~~🟢 **The Crest Suite tab's UNENTITLED branch was never seen (S763).**~~ — **closed S890** (owner decision: an automatic test, nothing on the live app touched). `src/components/LayoutSuiteUpsell.test.js` renders the real `Layout` as a tenant Owner: without Suite, no Suite tab in either row and the PRO-badged Crest Suite group in the IMS, HR and POS panels of both the bar and the phone drawer (also with one module only); with Suite, the tab and no group in the module panels. It matches what S763 promised. Owner decisions the same day, both no change: Home keeps no Suite upsell (the PRO group is one tap away in every module menu), and an HR-only or POS-only Owner keeps the three Suite rows that need IMS (Owner Dashboard, Owner Report, Profit & Loss), which open the honest "needs Crest IMS" card with Crest's contact buttons. `suiteEntitled` is
+  `isAdmin || suitePlan === 'pro'`, so an admin session is entitled by definition and cannot reach
+  the other path. Verified on a Suite client: the tab renders, its panel carries the five reachable
+  items, every Suite path selects it, and the Crest Suite group is gone from the module panels.
+  **Unverified:** that a client WITHOUT Suite still sees the PRO-badged group in each module panel
+  and no top-row tab, in both the bar and the phone drawer. One sign-in as a non-Suite client's
+  Owner answers it — the code path is `suiteUpsellInPanels`.
+
 - [x] ~~The order screen sends four ways; a note box on every line; the discard dialog; keyboard speed; Sales Report's
   11 tabs (the S846 critique leftovers)~~ — **shipped S854, 2026-10-21** (owner decisions S853/S854): ONE Send (food to
   the kitchen, drinks to the bar by Ticket Routing; "Send N new", the old Send / Just save ask gone) with "Save, do not

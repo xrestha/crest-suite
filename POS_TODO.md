@@ -1042,14 +1042,6 @@ when these were filed. Every item below assumes they are.
   The re-queue is done in S809 3f: a send with no answer is queued and prints, and a refusal no retry
   changes becomes a floor conflict carrying the server's sentence.
   Closes the POS half of `DOCS-REMEDIATION.md` T6 item 3.
-- [ ] 🟢 **The Crest Suite tab's UNENTITLED branch was never seen (S763).** `suiteEntitled` is
-  `isAdmin || suitePlan === 'pro'`, so an admin session is entitled by definition and cannot reach
-  the other path. Verified on a Suite client: the tab renders, its panel carries the five reachable
-  items, every Suite path selects it, and the Crest Suite group is gone from the module panels.
-  **Unverified:** that a client WITHOUT Suite still sees the PRO-badged group in each module panel
-  and no top-row tab, in both the bar and the phone drawer. One sign-in as a non-Suite client's
-  Owner answers it — the code path is `suiteUpsellInPanels`.
-
 - [x] **`admin-user-ops` defaulted an unnamed discount limit to NULL (= unlimited) for admin and Owner
   callers** — closed S829 (5e): `create_pos_staff` starts every new POS login at 0% unless the request
   names a limit, whoever creates it (the S776 decision). Existing logins are untouched.
